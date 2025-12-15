@@ -337,7 +337,7 @@ Developer machine                    Developer machine
   └── compiler ────┐                   └── source files only
                    │                            │
                    ▼                            ▼
-         binary package                  source package (.lona-p)
+         binary package                  source package (.lona-bundle)
                    │                            │
                    ▼                            ▼
          Target machine                Target machine (Lona)
@@ -376,8 +376,8 @@ The bytecode cache is purely an internal optimization — an implementation deta
 
 | Extension | Description |
 |-----------|-------------|
-| `.lona-s` | Lonala source code file |
-| `.lona-p` | Lonala source package (bundled source files + metadata) |
+| `.lona` | Lonala source code file |
+| `.lona-bundle` | Lonala source package (bundled source files + metadata) |
 
 ### What This Means
 
@@ -408,7 +408,7 @@ Source code is stored **per-definition**, not per-file. Each function, macro, or
  :type        :function
  :source      ";; Greets a user by name\n(defn greet [name]\n  (str \"Hello, \" name))"
  :provenance  {:origin :file
-               :file "hello-world.lona-s"
+               :file "hello-world.lona"
                :line 4
                :timestamp #inst "2025-12-15T10:00:00"}
  :compiled    <bytecode>}
@@ -423,7 +423,7 @@ When parsing a source file, comments immediately preceding a definition are atta
 - Comments between definitions that don't precede anything are dropped on hot-patch
 
 ```clojure
-;; Original file: hello-world.lona-s
+;; Original file: hello-world.lona
 (ns hello-world)
 
 ;; Greets a user by name        ← attached to 'greet' definition
@@ -459,7 +459,7 @@ The definition is replaced:
                :session "session-42"
                :timestamp #inst "2025-12-15T14:30:00"
                :previous {:origin :file
-                          :file "hello-world.lona-s"
+                          :file "hello-world.lona"
                           :line 4}}
  :compiled    <new-bytecode>}
 ```
@@ -470,13 +470,13 @@ The definition is replaced:
 ;; View current source (shows the REPL version)
 lona> (source hello-world/greet)
 ;; Source: REPL session-42 at 2025-12-15T14:30:00
-;; Previously: hello-world.lona-s:4
+;; Previously: hello-world.lona:4
 (defn greet [name]
   (str "Hi there, " name "!"))
 
 ;; View source of unmodified function (shows file version)
 lona> (source hello-world/farewell)
-;; Source: hello-world.lona-s:8
+;; Source: hello-world.lona:8
 ;; Says farewell
 (defn farewell [name]
   (str "Goodbye, " name))
@@ -486,12 +486,12 @@ lona> (provenance hello-world/greet)
 {:origin :repl
  :session "session-42"
  :timestamp #inst "2025-12-15T14:30:00"
- :previous {:origin :file :file "hello-world.lona-s" :line 4}}
+ :previous {:origin :file :file "hello-world.lona" :line 4}}
 
 ;; List all definitions in namespace with origins
 lona> (ns-definitions 'hello-world)
 {greet    {:origin :repl :modified true}
- farewell {:origin :file :file "hello-world.lona-s"}}
+ farewell {:origin :file :file "hello-world.lona"}}
 ```
 
 ### Exporting Modified Namespaces
@@ -500,7 +500,7 @@ Since source is stored per-definition, you can export the current state of a nam
 
 ```clojure
 ;; Export namespace to a new file (includes all current definitions)
-lona> (export-ns 'hello-world "hello-world-v2.lona-s")
+lona> (export-ns 'hello-world "hello-world-v2.lona")
 ;; Writes file with current source for all definitions
 ```
 
@@ -900,7 +900,7 @@ The Lona architecture enforces minimal capability grants:
         :memory-limit (megabytes 32)
         :can-spawn-domains false
         :meta {:type :sandbox
-               :source "https://example.com/app.lona-p"
+               :source "https://example.com/app.lona-bundle"
                :downloaded-at (now)}})
 
 ;; The untrusted code:

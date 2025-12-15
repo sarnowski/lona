@@ -49,7 +49,7 @@ services:
         -m 1G
         -nographic
         -serial mon:stdio
-        -kernel build/image/lona-qemu.elf
+        -kernel build/lona.elf
 
 volumes:
   cargo-cache:

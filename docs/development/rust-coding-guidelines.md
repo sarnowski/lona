@@ -1,535 +1,881 @@
 # Rust Coding Guidelines for Lona
 
-This document defines the coding standards for Rust code in the Lona project. These guidelines focus on bare-metal and kernel-specific concerns—standard Rust style (enforced by `rustfmt` and `clippy`) applies for everything else.
+This document defines coding guidelines and best practices for developing Lona's runtime in Rust on seL4. These guidelines complement the testing strategy and focus on patterns that are unusual or especially important for bare-metal seL4 development.
 
-## Tooling
+---
 
-All Rust code must pass quality checks before merging. Use the standard build commands:
+## Overview
 
-```bash
-make build    # Verify code quality (runs fmt + clippy) and compile
-make image    # Build the complete bootable OS image
-make run      # Build and run in QEMU
-make clean    # Remove build artifacts for a fresh build
+Developing Rust for seL4 differs from typical Rust applications in several ways:
+
+| Aspect | Normal Rust | seL4 Rust |
+|--------|-------------|-----------|
+| Standard library | Full `std` | `no_std` + `alloc` |
+| Memory allocation | System allocator | Custom `GlobalAlloc` on seL4 untypeds |
+| Panic handling | Unwind by default | Abort only, custom handler |
+| Error trait | `std::error::Error` | Not available in `core` (as of Rust 1.81, moved to core) |
+| Concurrency | OS threads | seL4 TCBs + green threads |
+| I/O | File descriptors | Capabilities + MMIO |
+
+---
+
+## Code Organization
+
+### Layered Architecture
+
+Structure code to maximize host-testability by separating hardware-independent logic:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  lona-runtime (seL4-specific, QEMU-tested only)         │
+│  - Root task entry point                                │
+│  - seL4 system calls                                    │
+│  - Hardware interaction                                 │
+├─────────────────────────────────────────────────────────┤
+│  lona-kernel (abstractions, mostly host-testable)       │
+│  - Traits for hardware abstraction                      │
+│  - Domain/Process logic with mock implementations       │
+├─────────────────────────────────────────────────────────┤
+│  lonala-compiler, lonala-parser (pure logic)            │
+│  - Zero seL4 dependencies                               │
+│  - 100% host-testable                                   │
+├─────────────────────────────────────────────────────────┤
+│  lona-core (foundational types)                         │
+│  - Value types, traits, errors                          │
+│  - 100% host-testable                                   │
+└─────────────────────────────────────────────────────────┘
 ```
 
-Use default `rustfmt` and `clippy` configurations. Do not add project-specific overrides without documenting them in an ADR.
+### Crate Design Principles
 
-A dedicated testing guide will be added as the project develops.
-
-> **Note**: On macOS, use `gmake` instead of `make` (install with `brew install make`).
-
-## License Header
-
-Every source file begins with this license header:
+1. **Minimize seL4 dependencies**: Only `lona-runtime` should depend on `sel4` and `sel4-root-task`
+2. **Use traits for hardware abstraction**: Enable mocking in tests
+3. **Prefer `core` over `alloc`**: Use `alloc` only when heap is necessary
+4. **Feature-gate allocator-dependent code**: Allow crates to be used without allocation
 
 ```rust
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) <year> Tobias Sarnowski <tobias@sarnowski.cloud>
-//
-// <filename> - <brief description of what this file contains>
-```
+// In Cargo.toml
+[features]
+default = ["alloc"]
+alloc = []
 
-## Module Organization
-
-### Directory Structure
-
-```
-src/
-├── main.rs              # Kernel entry point, minimal code
-├── arch/
-│   └── aarch64/
-│       ├── mod.rs       # Architecture module root
-│       ├── boot.rs      # Boot sequence
-│       ├── exceptions.rs # Exception handling
-│       └── mmu.rs       # Memory management unit
-├── kernel/
-│   ├── mod.rs
-│   ├── process.rs       # Process management
-│   ├── scheduler.rs     # Scheduling
-│   ├── memory.rs        # Memory allocation
-│   └── ipc.rs           # Inter-process communication
-├── runtime/
-│   ├── mod.rs
-│   ├── parser.rs        # Lonala parser
-│   ├── compiler.rs      # Lonala compiler
-│   └── gc.rs            # Garbage collector
-└── drivers/
-    └── uart.rs          # UART driver (kernel-mode only)
-```
-
-### Module Guidelines
-
-- Keep `mod.rs` files minimal—primarily re-exports and module declarations
-- One primary type or concept per file
-- Use `pub(crate)` for internal APIs, reserve `pub` for true public interfaces
-
-## No-Std Environment
-
-All kernel and runtime code operates without the standard library:
-
-```rust
+// In lib.rs
 #![no_std]
-#![no_main]
 
-// Available: core, alloc (with custom allocator)
-// Not available: std, threads, filesystem, networking
+#[cfg(feature = "alloc")]
+extern crate alloc;
+
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
 ```
 
-### Essential Attributes
+---
+
+## `no_std` Patterns
+
+### Available vs Unavailable
+
+| Available in `core` | Available in `alloc` | Not available |
+|---------------------|----------------------|---------------|
+| `Option`, `Result` | `Vec`, `String` | `std::io` |
+| `Iterator` | `Box`, `Rc`, `Arc` | `std::fs` |
+| Primitives, slices | `BTreeMap`, `BTreeSet` | `HashMap`, `HashSet`* |
+| `core::fmt` | `format!` macro | `std::net` |
+| Atomics, SIMD | `Cow`, `ToOwned` | `std::thread` |
+
+*`HashMap`/`HashSet` require random seeds from OS; use `BTreeMap`/`BTreeSet` or provide custom hasher.
+
+### Import Conventions
+
+Use explicit paths from `core` and `alloc`:
 
 ```rust
-#![no_std]                    // No standard library
-#![no_main]                   // Custom entry point
-#![feature(naked_functions)]  // For exception handlers
-#![feature(asm_const)]        // Constants in asm! blocks
+// Good: explicit about no_std
+use core::fmt::{self, Display};
+use core::result::Result;
+
+#[cfg(feature = "alloc")]
+use alloc::{string::String, vec::Vec};
+
+// Bad: assumes prelude availability
+use std::fmt::Display;
 ```
 
-## Unsafe Code
+### Fallible Allocation
 
-Unsafe code is necessary for OS development but must be carefully controlled.
-
-### Rules for Unsafe
-
-1. **Minimize scope**: Keep `unsafe` blocks as small as possible
-2. **Document invariants**: Every `unsafe` block must have a `// SAFETY:` comment
-3. **Encapsulate**: Wrap unsafe operations in safe abstractions where possible
-4. **Review required**: All new `unsafe` code requires explicit review
-
-### Safety Comments
+Standard `alloc` assumes infallible allocation. For memory-constrained environments, use fallible APIs:
 
 ```rust
-// GOOD: Specific safety justification
-let value = unsafe {
-    // SAFETY: UART_BASE is a valid MMIO address mapped in the page tables
-    // during early boot. This register is write-only and has no side effects
-    // beyond transmitting the character.
-    core::ptr::write_volatile(UART_BASE as *mut u8, byte);
-};
+// Preferred: fallible allocation
+let mut vec = Vec::new();
+vec.try_reserve(100)?;
 
-// BAD: Vague or missing justification
-let value = unsafe {
-    // This is safe because we know what we're doing
-    core::ptr::write_volatile(UART_BASE as *mut u8, byte);
-};
+// Or use try_* methods where available
+let boxed = Box::try_new(value)?;
+
+// Avoid: panics on OOM
+let vec = Vec::with_capacity(100);
+let boxed = Box::new(value);
 ```
 
-### Unsafe Abstractions
+---
 
-Prefer creating safe wrappers around unsafe operations:
+## Unsafe Code Guidelines
+
+### The SAFETY Comment Convention
+
+Every `unsafe` block must have a preceding `// SAFETY:` comment explaining why the code is sound:
 
 ```rust
-/// MMIO register for 32-bit read/write access.
+// SAFETY: `ptr` is valid because:
+// 1. It was obtained from `Box::into_raw()` in `new()`
+// 2. No other code has access to this pointer
+// 3. The pointer is properly aligned for `T`
+unsafe {
+    Box::from_raw(ptr)
+}
+```
+
+### Safety Documentation for Functions
+
+Unsafe functions must document their preconditions under a `# Safety` section:
+
+```rust
+/// Writes a byte to the UART transmit register.
 ///
 /// # Safety
 ///
-/// The caller must ensure the base address points to valid MMIO space
-/// that remains mapped for the lifetime of this struct.
-pub struct MmioReg32 {
-    addr: *mut u32,
+/// - `base_addr` must point to a valid UART MMIO region
+/// - The UART must be initialized before calling this function
+/// - The caller must have exclusive access to the UART
+pub unsafe fn uart_write_byte(base_addr: *mut u8, byte: u8) {
+    // SAFETY: Caller guarantees base_addr is valid UART MMIO
+    unsafe {
+        core::ptr::write_volatile(base_addr.add(TX_OFFSET), byte);
+    }
+}
+```
+
+### Safe Abstraction Pattern
+
+Encapsulate unsafe operations behind safe APIs:
+
+```rust
+/// A UART driver with ownership-based safety.
+pub struct Uart {
+    base: *mut u8,
 }
 
-impl MmioReg32 {
-    /// Creates a new MMIO register wrapper.
+impl Uart {
+    /// Creates a new UART driver.
     ///
     /// # Safety
     ///
-    /// `addr` must be a valid, aligned MMIO address.
-    pub const unsafe fn new(addr: usize) -> Self {
-        Self { addr: addr as *mut u32 }
+    /// - `base` must point to valid UART MMIO memory
+    /// - Only one `Uart` instance may exist per physical UART
+    pub unsafe fn new(base: *mut u8) -> Self {
+        Self { base }
     }
 
-    pub fn read(&self) -> u32 {
-        // SAFETY: Constructor invariant guarantees valid MMIO address
-        unsafe { core::ptr::read_volatile(self.addr) }
-    }
-
-    pub fn write(&self, value: u32) {
-        // SAFETY: Constructor invariant guarantees valid MMIO address
-        unsafe { core::ptr::write_volatile(self.addr, value) }
+    /// Writes a byte (safe because we own the UART).
+    pub fn write_byte(&mut self, byte: u8) {
+        // SAFETY: Constructor guarantees base is valid, &mut self
+        // guarantees exclusive access
+        unsafe {
+            core::ptr::write_volatile(self.base.add(TX_OFFSET), byte);
+        }
     }
 }
 ```
 
-## Inline Assembly
+### Minimizing Unsafe Scope
 
-Use `asm!()` for hardware operations that cannot be expressed in Rust.
-
-### Guidelines
+Keep unsafe blocks as small as possible:
 
 ```rust
-// Document what the assembly does and why it's necessary
-/// Read the current exception level.
-///
-/// Returns the current EL (0-3) in the lowest 2 bits.
-#[inline]
-pub fn current_el() -> u64 {
-    let el: u64;
-    // SAFETY: Reading CurrentEL is always safe and has no side effects
-    unsafe {
-        core::arch::asm!(
-            "mrs {el}, CurrentEL",
-            "lsr {el}, {el}, #2",
-            el = out(reg) el,
-            options(nomem, nostack, preserves_flags),
-        );
-    }
-    el
+// Bad: large unsafe block
+unsafe {
+    let ptr = allocate_page();
+    let page_num = ptr as usize / PAGE_SIZE;
+    let frame = Frame::new(page_num);
+    map_frame(frame, vaddr);
+    initialize_page(ptr);
 }
+
+// Good: minimal unsafe, pure logic outside
+let ptr = unsafe { allocate_page() };
+let page_num = ptr as usize / PAGE_SIZE;
+let frame = Frame::new(page_num);
+unsafe { map_frame(frame, vaddr) };
+unsafe { initialize_page(ptr) };
 ```
 
-### Assembly Options
-
-Always specify the most restrictive options that apply:
-
-| Option | Use when |
-|--------|----------|
-| `nomem` | Assembly does not access memory |
-| `nostack` | Assembly does not use the stack |
-| `preserves_flags` | Assembly does not modify condition flags |
-| `pure` | Assembly has no side effects (implies `nomem`) |
-
-### Separate Assembly Files
-
-For complex assembly (exception vectors, context switch), use separate `.S` files:
-
-```rust
-// In arch/aarch64/mod.rs
-core::arch::global_asm!(include_str!("boot.S"));
-core::arch::global_asm!(include_str!("exceptions.S"));
-```
-
-These files should follow ARM64 assembly conventions (assembly coding guidelines to be documented as needed).
+---
 
 ## Error Handling
 
-Without `std`, error handling requires explicit design.
+### Error Types in `no_std`
 
-### Error Types
+The `Error` trait is in `core` as of Rust 1.81. For earlier versions or maximum compatibility, define error enums:
 
 ```rust
-/// Kernel error type.
+/// Errors that can occur during memory allocation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(i32)]
-pub enum Error {
-    /// Invalid argument provided
-    InvalidArgument = -1,
-    /// Out of memory
-    OutOfMemory = -2,
-    /// Resource is busy
-    Busy = -3,
-    /// Operation timed out
-    Timeout = -4,
-    /// Permission denied
-    PermissionDenied = -5,
+pub enum AllocError {
+    /// No more untyped memory available
+    OutOfMemory,
+    /// Requested alignment is invalid
+    InvalidAlignment,
+    /// Requested size is too large
+    SizeTooLarge,
 }
 
-pub type Result<T> = core::result::Result<T, Error>;
-```
-
-### Panic Handling
-
-The kernel must never panic in normal operation. Use explicit error handling:
-
-```rust
-// GOOD: Explicit error handling
-pub fn allocate_page() -> Result<*mut u8> {
-    let page = try_allocate()?;
-    Ok(page)
-}
-
-// BAD: Can panic
-pub fn allocate_page() -> *mut u8 {
-    try_allocate().unwrap()  // Never use unwrap in kernel code
-}
-```
-
-Define a panic handler that halts or provides diagnostics:
-
-```rust
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    // Print panic info to debug UART if available
-    if let Some(location) = info.location() {
-        // ... print location
-    }
-
-    // Halt the CPU
-    loop {
-        unsafe { core::arch::asm!("wfi") };
+impl fmt::Display for AllocError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutOfMemory => write!(f, "out of memory"),
+            Self::InvalidAlignment => write!(f, "invalid alignment"),
+            Self::SizeTooLarge => write!(f, "size too large"),
+        }
     }
 }
 ```
 
-## Documentation
+### Result-Based APIs
 
-### Public API Documentation
-
-All public items must have documentation:
+Prefer `Result` over panicking:
 
 ```rust
-/// Initializes the memory management subsystem.
-///
-/// Sets up the page allocator and initial kernel page tables.
-/// Must be called exactly once during early boot, after the
-/// MMU is disabled.
-///
-/// # Arguments
-///
-/// * `memory_map` - Physical memory regions from the bootloader
-///
-/// # Errors
-///
-/// Returns `Error::InvalidArgument` if the memory map is empty or
-/// contains overlapping regions.
-///
-/// # Safety
-///
-/// This function must be called with the MMU disabled and before
-/// any other memory allocation functions.
-pub unsafe fn init(memory_map: &[MemoryRegion]) -> Result<()> {
-    // ...
+// Good: fallible
+pub fn allocate_frame(&mut self) -> Result<Frame, AllocError> {
+    self.free_list.pop().ok_or(AllocError::OutOfMemory)
+}
+
+// Avoid: panics
+pub fn allocate_frame(&mut self) -> Frame {
+    self.free_list.pop().expect("out of memory")
 }
 ```
 
-### Internal Documentation
+### Error Conversion
 
-Use regular comments for implementation details:
+Use `From` implementations for error conversion:
 
 ```rust
-fn schedule_next() -> Option<ProcessId> {
-    // Check the real-time queue first (highest priority)
-    if let Some(pid) = self.rt_queue.pop() {
-        return Some(pid);
+#[derive(Debug)]
+pub enum RuntimeError {
+    Alloc(AllocError),
+    Capability(CapError),
+    Parse(ParseError),
+}
+
+impl From<AllocError> for RuntimeError {
+    fn from(e: AllocError) -> Self {
+        Self::Alloc(e)
     }
+}
 
-    // Fall back to the normal queue with round-robin
-    self.normal_queue.rotate_left(1);
-    self.normal_queue.front().copied()
+// Now ? works automatically
+fn do_something() -> Result<(), RuntimeError> {
+    let frame = allocator.allocate_frame()?; // AllocError -> RuntimeError
+    Ok(())
 }
 ```
 
-## Constants and Configuration
+---
 
-### Hardware Constants
+## Panic Handling
 
-```rust
-/// Hardware and architecture constants.
-pub mod consts {
-    /// PL011 UART base address (QEMU virt machine)
-    pub const UART0_BASE: usize = 0x0900_0000;
+### Panic Strategy
 
-    /// Page size (4 KiB)
-    pub const PAGE_SIZE: usize = 4096;
-    pub const PAGE_SHIFT: usize = 12;
-
-    /// Kernel virtual address base
-    pub const KERNEL_VADDR_BASE: usize = 0xFFFF_0000_0000_0000;
-}
-```
-
-### Configuration
-
-Use Cargo features for compile-time configuration:
+Use `panic = "abort"` in release builds (already configured in `Cargo.toml`):
 
 ```toml
-[features]
-default = ["uart-debug"]
-uart-debug = []           # Enable UART debug output
-smp = []                  # Enable multi-core support
+[profile.release]
+panic = "abort"
 ```
+
+### Custom Panic Handler
+
+Implement a panic handler that outputs diagnostics and halts:
 
 ```rust
-#[cfg(feature = "uart-debug")]
-pub fn debug_print(s: &str) {
-    // ...
-}
+use core::panic::PanicInfo;
 
-#[cfg(not(feature = "uart-debug"))]
-pub fn debug_print(_: &str) {}
+#[panic_handler]
+fn panic(info: &PanicInfo) -> ! {
+    // Output to UART for debugging
+    if let Some(location) = info.location() {
+        serial_println!(
+            "PANIC at {}:{}:{}",
+            location.file(),
+            location.line(),
+            location.column()
+        );
+    }
+
+    if let Some(message) = info.message() {
+        serial_println!("  {}", message);
+    }
+
+    // Halt the system
+    loop {
+        core::hint::spin_loop();
+    }
+}
 ```
 
-## Memory Safety Patterns
+### Avoiding Panics
 
-### Volatile Access
+Minimize panic paths in production code:
 
-Always use volatile operations for MMIO and shared memory:
+```rust
+// Avoid: panics on None
+let value = map.get(&key).unwrap();
+
+// Better: handle missing values
+let value = map.get(&key).ok_or(Error::KeyNotFound)?;
+
+// Avoid: panics on index out of bounds
+let item = slice[index];
+
+// Better: bounds-checked access
+let item = slice.get(index).ok_or(Error::IndexOutOfBounds)?;
+```
+
+---
+
+## Memory Management
+
+### GlobalAlloc Implementation
+
+Implement `GlobalAlloc` for seL4 untyped memory:
+
+```rust
+use core::alloc::{GlobalAlloc, Layout};
+
+pub struct Sel4Allocator {
+    // Internal state
+}
+
+unsafe impl GlobalAlloc for Sel4Allocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: Layout is guaranteed valid by caller
+        // Implementation allocates from seL4 untypeds
+        self.inner_alloc(layout)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: ptr was allocated by this allocator with this layout
+        self.inner_dealloc(ptr, layout)
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: Sel4Allocator = Sel4Allocator::new();
+```
+
+### Allocation Initialization Order
+
+The allocator must be initialized before any allocation occurs:
+
+```rust
+#[no_mangle]
+pub extern "C" fn _start(bootinfo: &sel4::BootInfo) -> ! {
+    // 1. Initialize allocator FIRST (no allocations before this)
+    unsafe {
+        ALLOCATOR.init(bootinfo.untyped_list());
+    }
+
+    // 2. Now heap allocation is available
+    let config = parse_bootinfo(bootinfo);
+
+    // 3. Continue initialization
+    main(config)
+}
+```
+
+### Heapless Alternatives
+
+Consider `heapless` collections for fixed-size data:
+
+```rust
+use heapless::Vec;
+
+// Fixed capacity, no heap allocation
+let mut buffer: Vec<u8, 64> = Vec::new();
+buffer.push(0x42)?; // Returns Err if full
+```
+
+---
+
+## Capability Patterns
+
+### Rust Ownership as Capability
+
+Leverage Rust's ownership system to model capability semantics:
+
+```rust
+/// A capability to a seL4 endpoint (owned, unforgeable).
+pub struct EndpointCap {
+    cptr: sel4::CPtr,
+}
+
+impl EndpointCap {
+    /// Sends a message (requires ownership or mutable borrow).
+    pub fn send(&mut self, msg: &Message) -> Result<(), IpcError> {
+        // Only holder of capability can send
+        unsafe { sel4::sys::seL4_Send(self.cptr, msg.into()) }
+    }
+
+    /// Creates a derived capability with reduced rights.
+    pub fn mint_read_only(&self) -> Result<EndpointCap, CapError> {
+        // Mint new cap with reduced rights
+        let new_cptr = mint_capability(self.cptr, Rights::READ_ONLY)?;
+        Ok(EndpointCap { cptr: new_cptr })
+    }
+}
+
+// Capability cannot be copied (no Clone)
+// Capability cannot be forged (private field, controlled construction)
+// Capability can be moved (transferred)
+```
+
+### Capability Delegation
+
+Model capability delegation with move semantics:
+
+```rust
+/// Spawns a process in a new domain, transferring capabilities.
+pub fn spawn_isolated(
+    entry: fn(),
+    capabilities: Vec<Box<dyn Capability>>, // Ownership transferred
+) -> Result<ProcessId, SpawnError> {
+    // Capabilities are moved into the new domain
+    // Caller no longer has access
+    create_domain_with_caps(entry, capabilities)
+}
+```
+
+### Read-Only vs Read-Write
+
+Use Rust's borrow system to enforce access levels:
+
+```rust
+/// A shared memory region.
+pub struct SharedRegion {
+    base: *mut u8,
+    len: usize,
+}
+
+impl SharedRegion {
+    /// Read-only access.
+    pub fn as_slice(&self) -> &[u8] {
+        // SAFETY: region is valid for len bytes
+        unsafe { core::slice::from_raw_parts(self.base, self.len) }
+    }
+
+    /// Read-write access (requires mutable borrow).
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        // SAFETY: region is valid, &mut self ensures exclusivity
+        unsafe { core::slice::from_raw_parts_mut(self.base, self.len) }
+    }
+}
+```
+
+---
+
+## Concurrency Patterns
+
+### Green Thread State
+
+Design process state for cooperative/preemptive scheduling:
+
+```rust
+pub struct Process {
+    pid: ProcessId,
+    status: ProcessStatus,
+    stack: Stack,
+    heap: ProcessHeap,
+    mailbox: Mailbox,
+    reduction_count: u32,
+    context: SavedContext,
+}
+
+pub enum ProcessStatus {
+    Running,
+    Ready,
+    Waiting(WaitReason),
+    Suspended,
+    Terminated(ExitReason),
+}
+
+pub enum WaitReason {
+    Message,
+    Timeout { deadline: Instant },
+    Join { target: ProcessId },
+}
+```
+
+### Yield Points
+
+Insert yield points in long-running operations:
+
+```rust
+impl Vm {
+    pub fn execute(&mut self, process: &mut Process) -> ExecuteResult {
+        loop {
+            let instruction = self.fetch(process)?;
+
+            // Reduction counting for preemption
+            process.reduction_count += instruction.cost();
+
+            if process.reduction_count >= REDUCTION_LIMIT {
+                process.reduction_count = 0;
+                return ExecuteResult::Yield;
+            }
+
+            match self.execute_instruction(instruction, process)? {
+                InstrResult::Continue => {}
+                InstrResult::Yield => return ExecuteResult::Yield,
+                InstrResult::Exit(reason) => return ExecuteResult::Exit(reason),
+            }
+        }
+    }
+}
+```
+
+### Message Passing
+
+Design mailboxes for BEAM-style messaging:
+
+```rust
+pub struct Mailbox {
+    messages: VecDeque<Message>,
+    save_queue: VecDeque<Message>, // For selective receive
+}
+
+impl Mailbox {
+    /// Adds a message to the mailbox.
+    pub fn deliver(&mut self, msg: Message) {
+        self.messages.push_back(msg);
+    }
+
+    /// Attempts to receive a message matching the pattern.
+    pub fn receive(&mut self, pattern: &Pattern) -> Option<Message> {
+        // Check messages in order
+        let pos = self.messages.iter().position(|m| pattern.matches(m))?;
+        Some(self.messages.remove(pos).unwrap())
+    }
+}
+```
+
+---
+
+## Hardware Abstraction
+
+### Trait-Based Abstraction
+
+Define traits for hardware interfaces to enable mocking:
+
+```rust
+/// Serial port interface.
+pub trait Serial {
+    type Error;
+
+    fn write_byte(&mut self, byte: u8) -> Result<(), Self::Error>;
+    fn read_byte(&mut self) -> Result<u8, Self::Error>;
+    fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        for &byte in bytes {
+            self.write_byte(byte)?;
+        }
+        Ok(())
+    }
+}
+
+// Real implementation
+pub struct Pl011Uart { /* ... */ }
+
+impl Serial for Pl011Uart {
+    type Error = UartError;
+
+    fn write_byte(&mut self, byte: u8) -> Result<(), Self::Error> {
+        // Actual hardware access
+    }
+
+    fn read_byte(&mut self) -> Result<u8, Self::Error> {
+        // Actual hardware access
+    }
+}
+
+// Mock for testing
+#[cfg(test)]
+pub struct MockSerial {
+    pub written: Vec<u8>,
+    pub to_read: VecDeque<u8>,
+}
+
+#[cfg(test)]
+impl Serial for MockSerial {
+    type Error = core::convert::Infallible;
+
+    fn write_byte(&mut self, byte: u8) -> Result<(), Self::Error> {
+        self.written.push(byte);
+        Ok(())
+    }
+
+    fn read_byte(&mut self) -> Result<u8, Self::Error> {
+        Ok(self.to_read.pop_front().unwrap_or(0))
+    }
+}
+```
+
+### MMIO Access
+
+Use volatile operations for memory-mapped I/O:
 
 ```rust
 use core::ptr::{read_volatile, write_volatile};
 
-// MMIO read
-let status = unsafe { read_volatile(STATUS_REG as *const u32) };
-
-// MMIO write
-unsafe { write_volatile(CONTROL_REG as *mut u32, value) };
-```
-
-### Memory Barriers
-
-Document and use appropriate barriers:
-
-```rust
-use core::sync::atomic::{compiler_fence, Ordering};
-
-// Compiler barrier only
-compiler_fence(Ordering::SeqCst);
-
-// Full memory barrier (via inline assembly)
-unsafe {
-    core::arch::asm!("dmb sy", options(nostack, preserves_flags));
-}
-```
-
-## Testing
-
-Testing is integral to kernel development.
-
-### Testing Requirements
-
-1. **Pure logic must have unit tests**: Bit manipulation, parsing, calculations, data structures
-2. **Hardware interaction needs kernel tests**: MMIO, page tables, exception handling
-3. **All tests must pass**: `make build` runs quality checks; failures block merging
-
-### Writing Testable Code
-
-Design for testability by separating pure logic from hardware interaction:
-
-```rust
-// BAD: Logic mixed with hardware access
-pub fn configure_uart(baud: u32) {
-    let divisor = 115200 / baud;  // Pure logic
-    unsafe { write_volatile(UART_DLH, (divisor >> 8) as u8) };  // Hardware
+/// Memory-mapped register access.
+pub struct MmioRegion {
+    base: *mut u8,
 }
 
-// GOOD: Pure logic extracted for testing
-pub fn calculate_divisor(clock: u32, baud: u32) -> u16 {
-    (clock / baud) as u16
-}
+impl MmioRegion {
+    /// Reads a 32-bit register.
+    ///
+    /// # Safety
+    ///
+    /// - `offset` must be within the MMIO region
+    /// - The register at `offset` must be readable
+    pub unsafe fn read_u32(&self, offset: usize) -> u32 {
+        let ptr = self.base.add(offset) as *const u32;
+        // SAFETY: Caller guarantees offset is valid
+        unsafe { read_volatile(ptr) }
+    }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_divisor_calculation() {
-        assert_eq!(calculate_divisor(115200, 9600), 12);
-        assert_eq!(calculate_divisor(115200, 115200), 1);
+    /// Writes a 32-bit register.
+    ///
+    /// # Safety
+    ///
+    /// - `offset` must be within the MMIO region
+    /// - The register at `offset` must be writable
+    pub unsafe fn write_u32(&mut self, offset: usize, value: u32) {
+        let ptr = self.base.add(offset) as *mut u32;
+        // SAFETY: Caller guarantees offset is valid
+        unsafe { write_volatile(ptr, value) }
     }
 }
 ```
 
-### Test Placement
+---
 
-- **Unit tests**: In `#[cfg(test)] mod tests` within the same file
-- **Kernel tests**: In a dedicated test module (to be defined as the project develops)
+## Style and Conventions
 
-### Exception: `unwrap()` in Tests
+### Naming Conventions
 
-While kernel code prohibits `unwrap()` and `expect()`, test code may use them for clarity:
+Follow standard Rust conventions with adjustments for seL4 concepts:
+
+| Rust Convention | seL4/Lona Mapping |
+|-----------------|-------------------|
+| `snake_case` functions | `create_domain`, `send_message` |
+| `CamelCase` types | `ProcessId`, `CapabilitySlot` |
+| `SCREAMING_CASE` constants | `PAGE_SIZE`, `MAX_PROCESSES` |
+| Avoid abbreviations | `capability` not `cap` in public APIs |
+
+### File Headers
+
+Every source file must begin with the SPDX license header:
 
 ```rust
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn test_allocation() {
-        let page = allocate_page().expect("allocation should succeed");
-        assert!(!page.is_null());
-    }
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+```
+
+### Documentation Philosophy
+
+Documentation explains **why** code exists, not **what** it does. The code itself should be self-explanatory through descriptive names. This prevents documentation from becoming outdated.
+
+| Do | Don't |
+|----|-------|
+| Explain the purpose/goal | Rephrase the implementation logic |
+| Describe architectural context | Describe step-by-step what happens |
+| Keep under 10 lines | Write exhaustive documentation |
+| Use descriptive names | Compensate for bad names with docs |
+
+### Documentation Coverage
+
+**Document all functions, types, and constants** — both public and private. The more self-explanatory the item, the shorter the doc can be:
+
+```rust
+/// Returns the number of processes in the run queue.
+fn len(&self) -> usize {
+    self.queue.len()
+}
+
+/// Selects the next process for execution.
+///
+/// Implements fair round-robin scheduling, cycling through processes
+/// while respecting priority levels within each cycle.
+fn select_next_process(&mut self) -> Option<&mut Process> {
+    // ...
 }
 ```
 
-## Clippy Allow Directive Policy
+### Crate Documentation
 
-**`#[allow(clippy::...)]` and `#[allow(dead_code)]` directives are FORBIDDEN without explicit approval.**
-
-All clippy warnings must be fixed, not suppressed. This ensures the lint configuration in `Cargo.toml` remains meaningful.
-
-### Approval Process
-
-1. Developer must explain WHY the lint cannot be satisfied
-2. Developer must document what invariants make the code safe despite the warning
-3. Project owner must explicitly approve each exception
-4. Each approved exception MUST have a documented justification comment
-
-### Exception Format
-
-When an exception is approved, use this format:
+Each crate's `lib.rs` or `main.rs` must have a `//!` module doc explaining the crate's role:
 
 ```rust
-// LINT-EXCEPTION: clippy::lint_name
-// Reason: <why this specific case cannot satisfy the lint>
-// Safety: <what invariants ensure correctness despite suppressing>
-#[allow(clippy::lint_name)]
-fn my_function() { ... }
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+
+//! Memory allocator for the Lona runtime.
+//!
+//! Provides heap allocation on top of seL4's untyped memory capabilities.
+//! Each Lona process gets an independent heap to enable per-process
+//! garbage collection without global pauses.
 ```
 
-### Preferred Alternatives
+### Function Documentation
 
-Instead of suppressing lints, fix the underlying issue:
-
-| Lint | Fix |
-|------|-----|
-| `arithmetic_side_effects` | Use `.checked_add()`, `.saturating_sub()`, `.wrapping_mul()` |
-| `indexing_slicing` | Use `.get()` or `.get_mut()` with proper error handling |
-| `cast_possible_truncation` | Use `TryFrom::try_from()` with error handling |
-| `cast_sign_loss` | Use explicit conversion with validation |
-| `dead_code` | Remove unused code, or use `#[cfg(feature = "...")]` for staged features |
-| `unused_imports` | Remove the unused import |
-| `unused_assignments` | Restructure code to avoid the unnecessary assignment |
-
-### Example: Fixing `arithmetic_side_effects`
+Document the **purpose**, not the **implementation**:
 
 ```rust
-// BAD: Suppresses the warning
-#[allow(clippy::arithmetic_side_effects)]
-fn calculate_offset(base: u64, index: usize) -> u64 {
-    base + (index as u64 * 8)
+// Good: explains why this exists
+/// Finds the next runnable process for scheduling.
+///
+/// Implements fair scheduling by cycling through processes in round-robin
+/// order, respecting priority levels within each cycle.
+fn select_next_process(&mut self) -> Option<&mut Process> {
+    // Implementation is self-explanatory from the code
 }
 
-// GOOD: Uses checked arithmetic
-fn calculate_offset(base: u64, index: usize) -> Option<u64> {
-    let offset = (index as u64).checked_mul(8)?;
-    base.checked_add(offset)
+// Bad: restates what the code does (will become outdated)
+/// Iterates through the run queue starting at current_index,
+/// wrapping around if necessary, and returns the first process
+/// with status == Ready, or None if the queue is empty.
+fn select_next_process(&mut self) -> Option<&mut Process> {
+    // Now docs must be updated whenever implementation changes
 }
 ```
 
-### Example: Fixing `indexing_slicing`
+### Type Documentation
+
+For structs and enums, explain their role in the system:
 
 ```rust
-// BAD: Suppresses the warning
-#[allow(clippy::indexing_slicing)]
-fn get_item(items: &[u8], index: usize) -> u8 {
-    items[index]
-}
-
-// GOOD: Uses safe accessor
-fn get_item(items: &[u8], index: usize) -> Option<u8> {
-    items.get(index).copied()
+/// A lightweight execution context within a Domain.
+///
+/// Inspired by Erlang/BEAM processes: isolated heap, message-based
+/// communication, independent garbage collection.
+pub struct Process {
+    pid: ProcessId,
+    status: ProcessStatus,
+    // Field names are self-explanatory
 }
 ```
 
-## Code Quality Checklist
+### Comments vs Documentation
 
-All Rust code meets these requirements:
+| Syntax | Use For |
+|--------|---------|
+| `//!` | Crate/module-level docs (at top of file) |
+| `///` | Item docs (functions, types, constants) |
+| `//` | Implementation notes, SAFETY comments |
 
-- [ ] License header with SPDX identifier present
-- [ ] Passes `make build` (runs fmt, clippy)
-- [ ] All `unsafe` blocks have `// SAFETY:` comments
-- [ ] Public items have documentation
-- [ ] No `unwrap()` or `expect()` in kernel code paths (tests excepted)
-- [ ] No panicking operations in interrupt handlers
-- [ ] Memory barriers documented and justified
-- [ ] Hardware constants are named, not magic numbers
-- [ ] Pure logic has unit tests
-- [ ] New functionality has appropriate test coverage
-- [ ] **No `#[allow(...)]` directives without documented approval**
+Regular `//` comments explain tricky implementation details or non-obvious decisions:
+
+```rust
+fn allocate_frame(&mut self) -> Result<Frame, AllocError> {
+    // Prefer larger untypeds first to reduce fragmentation
+    self.untypeds.sort_by_key(|u| core::cmp::Reverse(u.size()));
+
+    // ... rest of implementation
+}
+```
+
+### Module Organization
+
+Use `mod.rs` style with clear module hierarchies:
+
+```
+src/
+├── lib.rs              # Crate root, re-exports
+├── engine/
+│   ├── mod.rs          # Module declarations
+│   ├── value.rs        # Value types
+│   ├── vm.rs           # Virtual machine
+│   └── gc.rs           # Garbage collector
+└── platform/
+    ├── mod.rs
+    ├── sel4.rs         # seL4 bindings
+    └── uart.rs         # UART driver
+```
+
+---
+
+## Lints and Checks
+
+The workspace `Cargo.toml` already configures comprehensive lints. Key points:
+
+### Required Lints
+
+- `warnings = "deny"` — No warnings in committed code
+- All clippy categories at `deny` level except `nursery` and `restriction`
+- `unsafe_op_in_unsafe_fn = "warn"` — Explicit unsafe in unsafe functions
+
+### Running Checks
+
+```bash
+# Full check suite
+make check
+
+# Individual checks
+cargo fmt --check
+cargo clippy --all-targets
+cargo test --workspace --exclude lona-runtime
+```
+
+### Suppressing Lints
+
+Use `#[expect(...)]` over `#[allow(...)]` when suppression is necessary:
+
+```rust
+// Good: will warn if the lint no longer triggers
+#[expect(clippy::too_many_arguments, reason = "seL4 syscall requires these")]
+fn sel4_call(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) { }
+
+// Avoid: silently continues even if unnecessary
+#[allow(clippy::too_many_arguments)]
+fn sel4_call(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) { }
+```
+
+---
 
 ## References
 
-- [Lona Goals](../goals.md) — Project vision and core concepts
-- [Rust API Guidelines](https://rust-lang.github.io/api-guidelines/)
-- [The Rustonomicon](https://doc.rust-lang.org/nomicon/) — Unsafe Rust guide
-- [Rust Embedded Book](https://docs.rust-embedded.org/book/)
-- [Writing an OS in Rust: Testing](https://os.phil-opp.com/testing/) — Custom test frameworks for bare-metal
-- [ARM Architecture Reference Manual](https://developer.arm.com/documentation/ddi0487/latest)
+### Official Documentation
+
+- [The Embedded Rust Book](https://docs.rust-embedded.org/book/)
+- [no_std chapter](https://docs.rust-embedded.org/book/intro/no-std.html)
+- [Linux Kernel Rust Coding Guidelines](https://docs.kernel.org/rust/coding-guidelines.html)
+- [seL4 Rust Support](https://docs.sel4.systems/projects/rust/)
+- [rust-sel4 Repository](https://github.com/seL4/rust-sel4)
+
+### Embedded Rust Patterns
+
+- [Concurrency Patterns in Embedded Rust](https://ferrous-systems.com/blog/embedded-concurrency-patterns/)
+- [Effective Rust - no_std](https://www.lurklurk.org/effective-rust/no-std.html)
+- [Heap Allocation | Writing an OS in Rust](https://os.phil-opp.com/heap-allocation/)
+
+### Capability-Based Security
+
+- [Capability-Security Model in Rust](https://softwarepatternslexicon.com/patterns-rust/24/16/)
+- [Object-capability model](https://en.wikipedia.org/wiki/Object-capability_model)
+
+### seL4 Integration
+
+- [Strengthen Your seL4 Userspace Code with Rust](https://www.dornerworks.com/blog/strengthen-your-sel4-userspace-code-with-rust/)
+- [seL4 Summit 2024 Rust Presentation](https://sel4.systems/Foundation/Summit/2024/slides/rust-support.pdf)

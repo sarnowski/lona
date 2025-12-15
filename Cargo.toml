@@ -1,28 +1,25 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 #
-# Cargo.toml - Lona runtime root task for seL4
+# Cargo.toml - Lona workspace root
 
-[package]
-name = "lona-runtime"
-description = "Lona runtime - the root task for Lona on seL4"
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 authors = ["Tobias Sarnowski <tobias@sarnowski.cloud>"]
 repository = "https://github.com/sarnowski/lona"
 
-[dependencies]
-# seL4 Rust bindings from the official repository
-sel4 = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
-sel4-root-task = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
-
-[lints.rust]
+[workspace.lints.rust]
 # Deny all warnings - build fails if any warning occurs
 warnings = "deny"
 unsafe_op_in_unsafe_fn = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 # =============================================================================
 # Lint Groups (from most to least strict)
 # =============================================================================
@@ -78,8 +75,7 @@ self_named_module_files = "allow" # mod.rs vs foo.rs style - we use mod.rs
 cargo_common_metadata = "allow"   # repository/readme/keywords/categories not needed
 
 [profile.release]
-opt-level = "z"     # Optimize for size
+opt-level = 3       # Optimize for speed
 lto = true          # Link-time optimization
 codegen-units = 1   # Better optimization, slower compile
 panic = "abort"     # No unwinding in kernel
-strip = "symbols"   # Strip symbols for smaller binary

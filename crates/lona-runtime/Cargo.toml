@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Cargo.toml - Lona runtime root task for seL4
+
+[package]
+name = "lona-runtime"
+description = "Lona runtime - the root task for Lona on seL4"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+# seL4 Rust bindings from the official repository
+sel4 = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
+sel4-root-task = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
+
+[lints]
+workspace = true

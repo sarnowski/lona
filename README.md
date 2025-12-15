@@ -13,20 +13,22 @@ Lona is a general-purpose operating system that brings together three powerful p
 
 ```bash
 # Build the Docker development environment (first time only)
-make docker-build
+make docker
 
-# Build and verify Rust code quality (runs fmt + clippy)
+# Fast verification: fmt, compile, clippy, unit tests
+make check
+
+# Create bootable QEMU image (includes check)
 make build
-
-# Build the complete bootable image
-make image
 
 # Run in QEMU
 make run
 
-# Clean build artifacts (for a fresh build)
+# Clean build artifacts
 make clean
 ```
+
+Run `make help` for all available targets.
 
 ## Documentation
 
