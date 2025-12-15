@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# docker-compose.yml - Container orchestration for Lona OS build environment
+
+services:
+  # Main build container - builds seL4 and Rust root task
+  builder:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+        RUST_CHANNEL: nightly-2025-10-20
+        SEL4_VERSION: "14.0.0"
+    image: lona-builder:latest
+    volumes:
+      - .:/work:rw
+      - cargo-cache:/opt/cargo/registry
+      - cargo-git:/opt/cargo/git
+    working_dir: /work
+    stdin_open: true
+    tty: true
+    environment:
+      - SEL4_PREFIX=/opt/seL4
+      - SEL4_INSTALL_DIR=/opt/seL4
+      - CARGO_HOME=/opt/cargo
+      - RUSTUP_HOME=/opt/rustup
+
+  # QEMU runner - runs the built Lona image
+  runner:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: lona-builder:latest
+    volumes:
+      - .:/work:ro
+    working_dir: /work
+    stdin_open: true
+    tty: true
+    command: >
+      qemu-system-aarch64
+        -machine virt,virtualization=on
+        -cpu cortex-a57
+        -m 1G
+        -nographic
+        -serial mon:stdio
+        -kernel build/image/lona-qemu.elf
+
+volumes:
+  cargo-cache:
+  cargo-git:

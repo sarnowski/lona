@@ -1,0 +1,25 @@
+# Build artifacts
+/build/
+/target/
+
+# Rust
+Cargo.lock
+
+# Python virtual environment (documentation)
+/.venv/
+__pycache__/
+*.pyc
+
+# MkDocs build output
+/site/
+
+# Editor and IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+.docker-cache/

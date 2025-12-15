@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# .cargo/config.toml - Cargo configuration for Lona
+
+[build]
+# Use the custom seL4 target by default for the runtime
+# Can be overridden with --target flag
+# target = "support/targets/aarch64-sel4.json"
+
+# Note: No -nostartfiles flag needed for aarch64-sel4 target.
+# rust-lld doesn't include C runtime startup files for bare-metal targets,
+# unlike GCC which requires -nostartfiles to disable them.
+
+[env]
+# These can be overridden by environment variables
+# SEL4_PREFIX is set in the Docker container

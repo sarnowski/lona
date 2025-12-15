@@ -1,0 +1,85 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Cargo.toml - Lona runtime root task for seL4
+
+[package]
+name = "lona-runtime"
+description = "Lona runtime - the root task for Lona on seL4"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+authors = ["Tobias Sarnowski <tobias@sarnowski.cloud>"]
+repository = "https://github.com/sarnowski/lona"
+
+[dependencies]
+# seL4 Rust bindings from the official repository
+sel4 = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
+sel4-root-task = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
+
+[lints.rust]
+# Deny all warnings - build fails if any warning occurs
+warnings = "deny"
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+# =============================================================================
+# Lint Groups (from most to least strict)
+# =============================================================================
+
+# Correctness - definitely wrong code
+correctness = { level = "deny", priority = -1 }
+
+# Suspicious - probably wrong code
+suspicious = { level = "deny", priority = -1 }
+
+# Complexity - overly complex code
+complexity = { level = "deny", priority = -1 }
+
+# Performance - inefficient code
+perf = { level = "deny", priority = -1 }
+
+# Style - non-idiomatic code
+style = { level = "deny", priority = -1 }
+
+# Pedantic - opinionated lints
+pedantic = { level = "deny", priority = -1 }
+
+# Nursery - experimental lints (may have false positives)
+nursery = { level = "warn", priority = -1 }
+
+# Cargo - Cargo.toml issues
+cargo = { level = "deny", priority = -1 }
+
+# Restriction - lints that restrict certain patterns (opt-in)
+restriction = { level = "warn", priority = -1 }
+
+# =============================================================================
+# Explicitly Allowed Lints (with justification)
+# =============================================================================
+
+# no_std context - these don't apply
+missing_errors_doc = "allow"      # No std::error::Error in no_std
+missing_panics_doc = "allow"      # Panics are fatal in kernel, documented differently
+std_instead_of_core = "allow"     # We use core, this would flag dependencies
+std_instead_of_alloc = "allow"    # We use alloc, this would flag dependencies
+
+# Conflicts with other lints or style choices
+blanket_clippy_restriction_lints = "allow"  # We intentionally enable restriction group
+implicit_return = "allow"         # Conflicts with Rust idioms, explicit return is noise
+question_mark_used = "allow"      # ? operator is idiomatic Rust
+separated_literal_suffix = "allow" # 123_i32 vs 123i32 - we prefer no separator
+single_call_fn = "allow"          # Extracting single-call functions aids readability
+ref_patterns = "allow"            # ref in patterns can be clearer sometimes
+pub_with_shorthand = "allow"      # pub(super) vs pub(in super) - shorthand is fine
+self_named_module_files = "allow" # mod.rs vs foo.rs style - we use mod.rs
+
+# Internal project - not published to crates.io
+cargo_common_metadata = "allow"   # repository/readme/keywords/categories not needed
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Better optimization, slower compile
+panic = "abort"     # No unwinding in kernel
+strip = "symbols"   # Strip symbols for smaller binary

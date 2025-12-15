@@ -1,0 +1,41 @@
+{
+    "permissions": {
+        "allow": [
+            "Skill(record-decision)",
+            "Skill(develop-rust)",
+            "Skill(finishing-work)",
+
+            "Bash(docker:*)",
+
+            "Bash(make:*)",
+            "Bash(gmake:*)",
+
+            "Bash(rustup:*)",
+            "Bash(cargo:*)",
+            "Bash(rustc:*)",
+
+            "Bash(git add:*)",
+            "Bash(git status:*)",
+            "Bash(git diff:*)",
+            "Bash(git log:*)",
+            "Bash(git describe:*)",
+
+            "Bash(wc:*)",
+            "Bash(grep:*)",
+
+            "WebSearch",
+            "WebFetch(domain:wiki.osdev.org)",
+            "WebFetch(domain:os.phil-opp.com)",
+
+            "WebFetch(domain:mermaid.js.org)",
+            "WebFetch(domain:squidfunk.github.io)",
+            "WebFetch(domain:www.mkdocs.org)"
+        ],
+        "ask": ["Bash(git commit:*)", "Bash(git push:*)"]
+    },
+
+    "attribution": {
+        "commit": "",
+        "pr": ""
+    }
+}
