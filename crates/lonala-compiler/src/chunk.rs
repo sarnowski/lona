@@ -171,13 +171,34 @@ impl Chunk {
 
     /// Adds a constant to the constant pool, returning its index.
     ///
+    /// This method does not track source spans - if you need span-aware
+    /// error reporting, use the compiler's `add_constant` wrapper instead.
+    ///
     /// # Errors
     ///
     /// Returns `Error::TooManyConstants` if the constant pool is full (> 65535).
     pub fn add_constant(&mut self, constant: Constant) -> Result<u16, Error> {
         let index = self.constants.len();
         if index > u16::MAX as usize {
-            return Err(Error::TooManyConstants);
+            return Err(Error::TooManyConstants {
+                span: Span::new(0_usize, 0_usize),
+            });
+        }
+        self.constants.push(constant);
+        // SAFETY: We checked that index <= u16::MAX
+        #[expect(clippy::as_conversions, reason = "checked above")]
+        Ok(index as u16)
+    }
+
+    /// Adds a constant with source span for error reporting.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::TooManyConstants` with the span if the pool is full.
+    pub fn add_constant_at(&mut self, constant: Constant, span: Span) -> Result<u16, Error> {
+        let index = self.constants.len();
+        if index > u16::MAX as usize {
+            return Err(Error::TooManyConstants { span });
         }
         self.constants.push(constant);
         // SAFETY: We checked that index <= u16::MAX

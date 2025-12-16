@@ -676,8 +676,8 @@ All implementation tasks with status tracking.
 | 3 | 1.3 | Value Representation | Tagged union: Integer, Float, Symbol, Nil, Bool | done |
 | 4 | 2.1 | Lexer | Tokenize S-expressions | done |
 | 5 | 2.2 | Parser | Tokens to AST, reader macros | done |
-| 6 | 2.3 | Bytecode Format | Define instruction set and constant pool | open |
-| 7 | 2.4 | Compiler | AST to bytecode compilation | open |
+| 6 | 2.3 | Bytecode Format | Define instruction set and constant pool | done |
+| 7 | 2.4 | Compiler | AST to bytecode compilation | done |
 | 8 | 2.5 | VM Core | Bytecode interpreter, stack, frames | open |
 | 9 | 2.6 | Primitives | Arithmetic, comparison, output functions | open |
 | 10 | 3.1 | REPL Loop (Rust) | Read, parse, compile, execute, print cycle | open |
