@@ -66,16 +66,25 @@ After completing all analysis, produce a comprehensive report with:
 1. **Executive Summary:** Brief overview of change scope and overall assessment
 2. **Documentation Compliance:** How well changes align with stated goals, coding guidelines, and testing strategy
 3. **Verification Results:** Output and analysis of make check and make test
-4. **Detailed Findings by Category:**
-   - Critical Issues (must be addressed)
-   - Conceptual/Architectural Concerns
+4. **Detailed Findings:** List ALL issues found, organized by category:
+   - Conceptual/Architectural Issues
    - OS/Kernel Design Issues
    - Rust Code Quality Issues
-   - Security Considerations
+   - Coding Guidelines Violations
+   - Security Issues
    - Testing Gaps
-   - Documentation Needs
-   - Minor Suggestions
+   - Documentation Issues (incorrect, inconsistent, or out-of-date documentation)
 5. **Positive Observations:** Well-implemented aspects worth noting
-6. **Summary Recommendation:** Overall assessment and prioritized action items
+6. **Issue Count:** State the exact number of issues found (e.g., "Total: 3 issues")
+
+**CRITICAL: No Optional Issues**
+- Every finding is an issue that MUST be resolved before work is complete
+- Do NOT categorize issues as "minor", "optional", "suggestions", or "future improvements"
+- Do NOT use language like "could be improved later" or "nice to have"
+- If something is worth mentioning, it is worth fixing NOW
+- The only valid outcome is: issues found (with count) OR no issues found
+
+**Not Issues:**
+- Uncommitted files - this is the natural state during development; commits happen after review
 
 Be thorough, precise, and constructive. Your review should provide clear, actionable insights that help maintain Lona's high standards for a secure, reliable microkernel system.

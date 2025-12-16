@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 
-//! Error types for lexical analysis.
+//! Error types for lexical analysis and parsing.
 //!
 //! This module provides error types and location information for reporting
-//! issues encountered during tokenization of Lonala source code.
+//! issues encountered during tokenization and parsing of Lonala source code.
 
 use core::fmt;
 
@@ -44,12 +44,13 @@ impl fmt::Display for Span {
     }
 }
 
-/// Kinds of errors that can occur during lexing.
+/// Kinds of errors that can occur during lexing and parsing.
 ///
-/// Each variant captures the specific nature of the lexical error,
+/// Each variant captures the specific nature of the error,
 /// enabling precise error messages and potential recovery strategies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Kind {
+    // Lexer errors
     /// Encountered a character that cannot start any token.
     UnexpectedCharacter(char),
     /// String literal reached end of input without closing quote.
@@ -60,21 +61,70 @@ pub enum Kind {
     InvalidNumber,
     /// Invalid unicode escape sequence (`\uXXXX`).
     InvalidUnicodeEscape,
+
+    // Parser errors
+    /// Unexpected token encountered during parsing.
+    UnexpectedToken {
+        /// Description of what was expected.
+        expected: &'static str,
+        /// Description of what was found.
+        found: &'static str,
+    },
+    /// Closing delimiter doesn't match the opening delimiter.
+    UnmatchedDelimiter {
+        /// The opening delimiter character.
+        opener: char,
+        /// The expected closing delimiter.
+        expected: char,
+        /// The actual closing delimiter found.
+        found: char,
+    },
+    /// Unexpected end of input during parsing.
+    UnexpectedEof {
+        /// Description of what was expected.
+        expected: &'static str,
+    },
+    /// Map literal has an odd number of elements.
+    OddMapEntries,
+    /// Reader macro not followed by an expression.
+    ReaderMacroMissingExpr,
 }
 
 impl fmt::Display for Kind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            // Lexer errors
             Self::UnexpectedCharacter(ch) => write!(f, "unexpected character '{ch}'"),
             Self::UnterminatedString => write!(f, "unterminated string literal"),
             Self::InvalidEscapeSequence(ch) => write!(f, "invalid escape sequence '\\{ch}'"),
             Self::InvalidNumber => write!(f, "invalid numeric literal"),
             Self::InvalidUnicodeEscape => write!(f, "invalid unicode escape sequence"),
+            // Parser errors
+            Self::UnexpectedToken { expected, found } => {
+                write!(f, "unexpected {found}, expected {expected}")
+            }
+            Self::UnmatchedDelimiter {
+                opener,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "mismatched delimiter: '{opener}' opened, expected '{expected}' but found '{found}'"
+                )
+            }
+            Self::UnexpectedEof { expected } => {
+                write!(f, "unexpected end of input, expected {expected}")
+            }
+            Self::OddMapEntries => write!(f, "map literal must have an even number of elements"),
+            Self::ReaderMacroMissingExpr => {
+                write!(f, "reader macro must be followed by an expression")
+            }
         }
     }
 }
 
-/// An error encountered during lexical analysis.
+/// An error encountered during lexical analysis or parsing.
 ///
 /// Combines an error kind with its location in the source, enabling
 /// helpful error messages that point to the exact position of the problem.
@@ -130,7 +180,7 @@ mod tests {
     }
 
     #[test]
-    fn error_kind_display() {
+    fn error_kind_display_lexer_errors() {
         assert_eq!(
             format!("{}", Kind::UnexpectedCharacter('@')),
             "unexpected character '@'"
@@ -150,6 +200,48 @@ mod tests {
         assert_eq!(
             format!("{}", Kind::InvalidUnicodeEscape),
             "invalid unicode escape sequence"
+        );
+    }
+
+    #[test]
+    fn error_kind_display_parser_errors() {
+        assert_eq!(
+            format!(
+                "{}",
+                Kind::UnexpectedToken {
+                    expected: "expression",
+                    found: "right parenthesis"
+                }
+            ),
+            "unexpected right parenthesis, expected expression"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                Kind::UnmatchedDelimiter {
+                    opener: '(',
+                    expected: ')',
+                    found: ']'
+                }
+            ),
+            "mismatched delimiter: '(' opened, expected ')' but found ']'"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                Kind::UnexpectedEof {
+                    expected: "closing delimiter"
+                }
+            ),
+            "unexpected end of input, expected closing delimiter"
+        );
+        assert_eq!(
+            format!("{}", Kind::OddMapEntries),
+            "map literal must have an even number of elements"
+        );
+        assert_eq!(
+            format!("{}", Kind::ReaderMacroMissingExpr),
+            "reader macro must be followed by an expression"
         );
     }
 

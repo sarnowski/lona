@@ -26,21 +26,28 @@ Present ALL findings from the reviewer to the user, regardless of severity.
 
 ### Step 3: Resolve All Issues
 
+**CRITICAL: You MUST resolve EVERY issue before proceeding. No exceptions.**
+
 For each finding from the review:
 
 - **If the solution is obvious**: Fix the issue immediately
-- **If the solution is not obvious**:
+- **If the solution is not obvious or requires significant effort**:
   1. Explain the issue to the user
   2. Provide 2-3 options for how to solve it
   3. Include your recommendation
   4. Wait for user feedback before proceeding
 
-ALL findings must be addressed, including minor ones. Do not skip any issues.
+**Rules:**
+- ALL findings must be addressed. There are no "optional" or "minor" issues.
+- Do NOT skip issues because they seem small or cosmetic.
+- Do NOT defer issues to "future improvements" or "later".
+- Do NOT claim completion if ANY issues remain unresolved.
+- If unsure how to fix an issue, ASK the user for guidance.
 
 ### Step 4: Repeat Until Clean
 
 After resolving all issues, return to Step 1 and run another review.
 
-Continue this loop until the reviewer finds ZERO issues.
+Continue this loop until the reviewer reports **exactly ZERO issues**.
 
-Only then is the work considered complete.
+Only when the issue count is zero is the work considered complete.
