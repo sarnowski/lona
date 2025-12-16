@@ -531,6 +531,126 @@ if !address.is_multiple_of(PAGE_SIZE) {
 
 ---
 
+## Function Design
+
+### Const Functions
+
+Make functions `const fn` when they don't perform heap allocation, I/O, or other non-const operations. This enables compile-time evaluation and communicates that the function has no side effects:
+
+```rust
+// Good: pure computation, should be const
+const fn is_printable_ascii(byte: u8) -> bool {
+    byte >= 0x20 && byte < 0x7F
+}
+
+// Good: constructor with no side effects
+const fn new() -> Self {
+    Self { buffer: Vec::new() }
+}
+
+// Cannot be const: performs I/O
+fn read_byte() -> Option<u8> {
+    uart::read_byte()
+}
+
+// Cannot be const: allocates (in non-const context)
+fn with_capacity(cap: usize) -> Self {
+    Self { data: Vec::with_capacity(cap) }
+}
+```
+
+### Methods vs Associated Functions
+
+Before writing a method with `&self` or `&mut self`, verify the function actually uses `self`. If not, make it an associated function:
+
+```rust
+// Bad: takes &self but never uses it (triggers clippy::unused_self)
+impl Parser {
+    fn read_line(&self) -> String {
+        let mut buffer = String::new();
+        // ... reads from global UART, never touches self
+        buffer
+    }
+}
+
+// Good: associated function since self isn't used
+impl Parser {
+    fn read_line() -> String {
+        let mut buffer = String::new();
+        // ... reads from global UART
+        buffer
+    }
+}
+
+// Good: method that actually uses self
+impl Parser {
+    fn parse(&self, input: &str) -> Result<Ast, Error> {
+        // Uses self.interner, self.options, etc.
+    }
+}
+```
+
+### Mutable References
+
+Use `&self` unless mutation is actually required. Don't speculatively use `&mut self` for "future flexibility":
+
+```rust
+// Bad: takes &mut self but doesn't mutate (triggers clippy::needless_pass_by_ref_mut)
+impl Evaluator {
+    fn execute(&mut self, chunk: &Chunk) -> Result<Value, Error> {
+        let vm = Vm::new(&self.interner);  // Only reads self.interner
+        vm.run(chunk)
+    }
+}
+
+// Good: use &self when only reading
+impl Evaluator {
+    fn execute(&self, chunk: &Chunk) -> Result<Value, Error> {
+        let vm = Vm::new(&self.interner);
+        vm.run(chunk)
+    }
+}
+
+// Good: &mut self when mutation is needed
+impl Evaluator {
+    fn define(&mut self, name: &str, value: Value) {
+        self.globals.insert(name.to_string(), value);  // Mutates self
+    }
+}
+```
+
+### Test-Only Code
+
+Mark methods that are only used in tests with `#[cfg(test)]` to avoid dead code warnings in production builds:
+
+```rust
+impl LineBuffer {
+    /// Creates a new buffer.
+    const fn new() -> Self {
+        Self { buffer: Vec::new() }
+    }
+
+    /// Adds a byte to the buffer.
+    fn push(&mut self, byte: u8) {
+        self.buffer.push(byte);
+    }
+
+    /// Clears the buffer (only used in tests).
+    #[cfg(test)]
+    fn clear(&mut self) {
+        self.buffer.clear();
+    }
+
+    /// Returns true if empty (only used in tests).
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
+}
+```
+
+---
+
 ## Memory Management
 
 ### GlobalAlloc Implementation
@@ -914,6 +1034,26 @@ fn _print(args: Arguments) { }     // Will trigger clippy::used_underscore_items
 fn print_fmt(args: Arguments) { }
 ```
 
+#### Identifier Length
+
+Avoid single-character identifiers except for well-established conventions. Use descriptive names that convey meaning:
+
+```rust
+// Bad: single-character identifiers (triggers clippy::min_ident_chars)
+Value::Float(f) => println!("{f}"),
+Value::Bool(b) => println!("{b}"),
+source.get(start..).and_then(|s| s.find('\n'))
+
+// Good: descriptive identifiers
+Value::Float(float_val) => println!("{float_val}"),
+Value::Bool(bool_val) => println!("{bool_val}"),
+source.get(start..).and_then(|rest| rest.find('\n'))
+
+// Acceptable: well-established loop conventions
+for i in 0_usize..len { }           // Index variable
+for (i, item) in items.iter().enumerate() { }
+```
+
 ### File Headers
 
 Every source file must begin with the SPDX license header:
@@ -1044,7 +1184,11 @@ fn allocate_frame(&mut self) -> Result<Frame, AllocError> {
 
 ### Variable Shadowing
 
-Avoid shadowing variables with transformed values of the same name. Use distinct names that reflect the variable's new state or role:
+Avoid shadowing variables. This includes both rebinding with transformation (`shadow_reuse`) and using the same name in nested scopes (`shadow_same`).
+
+#### Shadowing with Transformation
+
+Use distinct names that reflect the variable's new state or role:
 
 ```rust
 // Bad: uart shadows uart (triggers clippy::shadow_reuse)
@@ -1060,6 +1204,26 @@ let driver = initialized.configure(config)?;
 // Also good: single transformation with clear naming
 let builder = Config::builder();
 let config = builder.build()?;  // Different type, different name
+```
+
+#### Shadowing in Nested Scopes
+
+Avoid using the same variable name in match arms, closures, or inner blocks when an outer binding exists:
+
+```rust
+// Bad: byte shadows outer byte (triggers clippy::shadow_same)
+let Some(byte) = uart::read_byte() else { continue };
+match byte {
+    byte if is_printable(byte) => { }  // shadows outer byte
+    _ => { }
+}
+
+// Good: use distinct names in nested scopes
+let Some(input_byte) = uart::read_byte() else { continue };
+match input_byte {
+    ch if is_printable(ch) => { }  // different name, no shadowing
+    _ => { }
+}
 ```
 
 ### Trait Implementations

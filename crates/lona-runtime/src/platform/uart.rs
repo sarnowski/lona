@@ -24,6 +24,7 @@ const UARTFR: usize = 0x018;
 /// Transmit FIFO full flag.
 const UARTFR_TXFF: u32 = 1 << 5;
 /// Receive FIFO empty flag.
+#[cfg(not(feature = "integration-test"))]
 const UARTFR_RXFE: u32 = 1 << 4;
 
 /// PL011 UART driver for serial I/O.
@@ -92,7 +93,7 @@ impl Pl011 {
     /// Reads a single byte from the UART.
     ///
     /// Blocks until a byte is available in the receive FIFO.
-    #[expect(dead_code, reason = "will be used in Phase 3 REPL")]
+    #[cfg(not(feature = "integration-test"))]
     pub fn read_byte(&self) -> u8 {
         // SAFETY: UART base is valid
         unsafe {
@@ -107,6 +108,7 @@ impl Pl011 {
     /// # Safety
     ///
     /// UART base must be valid.
+    #[cfg(not(feature = "integration-test"))]
     unsafe fn wait_rx_ready(&self) {
         // SAFETY: Caller ensures base is valid
         let fr_ptr = unsafe { self.base.add(UARTFR / 4) };
@@ -121,6 +123,7 @@ impl Pl011 {
     /// # Safety
     ///
     /// RX FIFO must have data (call `wait_rx_ready` first).
+    #[cfg(not(feature = "integration-test"))]
     unsafe fn read_data(&self) -> u8 {
         // SAFETY: Caller ensures base is valid and RX ready
         let dr_ptr = unsafe { self.base.add(UARTDR / 4) };
@@ -130,7 +133,7 @@ impl Pl011 {
         #[expect(
             clippy::cast_possible_truncation,
             clippy::as_conversions,
-            reason = "intentional u8 extraction from UART data register"
+            reason = "[approved] intentional u8 extraction from UART data register"
         )]
         let byte = value as u8;
         byte
@@ -211,6 +214,16 @@ impl Write for Writer {
         }
         Ok(())
     }
+}
+
+/// Reads a single byte from the UART.
+///
+/// Blocks until a byte is available. Returns `None` if the UART is not initialized.
+#[cfg(not(feature = "integration-test"))]
+pub fn read_byte() -> Option<u8> {
+    // SAFETY: Accessing global state in single-threaded context
+    let driver = unsafe { &*UART_DRIVER.inner.get() };
+    driver.as_ref().map(Pl011::read_byte)
 }
 
 /// Writes formatted arguments to the UART.

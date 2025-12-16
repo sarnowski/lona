@@ -680,7 +680,7 @@ All implementation tasks with status tracking.
 | 7 | 2.4 | Compiler | AST to bytecode compilation | done |
 | 8 | 2.5 | VM Core | Bytecode interpreter, stack, frames | done |
 | 9 | 2.6 | Primitives | Arithmetic, comparison, output functions | done |
-| 10 | 3.1 | REPL Loop (Rust) | Read, parse, compile, execute, print cycle | open |
+| 10 | 3.1 | REPL Loop (Rust) | Read, parse, compile, execute, print cycle | done |
 | 11 | 3.2 | Extended Value Types | String, List, Vector, Map, arbitrary precision Integer, Ratio | open |
 | 12 | 3.3 | Special Forms | def, let, if, do, fn, quote | open |
 | 13 | 3.4 | Collection Primitives | cons, first, rest, vector, hash-map | open |

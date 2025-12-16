@@ -29,6 +29,7 @@ lona-core = { path = "../lona-core" }
 lona-kernel = { path = "../lona-kernel" }
 lona-test = { path = "../lona-test", optional = true }
 lonala-compiler = { path = "../lonala-compiler" }
+lonala-parser = { path = "../lonala-parser" }
 
 [lints]
 workspace = true
