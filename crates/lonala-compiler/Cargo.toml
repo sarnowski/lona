@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Cargo.toml - Bytecode compiler for the Lonala language
+
+[package]
+name = "lonala-compiler"
+description = "Bytecode compiler for the Lonala language"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = ["alloc"]
+alloc = []
+
+[dependencies]
+lona-core = { path = "../lona-core", default-features = false }
+lonala-parser = { path = "../lonala-parser", default-features = false }
+
+[lints]
+workspace = true
