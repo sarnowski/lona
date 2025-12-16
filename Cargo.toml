@@ -17,7 +17,7 @@ repository = "https://github.com/sarnowski/lona"
 [workspace.lints.rust]
 # Deny all warnings - build fails if any warning occurs
 warnings = "deny"
-unsafe_op_in_unsafe_fn = "warn"
+unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.lints.clippy]
 # =============================================================================
@@ -43,13 +43,13 @@ style = { level = "deny", priority = -1 }
 pedantic = { level = "deny", priority = -1 }
 
 # Nursery - experimental lints (may have false positives)
-nursery = { level = "warn", priority = -1 }
+nursery = { level = "deny", priority = -1 }
 
 # Cargo - Cargo.toml issues
 cargo = { level = "deny", priority = -1 }
 
 # Restriction - lints that restrict certain patterns (opt-in)
-restriction = { level = "warn", priority = -1 }
+restriction = { level = "deny", priority = -1 }
 
 # =============================================================================
 # Explicitly Allowed Lints (with justification)
@@ -65,11 +65,30 @@ std_instead_of_alloc = "allow"    # We use alloc, this would flag dependencies
 blanket_clippy_restriction_lints = "allow"  # We intentionally enable restriction group
 implicit_return = "allow"         # Conflicts with Rust idioms, explicit return is noise
 question_mark_used = "allow"      # ? operator is idiomatic Rust
+semicolon_outside_block = "allow" # Conflicts with rustfmt - defer to formatter
 separated_literal_suffix = "allow" # 123_i32 vs 123i32 - we prefer no separator
 single_call_fn = "allow"          # Extracting single-call functions aids readability
 ref_patterns = "allow"            # ref in patterns can be clearer sometimes
 pub_with_shorthand = "allow"      # pub(super) vs pub(in super) - shorthand is fine
 self_named_module_files = "allow" # mod.rs vs foo.rs style - we use mod.rs
+mod_module_files = "allow"        # Allow mod.rs files (same as above, different lint)
+
+# Too restrictive for practical code
+absolute_paths = "allow"          # Using crate::foo is clearer than many imports
+arbitrary_source_item_ordering = "allow"  # Logical ordering often better than alphabetical
+arithmetic_side_effects = "allow" # We use checked/saturating where needed, normal ops are fine
+as_conversions = "allow"          # Pointer conversions are necessary in low-level code
+default_numeric_fallback = "allow" # Type inference is fine for literals
+indexing_slicing = "allow"        # Bounds-checked indexing is fine when we know bounds
+integer_division = "allow"        # Integer division is intentional for size calculations
+integer_division_remainder_used = "allow"  # Same as above
+missing_docs_in_private_items = "allow"  # Only require docs on public items
+needless_collect = "allow"        # Sometimes we want to materialize for testing
+non_send_fields_in_send_ty = "allow"  # We manually implement Send/Sync correctly
+pub_use = "allow"                 # Re-exports are common and useful
+shadow_unrelated = "allow"        # Shadowing is sometimes cleaner than renaming
+undocumented_unsafe_blocks = "allow"  # Safety comments on impl blocks, not every unsafe
+unseparated_literal_suffix = "allow"  # 1usize is fine, no underscore needed
 
 # Internal project - not published to crates.io
 cargo_common_metadata = "allow"   # repository/readme/keywords/categories not needed

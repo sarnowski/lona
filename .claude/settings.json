@@ -1,8 +1,7 @@
 {
     "permissions": {
         "allow": [
-            "Skill(record-decision)",
-            "Skill(develop-rust)",
+            "Skill(develop-runtime)",
             "Skill(finishing-work)",
 
             "Bash(docker:*)",
@@ -26,10 +25,10 @@
             "WebSearch",
             "WebFetch(domain:wiki.osdev.org)",
             "WebFetch(domain:os.phil-opp.com)",
-
-            "WebFetch(domain:mermaid.js.org)",
-            "WebFetch(domain:squidfunk.github.io)",
-            "WebFetch(domain:www.mkdocs.org)"
+            "WebFetch(domain:docs.sel4.systems)",
+            "WebFetch(domain:crates.io)",
+            "WebFetch(domain:sel4.github.io)",
+            "WebFetch(domain:docs.rs)"
         ],
         "ask": ["Bash(git commit:*)", "Bash(git push:*)"]
     },

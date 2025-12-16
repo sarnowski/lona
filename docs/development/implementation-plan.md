@@ -670,7 +670,7 @@ All implementation tasks with status tracking.
 
 | # | Phase | Task | Description | Status |
 |---|-------|------|-------------|--------|
-| 1 | 1.1 | Memory Allocator | Bump allocator with seL4 untyped memory integration | open |
+| 1 | 1.1 | Memory Allocator | Bump allocator with seL4 untyped memory integration | done |
 | 2 | 1.2 | UART Driver | Read/write byte operations, blocking I/O | open |
 | 3 | 1.3 | Value Representation | Tagged union: Integer, Symbol, Nil, Bool | open |
 | 4 | 2.1 | Lexer | Tokenize S-expressions | open |

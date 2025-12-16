@@ -17,5 +17,8 @@ repository.workspace = true
 sel4 = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
 sel4-root-task = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
 
+# Lona crates
+lona-core = { path = "../lona-core" }
+
 [lints]
 workspace = true
