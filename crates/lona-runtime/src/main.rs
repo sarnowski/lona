@@ -29,6 +29,7 @@
 extern crate alloc;
 
 mod memory;
+mod platform;
 
 use alloc::vec;
 
@@ -79,10 +80,14 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     }
     sel4::debug_println!("Memory allocator initialized");
 
+    // Initialize UART for real serial output
+    init_uart(bootinfo);
+
     // Test heap allocation to verify the allocator works
     test_allocation();
 
-    sel4::debug_println!("Lona runtime initialized successfully");
+    println!("Lona runtime initialized successfully");
+    println!("Hello from allocator + UART");
 
     // For now, just halt. In the future, this will:
     // 1. Set up the Lonala compiler/interpreter
@@ -103,12 +108,44 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     }
 }
 
+/// Initializes the UART driver for serial output.
+///
+/// Discovers UART address from FDT and maps device memory.
+fn init_uart(bootinfo: &sel4::BootInfoPtr) {
+    // Discover UART from FDT in bootinfo
+    let uart_info = match platform::fdt::discover_uart(bootinfo) {
+        Ok(info) => {
+            sel4::debug_println!(
+                "Found UART at paddr 0x{:x}, size 0x{:x}",
+                info.paddr,
+                info.size
+            );
+            info
+        }
+        Err(err) => {
+            sel4::debug_println!("Warning: UART discovery failed: {:?}", err);
+            return;
+        }
+    };
+
+    // Initialize the UART driver
+    // SAFETY: PAGE_PROVIDER is initialized, single-threaded context
+    let success = unsafe { platform::uart::init(uart_info, &PAGE_PROVIDER) };
+
+    if success {
+        // First message via UART!
+        println!("UART initialized successfully");
+    } else {
+        sel4::debug_println!("Warning: UART initialization failed");
+    }
+}
+
 /// Tests that heap allocation is working correctly.
 fn test_allocation() {
     sel4::debug_println!("Testing heap allocation...");
 
     // Create a vector to test allocation
-    let test_vec = vec![1, 2, 3, 4, 5];
+    let test_vec = vec![1_i32, 2_i32, 3_i32, 4_i32, 5_i32];
 
     // Verify the contents
     sel4::debug_println!("Allocated vector: {:?}", test_vec.as_slice());

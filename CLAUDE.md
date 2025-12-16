@@ -11,12 +11,71 @@ Lona is a general-purpose operating system combining:
 
 The runtime is written in Rust (`no_std`) and runs as seL4's root task. Userspace will be programmed in Lonala, a custom Clojure/Erlang-inspired language.
 
-### Mandatory Reading
+### Required Reading
 
-**BEFORE ANY TASK** (planning, discussing features, or writing code), you MUST read:
+**Read when planning new features or tasks:**
+- `docs/goals.md` - The complete vision and design philosophy. Consult when making architectural decisions.
+- `docs/development/implementation-plan.md` - The phased roadmap, component dependencies, and current status.
 
-1. `docs/goals.md` - The complete vision and design philosophy. This is essential for understanding all architectural decisions.
-2. `docs/development/implementation-plan.md` - The phased roadmap, component dependencies, and current status.
+## Directory Structure
+
+> **Note**: Directories marked with `(planned)` are defined in the implementation plan but do not exist yet.
+
+```
+lona/
+├── Cargo.toml                    # Workspace root
+├── Makefile                      # Build orchestration (docker, check, build, run, test)
+├── CLAUDE.md                     # AI assistant instructions (this file)
+│
+├── crates/
+│   ├── lona-core/                # Foundational types (100% host-testable)
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       └── allocator.rs      # Bump allocator traits
+│   │
+│   ├── lona-runtime/             # seL4 root task (QEMU-tested only)
+│   │   └── src/
+│   │       ├── main.rs           # Entry point, receives bootinfo
+│   │       ├── memory/           # seL4 memory management
+│   │       │   ├── provider.rs   # Memory provider implementation
+│   │       │   ├── untyped.rs    # Untyped memory handling
+│   │       │   └── slots.rs      # Capability slot management
+│   │       └── platform/         # Hardware abstraction
+│   │           ├── uart.rs       # UART driver
+│   │           └── fdt.rs        # Device tree parsing
+│   │
+│   ├── lonala-parser/ (planned)  # Lexer and parser (100% host-testable)
+│   ├── lonala-compiler/ (planned)# Bytecode compiler (100% host-testable)
+│   ├── lona-kernel/ (planned)    # Process/scheduler abstractions (host-testable with mocks)
+│   └── lona-test/ (planned)      # Test harness for QEMU tests
+│
+├── docs/
+│   ├── goals.md                  # Project vision and design philosophy
+│   └── development/
+│       ├── implementation-plan.md    # Phased roadmap and task checklist
+│       ├── testing-strategy.md       # Three-tier testing pyramid
+│       └── rust-coding-guidelines.md # Coding standards
+│
+├── docker/
+│   └── Dockerfile                # Development environment with seL4 SDK
+│
+├── support/
+│   └── targets/
+│       └── aarch64-sel4.json     # Custom Rust target for seL4
+│
+├── tests/ (planned)              # Integration tests (Tier 3)
+│   └── integration/
+│
+└── .claude/                      # Claude Code configuration
+    ├── commands/                 # Custom slash commands
+    ├── agents/                   # Custom agent definitions
+    └── skills/                   # Workflow skills (develop-runtime, finishing-work)
+```
+
+## Workflows
+
+- **Before writing any Rust code**: Load the `develop-runtime` skill and follow its instructions
+- **When finishing all work**: Load the `finishing-work` skill and follow its instructions
 
 ## Build Commands
 
@@ -31,42 +90,3 @@ make test            # Run integration tests in QEMU
 make clean           # Remove build artifacts
 make shell           # Interactive Docker shell for debugging
 ```
-
-All Rust commands run inside Docker. The `make check` target runs:
-1. `cargo fmt --check`
-2. `cargo build` (with seL4 target)
-3. `cargo clippy -- -D warnings`
-4. `cargo test --workspace --exclude lona-runtime` (host-testable crates only)
-
-## Code Architecture
-
-### Crate Structure
-
-```
-crates/
-└── lona-runtime/     # seL4 root task, QEMU-tested only
-    src/main.rs       # Entry point, receives bootinfo from seL4
-```
-
-Future crates will follow a layered architecture to maximize host-testability:
-
-| Layer | Crate | Purpose |
-|-------|-------|---------|
-| Top | `lona-runtime` | seL4-specific, entry point, hardware interaction |
-| Middle | `lona-kernel` | Abstractions with trait-based mocking |
-| Language | `lonala-compiler`, `lonala-parser` | Pure logic, 100% host-testable |
-| Foundation | `lona-core` | Value types, traits, errors |
-
-Only `lona-runtime` depends on `sel4` and `sel4-root-task`.
-
-## Workflows
-
-- **Before writing any Rust code**: Load the `develop-runtime` skill and follow its instructions
-- **When finishing all work**: Load the `finishing-work` skill and follow its instructions
-
-## Target Platform
-
-- **Architecture**: ARM64 (aarch64-sel4 custom target)
-- **Machine**: QEMU virt with Cortex-A57 CPU
-- **Memory**: 1GB default
-- **seL4 Prefix**: `/opt/seL4` (inside Docker)

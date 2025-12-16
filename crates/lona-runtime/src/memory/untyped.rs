@@ -42,22 +42,20 @@ impl UntypedTracker {
     /// or `None` if no suitable untyped memory remains.
     pub fn find_next_frame_untyped(&mut self, bootinfo: &BootInfo) -> Option<UntypedAllocation> {
         let untyped_list = bootinfo.untyped_list();
-        let num_untypeds = untyped_list.len();
 
-        while self.next_untyped_index < num_untypeds {
-            let desc = &untyped_list[self.next_untyped_index];
+        while let Some(desc) = untyped_list.get(self.next_untyped_index) {
             let size_bits = desc.size_bits();
 
             // Skip device memory (we only want regular RAM)
             if desc.is_device() {
-                self.next_untyped_index += 1;
+                self.next_untyped_index = self.next_untyped_index.saturating_add(1);
                 self.current_offset = 0;
                 continue;
             }
 
             // Check if this untyped is large enough for a frame
             if size_bits < FRAME_SIZE_BITS {
-                self.next_untyped_index += 1;
+                self.next_untyped_index = self.next_untyped_index.saturating_add(1);
                 self.current_offset = 0;
                 continue;
             }
@@ -74,11 +72,11 @@ impl UntypedTracker {
                     frame_offset: self.current_offset,
                 };
 
-                self.current_offset += 1;
+                self.current_offset = self.current_offset.saturating_add(1);
 
                 // If we've exhausted this untyped, move to the next
                 if self.current_offset >= frames_in_untyped {
-                    self.next_untyped_index += 1;
+                    self.next_untyped_index = self.next_untyped_index.saturating_add(1);
                     self.current_offset = 0;
                 }
 
@@ -86,7 +84,7 @@ impl UntypedTracker {
             }
 
             // This untyped is exhausted, try the next one
-            self.next_untyped_index += 1;
+            self.next_untyped_index = self.next_untyped_index.saturating_add(1);
             self.current_offset = 0;
         }
 
@@ -103,4 +101,33 @@ pub struct UntypedAllocation {
     /// Frame offset within this untyped region.
     #[expect(dead_code, reason = "will be used for sub-allocation tracking")]
     pub frame_offset: usize,
+}
+
+/// Finds a device untyped capability containing the given physical address.
+///
+/// Device untypeds represent MMIO regions (UART, network controllers, etc).
+/// This function searches bootinfo for a device untyped that contains the
+/// specified physical address.
+///
+/// Returns the index into bootinfo's untyped list, or `None` if not found.
+pub fn find_device_untyped_containing(bootinfo: &BootInfo, paddr: usize) -> Option<usize> {
+    let untyped_list = bootinfo.untyped_list();
+
+    for (index, desc) in untyped_list.iter().enumerate() {
+        // Only consider device memory
+        if !desc.is_device() {
+            continue;
+        }
+
+        let base = desc.paddr();
+        let size = 1usize << desc.size_bits();
+        let end = base.saturating_add(size);
+
+        // Check if paddr falls within this region
+        if paddr >= base && paddr < end {
+            return Some(index);
+        }
+    }
+
+    None
 }

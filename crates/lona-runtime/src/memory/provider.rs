@@ -15,7 +15,7 @@ use sel4::cap_type::{PT, SmallPage};
 use sel4::{BootInfo, Cap, CapRights, ObjectBlueprint, ObjectBlueprintArm, VmAttributes};
 
 use super::slots::SlotAllocator;
-use super::untyped::{FRAME_SIZE, UntypedTracker};
+use super::untyped::{FRAME_SIZE, UntypedTracker, find_device_untyped_containing};
 
 /// Virtual address where we start mapping heap pages.
 ///
@@ -26,11 +26,17 @@ use super::untyped::{FRAME_SIZE, UntypedTracker};
 /// TODO: Query bootinfo for safe virtual address ranges instead of hardcoding.
 const HEAP_VADDR_START: usize = 0x1_0000_0000; // 4GB mark
 
+/// Virtual address where we start mapping MMIO device memory.
+///
+/// This is separate from the heap region to keep device mappings isolated.
+/// Positioned at 8GB to give the heap region 4GB of space below.
+const MMIO_VADDR_START: usize = 0x2_0000_0000; // 8GB mark
+
 /// Maximum virtual address for heap allocation.
 ///
-/// This prevents the heap from growing into kernel space or device memory.
-/// Set to 128GB to leave plenty of room while staying safely in user space.
-const HEAP_VADDR_END: usize = 0x20_0000_0000; // 128GB mark
+/// This prevents the heap from growing into MMIO device memory.
+/// Ends at MMIO start to ensure no overlap between heap and devices.
+const HEAP_VADDR_END: usize = MMIO_VADDR_START; // Must not overlap with MMIO
 
 /// seL4-based page provider that allocates from untyped memory.
 ///
@@ -48,8 +54,10 @@ struct ProviderState {
     untyped_tracker: UntypedTracker,
     /// Tracks `CNode` slot allocation.
     slot_allocator: SlotAllocator,
-    /// Next virtual address to map a frame at.
+    /// Next virtual address to map a heap frame at.
     next_vaddr: usize,
+    /// Next virtual address to map an MMIO device frame at.
+    next_mmio_vaddr: usize,
     /// Number of frames successfully allocated.
     frames_allocated: usize,
 }
@@ -65,6 +73,7 @@ impl Sel4PageProvider {
                 untyped_tracker: UntypedTracker::new(),
                 slot_allocator: SlotAllocator::new(),
                 next_vaddr: HEAP_VADDR_START,
+                next_mmio_vaddr: MMIO_VADDR_START,
                 frames_allocated: 0,
             }),
         }
@@ -192,7 +201,7 @@ impl Sel4PageProvider {
 
         // ARM64 has up to 4 levels of page tables. We try mapping the frame,
         // and if it fails due to missing page tables, we create them one at a time.
-        for _ in 0..4 {
+        for _ in 0_u8..4_u8 {
             let result = frame_cap.frame_map(
                 vspace,
                 vaddr,
@@ -228,12 +237,89 @@ impl Sel4PageProvider {
         );
         false
     }
+
+    /// Maps a device frame at the given physical address into virtual memory.
+    ///
+    /// Device frames are memory-mapped I/O regions for hardware like UARTs.
+    /// Unlike regular memory, device untypeds are pre-existing and just need
+    /// to be retyped and mapped (not allocated from the untyped pool).
+    ///
+    /// Returns a pointer to the mapped virtual address, or `None` on failure.
+    ///
+    /// # Safety
+    ///
+    /// - The provider must be initialized
+    /// - Must be called in single-threaded context
+    pub unsafe fn map_device_frame(&self, paddr: usize) -> Option<*mut u8> {
+        // Verify the physical address is page-aligned
+        if !paddr.is_multiple_of(FRAME_SIZE) {
+            sel4::debug_println!("map_device_frame: paddr 0x{:x} is not page-aligned", paddr);
+            return None;
+        }
+
+        // SAFETY: Single-threaded access in seL4 root task
+        let state = unsafe { &mut *self.state.get() };
+
+        let bootinfo_ptr = state.bootinfo?;
+        // SAFETY: The bootinfo pointer was validated during init()
+        let bootinfo = unsafe { bootinfo_ptr.as_ref() };
+
+        // Find the device untyped containing this physical address
+        let untyped_index = find_device_untyped_containing(bootinfo, paddr)?;
+
+        // Allocate a CNode slot for the device frame capability
+        let slot = state.slot_allocator.allocate()?;
+
+        // Get the device untyped capability
+        let untyped = bootinfo.untyped().index(untyped_index).cap();
+        let cnode = sel4::init_thread::slot::CNODE.cap();
+
+        // Retype into a SmallPage frame
+        let blueprint = ObjectBlueprint::Arch(ObjectBlueprintArm::SmallPage);
+        if let Err(err) =
+            untyped.untyped_retype(&blueprint, &cnode.absolute_cptr_for_self(), slot, 1)
+        {
+            sel4::debug_println!("Failed to retype device untyped: {:?}", err);
+            return None;
+        }
+
+        // Get virtual address for this device mapping
+        let vaddr = state.next_mmio_vaddr;
+
+        // Map the device frame with page tables as needed
+        if !Self::map_frame_with_page_tables(state, bootinfo, slot, vaddr) {
+            sel4::debug_println!("Failed to map device frame at 0x{:x}", vaddr);
+            return None;
+        }
+
+        // Update state for next device mapping
+        state.next_mmio_vaddr = vaddr.saturating_add(FRAME_SIZE);
+
+        sel4::debug_println!(
+            "Mapped device frame at paddr 0x{:x} to vaddr 0x{:x}",
+            paddr,
+            vaddr
+        );
+
+        #[expect(
+            clippy::as_conversions,
+            reason = "usize to pointer is required for MMIO access"
+        )]
+        Some(vaddr as *mut u8)
+    }
 }
 
-// SAFETY: Sel4PageProvider uses UnsafeCell for interior mutability but is only
-// used in single-threaded context (seL4 root task).
 // TODO: Replace with proper synchronization when multi-threading is added.
+#[expect(
+    clippy::non_send_fields_in_send_ty,
+    reason = "Single-threaded seL4 root task - no concurrent access to UnsafeCell"
+)]
+// SAFETY: Sel4PageProvider uses UnsafeCell for interior mutability but is only
+// used in single-threaded context (seL4 root task). The UnsafeCell<ProviderState>
+// field is not accessed concurrently - all access is serialized by the single-threaded
+// execution model of the root task.
 unsafe impl Send for Sel4PageProvider {}
+// SAFETY: Same as Send - single-threaded access only in seL4 root task.
 unsafe impl Sync for Sel4PageProvider {}
 
 impl PageProvider for Sel4PageProvider {

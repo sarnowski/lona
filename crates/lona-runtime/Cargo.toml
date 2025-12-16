@@ -17,6 +17,9 @@ repository.workspace = true
 sel4 = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
 sel4-root-task = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
 
+# Device tree parsing for hardware discovery
+fdt = "0.1"
+
 # Lona crates
 lona-core = { path = "../lona-core" }
 

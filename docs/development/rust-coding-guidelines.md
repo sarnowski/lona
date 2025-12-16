@@ -190,10 +190,10 @@ impl Uart {
 
 ### Minimizing Unsafe Scope
 
-Keep unsafe blocks as small as possible:
+Each `unsafe` block must contain **exactly one** unsafe operation. This makes it clear which operation requires the safety justification:
 
 ```rust
-// Bad: large unsafe block
+// Bad: multiple unsafe operations in one block
 unsafe {
     let ptr = allocate_page();
     let page_num = ptr as usize / PAGE_SIZE;
@@ -202,13 +202,40 @@ unsafe {
     initialize_page(ptr);
 }
 
-// Good: minimal unsafe, pure logic outside
+// Good: one unsafe operation per block, pure logic outside
+// SAFETY: allocator is initialized and has available pages
 let ptr = unsafe { allocate_page() };
+
 let page_num = ptr as usize / PAGE_SIZE;
 let frame = Frame::new(page_num);
+
+// SAFETY: frame is valid and vaddr is unmapped
 unsafe { map_frame(frame, vaddr) };
+
+// SAFETY: ptr points to newly allocated, mapped memory
 unsafe { initialize_page(ptr) };
 ```
+
+### Manual Send/Sync Implementations
+
+When implementing `Send` or `Sync` manually for types with interior mutability (e.g., `UnsafeCell`), document why it's safe and use `#[expect]` to acknowledge the lint:
+
+```rust
+pub struct PageProvider {
+    state: UnsafeCell<ProviderState>,
+}
+
+// SAFETY: PageProvider is only used in seL4's single-threaded root task.
+// The UnsafeCell provides interior mutability for the allocator state,
+// but no concurrent access is possible in this execution model.
+#[expect(clippy::non_send_fields_in_send_ty, reason = "single-threaded root task")]
+unsafe impl Send for PageProvider {}
+
+// SAFETY: Same rationale - no concurrent access possible.
+unsafe impl Sync for PageProvider {}
+```
+
+Only use manual `Send`/`Sync` when absolutely necessary. Prefer designs that don't require them.
 
 ---
 
@@ -282,6 +309,44 @@ fn do_something() -> Result<(), RuntimeError> {
 }
 ```
 
+### Error Parameter Naming
+
+Always name error parameters in `map_err()` closures—never use bare `|_|`:
+
+```rust
+// Bad: ignores error completely
+.map_err(|_| MyError::Failed)
+
+// Good: names the error (minimum requirement)
+.map_err(|_err| MyError::Failed)
+
+// Better: uses the error for context
+.map_err(|e| MyError::Failed { cause: e })
+
+// Best: logs or wraps with context
+.map_err(|e| {
+    log::warn!("operation failed: {e}");
+    MyError::OperationFailed
+})
+```
+
+### Discarding Values
+
+Never use `drop()` on Copy types—use `let _ =` instead:
+
+```rust
+// Bad: drop() on Copy type (Result<(), E> where E: Copy)
+drop(send_message(msg));
+
+// Good: explicit discard with let binding
+let _ = send_message(msg);
+
+// Better: handle the error or explicitly check
+if send_message(msg).is_err() {
+    // Intentionally ignoring error
+}
+```
+
 ---
 
 ## Panic Handling
@@ -341,6 +406,127 @@ let item = slice[index];
 
 // Better: bounds-checked access
 let item = slice.get(index).ok_or(Error::IndexOutOfBounds)?;
+```
+
+---
+
+## Arithmetic & Type Safety
+
+Kernel code must be bulletproof against arithmetic errors. Our clippy configuration enforces these rules at compile time.
+
+### Checked Arithmetic
+
+Never use raw arithmetic operators (`+`, `-`, `*`, `/`, `%`, `<<`, `>>`). Always use explicit overflow handling:
+
+```rust
+// Bad: can overflow silently in release, UB in debug
+self.index += 1;
+let size = count * FRAME_SIZE;
+
+// Good: explicit overflow handling
+self.index = self.index.checked_add(1).expect("index overflow");
+let size = count.checked_mul(FRAME_SIZE).ok_or(Error::SizeOverflow)?;
+
+// Good: when wrapping is intentional
+self.sequence = self.sequence.wrapping_add(1);
+
+// Good: when capping at max is acceptable
+self.retry_count = self.retry_count.saturating_add(1);
+```
+
+Choose the appropriate method based on semantics:
+- `.checked_*()` — Returns `Option`, use when overflow is an error
+- `.saturating_*()` — Clamps at min/max, use for counters that shouldn't wrap
+- `.wrapping_*()` — Wraps around, use when wrap semantics are intentional
+
+### Numeric Literals
+
+Always add explicit type suffixes to integer literals:
+
+```rust
+// Bad: relies on type inference (defaults to i32)
+for _ in 0..4 { }
+let values = vec![1, 2, 3];
+
+// Good: explicit types
+for _ in 0_u32..4_u32 { }
+let values: Vec<i32> = vec![1_i32, 2_i32, 3_i32];
+
+// Good: type annotation on binding also works
+let count: usize = 0;
+```
+
+### Type Conversions
+
+Never use `as` for numeric conversions—it silently truncates or changes sign:
+
+```rust
+// Bad: silently truncates (256_u16 as u8 == 0)
+let small = large_value as u8;
+
+// Bad: sign change (-1_i32 as u32 == 4294967295)
+let unsigned = signed_value as u32;
+
+// Good: fallible conversion
+let small = u8::try_from(large_value).expect("value too large");
+let unsigned = u32::try_from(signed_value)?;
+
+// Good: infallible widening (u8 -> u16 always succeeds)
+let wider = u16::from(byte_value);
+```
+
+For pointer casts (MMIO, FFI), use a local `#[expect]` with justification:
+
+```rust
+#[expect(clippy::as_conversions, reason = "MMIO base address conversion")]
+let base = region.starting_address as usize;
+```
+
+### Pointer Alignment
+
+When casting pointers, ensure proper alignment:
+
+```rust
+// Bad: u8 pointer for 32-bit register access
+let base: *mut u8 = mmio_region;
+let value = unsafe { *(base.add(offset) as *mut u32) };  // alignment violation!
+
+// Good: use properly aligned pointer type
+let base: *mut u32 = mmio_region.cast();
+let value = unsafe { base.add(offset / 4).read_volatile() };
+```
+
+### Safe Indexing
+
+Never use `[]` indexing—it panics on out-of-bounds:
+
+```rust
+// Bad: panics if index >= len
+let item = slice[index];
+let range = data[start..end];
+
+// Good: returns Option
+let item = slice.get(index).ok_or(Error::IndexOutOfBounds)?;
+let range = data.get(start..end).ok_or(Error::InvalidRange)?;
+
+// Good: for mutable access
+let item = slice.get_mut(index).ok_or(Error::IndexOutOfBounds)?;
+```
+
+### Numeric Comparisons
+
+Use standard library methods instead of manual comparisons:
+
+```rust
+// Bad: manual modulo check
+if address % PAGE_SIZE != 0 {
+    return Err(Error::Misaligned);
+}
+
+// Good: semantic method
+if !address.is_multiple_of(PAGE_SIZE) {
+    return Err(Error::Misaligned);
+}
 ```
 
 ---
@@ -684,6 +870,50 @@ Follow standard Rust conventions with adjustments for seL4 concepts:
 | `SCREAMING_CASE` constants | `PAGE_SIZE`, `MAX_PROCESSES` |
 | Avoid abbreviations | `capability` not `cap` in public APIs |
 
+#### Module Name Repetition
+
+Never repeat the module name in type or function names—the module path provides context:
+
+```rust
+// Bad: redundant module name in identifier
+mod uart {
+    pub struct UartDriver { }      // "uart" repeated
+    pub struct UartError { }       // "uart" repeated
+    pub fn init_uart() { }         // "uart" repeated
+}
+
+// Good: module path provides context
+mod uart {
+    pub struct Driver { }          // uart::Driver
+    pub struct Error { }           // uart::Error
+    pub fn init() { }              // uart::init()
+}
+
+// Same for nested modules
+mod fdt {
+    pub enum FdtError { }          // Bad: fdt::FdtError
+    pub enum Error { }             // Good: fdt::Error
+}
+```
+
+#### Underscore Prefix Convention
+
+Only use `_` prefix for truly unused items that would otherwise trigger warnings:
+
+```rust
+// Good: underscore for unused loop variable
+for _ in 0_u32..10_u32 { }
+
+// Good: underscore for intentionally unused binding
+let _unused = compute_side_effect();
+
+// Bad: underscore on a function that IS called
+fn _print(args: Arguments) { }     // Will trigger clippy::used_underscore_items
+
+// Good: use descriptive name for used items
+fn print_fmt(args: Arguments) { }
+```
+
 ### File Headers
 
 Every source file must begin with the SPDX license header:
@@ -703,6 +933,22 @@ Documentation explains **why** code exists, not **what** it does. The code itsel
 | Describe architectural context | Describe step-by-step what happens |
 | Keep under 10 lines | Write exhaustive documentation |
 | Use descriptive names | Compensate for bad names with docs |
+
+#### Code References in Documentation
+
+Wrap all code references in backticks—function names, type names, field names, parameters:
+
+```rust
+// Bad: missing backticks triggers clippy::doc_markdown
+/// Calls process_message to handle the Message.
+
+// Good: backticks around code references
+/// Calls `process_message` to handle the `Message`.
+
+/// Returns the `ProcessId` of the current process.
+///
+/// Uses the `scheduler` to look up the running process in the `run_queue`.
+```
 
 ### Documentation Coverage
 
@@ -796,6 +1042,72 @@ fn allocate_frame(&mut self) -> Result<Frame, AllocError> {
 }
 ```
 
+### Variable Shadowing
+
+Avoid shadowing variables with transformed values of the same name. Use distinct names that reflect the variable's new state or role:
+
+```rust
+// Bad: uart shadows uart (triggers clippy::shadow_reuse)
+let uart = Uart::new(base);
+let uart = uart.init()?;
+let uart = uart.configure(config)?;
+
+// Good: names reflect state progression
+let uart = Uart::new(base);
+let initialized = uart.init()?;
+let driver = initialized.configure(config)?;
+
+// Also good: single transformation with clear naming
+let builder = Config::builder();
+let config = builder.build()?;  // Different type, different name
+```
+
+### Trait Implementations
+
+When intentionally not implementing optional trait methods, document with `#[expect]`:
+
+```rust
+#[expect(clippy::missing_trait_methods, reason = "write_str suffices for our use")]
+impl fmt::Write for UartWriter {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        for byte in s.bytes() {
+            self.write_byte(byte);
+        }
+        Ok(())
+    }
+    // write_char intentionally not overridden - default impl is fine
+}
+```
+
+### Conditional Logic
+
+Avoid deeply nested conditional logic. Extract helper functions or use early returns:
+
+```rust
+// Bad: nested if-let chains (triggers clippy::collapsible_if)
+if let Some(region) = regions.next() {
+    if let Some(addr) = region.address() {
+        if addr.is_aligned() {
+            // ...
+        }
+    }
+}
+
+// Good: extract to helper or use guard clauses
+let region = regions.next()?;
+let addr = region.address()?;
+if !addr.is_aligned() {
+    return Err(Error::Misaligned);
+}
+// ...
+
+// Also good: combine with and_then
+regions.next()
+    .and_then(|r| r.address())
+    .filter(|a| a.is_aligned())
+    .ok_or(Error::NoValidRegion)?
+```
+
 ### Module Organization
 
 Use `mod.rs` style with clear module hierarchies:
@@ -818,18 +1130,30 @@ src/
 
 ## Lints and Checks
 
-The workspace `Cargo.toml` already configures comprehensive lints. Key points:
+The workspace `Cargo.toml` configures extremely strict linting. This is intentional for kernel code.
 
 ### Required Lints
 
 - `warnings = "deny"` — No warnings in committed code
-- All clippy categories at `deny` level except `nursery` and `restriction`
-- `unsafe_op_in_unsafe_fn = "warn"` — Explicit unsafe in unsafe functions
+- **All** clippy categories at `deny` level, including `nursery` and `restriction`
+- `unsafe_op_in_unsafe_fn = "deny"` — Must use `unsafe` block inside unsafe functions
+
+This strict configuration enforces:
+
+| Lint | Enforcement |
+|------|-------------|
+| `arithmetic_side_effects` | Must use `checked_*()`, `saturating_*()`, or `wrapping_*()` |
+| `indexing_slicing` | Must use `.get()` instead of `[]` |
+| `as_conversions` | Must use `try_from()` / `from()` for numerics |
+| `default_numeric_fallback` | Must add type suffixes to integer literals |
+| `undocumented_unsafe_blocks` | Must have `// SAFETY:` comment |
+| `multiple_unsafe_ops_per_block` | One unsafe operation per block |
+| `module_name_repetitions` | Don't repeat module name in identifiers |
 
 ### Running Checks
 
 ```bash
-# Full check suite
+# Full check suite (recommended)
 make check
 
 # Individual checks
@@ -840,16 +1164,30 @@ cargo test --workspace --exclude lona-runtime
 
 ### Suppressing Lints
 
-Use `#[expect(...)]` over `#[allow(...)]` when suppression is necessary:
+Use `#[expect(...)]` over `#[allow(...)]` when suppression is necessary. Always include a reason:
 
 ```rust
-// Good: will warn if the lint no longer triggers
-#[expect(clippy::too_many_arguments, reason = "seL4 syscall requires these")]
+// Good: will warn if the lint no longer triggers, documents why
+#[expect(clippy::too_many_arguments, reason = "seL4 syscall ABI requires all parameters")]
 fn sel4_call(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) { }
 
-// Avoid: silently continues even if unnecessary
+// Bad: silently continues even if suppression becomes unnecessary
 #[allow(clippy::too_many_arguments)]
 fn sel4_call(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) { }
+
+// Bad: no reason provided
+#[expect(clippy::too_many_arguments)]
+fn sel4_call(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) { }
+```
+
+### Stale Lint Suppressions
+
+Remove `#[expect]` attributes when the lint no longer triggers. The `unfulfilled_lint_expectations` lint will warn you:
+
+```rust
+// This will warn if the function no longer has too many arguments
+#[expect(clippy::too_many_arguments, reason = "...")]
+fn refactored_call(params: CallParams) { }  // Warning: unfulfilled expectation
 ```
 
 ---

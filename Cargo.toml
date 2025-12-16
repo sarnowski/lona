@@ -76,18 +76,12 @@ mod_module_files = "allow"        # Allow mod.rs files (same as above, different
 # Too restrictive for practical code
 absolute_paths = "allow"          # Using crate::foo is clearer than many imports
 arbitrary_source_item_ordering = "allow"  # Logical ordering often better than alphabetical
-arithmetic_side_effects = "allow" # We use checked/saturating where needed, normal ops are fine
-as_conversions = "allow"          # Pointer conversions are necessary in low-level code
-default_numeric_fallback = "allow" # Type inference is fine for literals
-indexing_slicing = "allow"        # Bounds-checked indexing is fine when we know bounds
 integer_division = "allow"        # Integer division is intentional for size calculations
 integer_division_remainder_used = "allow"  # Same as above
 missing_docs_in_private_items = "allow"  # Only require docs on public items
 needless_collect = "allow"        # Sometimes we want to materialize for testing
-non_send_fields_in_send_ty = "allow"  # We manually implement Send/Sync correctly
 pub_use = "allow"                 # Re-exports are common and useful
 shadow_unrelated = "allow"        # Shadowing is sometimes cleaner than renaming
-undocumented_unsafe_blocks = "allow"  # Safety comments on impl blocks, not every unsafe
 unseparated_literal_suffix = "allow"  # 1usize is fine, no underscore needed
 
 # Internal project - not published to crates.io
