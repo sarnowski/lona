@@ -261,22 +261,44 @@ A `Chunk` represents a compiled function or top-level expression:
 ```rust
 pub struct Chunk {
     /// Bytecode instructions.
-    pub code: Vec<u32>,
+    code: Vec<u32>,
 
     /// Constant pool.
-    pub constants: Vec<Constant>,
+    constants: Vec<Constant>,
 
     /// Number of registers needed.
-    pub max_registers: u8,
+    max_registers: u8,
 
     /// Number of parameters (for functions).
-    pub arity: u8,
+    arity: u8,
 
     /// Source spans for each instruction (debugging).
-    pub spans: Vec<Span>,
+    spans: Vec<Span>,
 
-    /// Function name (for debugging/introspection).
-    pub name: Option<String>,
+    /// Function name for debugging (empty for anonymous/top-level).
+    name: String,
+}
+
+impl Chunk {
+    pub fn new() -> Self;
+    pub fn with_name(name: String) -> Self;
+    pub fn name(&self) -> &str;
+    pub fn set_name(&mut self, name: String);
+    pub fn arity(&self) -> u8;
+    pub fn set_arity(&mut self, arity: u8);
+    pub fn max_registers(&self) -> u8;
+    pub fn set_max_registers(&mut self, count: u8);
+    pub fn emit(&mut self, instruction: u32, span: Span) -> usize;
+    pub fn patch(&mut self, index: usize, instruction: u32);
+    pub fn len(&self) -> usize;
+    pub fn is_empty(&self) -> bool;
+    pub fn add_constant(&mut self, constant: Constant) -> Result<u16, Error>;
+    pub fn get_constant(&self, index: u16) -> Option<&Constant>;
+    pub fn code(&self) -> &[u32];
+    pub fn constants(&self) -> &[Constant];
+    pub fn spans(&self) -> &[Span];
+    pub fn span_at(&self, index: usize) -> Option<Span>;
+    pub fn disassemble(&self) -> String;
 }
 ```
 

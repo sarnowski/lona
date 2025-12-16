@@ -678,7 +678,7 @@ All implementation tasks with status tracking.
 | 5 | 2.2 | Parser | Tokens to AST, reader macros | done |
 | 6 | 2.3 | Bytecode Format | Define instruction set and constant pool | done |
 | 7 | 2.4 | Compiler | AST to bytecode compilation | done |
-| 8 | 2.5 | VM Core | Bytecode interpreter, stack, frames | open |
+| 8 | 2.5 | VM Core | Bytecode interpreter, stack, frames | done |
 | 9 | 2.6 | Primitives | Arithmetic, comparison, output functions | open |
 | 10 | 3.1 | REPL Loop (Rust) | Read, parse, compile, execute, print cycle | open |
 | 11 | 3.2 | Extended Value Types | String, List, Vector, Map, arbitrary precision Integer, Ratio | open |

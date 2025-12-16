@@ -14,7 +14,7 @@ use alloc::{collections::BTreeMap, string::String, vec::Vec};
 ///
 /// Provides O(1) equality comparison for symbols. Two symbols with the
 /// same name always have the same ID within a given [`Interner`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Id(u32);
 
 impl Id {
