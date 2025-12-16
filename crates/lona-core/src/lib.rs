@@ -11,6 +11,8 @@
 //! # Modules
 //!
 //! - [`allocator`] - Memory allocation primitives including a bump allocator
+//! - [`symbol`] - Symbol interning for efficient identifier handling
+//! - [`value`] - Core value types for the Lonala language
 
 #![no_std]
 
@@ -18,3 +20,5 @@
 extern crate alloc;
 
 pub mod allocator;
+pub mod symbol;
+pub mod value;

@@ -226,7 +226,7 @@ The Lona runtime must provide a complete execution environment for Lonala code o
 |------|-------------|
 | 1.1 Memory Allocator | Bump allocator, seL4 untyped memory integration |
 | 1.2 UART Driver | Read byte, write byte, blocking I/O |
-| 1.3 Value Representation | Tagged union: Integer, Symbol, Nil, Bool |
+| 1.3 Value Representation | Tagged union: Integer, Float, Symbol, Nil, Bool |
 
 **Deliverable**: `println!("Hello from allocator + UART")`
 
@@ -256,13 +256,14 @@ The Lona runtime must provide a complete execution environment for Lonala code o
 | Task | Description |
 |------|-------------|
 | 3.1 REPL Loop | Read line, parse, compile, execute, print, error recovery |
-| 3.2 More Value Types | String, List, Vector, Map |
+| 3.2 More Value Types | String, List, Vector, Map, arbitrary precision Integer, Ratio |
 | 3.3 Special Forms | `def`, `let`, `if`, `do`, `fn`, `quote` |
 | 3.4 Collection Primitives | `cons`, `first`, `rest`, `vector`, `hash-map` |
 
 **Deliverable**:
 ```clojure
 lona> (def x 42)
+x
 lona> (+ x 8)
 50
 ```
@@ -672,7 +673,7 @@ All implementation tasks with status tracking.
 |---|-------|------|-------------|--------|
 | 1 | 1.1 | Memory Allocator | Bump allocator with seL4 untyped memory integration | done |
 | 2 | 1.2 | UART Driver | Read/write byte operations, blocking I/O | done |
-| 3 | 1.3 | Value Representation | Tagged union: Integer, Symbol, Nil, Bool | open |
+| 3 | 1.3 | Value Representation | Tagged union: Integer, Float, Symbol, Nil, Bool | done |
 | 4 | 2.1 | Lexer | Tokenize S-expressions | open |
 | 5 | 2.2 | Parser | Tokens to AST, reader macros | open |
 | 6 | 2.3 | Bytecode Format | Define instruction set and constant pool | open |
@@ -680,7 +681,7 @@ All implementation tasks with status tracking.
 | 8 | 2.5 | VM Core | Bytecode interpreter, stack, frames | open |
 | 9 | 2.6 | Primitives | Arithmetic, comparison, output functions | open |
 | 10 | 3.1 | REPL Loop (Rust) | Read, parse, compile, execute, print cycle | open |
-| 11 | 3.2 | Extended Value Types | String, List, Vector, Map | open |
+| 11 | 3.2 | Extended Value Types | String, List, Vector, Map, arbitrary precision Integer, Ratio | open |
 | 12 | 3.3 | Special Forms | def, let, if, do, fn, quote | open |
 | 13 | 3.4 | Collection Primitives | cons, first, rest, vector, hash-map | open |
 | 14 | 4.1 | Named Functions | defn with multi-arity support | open |
