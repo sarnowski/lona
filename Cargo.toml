@@ -76,6 +76,7 @@ mod_module_files = "allow"        # Allow mod.rs files (same as above, different
 
 # Too restrictive for practical code
 absolute_paths = "allow"          # Using crate::foo is clearer than many imports
+missing_trait_methods = "allow"   # Default trait method impls in stdlib are correct
 arbitrary_source_item_ordering = "allow"  # Logical ordering often better than alphabetical
 integer_division = "allow"        # Integer division is intentional for size calculations
 integer_division_remainder_used = "allow"  # Same as above

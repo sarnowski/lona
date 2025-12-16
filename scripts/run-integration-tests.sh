@@ -45,20 +45,24 @@ echo "  Image: $IMAGE_FILE"
 echo "  Timeout: ${TIMEOUT}s"
 echo ""
 
-# Run QEMU with timeout, capturing output
-# Use timeout command to limit execution time
-# The -nographic -serial mon:stdio options route serial output to stdout
+# Run QEMU with timeout, capturing output to file
+# Use -serial file: to write output directly to file, avoiding pipe buffering issues
+# The -nographic option is still needed to disable graphical output
 set +e
 timeout "$TIMEOUT" "$QEMU" \
     -machine "$QEMU_MACHINE" \
     -cpu "$QEMU_CPU" \
     -m "$QEMU_MEMORY" \
     -nographic \
-    -serial mon:stdio \
+    -serial "file:$OUTPUT_FILE" \
+    -monitor none \
     -kernel "$IMAGE_FILE" \
-    2>&1 | tee "$OUTPUT_FILE"
+    2>&1
 QEMU_EXIT=$?
 set -e
+
+# Display the captured output
+cat "$OUTPUT_FILE"
 
 echo ""
 echo "---"

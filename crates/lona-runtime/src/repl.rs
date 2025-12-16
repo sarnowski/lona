@@ -277,6 +277,20 @@ impl Repl {
                 let name = self.interner.resolve(sym_id);
                 println!("{name}");
             }
+            Value::String(ref string) => {
+                print!("\"");
+                for ch in string.as_str().chars() {
+                    match ch {
+                        '"' => print!("\\\""),
+                        '\\' => print!("\\\\"),
+                        '\n' => print!("\\n"),
+                        '\t' => print!("\\t"),
+                        '\r' => print!("\\r"),
+                        other => print!("{other}"),
+                    }
+                }
+                println!("\"");
+            }
             // Handle future value variants (Value is non-exhaustive)
             _ => println!("{value:?}"),
         }

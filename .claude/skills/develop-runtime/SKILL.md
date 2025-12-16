@@ -7,9 +7,77 @@ description: Mandatory workflow for writing any Rust code in the runtime. Use th
 
 This skill enforces the mandatory development workflow for all Rust code in this project.
 
-## Mandatory Workflow
+## Determine Workflow Type
 
-You MUST follow these steps in order:
+First, determine what type of work you are doing:
+
+- **Bug Fix**: A bug was reported by the user OR you discovered a bug during development → Follow the **Bug Fix Workflow** below
+- **New Feature / Enhancement / Refactoring**: Any other code changes → Follow the **Standard Development Workflow** below
+
+---
+
+## Bug Fix Workflow
+
+**CRITICAL: You MUST follow this test-first approach for ALL bug fixes, whether reported by the user or discovered during development.**
+
+### Step B1: Read the Guidelines
+
+Read these files completely before proceeding:
+- `docs/development/rust-coding-guidelines.md`
+- `docs/development/testing-strategy.md`
+- `Cargo.toml` (examine `[workspace.lints.clippy]` section)
+
+### Step B2: Understand the Bug
+
+Before writing any code:
+1. Reproduce the bug and understand its root cause
+2. Document what the expected behavior should be
+3. Identify which component(s) are affected
+
+### Step B3: Write a Failing Test FIRST
+
+**You MUST write a test that demonstrates the bug BEFORE attempting any fix.**
+
+This test should:
+- Clearly demonstrate the buggy behavior
+- Be named descriptively (e.g., `test_parser_handles_empty_input` or `test_issue_123_stack_overflow_on_deep_nesting`)
+- Be placed in the appropriate test location per the testing strategy
+- FAIL when run against the current (buggy) code
+
+Run the test to confirm it fails:
+```bash
+make test
+```
+
+The test MUST fail. If it passes, your test doesn't capture the bug correctly. Revise the test until it demonstrates the failure.
+
+### Step B4: Fix the Bug
+
+Now implement the minimal fix required to make the test pass:
+- Keep the fix focused - don't refactor or add unrelated improvements
+- Follow the coding guidelines
+- Ensure the fix addresses the root cause, not just symptoms
+
+### Step B5: Verify the Fix
+
+Run the full test suite:
+```bash
+make test
+```
+
+- Your new test MUST now pass
+- All existing tests MUST still pass
+- Zero clippy warnings or errors
+
+### Step B6: Finish Work
+
+Call the `finishing-work` skill to complete the workflow.
+
+---
+
+## Standard Development Workflow
+
+For new features, enhancements, and refactoring, follow these steps:
 
 ### Step 1: Read the Rust Coding Guidelines
 

@@ -310,7 +310,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result = Self::numeric_add(left, right, frame)?;
+        let result = Self::numeric_add(&left, &right, frame)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -323,7 +323,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result = Self::numeric_sub(left, right, frame)?;
+        let result = Self::numeric_sub(&left, &right, frame)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -336,7 +336,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result = Self::numeric_mul(left, right, frame)?;
+        let result = Self::numeric_mul(&left, &right, frame)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -349,7 +349,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result = Self::numeric_div(left, right, frame)?;
+        let result = Self::numeric_div(&left, &right, frame)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -362,7 +362,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result = Self::numeric_mod(left, right, frame)?;
+        let result = Self::numeric_mod(&left, &right, frame)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -376,10 +376,10 @@ impl<'interner> Vm<'interner> {
         let result = match operand {
             Value::Integer(int_val) => Value::Integer(int_val.saturating_neg()),
             Value::Float(float_val) => Value::Float(-float_val),
-            Value::Nil | Value::Bool(_) | Value::Symbol(_) | _ => {
+            other @ (Value::Nil | Value::Bool(_) | Value::Symbol(_) | Value::String(_) | _) => {
                 return Err(Error::TypeError {
                     expected: "number",
-                    got: value_type_name(operand),
+                    got: value_type_name(&other),
                     span: frame.current_span(),
                 });
             }
@@ -400,7 +400,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result = Value::Bool(values_equal(left, right));
+        let result = Value::Bool(values_equal(&left, &right));
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -413,7 +413,8 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result = Self::numeric_compare(left, right, frame, |lv, rv| lv < rv, |lv, rv| lv < rv)?;
+        let result =
+            Self::numeric_compare(&left, &right, frame, |lv, rv| lv < rv, |lv, rv| lv < rv)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -427,7 +428,7 @@ impl<'interner> Vm<'interner> {
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
         let result =
-            Self::numeric_compare(left, right, frame, |lv, rv| lv <= rv, |lv, rv| lv <= rv)?;
+            Self::numeric_compare(&left, &right, frame, |lv, rv| lv <= rv, |lv, rv| lv <= rv)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -440,7 +441,8 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result = Self::numeric_compare(left, right, frame, |lv, rv| lv > rv, |lv, rv| lv > rv)?;
+        let result =
+            Self::numeric_compare(&left, &right, frame, |lv, rv| lv > rv, |lv, rv| lv > rv)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -454,7 +456,7 @@ impl<'interner> Vm<'interner> {
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
         let result =
-            Self::numeric_compare(left, right, frame, |lv, rv| lv >= rv, |lv, rv| lv >= rv)?;
+            Self::numeric_compare(&left, &right, frame, |lv, rv| lv >= rv, |lv, rv| lv >= rv)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -622,7 +624,7 @@ impl<'interner> Vm<'interner> {
         let absolute_index = frame.base().saturating_add(usize::from(index));
         self.registers
             .get(absolute_index)
-            .copied()
+            .cloned()
             .ok_or_else(|| Error::InvalidRegister {
                 index,
                 span: frame.current_span(),
@@ -667,9 +669,11 @@ impl<'interner> Vm<'interner> {
             Constant::Integer(num) => Value::Integer(num),
             Constant::Float(num) => Value::Float(num),
             Constant::Symbol(id) => Value::Symbol(id),
-            // Constant::Nil, Constant::String, and future variants all become nil for now.
-            // String values will be fully supported in Phase 3.2.
-            Constant::Nil | Constant::String(_) | _ => Value::Nil,
+            Constant::String(ref text) => {
+                Value::String(lona_core::string::HeapStr::from(text.as_str()))
+            }
+            // Handle Nil and future Constant variants (Constant is #[non_exhaustive])
+            Constant::Nil | _ => Value::Nil,
         })
     }
 
@@ -706,13 +710,13 @@ impl<'interner> Vm<'interner> {
     // =========================================================================
 
     /// Performs addition with type promotion.
-    fn numeric_add(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_add(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(lhs), Value::Integer(rhs)) => {
+            (&Value::Integer(lhs), &Value::Integer(rhs)) => {
                 Ok(Value::Integer(lhs.saturating_add(rhs)))
             }
-            (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
-            (Value::Integer(lhs), Value::Float(rhs)) => {
+            (&Value::Float(lhs), &Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
+            (&Value::Integer(lhs), &Value::Float(rhs)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
@@ -721,7 +725,7 @@ impl<'interner> Vm<'interner> {
                 let lhs_float = lhs as f64;
                 Ok(Value::Float(lhs_float + rhs))
             }
-            (Value::Float(lhs), Value::Integer(rhs)) => {
+            (&Value::Float(lhs), &Value::Integer(rhs)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
@@ -739,13 +743,13 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs subtraction with type promotion.
-    fn numeric_sub(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_sub(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(lhs), Value::Integer(rhs)) => {
+            (&Value::Integer(lhs), &Value::Integer(rhs)) => {
                 Ok(Value::Integer(lhs.saturating_sub(rhs)))
             }
-            (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs - rhs)),
-            (Value::Integer(lhs), Value::Float(rhs)) => {
+            (&Value::Float(lhs), &Value::Float(rhs)) => Ok(Value::Float(lhs - rhs)),
+            (&Value::Integer(lhs), &Value::Float(rhs)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
@@ -754,7 +758,7 @@ impl<'interner> Vm<'interner> {
                 let lhs_float = lhs as f64;
                 Ok(Value::Float(lhs_float - rhs))
             }
-            (Value::Float(lhs), Value::Integer(rhs)) => {
+            (&Value::Float(lhs), &Value::Integer(rhs)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
@@ -772,15 +776,15 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs multiplication with type promotion.
-    fn numeric_mul(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_mul(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(left_int), Value::Integer(right_int)) => {
+            (&Value::Integer(left_int), &Value::Integer(right_int)) => {
                 Ok(Value::Integer(left_int.saturating_mul(right_int)))
             }
-            (Value::Float(left_float), Value::Float(right_float)) => {
+            (&Value::Float(left_float), &Value::Float(right_float)) => {
                 Ok(Value::Float(left_float * right_float))
             }
-            (Value::Integer(left_int), Value::Float(right_float)) => {
+            (&Value::Integer(left_int), &Value::Float(right_float)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
@@ -789,7 +793,7 @@ impl<'interner> Vm<'interner> {
                 let left_as_float = left_int as f64;
                 Ok(Value::Float(left_as_float * right_float))
             }
-            (Value::Float(left_float), Value::Integer(right_int)) => {
+            (&Value::Float(left_float), &Value::Integer(right_int)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
@@ -807,9 +811,9 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs division with type promotion.
-    fn numeric_div(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_div(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(left_int), Value::Integer(right_int)) => {
+            (&Value::Integer(left_int), &Value::Integer(right_int)) => {
                 if right_int == 0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
@@ -818,7 +822,7 @@ impl<'interner> Vm<'interner> {
                     Ok(Value::Integer(left_int.checked_div(right_int).unwrap_or(0)))
                 }
             }
-            (Value::Float(left_float), Value::Float(right_float)) => {
+            (&Value::Float(left_float), &Value::Float(right_float)) => {
                 if right_float == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
@@ -827,7 +831,7 @@ impl<'interner> Vm<'interner> {
                     Ok(Value::Float(left_float / right_float))
                 }
             }
-            (Value::Integer(left_int), Value::Float(right_float)) => {
+            (&Value::Integer(left_int), &Value::Float(right_float)) => {
                 if right_float == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
@@ -842,7 +846,7 @@ impl<'interner> Vm<'interner> {
                     Ok(Value::Float(left_as_float / right_float))
                 }
             }
-            (Value::Float(left_float), Value::Integer(right_int)) => {
+            (&Value::Float(left_float), &Value::Integer(right_int)) => {
                 if right_int == 0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
@@ -870,9 +874,9 @@ impl<'interner> Vm<'interner> {
         clippy::modulo_arithmetic,
         reason = "[approved] Standard IEEE 754 float modulo for language runtime"
     )]
-    fn numeric_mod(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_mod(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(left_int), Value::Integer(right_int)) => {
+            (&Value::Integer(left_int), &Value::Integer(right_int)) => {
                 if right_int == 0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
@@ -881,7 +885,7 @@ impl<'interner> Vm<'interner> {
                     Ok(Value::Integer(left_int.checked_rem(right_int).unwrap_or(0)))
                 }
             }
-            (Value::Float(left_float), Value::Float(right_float)) => {
+            (&Value::Float(left_float), &Value::Float(right_float)) => {
                 if right_float == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
@@ -890,7 +894,7 @@ impl<'interner> Vm<'interner> {
                     Ok(Value::Float(left_float % right_float))
                 }
             }
-            (Value::Integer(left_int), Value::Float(right_float)) => {
+            (&Value::Integer(left_int), &Value::Float(right_float)) => {
                 if right_float == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
@@ -905,7 +909,7 @@ impl<'interner> Vm<'interner> {
                     Ok(Value::Float(left_as_float % right_float))
                 }
             }
-            (Value::Float(left_float), Value::Integer(right_int)) => {
+            (&Value::Float(left_float), &Value::Integer(right_int)) => {
                 if right_int == 0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
@@ -930,8 +934,8 @@ impl<'interner> Vm<'interner> {
 
     /// Performs a numeric comparison operation.
     fn numeric_compare<FI, FF>(
-        left: Value,
-        right: Value,
+        left: &Value,
+        right: &Value,
         frame: &Frame<'_>,
         int_cmp: FI,
         float_cmp: FF,
@@ -941,13 +945,13 @@ impl<'interner> Vm<'interner> {
         FF: Fn(f64, f64) -> bool,
     {
         match (left, right) {
-            (Value::Integer(left_int), Value::Integer(right_int)) => {
+            (&Value::Integer(left_int), &Value::Integer(right_int)) => {
                 Ok(Value::Bool(int_cmp(left_int, right_int)))
             }
-            (Value::Float(left_float), Value::Float(right_float)) => {
+            (&Value::Float(left_float), &Value::Float(right_float)) => {
                 Ok(Value::Bool(float_cmp(left_float, right_float)))
             }
-            (Value::Integer(left_int), Value::Float(right_float)) => {
+            (&Value::Integer(left_int), &Value::Float(right_float)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
@@ -956,7 +960,7 @@ impl<'interner> Vm<'interner> {
                 let left_as_float = left_int as f64;
                 Ok(Value::Bool(float_cmp(left_as_float, right_float)))
             }
-            (Value::Float(left_float), Value::Integer(right_int)) => {
+            (&Value::Float(left_float), &Value::Integer(right_int)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
@@ -979,13 +983,14 @@ impl<'interner> Vm<'interner> {
 // =============================================================================
 
 /// Returns the type name of a value.
-const fn value_type_name(value: Value) -> &'static str {
-    match value {
+const fn value_type_name(value: &Value) -> &'static str {
+    match *value {
         Value::Nil => "nil",
         Value::Bool(_) => "boolean",
         Value::Integer(_) => "integer",
         Value::Float(_) => "float",
         Value::Symbol(_) => "symbol",
+        Value::String(_) => "string",
         // Value is non-exhaustive, handle future variants
         _ => "unknown",
     }
@@ -1006,11 +1011,12 @@ const fn constant_type_name(constant: &Constant) -> &'static str {
 }
 
 /// Returns a description of the types in a binary operation.
-const fn binary_type_description(left: Value, right: Value) -> &'static str {
+const fn binary_type_description(left: &Value, right: &Value) -> &'static str {
     match (left, right) {
-        (Value::Nil, _) | (_, Value::Nil) => "nil",
-        (Value::Bool(_), _) | (_, Value::Bool(_)) => "boolean",
-        (Value::Symbol(_), _) | (_, Value::Symbol(_)) => "symbol",
+        (&Value::Nil, _) | (_, &Value::Nil) => "nil",
+        (&Value::Bool(_), _) | (_, &Value::Bool(_)) => "boolean",
+        (&Value::Symbol(_), _) | (_, &Value::Symbol(_)) => "symbol",
+        (&Value::String(_), _) | (_, &Value::String(_)) => "string",
         _ => "non-number",
     }
 }
@@ -1020,15 +1026,16 @@ const fn binary_type_description(left: Value, right: Value) -> &'static str {
     clippy::float_cmp,
     reason = "[approved] VM equality semantics require exact float comparison"
 )]
-fn values_equal(left: Value, right: Value) -> bool {
+fn values_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
-        (Value::Nil, Value::Nil) => true,
-        (Value::Bool(left_bool), Value::Bool(right_bool)) => left_bool == right_bool,
-        (Value::Integer(left_int), Value::Integer(right_int)) => left_int == right_int,
-        (Value::Float(left_float), Value::Float(right_float)) => left_float == right_float,
-        (Value::Symbol(left_sym), Value::Symbol(right_sym)) => left_sym == right_sym,
+        (&Value::Nil, &Value::Nil) => true,
+        (&Value::Bool(left_bool), &Value::Bool(right_bool)) => left_bool == right_bool,
+        (&Value::Integer(left_int), &Value::Integer(right_int)) => left_int == right_int,
+        (&Value::Float(left_float), &Value::Float(right_float)) => left_float == right_float,
+        (&Value::Symbol(left_sym), &Value::Symbol(right_sym)) => left_sym == right_sym,
+        (&Value::String(ref left_str), &Value::String(ref right_str)) => left_str == right_str,
         // Cross-type numeric comparison
-        (Value::Integer(left_int), Value::Float(right_float)) => {
+        (&Value::Integer(left_int), &Value::Float(right_float)) => {
             #[expect(
                 clippy::as_conversions,
                 clippy::cast_precision_loss,
@@ -1037,7 +1044,7 @@ fn values_equal(left: Value, right: Value) -> bool {
             let left_as_float = left_int as f64;
             left_as_float == right_float
         }
-        (Value::Float(left_float), Value::Integer(right_int)) => {
+        (&Value::Float(left_float), &Value::Integer(right_int)) => {
             #[expect(
                 clippy::as_conversions,
                 clippy::cast_precision_loss,

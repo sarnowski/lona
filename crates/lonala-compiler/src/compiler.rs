@@ -115,11 +115,8 @@ impl<'interner> Compiler<'interner> {
             // Lists (function calls or special forms)
             Ast::List(ref elements) => self.compile_list(elements, expr.span),
 
-            // Not yet implemented
-            Ast::String(ref _str_val) => Err(Error::NotImplemented {
-                feature: "string literals",
-                span: expr.span,
-            }),
+            // String literals
+            Ast::String(ref string) => self.compile_string(string, expr.span),
             Ast::Keyword(ref _kw) => Err(Error::NotImplemented {
                 feature: "keyword literals",
                 span: expr.span,
@@ -180,6 +177,17 @@ impl<'interner> Compiler<'interner> {
         let dest = self.alloc_register(span)?;
         self.chunk
             .emit(encode_abc(Opcode::LoadNil, dest, 0, 0), span);
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles a string literal.
+    fn compile_string(&mut self, value: &str, span: Span) -> Result<ExprResult, Error> {
+        let dest = self.alloc_register(span)?;
+        let const_idx = self
+            .chunk
+            .add_constant_at(Constant::String(alloc::string::String::from(value)), span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
         Ok(ExprResult { register: dest })
     }
 
@@ -761,6 +769,39 @@ mod tests {
         }
     }
 
+    #[test]
+    fn compile_print_string() {
+        let (chunk, interner) = compile_with_interner("(print \"hello\")");
+        let code = chunk.code();
+
+        // GetGlobal R0, K0 (print)
+        // LoadK R1, K1 ("hello")
+        // Call R0, 1, 1
+        // Return R0, 1
+        assert_eq!(code.len(), 4);
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
+
+        let instr1 = *code.get(1_usize).unwrap();
+        assert_eq!(decode_op(instr1), Some(Opcode::LoadK));
+        assert_eq!(decode_a(instr1), 1); // string in R1
+
+        let instr2 = *code.get(2_usize).unwrap();
+        assert_eq!(decode_op(instr2), Some(Opcode::Call));
+
+        // Verify constants
+        if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(0) {
+            assert_eq!(interner.resolve(*sym_id), "print");
+        } else {
+            panic!("expected Symbol constant at K0");
+        }
+        assert_eq!(
+            chunk.get_constant(1),
+            Some(&Constant::String(alloc::string::String::from("hello")))
+        );
+    }
+
     // =========================================================================
     // Error Tests
     // =========================================================================
@@ -779,16 +820,54 @@ mod tests {
     }
 
     #[test]
-    fn compile_string_not_implemented() {
-        let mut interner = symbol::Interner::new();
-        let result = compile("\"hello\"", &mut interner);
-        assert!(result.is_err());
+    fn compile_string() {
+        let chunk = compile_source("\"hello\"");
+        let code = chunk.code();
 
-        if let Err(CompileError::Compile(Error::NotImplemented { feature, .. })) = result {
-            assert_eq!(feature, "string literals");
-        } else {
-            panic!("expected NotImplemented error");
-        }
+        // LoadK R0, K0; Return R0, 1
+        assert_eq!(code.len(), 2);
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+        assert_eq!(decode_a(instr0), 0);
+        let const_idx = decode_bx(instr0);
+        assert_eq!(
+            chunk.get_constant(const_idx),
+            Some(&Constant::String(alloc::string::String::from("hello")))
+        );
+    }
+
+    #[test]
+    fn compile_empty_string() {
+        let chunk = compile_source("\"\"");
+        let code = chunk.code();
+
+        assert_eq!(code.len(), 2);
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+        let const_idx = decode_bx(instr0);
+        assert_eq!(
+            chunk.get_constant(const_idx),
+            Some(&Constant::String(alloc::string::String::from("")))
+        );
+    }
+
+    #[test]
+    fn compile_string_with_escapes() {
+        let chunk = compile_source("\"hello\\nworld\"");
+        let code = chunk.code();
+
+        assert_eq!(code.len(), 2);
+
+        let instr0 = *code.get(0_usize).unwrap();
+        let const_idx = decode_bx(instr0);
+        assert_eq!(
+            chunk.get_constant(const_idx),
+            Some(&Constant::String(alloc::string::String::from(
+                "hello\nworld"
+            )))
+        );
     }
 
     #[test]

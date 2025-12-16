@@ -4,9 +4,8 @@
 # Makefile - Lona build system
 #
 # Primary targets:
-#   check  - Fast verification (fmt, compile, clippy, unit tests)
-#   build  - Create bootable QEMU image (includes check)
-#   test   - Run integration tests in QEMU
+#   build  - Create bootable QEMU image
+#   test   - Full verification: fmt, clippy, unit tests, build, integration tests
 #   run    - Interactive QEMU session
 #   clean  - Remove all build artifacts
 #
@@ -38,7 +37,7 @@ QEMU_MEMORY   := 1G
 
 # Test configuration
 TEST_IMAGE    := $(BUILD_DIR)/lona-test.elf
-TEST_TIMEOUT  := 30
+TEST_TIMEOUT  := 10
 
 # ==============================================================================
 # Primary Targets
@@ -46,16 +45,13 @@ TEST_TIMEOUT  := 30
 
 .DEFAULT_GOAL := build
 
-.PHONY: check
-check: ## Fast verification: fmt, compile, clippy, unit tests
-	$(COMPOSE) run --rm builder make _check
-
 .PHONY: build
-build: check ## Create bootable QEMU image
+build: ## Create bootable QEMU image
 	$(COMPOSE) run --rm builder make _build
 
 .PHONY: test
-test: check ## Run integration tests in QEMU
+test: ## Full verification: fmt, clippy, unit tests, build, integration tests
+	$(COMPOSE) run --rm builder make _check
 	$(COMPOSE) run --rm builder make _build-test
 	$(COMPOSE) run --rm tester
 
@@ -85,18 +81,14 @@ help: ## Show this help
 	@echo "Lona Build System"
 	@echo ""
 	@echo "Primary targets:"
-	@echo "  check   Fast verification (fmt, compile, clippy, unit tests)"
-	@echo "  build   Create bootable QEMU image (includes check)"
-	@echo "  test    Run integration tests in QEMU"
+	@echo "  build   Create bootable QEMU image"
+	@echo "  test    Full verification: fmt, clippy, unit tests, build, integration tests"
 	@echo "  run     Interactive QEMU session"
 	@echo "  clean   Remove all build artifacts"
 	@echo ""
 	@echo "Secondary targets:"
 	@echo "  docker  Build Docker development image"
 	@echo "  shell   Interactive Docker shell"
-	@echo ""
-	@echo "Dependency: check -> build -> test"
-	@echo "                  -> run"
 
 # ==============================================================================
 # Internal Targets (run inside Docker container)

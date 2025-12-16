@@ -1228,10 +1228,9 @@ match input_byte {
 
 ### Trait Implementations
 
-When intentionally not implementing optional trait methods, document with `#[expect]`:
+When implementing traits, you don't need to override optional methods if the default implementation is correct. The `missing_trait_methods` lint is globally allowed in the workspace configuration since default trait implementations in the standard library are generally correct.
 
 ```rust
-#[expect(clippy::missing_trait_methods, reason = "write_str suffices for our use")]
 impl fmt::Write for UartWriter {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         for byte in s.bytes() {
@@ -1239,7 +1238,7 @@ impl fmt::Write for UartWriter {
         }
         Ok(())
     }
-    // write_char intentionally not overridden - default impl is fine
+    // write_char not overridden - default impl calls write_str
 }
 ```
 
@@ -1317,14 +1316,10 @@ This strict configuration enforces:
 ### Running Checks
 
 ```bash
-# Full check suite (recommended)
-make check
-
-# Individual checks
-cargo fmt --check
-cargo clippy --all-targets
-cargo test --workspace --exclude lona-runtime
+make test
 ```
+
+This runs the full verification suite: formatting, compilation, clippy, unit tests, and integration tests.
 
 ### Suppressing Lints
 

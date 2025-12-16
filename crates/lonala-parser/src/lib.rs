@@ -33,16 +33,6 @@
 //! ```
 
 #![no_std]
-// Allow missing Iterator trait methods crate-wide. The `missing_trait_methods` lint
-// (from clippy::restriction) requires explicit implementation of all default trait
-// methods. For Iterator, this means ~58 methods. The cost is ~300 lines of boilerplate
-// that delegates to default implementations with zero benefit. Our Lexer iterator
-// doesn't benefit from custom implementations (sequential, unknown size, no random
-// access). With LTO enabled in release builds, cross-crate inlining happens anyway.
-#![expect(
-    clippy::missing_trait_methods,
-    reason = "Iterator defaults are sufficient for lexer"
-)]
 // Allow single-char identifiers in closure parameters and loop indices, which is
 // conventional Rust style (e.g., `|c| c.is_digit()`, `for (i, x) in iter`). The
 // `min_ident_chars` lint is overly strict for these common patterns.

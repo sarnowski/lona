@@ -36,10 +36,6 @@ struct OutputWriter<'output, O: Output + ?Sized> {
     output: &'output mut O,
 }
 
-#[expect(
-    clippy::missing_trait_methods,
-    reason = "[approved] write_str is sufficient"
-)]
 impl<O: Output + ?Sized> Write for OutputWriter<'_, O> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.output.write_str(s);

@@ -9,6 +9,8 @@
 
 use core::fmt::{self, Display};
 
+#[cfg(feature = "alloc")]
+use crate::string::HeapStr;
 use crate::symbol;
 
 #[cfg(feature = "alloc")]
@@ -16,10 +18,10 @@ use crate::symbol::Interner;
 
 /// Core value representation for Lonala.
 ///
-/// All variants are small and stack-allocated, enabling `Copy` semantics.
-/// Phase 3.2 will extend this with heap-allocated types (String, List, etc.)
-/// which will remove the `Copy` trait.
-#[derive(Debug, Clone, Copy)]
+/// Values can be stack-allocated primitives or heap-allocated types.
+/// The heap types (String, and future List, Vector, Map) use `Rc` for
+/// reference counting, which is why `Value` is `Clone` but not `Copy`.
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Value {
     /// Nothing - the absence of a value.
@@ -28,13 +30,16 @@ pub enum Value {
     Bool(bool),
     /// Signed 64-bit integer.
     ///
-    /// Will become a hybrid small/big integer in Phase 3.2 to support
+    /// Will become a hybrid small/big integer in Phase 3.2.2 to support
     /// arbitrary precision.
     Integer(i64),
     /// 64-bit floating point number.
     Float(f64),
     /// Interned symbol (identifier or keyword).
     Symbol(symbol::Id),
+    /// Immutable string (requires `alloc` feature).
+    #[cfg(feature = "alloc")]
+    String(HeapStr),
 }
 
 impl Value {
@@ -61,6 +66,8 @@ impl Value {
         match *self {
             Self::Bool(value) => Some(value),
             Self::Nil | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
+            #[cfg(feature = "alloc")]
+            Self::String(_) => None,
         }
     }
 
@@ -71,6 +78,8 @@ impl Value {
         match *self {
             Self::Integer(value) => Some(value),
             Self::Nil | Self::Bool(_) | Self::Float(_) | Self::Symbol(_) => None,
+            #[cfg(feature = "alloc")]
+            Self::String(_) => None,
         }
     }
 
@@ -81,6 +90,8 @@ impl Value {
         match *self {
             Self::Float(value) => Some(value),
             Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Symbol(_) => None,
+            #[cfg(feature = "alloc")]
+            Self::String(_) => None,
         }
     }
 
@@ -91,6 +102,27 @@ impl Value {
         match *self {
             Self::Symbol(id) => Some(id),
             Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) => None,
+            #[cfg(feature = "alloc")]
+            Self::String(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `String`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_string(&self) -> bool {
+        matches!(self, Self::String(_))
+    }
+
+    /// Returns a reference to the contained string if this is a `String` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_string(&self) -> Option<&HeapStr> {
+        match *self {
+            Self::String(ref string) => Some(string),
+            Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
         }
     }
 
@@ -109,19 +141,17 @@ impl Value {
     }
 }
 
-#[expect(
-    clippy::missing_trait_methods,
-    reason = "default ne() is correct for our eq() implementation"
-)]
 impl PartialEq for Value {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        match (*self, *other) {
-            (Self::Nil, Self::Nil) => true,
-            (Self::Bool(left), Self::Bool(right)) => left == right,
-            (Self::Integer(left), Self::Integer(right)) => left == right,
-            (Self::Float(left), Self::Float(right)) => left == right,
-            (Self::Symbol(left), Self::Symbol(right)) => left == right,
+        match (self, other) {
+            (&Self::Nil, &Self::Nil) => true,
+            (&Self::Bool(ref left), &Self::Bool(ref right)) => left == right,
+            (&Self::Integer(ref left), &Self::Integer(ref right)) => left == right,
+            (&Self::Float(ref left), &Self::Float(ref right)) => left == right,
+            (&Self::Symbol(ref left), &Self::Symbol(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
+            (&Self::String(ref left), &Self::String(ref right)) => left == right,
             _ => false,
         }
     }
@@ -137,6 +167,8 @@ impl Display for Value {
             Self::Integer(value) => write!(f, "{value}"),
             Self::Float(value) => format_float(value, f),
             Self::Symbol(id) => write!(f, "#<symbol:{}>", id.as_u32()),
+            #[cfg(feature = "alloc")]
+            Self::String(ref string) => write!(f, "\"{string}\""),
         }
     }
 }
@@ -197,6 +229,7 @@ impl Display for Displayable<'_> {
             Value::Bool(false) => write!(f, "false"),
             Value::Integer(value) => write!(f, "{value}"),
             Value::Float(value) => format_float(value, f),
+            Value::String(ref string) => write!(f, "{string}"),
         }
     }
 }
@@ -235,6 +268,22 @@ impl From<symbol::Id> for Value {
     #[inline]
     fn from(id: symbol::Id) -> Self {
         Self::Symbol(id)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<HeapStr> for Value {
+    #[inline]
+    fn from(string: HeapStr) -> Self {
+        Self::String(string)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<&str> for Value {
+    #[inline]
+    fn from(text: &str) -> Self {
+        Self::String(HeapStr::new(text))
     }
 }
 
@@ -444,9 +493,107 @@ mod tests {
     }
 
     #[test]
-    fn value_is_copy() {
+    fn value_is_clone() {
         let v1 = Value::Integer(42);
-        let v2 = v1; // Copy
-        assert_eq!(v1, v2); // Both still valid
+        let v2 = v1.clone();
+        assert_eq!(v1, v2);
+    }
+
+    // =========================================================================
+    // String Tests
+    // =========================================================================
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn string_equality() {
+        let s1 = Value::String(HeapStr::new("hello"));
+        let s2 = Value::String(HeapStr::new("hello"));
+        let s3 = Value::String(HeapStr::new("world"));
+
+        assert_eq!(s1, s2);
+        assert_ne!(s1, s3);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_string() {
+        let string = Value::String(HeapStr::new("hello world"));
+        assert_eq!(string.to_string(), "\"hello world\"");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_string_empty() {
+        let string = Value::String(HeapStr::new(""));
+        assert_eq!(string.to_string(), "\"\"");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_string_with_interner() {
+        let interner = Interner::new();
+        let string = Value::String(HeapStr::new("hello"));
+        // With interner, string shows without quotes (raw content)
+        assert_eq!(string.display(&interner).to_string(), "hello");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn is_string() {
+        assert!(Value::String(HeapStr::new("test")).is_string());
+        assert!(!Value::Nil.is_string());
+        assert!(!Value::Integer(42).is_string());
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn as_string() {
+        let string = HeapStr::new("test");
+        let value = Value::String(string.clone());
+        assert_eq!(value.as_string(), Some(&string));
+        assert_eq!(Value::Nil.as_string(), None);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn from_heap_str() {
+        let string = HeapStr::new("test");
+        let value = Value::from(string.clone());
+        assert_eq!(value, Value::String(string));
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn from_str_slice() {
+        let value = Value::from("hello");
+        assert_eq!(value, Value::String(HeapStr::new("hello")));
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn string_is_truthy() {
+        // All strings are truthy, even empty ones
+        assert!(Value::String(HeapStr::new("")).is_truthy());
+        assert!(Value::String(HeapStr::new("hello")).is_truthy());
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn string_not_equal_to_other_types() {
+        let string = Value::String(HeapStr::new("42"));
+        assert_ne!(string, Value::Integer(42));
+        assert_ne!(string, Value::Nil);
+        assert_ne!(string, Value::Bool(true));
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn string_clone_shares_data() {
+        let s1 = Value::String(HeapStr::new("hello"));
+        let s2 = s1.clone();
+        assert_eq!(s1, s2);
+        // Both are still valid after clone
+        assert_eq!(s1.as_string().unwrap().as_str(), "hello");
+        assert_eq!(s2.as_string().unwrap().as_str(), "hello");
     }
 }

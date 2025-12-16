@@ -106,6 +106,45 @@ lona/
 - **Before writing any Rust code**: Load the `develop-runtime` skill and follow its instructions
 - **When finishing all work**: Load the `finishing-work` skill and follow its instructions
 
+## Test-First Bug Fixing (MANDATORY)
+
+**CRITICAL: ALL bug fixes MUST follow a test-first approach. No exceptions.**
+
+When you encounter a bug—whether reported by the user OR discovered during development—you MUST:
+
+1. **Write a failing test FIRST** that demonstrates the bug
+2. **Verify the test fails** against the current (buggy) code
+3. **Then fix the bug** to make the test pass
+4. **Keep the test** as a permanent regression test
+
+### Why This Matters
+
+- Tests prove the bug exists and is reproducible
+- Tests document the expected behavior
+- Tests prevent the same bug from recurring
+- Tests serve as living documentation of edge cases
+
+### Workflow
+
+The `develop-runtime` skill contains the detailed Bug Fix Workflow (Steps B1-B6). Load it before starting any bug fix work.
+
+### Examples of When This Applies
+
+- User reports: "The parser crashes on empty input" → Write test first
+- You notice: "This function doesn't handle negative numbers" → Write test first
+- CI reveals: "Test flakes under high load" → Write test first
+- Code review finds: "Edge case not handled" → Write test first
+
+### What Counts as a Bug
+
+- Incorrect behavior (code does the wrong thing)
+- Missing behavior (code doesn't handle a valid case)
+- Crashes or panics on valid input
+- Performance regressions (if measurable via tests)
+- Security issues (if demonstrable via tests)
+
+**Remember: If you're about to fix something, write a test for it first.**
+
 ## Clippy Policy
 
 **CRITICAL: You MUST NOT disable any clippy check at any level (file, module, crate, or workspace).**
@@ -139,10 +178,9 @@ Requires Docker and GNU Make 4.0+ (on macOS: `brew install make`, use `gmake`).
 
 ```bash
 make docker          # Build Docker development image (first time only)
-make check           # Fast verification: fmt, compile, clippy, unit tests
-make build           # Create bootable QEMU image (includes check)
+make build           # Create bootable QEMU image
 make run             # Run in QEMU (includes build)
-make test            # Run integration tests in QEMU
+make test            # Full verification: fmt, clippy, unit tests, build, integration tests
 make clean           # Remove build artifacts
 make shell           # Interactive Docker shell for debugging
 ```

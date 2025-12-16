@@ -195,10 +195,6 @@ pub unsafe fn init(uart_info: UartInfo, page_provider: &Sel4PageProvider) -> boo
 /// Implements `core::fmt::Write` for use with formatting macros.
 pub struct Writer;
 
-#[expect(
-    clippy::missing_trait_methods,
-    reason = "default implementations are sufficient for our use case"
-)]
 impl Write for Writer {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         // SAFETY: Accessing global state in single-threaded context

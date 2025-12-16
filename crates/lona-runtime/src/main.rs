@@ -208,6 +208,12 @@ fn run_integration_tests() {
     let tests = [
         Test::new("boot", test_boot),
         Test::new("arithmetic", test_arithmetic),
+        Test::new("subtraction", test_subtraction),
+        Test::new("multiplication", test_multiplication),
+        Test::new("comparison", test_comparison),
+        Test::new("boolean_not", test_boolean_not),
+        Test::new("nested_expr", test_nested_expression),
+        Test::new("string_literal", test_string_literal),
     ];
 
     let status = run_tests(&tests, |s| print!("{s}"));
@@ -247,6 +253,108 @@ fn test_arithmetic() -> Status {
     let mut vm = Vm::new(&interner);
     match vm.execute(&chunk) {
         Ok(Value::Integer(result)) if result == 3 => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests subtraction: (- 10 3) should evaluate to 7.
+#[cfg(feature = "integration-test")]
+fn test_subtraction() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(- 10 3)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == 7 => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests multiplication: (* 6 7) should evaluate to 42.
+#[cfg(feature = "integration-test")]
+fn test_multiplication() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(* 6 7)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == 42 => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests comparison: (< 1 2) should evaluate to true.
+#[cfg(feature = "integration-test")]
+fn test_comparison() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(< 1 2)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Bool(result)) if result => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests boolean not: (not false) should evaluate to true.
+#[cfg(feature = "integration-test")]
+fn test_boolean_not() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(not false)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Bool(result)) if result => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests nested expression: (+ (* 2 3) (- 10 5)) should evaluate to 11.
+#[cfg(feature = "integration-test")]
+fn test_nested_expression() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(+ (* 2 3) (- 10 5))", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == 11 => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests string literal: "hello" should evaluate to a string value.
+#[cfg(feature = "integration-test")]
+fn test_string_literal() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("\"hello\"", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::String(ref string)) if string.as_str() == "hello" => Status::Pass,
         _ => Status::Fail,
     }
 }

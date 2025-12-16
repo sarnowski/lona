@@ -59,10 +59,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV RUSTUP_HOME=/opt/rustup
 ENV CARGO_HOME=/opt/cargo
 ENV PATH="${CARGO_HOME}/bin:${PATH}"
+# Disable rustup update checks - toolchain is fixed in this image
+ENV RUSTUP_UPDATE_ROOT=""
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --default-toolchain ${RUST_CHANNEL} --profile minimal && \
-    rustup component add rust-src rustfmt clippy llvm-tools-preview
+    rustup component add rust-src rustfmt clippy llvm-tools-preview && \
+    rustup target add aarch64-unknown-none
 
 # Clone seL4 kernel source
 WORKDIR /opt/seL4-src

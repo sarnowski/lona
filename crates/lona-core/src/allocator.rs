@@ -92,6 +92,8 @@ impl<P: PageProvider> Allocator<P> {
     /// Attempts to allocate memory with the given layout.
     ///
     /// Returns a pointer to the allocated memory, or null if allocation fails.
+    /// Supports allocations larger than a single page by allocating multiple
+    /// contiguous pages.
     fn alloc_inner(&self, layout: Layout) -> *mut u8 {
         // SAFETY: Single-threaded access is guaranteed because:
         // 1. seL4 root task runs in a single-threaded context
@@ -101,13 +103,15 @@ impl<P: PageProvider> Allocator<P> {
         // TODO: For multi-threaded use (Phase 10), wrap in spin::Mutex or similar.
         let state = unsafe { &mut *self.state.get() };
 
+        let page_size = self.provider.page_size();
+
         // Align the next pointer up to the required alignment
         let alloc_start = align_up(state.next, layout.align());
         let Some(alloc_end) = alloc_start.checked_add(layout.size()) else {
             return ptr::null_mut();
         };
 
-        // Check if we have enough space in the current page
+        // Check if we have enough space in the current page(s)
         if alloc_end <= state.current_page_end {
             state.next = alloc_end;
             state.total_allocated = state.total_allocated.saturating_add(layout.size());
@@ -119,15 +123,21 @@ impl<P: PageProvider> Allocator<P> {
             return alloc_start as *mut u8;
         }
 
-        // Need a new page - check if the allocation fits in one page
-        let page_size = self.provider.page_size();
-        if layout.size() > page_size {
-            // Allocation larger than a page - not supported
+        // Need more pages - calculate how many
+        // For simplicity, start allocation at a fresh page boundary for large allocations
+        let pages_needed = layout
+            .size()
+            .saturating_add(page_size.saturating_sub(1))
+            .checked_div(page_size)
+            .unwrap_or(0);
+
+        if pages_needed == 0 {
             return ptr::null_mut();
         }
 
-        // Request a new page from the provider
-        let Some(new_page) = self.provider.allocate_page() else {
+        // Allocate the required number of pages
+        // Pages are mapped at contiguous virtual addresses by the provider
+        let Some(first_page) = self.provider.allocate_page() else {
             return ptr::null_mut();
         };
 
@@ -136,23 +146,37 @@ impl<P: PageProvider> Allocator<P> {
             clippy::as_conversions,
             reason = "pointer to usize is required for address arithmetic"
         )]
-        let page_start = new_page as usize;
-        let page_end = page_start.saturating_add(page_size);
+        let first_page_start = first_page as usize;
 
-        // Update state with new page
-        state.current_page_start = page_start;
-        state.current_page_end = page_end;
         state.pages_allocated = state.pages_allocated.saturating_add(1);
 
-        // Align within the new page (different variable names to avoid shadowing)
-        let new_alloc_start = align_up(page_start, layout.align());
+        // Allocate additional pages if needed (they will be contiguous)
+        for _ in 1_usize..pages_needed {
+            if self.provider.allocate_page().is_none() {
+                // Failed to allocate enough pages
+                // Note: In a bump allocator, we can't free the pages we already allocated
+                return ptr::null_mut();
+            }
+            state.pages_allocated = state.pages_allocated.saturating_add(1);
+        }
+
+        // Calculate the end of all allocated pages
+        let total_page_space = pages_needed.saturating_mul(page_size);
+        let page_end = first_page_start.saturating_add(total_page_space);
+
+        // Update state with new page range
+        state.current_page_start = first_page_start;
+        state.current_page_end = page_end;
+
+        // Align within the new pages
+        let new_alloc_start = align_up(first_page_start, layout.align());
         let new_alloc_end = new_alloc_start.saturating_add(layout.size());
 
-        // Verify the allocation fits - this should always succeed since we checked size <= page_size
-        debug_assert!(
-            new_alloc_end <= page_end,
-            "allocation should fit within page after size check"
-        );
+        // Verify the allocation fits
+        if new_alloc_end > page_end {
+            // Alignment pushed us past the end - shouldn't happen with proper page count
+            return ptr::null_mut();
+        }
 
         state.next = new_alloc_end;
         state.total_allocated = state.total_allocated.saturating_add(layout.size());
@@ -358,11 +382,31 @@ mod tests {
     }
 
     #[test]
-    fn test_allocation_larger_than_page_fails() {
+    fn test_multi_page_allocation_succeeds() {
         let provider = MockPageProvider::new(&PAGES);
         let allocator = Allocator::new(provider);
 
-        // Try to allocate more than one page
+        // Allocate more than one page - should succeed with 2 pages available
+        // Note: In real seL4, pages are mapped contiguously. The mock doesn't provide
+        // truly contiguous memory, but we're only checking allocation success here.
+        let large_layout = Layout::from_size_align(6144, 8).unwrap(); // 1.5 pages
+        // SAFETY: Test allocation
+        let ptr = unsafe { allocator.alloc(large_layout) };
+        assert!(!ptr.is_null());
+
+        let stats = allocator.stats();
+        assert_eq!(stats.pages_allocated, 2);
+        assert_eq!(stats.total_allocated, 6144);
+    }
+
+    #[test]
+    fn test_allocation_fails_when_not_enough_pages() {
+        // Only provide one page
+        static SINGLE_PAGE_ONLY: [&[u8]; 1] = [&PAGE1.0];
+        let provider = MockPageProvider::new(&SINGLE_PAGE_ONLY);
+        let allocator = Allocator::new(provider);
+
+        // Try to allocate more than one page - should fail with only 1 page available
         let huge_layout = Layout::from_size_align(8192, 8).unwrap();
         // SAFETY: Test allocation
         let ptr = unsafe { allocator.alloc(huge_layout) };

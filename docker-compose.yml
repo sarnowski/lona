@@ -63,6 +63,7 @@ services:
     volumes:
       - .:/work:ro
     working_dir: /work
+    tty: true
     command: make _test
 
 volumes:

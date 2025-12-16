@@ -50,6 +50,7 @@ Evaluate all changes across these critical dimensions:
 - **Language Design:** For interpreter/compiler code, are implementations sound and aligned with language goals?
 - **Security:** Are there potential vulnerabilities, capability leaks, or privilege escalation risks?
 - **Testing:** Are changes adequately tested per the testing strategy? Are edge cases covered?
+- **Regression Tests for Bug Fixes:** If the changes appear to fix a bug (behavior correction, edge case handling, crash prevention), verify that a corresponding regression test exists. Bug fixes WITHOUT regression tests are a review failure.
 - **Code Quality:** Is code readable, maintainable, and well-documented?
 - **Documentation Correctness:** Is the documentation in line with the implementation? Is all documentation up-to-date?
 
@@ -64,7 +65,7 @@ After completing all analysis, produce a comprehensive report with:
 
 1. **Executive Summary:** Brief overview of change scope and overall assessment
 2. **Documentation Compliance:** How well changes align with stated goals, coding guidelines, and testing strategy
-3. **Verification Results:** Output and analysis of make check and make test
+3. **Verification Results:** Output and analysis of make test
 4. **Detailed Findings:** List ALL issues found, organized by category:
    - Conceptual/Architectural Issues
    - OS/Kernel Design Issues
@@ -72,6 +73,7 @@ After completing all analysis, produce a comprehensive report with:
    - Coding Guidelines Violations
    - Security Issues
    - Testing Gaps
+   - Missing Regression Tests (bug fixes without corresponding tests)
    - Documentation Issues (incorrect, inconsistent, or out-of-date documentation)
 5. **Positive Observations:** Well-implemented aspects worth noting
 6. **Issue Count:** State the exact number of issues found (e.g., "Total: 3 issues")

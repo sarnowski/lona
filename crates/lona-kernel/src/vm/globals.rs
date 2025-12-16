@@ -33,7 +33,7 @@ impl Globals {
     #[inline]
     #[must_use]
     pub fn get(&self, symbol: symbol::Id) -> Option<Value> {
-        self.values.get(&symbol).copied()
+        self.values.get(&symbol).cloned()
     }
 
     /// Sets the value of a global variable.

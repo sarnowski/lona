@@ -11,6 +11,7 @@
 //! # Modules
 //!
 //! - [`allocator`] - Memory allocation primitives including a bump allocator
+//! - [`string`] - Immutable reference-counted strings (requires `alloc` feature)
 //! - [`symbol`] - Symbol interning for efficient identifier handling
 //! - [`value`] - Core value types for the Lonala language
 
@@ -20,5 +21,7 @@
 extern crate alloc;
 
 pub mod allocator;
+#[cfg(feature = "alloc")]
+pub mod string;
 pub mod symbol;
 pub mod value;

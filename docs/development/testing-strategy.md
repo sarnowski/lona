@@ -86,15 +86,11 @@ mod tests {
 
 ### Execution
 
-```bash
-make test-host    # Runs in milliseconds
-```
-
-This executes `cargo test --workspace --exclude lona-runtime` - testing all crates except the seL4-specific runtime.
+Host tests run as part of `make test`, which executes `cargo test --workspace --exclude lona-runtime` - testing all crates except the seL4-specific runtime.
 
 ### Speed Target
 
-**< 5 seconds** for the entire host test suite. Developers should run this continuously during development.
+**< 5 seconds** for the entire host test suite.
 
 ## Tier 2: On-Target Tests (Kernel Components)
 
@@ -177,15 +173,11 @@ pub fn exit_qemu(code: QemuExitCode) -> ! {
 
 ### Execution
 
-```bash
-make test-target  # ~1-5 seconds per test suite
-```
-
-Each test binary boots QEMU, runs tests, and exits. The Makefile target orchestrates multiple test binaries.
+On-target tests run as part of `make test`. Each test binary boots QEMU, runs tests, and exits.
 
 ### Speed Target
 
-**< 30 seconds** for all on-target tests. Run before commits.
+**< 30 seconds** for all on-target tests.
 
 ## Tier 3: Integration Tests (Full System)
 
@@ -227,9 +219,7 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
 
 ### Execution
 
-```bash
-make test-integration  # ~5-30 seconds per scenario
-```
+Integration tests run as part of `make test`.
 
 ### Speed Target
 
@@ -342,20 +332,16 @@ This pattern enables testing scheduler logic, process management, and memory alg
 ### Primary Targets
 
 ```bash
-make check    # Fast verification: fmt, compile, clippy, unit tests
-make build    # Create bootable image (includes check)
-make test     # Run integration tests in QEMU
+make build    # Create bootable QEMU image
+make test     # Full verification: fmt, clippy, unit tests, build, integration tests
 make run      # Interactive QEMU session
 ```
 
 ### Development Workflow
 
 ```bash
-# Fast feedback during development (run constantly)
-make check            # Fmt, compile, clippy, unit tests
-
-# Full validation before committing
-make test             # Build + integration tests
+# Full validation (run before committing)
+make test
 ```
 
 ### Individual Crate Tests
