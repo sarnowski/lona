@@ -30,7 +30,9 @@ pub struct Parser<'src> {
 
 impl<'src> Parser<'src> {
     /// Creates a new parser for the given source code.
-    pub fn new(source: &'src str) -> Self {
+    #[inline]
+    #[must_use]
+    pub const fn new(source: &'src str) -> Self {
         Self {
             lexer: Lexer::new(source),
             source,
@@ -40,6 +42,7 @@ impl<'src> Parser<'src> {
     /// Parses all expressions from the source.
     ///
     /// Returns a vector of spanned AST nodes, one for each top-level expression.
+    #[inline]
     #[must_use = "parsing result should be used"]
     pub fn parse(&mut self) -> Result<Vec<Spanned<Ast>>, Error> {
         let mut exprs = Vec::new();
@@ -52,6 +55,7 @@ impl<'src> Parser<'src> {
     /// Parses a single expression from the source.
     ///
     /// Returns an error if there are no expressions or if parsing fails.
+    #[inline]
     #[must_use = "parsing result should be used"]
     pub fn parse_one(&mut self) -> Result<Spanned<Ast>, Error> {
         if self.lexer.peek().is_none() {
@@ -68,8 +72,8 @@ impl<'src> Parser<'src> {
     /// Parses a single expression.
     fn parse_expr(&mut self) -> Result<Spanned<Ast>, Error> {
         let token = match self.lexer.peek() {
-            Some(Ok(token)) => token.clone(),
-            Some(Err(err)) => return Err(err.clone()),
+            Some(&Ok(ref token)) => token.clone(),
+            Some(&Err(ref err)) => return Err(err.clone()),
             None => {
                 return Err(Error::new(
                     ErrorKind::UnexpectedEof {
@@ -164,14 +168,14 @@ impl<'src> Parser<'src> {
                         Span::new(self.source.len(), self.source.len()),
                     ));
                 }
-                Some(Err(err)) => return Err(err.clone()),
-                Some(Ok(token)) if token.kind == close_kind => {
+                Some(&Err(ref err)) => return Err(err.clone()),
+                Some(&Ok(ref token)) if token.kind == close_kind => {
                     // Consume closing delimiter
                     let close_token = self.advance()?;
                     let span = Span::new(start, close_token.span.end);
                     return Ok((elements, span));
                 }
-                Some(Ok(token)) => {
+                Some(&Ok(ref token)) => {
                     // Check for mismatched delimiters
                     if matches!(
                         token.kind,
@@ -181,8 +185,8 @@ impl<'src> Parser<'src> {
                         let found_char = match token.kind {
                             TokenKind::RightParen => ')',
                             TokenKind::RightBracket => ']',
-                            TokenKind::RightBrace => '}',
-                            _ => unreachable!(),
+                            // RightBrace is the only remaining option
+                            TokenKind::RightBrace | _ => '}',
                         };
                         return Err(Error::new(
                             ErrorKind::UnmatchedDelimiter {
@@ -217,8 +221,8 @@ impl<'src> Parser<'src> {
                     macro_token.span,
                 ));
             }
-            Some(Err(err)) => return Err(err.clone()),
-            Some(Ok(token)) => {
+            Some(&Err(ref err)) => return Err(err.clone()),
+            Some(&Ok(ref token)) => {
                 // Closing delimiters are not valid here
                 if matches!(
                     token.kind,
@@ -253,15 +257,15 @@ impl<'src> Parser<'src> {
 
         let ast = match token.kind {
             TokenKind::Integer => {
-                let value = self.parse_integer(token.lexeme)?;
+                let value = Self::parse_integer(token.lexeme)?;
                 Ast::integer(value)
             }
             TokenKind::Float => {
-                let value = self.parse_float(token.lexeme)?;
+                let value = Self::parse_float(token.lexeme)?;
                 Ast::float(value)
             }
             TokenKind::String => {
-                let value = self.process_string(token.lexeme, token.span)?;
+                let value = Self::process_string(token.lexeme, token.span)?;
                 Ast::string(value)
             }
             TokenKind::True => Ast::bool(true),
@@ -273,48 +277,56 @@ impl<'src> Parser<'src> {
                 let name = token.lexeme.get(1_usize..).unwrap_or("");
                 Ast::keyword(name)
             }
-            _ => unreachable!("parse_atom called with non-atom token"),
+            // parse_atom is only called for atom token kinds from parse_expr
+            TokenKind::LeftParen
+            | TokenKind::LeftBracket
+            | TokenKind::LeftBrace
+            | TokenKind::RightParen
+            | TokenKind::RightBracket
+            | TokenKind::RightBrace
+            | TokenKind::Quote
+            | TokenKind::SyntaxQuote
+            | TokenKind::Unquote
+            | TokenKind::UnquoteSplice => {
+                return Err(Error::new(
+                    ErrorKind::UnexpectedToken {
+                        expected: "atom",
+                        found: token.kind.description(),
+                    },
+                    token.span,
+                ));
+            }
         };
 
         Ok(Spanned::new(ast, token.span))
     }
 
     /// Parses an integer literal from its lexeme.
-    fn parse_integer(&self, lexeme: &str) -> Result<i64, Error> {
+    fn parse_integer(lexeme: &str) -> Result<i64, Error> {
+        let make_err = || Error::new(ErrorKind::InvalidNumber, Span::new(0_usize, lexeme.len()));
+
         // Handle different bases
         if lexeme.len() >= 2_usize {
             let prefix = lexeme.get(..2_usize).unwrap_or("");
-            let prefix_lower = prefix.to_ascii_lowercase();
+            let (radix, skip) = match prefix.to_ascii_lowercase().as_str() {
+                "0x" => (16_u32, 2_usize),
+                "0b" => (2_u32, 2_usize),
+                "0o" => (8_u32, 2_usize),
+                _ => (10_u32, 0_usize),
+            };
 
-            if prefix_lower == "0x" {
-                // Hexadecimal
-                let digits = lexeme.get(2_usize..).unwrap_or("");
-                return i64::from_str_radix(digits, 16_u32).map_err(|_err| {
-                    Error::new(ErrorKind::InvalidNumber, Span::new(0_usize, lexeme.len()))
-                });
-            } else if prefix_lower == "0b" {
-                // Binary
-                let digits = lexeme.get(2_usize..).unwrap_or("");
-                return i64::from_str_radix(digits, 2_u32).map_err(|_err| {
-                    Error::new(ErrorKind::InvalidNumber, Span::new(0_usize, lexeme.len()))
-                });
-            } else if prefix_lower == "0o" {
-                // Octal
-                let digits = lexeme.get(2_usize..).unwrap_or("");
-                return i64::from_str_radix(digits, 8_u32).map_err(|_err| {
-                    Error::new(ErrorKind::InvalidNumber, Span::new(0_usize, lexeme.len()))
-                });
+            if skip > 0_usize {
+                let digits = lexeme.get(skip..).unwrap_or("");
+                return i64::from_str_radix(digits, radix).map_err(|_err| make_err());
             }
         }
 
         // Decimal
-        lexeme
-            .parse::<i64>()
-            .map_err(|_err| Error::new(ErrorKind::InvalidNumber, Span::new(0_usize, lexeme.len())))
+        lexeme.parse::<i64>().map_err(|_err| make_err())
     }
 
     /// Parses a float literal from its lexeme.
-    fn parse_float(&self, lexeme: &str) -> Result<f64, Error> {
+    fn parse_float(lexeme: &str) -> Result<f64, Error> {
         // Handle special float literals
         match lexeme {
             "##NaN" => return Ok(f64::NAN),
@@ -333,14 +345,14 @@ impl<'src> Parser<'src> {
     /// The lexeme includes the surrounding quotes. This function returns
     /// the string content with escapes processed. The `token_span` is used
     /// to calculate accurate error positions within the source.
-    fn process_string(&self, lexeme: &str, token_span: Span) -> Result<String, Error> {
+    fn process_string(lexeme: &str, token_span: Span) -> Result<String, Error> {
         // Remove surrounding quotes
         let content = lexeme
             .get(1_usize..lexeme.len().saturating_sub(1_usize))
             .unwrap_or("");
 
         let mut result = String::new();
-        let mut chars = content.char_indices().peekable();
+        let mut chars = content.char_indices();
 
         while let Some((byte_offset, ch)) = chars.next() {
             if ch == '\\' {
@@ -445,6 +457,7 @@ impl<'src> Parser<'src> {
 ///
 /// This is a convenience function that creates a parser and parses all
 /// top-level expressions.
+#[inline]
 #[must_use = "parsing result should be used"]
 pub fn parse(source: &str) -> Result<Vec<Spanned<Ast>>, Error> {
     Parser::new(source).parse()
@@ -454,6 +467,7 @@ pub fn parse(source: &str) -> Result<Vec<Spanned<Ast>>, Error> {
 ///
 /// This is a convenience function that creates a parser and parses one
 /// expression. Returns an error if there are no expressions.
+#[inline]
 #[must_use = "parsing result should be used"]
 pub fn parse_one(source: &str) -> Result<Spanned<Ast>, Error> {
     Parser::new(source).parse_one()

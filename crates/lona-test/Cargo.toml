@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 #
-# Cargo.toml - Lexer and parser for the Lonala language
+# Cargo.toml - Integration test utilities for Lona
 
 [package]
-name = "lonala-parser"
-description = "Lexer and parser for the Lonala language"
+name = "lona-test"
+description = "Integration test utilities for Lona (test harness, markers, assertions)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,7 +17,7 @@ default = ["alloc"]
 alloc = []
 
 [dependencies]
-# No external dependencies - this crate is self-contained
+# No dependencies - this crate provides primitives only
 
 [lints]
 workspace = true

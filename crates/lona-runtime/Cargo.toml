@@ -12,6 +12,10 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = []
+integration-test = ["dep:lona-test"]
+
 [dependencies]
 # seL4 Rust bindings from the official repository
 sel4 = { git = "https://github.com/seL4/rust-sel4", branch = "main" }
@@ -22,6 +26,9 @@ fdt = "0.1"
 
 # Lona crates
 lona-core = { path = "../lona-core" }
+lona-kernel = { path = "../lona-kernel" }
+lona-test = { path = "../lona-test", optional = true }
+lonala-compiler = { path = "../lonala-compiler" }
 
 [lints]
 workspace = true

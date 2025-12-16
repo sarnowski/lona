@@ -44,6 +44,21 @@ For each finding from the review:
 - Do NOT claim completion if ANY issues remain unresolved.
 - If unsure how to fix an issue, ASK the user for guidance.
 
+**Clippy Policy:**
+- You MUST NOT disable any clippy check at any level (file, module, crate, or workspace).
+- A pre-tool hook automatically blocks any attempt to add suppression directives without proper approval.
+- If a clippy issue cannot be correctly resolved:
+  1. Explain the issue to the user in detail
+  2. Describe why a standard fix is not possible
+  3. Provide your recommendation for how to handle it
+  4. Wait for the user's EXPLICIT approval before taking any action
+- NEVER use `#[allow(...)]`, `#[expect(...)]`, `#[cfg_attr(..., allow(...))]`, `#[cfg_attr(..., expect(...))]`, or modify clippy.toml to suppress warnings without explicit user approval.
+- Do not assume approval. The user MUST explicitly approve ANY clippy exception.
+- **Approved Directive Format**: When the user explicitly approves, include `[approved]` in the reason:
+  ```rust
+  #[expect(clippy::lint_name, reason = "[approved] explanation")]
+  ```
+
 ### Step 4: Repeat Until Clean
 
 After resolving all issues, return to Step 1 and run another review.

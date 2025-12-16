@@ -15,6 +15,7 @@ use lonala_parser::Span;
 /// These errors represent limits exceeded during bytecode generation,
 /// semantic errors, or features not yet implemented.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
     /// Too many constants in a single chunk (> 65535).
     ///
@@ -65,35 +66,37 @@ pub enum Error {
 
 impl Error {
     /// Returns the source span where this error occurred.
+    #[inline]
     #[must_use]
     pub const fn span(&self) -> Span {
-        match self {
+        match *self {
             Self::TooManyConstants { span }
             | Self::TooManyRegisters { span }
             | Self::JumpTooLarge { span }
             | Self::EmptyCall { span }
-            | Self::NotImplemented { span, .. } => *span,
+            | Self::NotImplemented { span, .. } => span,
         }
     }
 }
 
 impl fmt::Display for Error {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match *self {
             Self::TooManyConstants { span } => {
-                write!(f, "too many constants in chunk (maximum 65535) at {}", span)
+                write!(f, "too many constants in chunk (maximum 65535) at {span}")
             }
             Self::TooManyRegisters { span } => {
-                write!(f, "too many registers needed (maximum 255) at {}", span)
+                write!(f, "too many registers needed (maximum 255) at {span}")
             }
             Self::JumpTooLarge { span } => {
-                write!(f, "jump offset too large (maximum +/- 32767) at {}", span)
+                write!(f, "jump offset too large (maximum +/- 32767) at {span}")
             }
             Self::EmptyCall { span } => {
-                write!(f, "empty list cannot be called as function at {}", span)
+                write!(f, "empty list cannot be called as function at {span}")
             }
             Self::NotImplemented { feature, span } => {
-                write!(f, "not implemented: {} at {}", feature, span)
+                write!(f, "not implemented: {feature} at {span}")
             }
         }
     }

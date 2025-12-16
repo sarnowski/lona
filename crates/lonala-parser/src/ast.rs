@@ -21,6 +21,7 @@ use crate::error::Span;
 /// AST nodes are separate from runtime `Value` types to maintain clean
 /// separation between parsing and evaluation phases.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Ast {
     // Literals
     /// Integer literal (e.g., `42`, `-17`, `0xFF`).
@@ -42,67 +43,89 @@ pub enum Ast {
 
     // Collections
     /// List `(...)` - function calls, special forms.
-    List(Vec<Spanned<Ast>>),
+    List(Vec<Spanned<Self>>),
     /// Vector `[...]` - data structure.
-    Vector(Vec<Spanned<Ast>>),
+    Vector(Vec<Spanned<Self>>),
     /// Map `{...}` - key-value pairs (must have even number of elements).
-    Map(Vec<Spanned<Ast>>),
+    Map(Vec<Spanned<Self>>),
 }
 
 impl Ast {
     /// Creates an integer AST node.
+    #[inline]
+    #[must_use]
     pub const fn integer(value: i64) -> Self {
         Self::Integer(value)
     }
 
     /// Creates a float AST node.
+    #[inline]
+    #[must_use]
     pub const fn float(value: f64) -> Self {
         Self::Float(value)
     }
 
     /// Creates a string AST node.
-    pub fn string(value: impl Into<String>) -> Self {
+    #[inline]
+    #[must_use]
+    pub fn string<S: Into<String>>(value: S) -> Self {
         Self::String(value.into())
     }
 
     /// Creates a boolean AST node.
+    #[inline]
+    #[must_use]
     pub const fn bool(value: bool) -> Self {
         Self::Bool(value)
     }
 
     /// Creates a nil AST node.
+    #[inline]
+    #[must_use]
     pub const fn nil() -> Self {
         Self::Nil
     }
 
     /// Creates a symbol AST node.
-    pub fn symbol(name: impl Into<String>) -> Self {
+    #[inline]
+    #[must_use]
+    pub fn symbol<S: Into<String>>(name: S) -> Self {
         Self::Symbol(name.into())
     }
 
     /// Creates a keyword AST node.
-    pub fn keyword(name: impl Into<String>) -> Self {
+    #[inline]
+    #[must_use]
+    pub fn keyword<S: Into<String>>(name: S) -> Self {
         Self::Keyword(name.into())
     }
 
     /// Creates a list AST node.
-    pub fn list(elements: Vec<Spanned<Ast>>) -> Self {
+    #[inline]
+    #[must_use]
+    pub const fn list(elements: Vec<Spanned<Self>>) -> Self {
         Self::List(elements)
     }
 
     /// Creates a vector AST node.
-    pub fn vector(elements: Vec<Spanned<Ast>>) -> Self {
+    #[inline]
+    #[must_use]
+    pub const fn vector(elements: Vec<Spanned<Self>>) -> Self {
         Self::Vector(elements)
     }
 
     /// Creates a map AST node.
-    pub fn map(elements: Vec<Spanned<Ast>>) -> Self {
+    #[inline]
+    #[must_use]
+    pub const fn map(elements: Vec<Spanned<Self>>) -> Self {
         Self::Map(elements)
     }
 
     /// Returns a human-readable type name for this AST node.
+    #[inline]
+    #[must_use]
     pub const fn type_name(&self) -> &'static str {
-        match self {
+        match *self {
             Self::Integer(_) => "integer",
             Self::Float(_) => "float",
             Self::String(_) => "string",
@@ -118,51 +141,52 @@ impl Ast {
 }
 
 impl fmt::Display for Ast {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Integer(n) => write!(f, "{n}"),
-            Self::Float(n) => {
-                if n.is_nan() {
+        match *self {
+            Self::Integer(num) => write!(f, "{num}"),
+            Self::Float(num) => {
+                if num.is_nan() {
                     write!(f, "##NaN")
-                } else if n.is_infinite() {
-                    if n.is_sign_positive() {
+                } else if num.is_infinite() {
+                    if num.is_sign_positive() {
                         write!(f, "##Inf")
                     } else {
                         write!(f, "##-Inf")
                     }
                 } else {
-                    write!(f, "{n}")
+                    write!(f, "{num}")
                 }
             }
-            Self::String(s) => write!(f, "\"{s}\""),
-            Self::Bool(b) => write!(f, "{b}"),
+            Self::String(ref text) => write!(f, "\"{text}\""),
+            Self::Bool(val) => write!(f, "{val}"),
             Self::Nil => write!(f, "nil"),
-            Self::Symbol(s) => write!(f, "{s}"),
-            Self::Keyword(k) => write!(f, ":{k}"),
-            Self::List(elements) => {
+            Self::Symbol(ref name) => write!(f, "{name}"),
+            Self::Keyword(ref name) => write!(f, ":{name}"),
+            Self::List(ref elements) => {
                 write!(f, "(")?;
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0_usize {
+                for (idx, elem) in elements.iter().enumerate() {
+                    if idx > 0_usize {
                         write!(f, " ")?;
                     }
                     write!(f, "{}", elem.node)?;
                 }
                 write!(f, ")")
             }
-            Self::Vector(elements) => {
+            Self::Vector(ref elements) => {
                 write!(f, "[")?;
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0_usize {
+                for (idx, elem) in elements.iter().enumerate() {
+                    if idx > 0_usize {
                         write!(f, " ")?;
                     }
                     write!(f, "{}", elem.node)?;
                 }
                 write!(f, "]")
             }
-            Self::Map(elements) => {
+            Self::Map(ref elements) => {
                 write!(f, "{{")?;
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0_usize {
+                for (idx, elem) in elements.iter().enumerate() {
+                    if idx > 0_usize {
                         write!(f, " ")?;
                     }
                     write!(f, "{}", elem.node)?;
@@ -178,6 +202,7 @@ impl fmt::Display for Ast {
 /// Wraps any AST node with its source span, enabling precise error messages
 /// that can point to the exact location in source code.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Spanned<T> {
     /// The AST node.
     pub node: T,
@@ -187,20 +212,25 @@ pub struct Spanned<T> {
 
 impl<T> Spanned<T> {
     /// Creates a new spanned node.
+    #[inline]
+    #[must_use]
     pub const fn new(node: T, span: Span) -> Self {
         Self { node, span }
     }
 
     /// Maps the inner node using a function, preserving the span.
-    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Spanned<U> {
+    #[inline]
+    #[must_use]
+    pub fn map<U, F: FnOnce(T) -> U>(self, func: F) -> Spanned<U> {
         Spanned {
-            node: f(self.node),
+            node: func(self.node),
             span: self.span,
         }
     }
 }
 
 impl<T: fmt::Display> fmt::Display for Spanned<T> {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.node)
     }

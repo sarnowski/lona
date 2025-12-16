@@ -1,4 +1,19 @@
 {
+    "hooks": {
+        "PreToolUse": [
+            {
+                "matcher": "Edit|Write",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-clippy-directives.py\"",
+                        "timeout": 5
+                    }
+                ]
+            }
+        ]
+    },
+
     "permissions": {
         "allow": [
             "Skill(develop-runtime)",
@@ -21,6 +36,7 @@
 
             "Bash(wc:*)",
             "Bash(grep:*)",
+            "Bash(tee:*)",
 
             "WebSearch",
             "WebFetch(domain:wiki.osdev.org)",
@@ -28,7 +44,11 @@
             "WebFetch(domain:docs.sel4.systems)",
             "WebFetch(domain:crates.io)",
             "WebFetch(domain:sel4.github.io)",
-            "WebFetch(domain:docs.rs)"
+            "WebFetch(domain:docs.rs)",
+            "WebFetch(domain:blog.stenmans.org)",
+            "WebFetch(domain:www.erlang.org)",
+            "WebFetch(domain:dl.acm.org)",
+            "WebFetch(domain:www.lua.org)"
         ],
         "ask": ["Bash(git commit:*)", "Bash(git push:*)"]
     },

@@ -14,7 +14,7 @@ repository.workspace = true
 
 [features]
 default = ["alloc"]
-alloc = []
+alloc = ["lona-core/alloc", "lonala-compiler/alloc", "lonala-parser/alloc"]
 
 [dependencies]
 lona-core = { path = "../lona-core", default-features = false }

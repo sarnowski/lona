@@ -18,6 +18,7 @@ use crate::opcode::{Opcode, RK_MAX_CONSTANT, encode_abc, encode_abx, rk_constant
 /// Contains the register where the expression's value is stored after
 /// the compiled instructions execute.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct ExprResult {
     /// Register containing the expression's result.
     pub register: u8,
@@ -40,8 +41,9 @@ pub struct Compiler<'interner> {
 
 impl<'interner> Compiler<'interner> {
     /// Creates a new compiler with the given symbol interner.
+    #[inline]
     #[must_use]
-    pub fn new(interner: &'interner mut symbol::Interner) -> Self {
+    pub const fn new(interner: &'interner mut symbol::Interner) -> Self {
         Self {
             chunk: Chunk::new(),
             interner,
@@ -59,6 +61,7 @@ impl<'interner> Compiler<'interner> {
     ///
     /// Returns an error if compilation fails (too many constants,
     /// registers, or unsupported features).
+    #[inline]
     pub fn compile_program(mut self, exprs: &[Spanned<Ast>]) -> Result<Chunk, Error> {
         let last_result = if exprs.is_empty() {
             // Empty program returns nil
@@ -79,7 +82,9 @@ impl<'interner> Compiler<'interner> {
         };
 
         // Emit final return
-        let span = exprs.last().map_or(Span::new(0_usize, 0_usize), |e| e.span);
+        let span = exprs
+            .last()
+            .map_or(Span::new(0_usize, 0_usize), |last| last.span);
         self.chunk
             .emit(encode_abc(Opcode::Return, last_result.register, 1, 0), span);
 
@@ -95,35 +100,42 @@ impl<'interner> Compiler<'interner> {
     /// # Errors
     ///
     /// Returns an error if compilation fails.
+    #[inline]
     pub fn compile_expr(&mut self, expr: &Spanned<Ast>) -> Result<ExprResult, Error> {
-        match &expr.node {
+        match expr.node {
             // Literals
-            Ast::Integer(n) => self.compile_integer(*n, expr.span),
-            Ast::Float(n) => self.compile_float(*n, expr.span),
-            Ast::Bool(b) => self.compile_bool(*b, expr.span),
+            Ast::Integer(num) => self.compile_integer(num, expr.span),
+            Ast::Float(num) => self.compile_float(num, expr.span),
+            Ast::Bool(val) => self.compile_bool(val, expr.span),
             Ast::Nil => self.compile_nil(expr.span),
 
             // Symbols (global variable lookup)
-            Ast::Symbol(name) => self.compile_symbol(name, expr.span),
+            Ast::Symbol(ref name) => self.compile_symbol(name, expr.span),
 
             // Lists (function calls or special forms)
-            Ast::List(elements) => self.compile_list(elements, expr.span),
+            Ast::List(ref elements) => self.compile_list(elements, expr.span),
 
             // Not yet implemented
-            Ast::String(_str_val) => Err(Error::NotImplemented {
+            Ast::String(ref _str_val) => Err(Error::NotImplemented {
                 feature: "string literals",
                 span: expr.span,
             }),
-            Ast::Keyword(_kw) => Err(Error::NotImplemented {
+            Ast::Keyword(ref _kw) => Err(Error::NotImplemented {
                 feature: "keyword literals",
                 span: expr.span,
             }),
-            Ast::Vector(_elements) => Err(Error::NotImplemented {
+            Ast::Vector(ref _elements) => Err(Error::NotImplemented {
                 feature: "vector literals",
                 span: expr.span,
             }),
-            Ast::Map(_elements) => Err(Error::NotImplemented {
+            Ast::Map(ref _elements) => Err(Error::NotImplemented {
                 feature: "map literals",
+                span: expr.span,
+            }),
+
+            // Handle future Ast variants (Ast is #[non_exhaustive])
+            _ => Err(Error::NotImplemented {
+                feature: "unknown AST node",
                 span: expr.span,
             }),
         }
@@ -202,12 +214,17 @@ impl<'interner> Compiler<'interner> {
         }
 
         // Check if the first element is a known operator symbol
-        if let Some(spanned_func) = elements.first() {
-            if let Ast::Symbol(name) = &spanned_func.node {
-                // Check for arithmetic operators
-                if let Some(opcode) = self.arithmetic_opcode(name) {
-                    return self.compile_arithmetic(opcode, elements, span);
-                }
+        if let Some(spanned_func) = elements.first()
+            && let Ast::Symbol(ref name) = spanned_func.node
+        {
+            // Check for unary 'not'
+            if name == "not" && elements.len() == 2_usize {
+                return self.compile_not(elements, span);
+            }
+
+            // Check for binary operators (arithmetic and comparison)
+            if let Some(opcode) = Self::binary_opcode(name) {
+                return self.compile_binary_op(opcode, elements, span);
             }
         }
 
@@ -215,49 +232,87 @@ impl<'interner> Compiler<'interner> {
         self.compile_call(elements, span)
     }
 
-    /// Returns the opcode for an arithmetic operator symbol, if any.
-    fn arithmetic_opcode(&self, name: &str) -> Option<Opcode> {
+    /// Returns the opcode for a binary operator symbol, if any.
+    ///
+    /// Handles both arithmetic operators (`+`, `-`, `*`, `/`, `mod`) and
+    /// comparison operators (`=`, `<`, `>`, `<=`, `>=`).
+    fn binary_opcode(name: &str) -> Option<Opcode> {
         match name {
+            // Arithmetic operators
             "+" => Some(Opcode::Add),
             "-" => Some(Opcode::Sub),
             "*" => Some(Opcode::Mul),
             "/" => Some(Opcode::Div),
             "mod" => Some(Opcode::Mod),
+            // Comparison operators
+            "=" => Some(Opcode::Eq),
+            "<" => Some(Opcode::Lt),
+            ">" => Some(Opcode::Gt),
+            "<=" => Some(Opcode::Le),
+            ">=" => Some(Opcode::Ge),
             _ => None,
         }
     }
 
-    /// Compiles a binary arithmetic operation.
-    fn compile_arithmetic(
+    /// Compiles a binary operation (arithmetic or comparison).
+    ///
+    /// Also handles unary negation `(- x)` as a special case.
+    fn compile_binary_op(
         &mut self,
         opcode: Opcode,
         elements: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
-        // Need exactly 3 elements: (op arg1 arg2)
-        if elements.len() != 3_usize {
-            // For now, only support binary operations
-            return Err(Error::NotImplemented {
+        match elements.len() {
+            // Unary: (- x) → Neg
+            2_usize if opcode == Opcode::Sub => {
+                let arg = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
+                let checkpoint = self.next_register;
+                let result = self.compile_expr(arg)?;
+
+                self.free_registers_to(checkpoint);
+                let dest = self.alloc_register(span)?;
+                self.chunk
+                    .emit(encode_abc(Opcode::Neg, dest, result.register, 0), span);
+                Ok(ExprResult { register: dest })
+            }
+            // Binary: (op x y)
+            3_usize => {
+                let arg1 = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
+                let arg2 = elements.get(2_usize).ok_or(Error::EmptyCall { span })?;
+
+                // Save register checkpoint
+                let checkpoint = self.next_register;
+
+                // Try to use RK encoding for constant operands
+                let rk_b = self.try_compile_rk_operand(arg1)?;
+                let rk_c = self.try_compile_rk_operand(arg2)?;
+
+                // Allocate destination register (reuse checkpoint if possible)
+                self.free_registers_to(checkpoint);
+                let dest = self.alloc_register(span)?;
+
+                self.chunk.emit(encode_abc(opcode, dest, rk_b, rk_c), span);
+                Ok(ExprResult { register: dest })
+            }
+            _ => Err(Error::NotImplemented {
                 feature: "n-ary arithmetic",
                 span,
-            });
+            }),
         }
+    }
 
-        let arg1 = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
-        let arg2 = elements.get(2_usize).ok_or(Error::EmptyCall { span })?;
+    /// Compiles unary `not` operation.
+    fn compile_not(&mut self, elements: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
+        let arg = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
 
-        // Save register checkpoint
         let checkpoint = self.next_register;
+        let result = self.compile_expr(arg)?;
 
-        // Try to use RK encoding for constant operands
-        let rk_b = self.try_compile_rk_operand(arg1)?;
-        let rk_c = self.try_compile_rk_operand(arg2)?;
-
-        // Allocate destination register (reuse checkpoint if possible)
         self.free_registers_to(checkpoint);
         let dest = self.alloc_register(span)?;
-
-        self.chunk.emit(encode_abc(opcode, dest, rk_b, rk_c), span);
+        self.chunk
+            .emit(encode_abc(Opcode::Not, dest, result.register, 0), span);
         Ok(ExprResult { register: dest })
     }
 
@@ -280,11 +335,20 @@ impl<'interner> Compiler<'interner> {
     /// Returns `Some(rk)` if the expression is a simple constant that fits in
     /// the RK constant range (index <= 127), `None` otherwise.
     fn try_constant_rk(&mut self, expr: &Spanned<Ast>) -> Result<Option<u8>, Error> {
-        let constant = match &expr.node {
-            Ast::Integer(n) => Constant::Integer(*n),
-            Ast::Float(n) => Constant::Float(*n),
-            // Could add more constant types here
-            _ => return Ok(None),
+        let constant = match expr.node {
+            Ast::Integer(num) => Constant::Integer(num),
+            Ast::Float(num) => Constant::Float(num),
+            // Other AST types are not simple constants for RK encoding
+            Ast::Nil
+            | Ast::Bool(_)
+            | Ast::String(_)
+            | Ast::Symbol(_)
+            | Ast::Keyword(_)
+            | Ast::List(_)
+            | Ast::Vector(_)
+            | Ast::Map(_)
+            // Handle future Ast variants (Ast is #[non_exhaustive])
+            | _ => return Ok(None),
         };
 
         // Check if the next constant index would fit in RK range BEFORE adding.
@@ -331,10 +395,11 @@ impl<'interner> Compiler<'interner> {
         }
 
         // Emit call instruction
-        let argc = u8::try_from(args.len()).map_err(|_err| Error::TooManyRegisters { span })?;
+        let arg_count =
+            u8::try_from(args.len()).map_err(|_err| Error::TooManyRegisters { span })?;
 
         self.chunk
-            .emit(encode_abc(Opcode::Call, base, argc, 1), span);
+            .emit(encode_abc(Opcode::Call, base, arg_count, 1), span);
 
         // Result is left in base register
         // Free argument registers
@@ -352,7 +417,7 @@ impl<'interner> Compiler<'interner> {
     /// # Errors
     ///
     /// Returns `Error::TooManyRegisters` if all 256 registers are in use.
-    fn alloc_register(&mut self, span: Span) -> Result<u8, Error> {
+    const fn alloc_register(&mut self, span: Span) -> Result<u8, Error> {
         let reg = self.next_register;
         if reg == u8::MAX {
             return Err(Error::TooManyRegisters { span });
@@ -367,7 +432,7 @@ impl<'interner> Compiler<'interner> {
     /// Releases registers back to a checkpoint.
     ///
     /// Used to reclaim temporary registers after a subexpression.
-    fn free_registers_to(&mut self, checkpoint: u8) {
+    const fn free_registers_to(&mut self, checkpoint: u8) {
         self.next_register = checkpoint;
     }
 }
@@ -377,7 +442,8 @@ impl<'interner> Compiler<'interner> {
 // =============================================================================
 
 /// Error type for high-level compilation that includes parse errors.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum CompileError {
     /// Error during parsing.
     Parse(lonala_parser::Error),
@@ -386,23 +452,26 @@ pub enum CompileError {
 }
 
 impl core::fmt::Display for CompileError {
+    #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self {
-            Self::Parse(e) => write!(f, "parse error: {}", e),
-            Self::Compile(e) => write!(f, "compile error: {}", e),
+        match *self {
+            Self::Parse(ref err) => write!(f, "parse error: {err}"),
+            Self::Compile(ref err) => write!(f, "compile error: {err}"),
         }
     }
 }
 
 impl From<lonala_parser::Error> for CompileError {
-    fn from(e: lonala_parser::Error) -> Self {
-        Self::Parse(e)
+    #[inline]
+    fn from(err: lonala_parser::Error) -> Self {
+        Self::Parse(err)
     }
 }
 
 impl From<Error> for CompileError {
-    fn from(e: Error) -> Self {
-        Self::Compile(e)
+    #[inline]
+    fn from(err: Error) -> Self {
+        Self::Compile(err)
     }
 }
 
@@ -424,6 +493,7 @@ impl From<Error> for CompileError {
 /// let mut interner = Interner::new();
 /// let chunk = compile("(+ 1 2)", &mut interner).unwrap();
 /// ```
+#[inline]
 pub fn compile(source: &str, interner: &mut symbol::Interner) -> Result<Chunk, CompileError> {
     let exprs = lonala_parser::parse(source)?;
     let compiler = Compiler::new(interner);
@@ -436,7 +506,7 @@ mod tests {
     extern crate alloc;
 
     use super::*;
-    use crate::opcode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode};
+    use crate::opcode::{decode_a, decode_b, decode_bx, decode_c, decode_op};
 
     /// Helper to compile source and return the chunk.
     fn compile_source(source: &str) -> Chunk {
@@ -465,14 +535,14 @@ mod tests {
 
         // LoadK instruction
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::LoadK));
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
         assert_eq!(decode_a(instr0), 0);
         let k_idx = decode_bx(instr0);
         assert_eq!(chunk.get_constant(k_idx), Some(&Constant::Integer(42)));
 
         // Return instruction
         let instr1 = *code.get(1_usize).unwrap();
-        assert_eq!(decode_opcode(instr1), Some(Opcode::Return));
+        assert_eq!(decode_op(instr1), Some(Opcode::Return));
         assert_eq!(decode_a(instr1), 0);
         assert_eq!(decode_b(instr1), 1);
     }
@@ -485,7 +555,7 @@ mod tests {
         assert_eq!(code.len(), 2);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::LoadK));
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
         let k_idx = decode_bx(instr0);
         assert_eq!(chunk.get_constant(k_idx), Some(&Constant::Float(3.14)));
     }
@@ -498,7 +568,7 @@ mod tests {
         assert_eq!(code.len(), 2);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::LoadTrue));
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadTrue));
         assert_eq!(decode_a(instr0), 0);
     }
 
@@ -510,7 +580,7 @@ mod tests {
         assert_eq!(code.len(), 2);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::LoadFalse));
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadFalse));
     }
 
     #[test]
@@ -521,7 +591,7 @@ mod tests {
         assert_eq!(code.len(), 2);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::LoadNil));
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadNil));
     }
 
     // =========================================================================
@@ -537,7 +607,7 @@ mod tests {
         assert_eq!(code.len(), 2);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::GetGlobal));
+        assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
         assert_eq!(decode_a(instr0), 0);
 
         let k_idx = decode_bx(instr0);
@@ -561,7 +631,7 @@ mod tests {
         assert_eq!(code.len(), 2);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::Add));
+        assert_eq!(decode_op(instr0), Some(Opcode::Add));
         assert_eq!(decode_a(instr0), 0);
 
         // Verify constants
@@ -575,7 +645,7 @@ mod tests {
         let code = chunk.code();
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::Sub));
+        assert_eq!(decode_op(instr0), Some(Opcode::Sub));
     }
 
     #[test]
@@ -584,7 +654,7 @@ mod tests {
         let code = chunk.code();
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::Mul));
+        assert_eq!(decode_op(instr0), Some(Opcode::Mul));
     }
 
     #[test]
@@ -593,7 +663,7 @@ mod tests {
         let code = chunk.code();
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::Div));
+        assert_eq!(decode_op(instr0), Some(Opcode::Div));
     }
 
     #[test]
@@ -602,7 +672,7 @@ mod tests {
         let code = chunk.code();
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::Mod));
+        assert_eq!(decode_op(instr0), Some(Opcode::Mod));
     }
 
     #[test]
@@ -616,10 +686,10 @@ mod tests {
         assert_eq!(code.len(), 3);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::Mul));
+        assert_eq!(decode_op(instr0), Some(Opcode::Mul));
 
         let instr1 = *code.get(1_usize).unwrap();
-        assert_eq!(decode_opcode(instr1), Some(Opcode::Add));
+        assert_eq!(decode_op(instr1), Some(Opcode::Add));
 
         // Verify constants
         assert_eq!(chunk.get_constant(0), Some(&Constant::Integer(2)));
@@ -643,13 +713,13 @@ mod tests {
         assert_eq!(code.len(), 4);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::GetGlobal));
+        assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
 
         let instr1 = *code.get(1_usize).unwrap();
-        assert_eq!(decode_opcode(instr1), Some(Opcode::LoadK));
+        assert_eq!(decode_op(instr1), Some(Opcode::LoadK));
 
         let instr2 = *code.get(2_usize).unwrap();
-        assert_eq!(decode_opcode(instr2), Some(Opcode::Call));
+        assert_eq!(decode_op(instr2), Some(Opcode::Call));
         assert_eq!(decode_a(instr2), 0); // base register
         assert_eq!(decode_b(instr2), 1); // 1 argument
         assert_eq!(decode_c(instr2), 1); // 1 result
@@ -674,14 +744,14 @@ mod tests {
         assert_eq!(code.len(), 4);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::GetGlobal));
+        assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
 
         let instr1 = *code.get(1_usize).unwrap();
-        assert_eq!(decode_opcode(instr1), Some(Opcode::Add));
+        assert_eq!(decode_op(instr1), Some(Opcode::Add));
         assert_eq!(decode_a(instr1), 1); // result in R1
 
         let instr2 = *code.get(2_usize).unwrap();
-        assert_eq!(decode_opcode(instr2), Some(Opcode::Call));
+        assert_eq!(decode_op(instr2), Some(Opcode::Call));
 
         // Verify print symbol
         if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(0) {
@@ -792,7 +862,7 @@ mod tests {
 
         // Last instruction is Return with R0
         let last = *code.get(3_usize).unwrap();
-        assert_eq!(decode_opcode(last), Some(Opcode::Return));
+        assert_eq!(decode_op(last), Some(Opcode::Return));
         assert_eq!(decode_a(last), 0);
     }
 
@@ -805,10 +875,140 @@ mod tests {
         assert_eq!(code.len(), 2);
 
         let instr0 = *code.get(0_usize).unwrap();
-        assert_eq!(decode_opcode(instr0), Some(Opcode::LoadNil));
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadNil));
 
         // Verify max_registers is correctly set for frame allocation
         assert_eq!(chunk.max_registers(), 1);
+    }
+
+    // =========================================================================
+    // Comparison Operators Tests
+    // =========================================================================
+
+    #[test]
+    fn compile_equality() {
+        let chunk = compile_source("(= 1 1)");
+        let code = chunk.code();
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::Eq));
+    }
+
+    #[test]
+    fn compile_less_than() {
+        let chunk = compile_source("(< 1 2)");
+        let code = chunk.code();
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::Lt));
+    }
+
+    #[test]
+    fn compile_greater_than() {
+        let chunk = compile_source("(> 2 1)");
+        let code = chunk.code();
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::Gt));
+    }
+
+    #[test]
+    fn compile_less_than_or_equal() {
+        let chunk = compile_source("(<= 2 2)");
+        let code = chunk.code();
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::Le));
+    }
+
+    #[test]
+    fn compile_greater_than_or_equal() {
+        let chunk = compile_source("(>= 3 2)");
+        let code = chunk.code();
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::Ge));
+    }
+
+    // =========================================================================
+    // Unary Operators Tests
+    // =========================================================================
+
+    #[test]
+    fn compile_unary_negation() {
+        let chunk = compile_source("(- 5)");
+        let code = chunk.code();
+
+        // LoadK R0, K0 (5)
+        // Neg R0, R0
+        // Return R0, 1
+        assert_eq!(code.len(), 3);
+
+        let instr1 = *code.get(1_usize).unwrap();
+        assert_eq!(decode_op(instr1), Some(Opcode::Neg));
+    }
+
+    #[test]
+    fn compile_unary_negation_expression() {
+        let chunk = compile_source("(- (+ 1 2))");
+        let code = chunk.code();
+
+        // Add R0, K0, K1 (1 + 2)
+        // Neg R0, R0
+        // Return R0, 1
+        assert_eq!(code.len(), 3);
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::Add));
+
+        let instr1 = *code.get(1_usize).unwrap();
+        assert_eq!(decode_op(instr1), Some(Opcode::Neg));
+    }
+
+    #[test]
+    fn compile_not_operator() {
+        let chunk = compile_source("(not true)");
+        let code = chunk.code();
+
+        // LoadTrue R0
+        // Not R0, R0
+        // Return R0, 1
+        assert_eq!(code.len(), 3);
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadTrue));
+
+        let instr1 = *code.get(1_usize).unwrap();
+        assert_eq!(decode_op(instr1), Some(Opcode::Not));
+    }
+
+    #[test]
+    fn compile_not_false() {
+        let chunk = compile_source("(not false)");
+        let code = chunk.code();
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::LoadFalse));
+
+        let instr1 = *code.get(1_usize).unwrap();
+        assert_eq!(decode_op(instr1), Some(Opcode::Not));
+    }
+
+    #[test]
+    fn compile_not_with_comparison() {
+        let chunk = compile_source("(not (= 1 2))");
+        let code = chunk.code();
+
+        // Eq R0, K0, K1 (1 = 2)
+        // Not R0, R0
+        // Return R0, 1
+        assert_eq!(code.len(), 3);
+
+        let instr0 = *code.get(0_usize).unwrap();
+        assert_eq!(decode_op(instr0), Some(Opcode::Eq));
+
+        let instr1 = *code.get(1_usize).unwrap();
+        assert_eq!(decode_op(instr1), Some(Opcode::Not));
     }
 
     // =========================================================================

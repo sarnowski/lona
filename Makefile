@@ -36,6 +36,10 @@ QEMU_MACHINE  := virt,virtualization=on
 QEMU_CPU      := cortex-a57
 QEMU_MEMORY   := 1G
 
+# Test configuration
+TEST_IMAGE    := $(BUILD_DIR)/lona-test.elf
+TEST_TIMEOUT  := 30
+
 # ==============================================================================
 # Primary Targets
 # ==============================================================================
@@ -51,8 +55,9 @@ build: check ## Create bootable QEMU image
 	$(COMPOSE) run --rm builder make _build
 
 .PHONY: test
-test: build ## Run integration tests in QEMU
-	@echo "Integration tests not yet implemented"
+test: check ## Run integration tests in QEMU
+	$(COMPOSE) run --rm builder make _build-test
+	$(COMPOSE) run --rm tester
 
 .PHONY: run
 run: build ## Interactive QEMU session
@@ -99,15 +104,17 @@ help: ## Show this help
 
 .PHONY: _check
 _check:
-	@echo "==> Checking formatting..."
-	cargo fmt --check
-	@echo "==> Compiling..."
+	@echo "==> Formatting code..."
+	cargo fmt
+	@echo "==> Compiling runtime..."
 	SEL4_PREFIX=$(SEL4_PREFIX) cargo build \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
 		--target $(TARGET) \
 		--package $(CRATE)
-	@echo "==> Running clippy..."
+	@echo "==> Running clippy on host-testable crates..."
+	cargo clippy --workspace --exclude $(CRATE) -- -D warnings
+	@echo "==> Running clippy on runtime..."
 	SEL4_PREFIX=$(SEL4_PREFIX) cargo clippy \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
@@ -143,6 +150,32 @@ _build:
 		--app $(BUILD_DIR)/$(CRATE).elf \
 		-o $(IMAGE_FILE)
 	@echo "==> Image created: $(IMAGE_FILE)"
+
+.PHONY: _build-test
+_build-test:
+	@echo "==> Building test binary..."
+	@mkdir -p $(BUILD_DIR)
+	SEL4_PREFIX=$(SEL4_PREFIX) cargo build \
+		--release \
+		-Z build-std=core,alloc \
+		-Z build-std-features=compiler-builtins-mem \
+		-Z unstable-options \
+		--target $(TARGET) \
+		--package $(CRATE) \
+		--features integration-test \
+		--target-dir $(BUILD_DIR)/target-test \
+		--artifact-dir $(BUILD_DIR)/test-artifacts
+	@echo "==> Creating test image..."
+	sel4-kernel-loader-add-payload \
+		--loader $(SEL4_PREFIX)/bin/sel4-kernel-loader \
+		--sel4-prefix $(SEL4_PREFIX) \
+		--app $(BUILD_DIR)/test-artifacts/$(CRATE).elf \
+		-o $(TEST_IMAGE)
+	@echo "==> Test image created: $(TEST_IMAGE)"
+
+.PHONY: _test
+_test:
+	TIMEOUT=$(TEST_TIMEOUT) ./scripts/run-integration-tests.sh $(TEST_IMAGE)
 
 .PHONY: _run
 _run:

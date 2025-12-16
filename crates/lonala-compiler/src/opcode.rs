@@ -19,6 +19,7 @@ use core::fmt;
 /// in the lowest 8 bits of each 32-bit instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum Opcode {
     // =========================================================================
     // Data Movement
@@ -244,6 +245,7 @@ impl Opcode {
 }
 
 impl fmt::Display for Opcode {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name())
     }
@@ -262,9 +264,9 @@ impl fmt::Display for Opcode {
     clippy::as_conversions,
     reason = "const fn requires as; widening u8->u32 is safe"
 )]
-pub const fn encode_abc(op: Opcode, a: u8, b: u8, c: u8) -> u32 {
+pub const fn encode_abc(op: Opcode, dest: u8, op_b: u8, op_c: u8) -> u32 {
     let op_byte = op as u8;
-    (op_byte as u32) | ((a as u32) << 8) | ((b as u32) << 16) | ((c as u32) << 24)
+    (op_byte as u32) | ((dest as u32) << 8) | ((op_b as u32) << 16) | ((op_c as u32) << 24)
 }
 
 /// Encodes an iABx format instruction.
@@ -276,9 +278,9 @@ pub const fn encode_abc(op: Opcode, a: u8, b: u8, c: u8) -> u32 {
     clippy::as_conversions,
     reason = "const fn requires as; widening u8/u16->u32 is safe"
 )]
-pub const fn encode_abx(op: Opcode, a: u8, bx: u16) -> u32 {
+pub const fn encode_abx(op: Opcode, dest: u8, bx: u16) -> u32 {
     let op_byte = op as u8;
-    (op_byte as u32) | ((a as u32) << 8) | ((bx as u32) << 16)
+    (op_byte as u32) | ((dest as u32) << 8) | ((bx as u32) << 16)
 }
 
 /// Encodes an iAsBx format instruction with a signed offset.
@@ -291,13 +293,14 @@ pub const fn encode_abx(op: Opcode, a: u8, bx: u16) -> u32 {
 #[must_use]
 #[expect(
     clippy::as_conversions,
+    clippy::cast_sign_loss,
     reason = "const fn requires as; i16->u16 bitcast is intentional"
 )]
-pub const fn encode_asbx(op: Opcode, a: u8, sbx: i16) -> u32 {
+pub const fn encode_asbx(op: Opcode, dest: u8, sbx: i16) -> u32 {
     let op_byte = op as u8;
     // Store as unsigned (bitwise reinterpretation)
     let sbx_unsigned = sbx as u16;
-    (op_byte as u32) | ((a as u32) << 8) | ((sbx_unsigned as u32) << 16)
+    (op_byte as u32) | ((dest as u32) << 8) | ((sbx_unsigned as u32) << 16)
 }
 
 // =============================================================================
@@ -310,14 +313,14 @@ pub const fn encode_asbx(op: Opcode, a: u8, sbx: i16) -> u32 {
 #[inline]
 #[must_use]
 #[expect(clippy::as_conversions, reason = "masking guarantees value fits in u8")]
-pub const fn decode_opcode(instruction: u32) -> Option<Opcode> {
+pub const fn decode_op(instruction: u32) -> Option<Opcode> {
     let byte = (instruction & 0xFF) as u8;
     Opcode::from_u8(byte)
 }
 
 /// Decodes the opcode byte from an instruction without validation.
 ///
-/// Use `decode_opcode` for safe decoding with validation.
+/// Use `decode_op` for safe decoding with validation.
 #[inline]
 #[must_use]
 #[expect(clippy::as_conversions, reason = "masking guarantees value fits in u8")]
@@ -374,10 +377,11 @@ pub const fn decode_bx(instruction: u32) -> u16 {
 #[must_use]
 #[expect(
     clippy::as_conversions,
+    clippy::cast_possible_wrap,
     reason = "u16 to i16 bitcast is intentional for signed decoding"
 )]
 pub const fn decode_sbx(instruction: u32) -> i16 {
-    let unsigned = (instruction >> 16) as u16;
+    let unsigned = (instruction >> 16_i32) as u16;
     unsigned as i16
 }
 
@@ -484,7 +488,7 @@ mod tests {
     #[test]
     fn encode_abc_basic() {
         let instr = encode_abc(Opcode::Add, 0, 1, 2);
-        assert_eq!(decode_opcode(instr), Some(Opcode::Add));
+        assert_eq!(decode_op(instr), Some(Opcode::Add));
         assert_eq!(decode_a(instr), 0);
         assert_eq!(decode_b(instr), 1);
         assert_eq!(decode_c(instr), 2);
@@ -493,7 +497,7 @@ mod tests {
     #[test]
     fn encode_abc_max_values() {
         let instr = encode_abc(Opcode::Move, 255, 255, 255);
-        assert_eq!(decode_opcode(instr), Some(Opcode::Move));
+        assert_eq!(decode_op(instr), Some(Opcode::Move));
         assert_eq!(decode_a(instr), 255);
         assert_eq!(decode_b(instr), 255);
         assert_eq!(decode_c(instr), 255);
@@ -507,7 +511,7 @@ mod tests {
                 for b in [0_u8, 1, 127, 255] {
                     for c in [0_u8, 1, 127, 255] {
                         let instr = encode_abc(opcode, a, b, c);
-                        assert_eq!(decode_opcode(instr), Some(opcode));
+                        assert_eq!(decode_op(instr), Some(opcode));
                         assert_eq!(decode_a(instr), a);
                         assert_eq!(decode_b(instr), b);
                         assert_eq!(decode_c(instr), c);
@@ -524,7 +528,7 @@ mod tests {
     #[test]
     fn encode_abx_basic() {
         let instr = encode_abx(Opcode::LoadK, 5, 1000);
-        assert_eq!(decode_opcode(instr), Some(Opcode::LoadK));
+        assert_eq!(decode_op(instr), Some(Opcode::LoadK));
         assert_eq!(decode_a(instr), 5);
         assert_eq!(decode_bx(instr), 1000);
     }
@@ -532,7 +536,7 @@ mod tests {
     #[test]
     fn encode_abx_max_values() {
         let instr = encode_abx(Opcode::GetGlobal, 255, 65535);
-        assert_eq!(decode_opcode(instr), Some(Opcode::GetGlobal));
+        assert_eq!(decode_op(instr), Some(Opcode::GetGlobal));
         assert_eq!(decode_a(instr), 255);
         assert_eq!(decode_bx(instr), 65535);
     }
@@ -541,7 +545,7 @@ mod tests {
     fn encode_abx_roundtrip() {
         for bx in [0_u16, 1, 1000, 32767, 65535] {
             let instr = encode_abx(Opcode::LoadK, 42, bx);
-            assert_eq!(decode_opcode(instr), Some(Opcode::LoadK));
+            assert_eq!(decode_op(instr), Some(Opcode::LoadK));
             assert_eq!(decode_a(instr), 42);
             assert_eq!(decode_bx(instr), bx);
         }
@@ -554,7 +558,7 @@ mod tests {
     #[test]
     fn encode_asbx_positive() {
         let instr = encode_asbx(Opcode::Jump, 0, 100);
-        assert_eq!(decode_opcode(instr), Some(Opcode::Jump));
+        assert_eq!(decode_op(instr), Some(Opcode::Jump));
         assert_eq!(decode_a(instr), 0);
         assert_eq!(decode_sbx(instr), 100);
     }
@@ -562,7 +566,7 @@ mod tests {
     #[test]
     fn encode_asbx_negative() {
         let instr = encode_asbx(Opcode::Jump, 0, -100);
-        assert_eq!(decode_opcode(instr), Some(Opcode::Jump));
+        assert_eq!(decode_op(instr), Some(Opcode::Jump));
         assert_eq!(decode_a(instr), 0);
         assert_eq!(decode_sbx(instr), -100);
     }
@@ -570,7 +574,7 @@ mod tests {
     #[test]
     fn encode_asbx_zero() {
         let instr = encode_asbx(Opcode::JumpIf, 5, 0);
-        assert_eq!(decode_opcode(instr), Some(Opcode::JumpIf));
+        assert_eq!(decode_op(instr), Some(Opcode::JumpIf));
         assert_eq!(decode_a(instr), 5);
         assert_eq!(decode_sbx(instr), 0);
     }
@@ -590,7 +594,7 @@ mod tests {
     fn encode_asbx_roundtrip() {
         for sbx in [i16::MIN, -1000, -1, 0, 1, 1000, i16::MAX] {
             let instr = encode_asbx(Opcode::Jump, 10, sbx);
-            assert_eq!(decode_opcode(instr), Some(Opcode::Jump));
+            assert_eq!(decode_op(instr), Some(Opcode::Jump));
             assert_eq!(decode_a(instr), 10);
             assert_eq!(decode_sbx(instr), sbx);
         }
@@ -671,7 +675,7 @@ mod tests {
     fn decode_invalid_opcode() {
         // Create instruction with invalid opcode byte
         let invalid_instr = 0xFF_u32; // opcode = 255, which is invalid
-        assert_eq!(decode_opcode(invalid_instr), None);
+        assert_eq!(decode_op(invalid_instr), None);
         assert_eq!(decode_opcode_byte(invalid_instr), 255);
     }
 }

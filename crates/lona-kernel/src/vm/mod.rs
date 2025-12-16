@@ -30,8 +30,12 @@ mod error;
 mod frame;
 mod globals;
 mod interpreter;
+pub mod natives;
+pub mod output;
+pub mod primitives;
 
 pub use error::Error;
 pub use frame::Frame;
 pub use globals::Globals;
 pub use interpreter::Vm;
+pub use natives::{NativeError, NativeFn, Registry as NativeRegistry};

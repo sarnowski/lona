@@ -14,6 +14,10 @@
 //! and garbage collector.
 
 #![no_std]
+#![expect(
+    clippy::float_arithmetic,
+    reason = "[approved] VM must execute float operations for language semantics"
+)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;

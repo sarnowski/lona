@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use lona_core::symbol::{self, Interner};
 use lona_core::value::Value;
 use lonala_compiler::opcode::{
-    Opcode, decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_opcode_byte, decode_sbx,
+    Opcode, decode_a, decode_b, decode_bx, decode_c, decode_op, decode_opcode_byte, decode_sbx,
     rk_index, rk_is_constant,
 };
 use lonala_compiler::{Chunk, Constant};
@@ -17,6 +17,8 @@ use lonala_compiler::{Chunk, Constant};
 use super::error::Error;
 use super::frame::Frame;
 use super::globals::Globals;
+use super::natives::{NativeFn, Registry as NativeRegistry};
+use super::primitives::{PrintCallback, format_print_args};
 
 /// Default register file size.
 const DEFAULT_REGISTER_COUNT: usize = 256;
@@ -32,20 +34,66 @@ pub struct Vm<'interner> {
     globals: Globals,
     /// Symbol interner for resolving symbol names.
     interner: &'interner Interner,
+    /// Registry of native functions.
+    natives: NativeRegistry,
+    /// Callback for print output.
+    print_callback: Option<PrintCallback>,
+    /// Symbol ID for "print" - cached for fast lookup.
+    print_symbol: Option<symbol::Id>,
 }
 
 impl<'interner> Vm<'interner> {
     /// Creates a new virtual machine.
+    #[inline]
     #[must_use]
     pub fn new(interner: &'interner Interner) -> Self {
+        // Look up "print" symbol if it exists in the interner
+        let print_symbol = interner.get("print");
+
         Self {
             registers: vec![Value::Nil; DEFAULT_REGISTER_COUNT],
             globals: Globals::new(),
             interner,
+            natives: NativeRegistry::new(),
+            print_callback: None,
+            print_symbol,
         }
     }
 
+    /// Registers a native function for a symbol.
+    ///
+    /// The symbol must already be interned in the interner passed to [`Vm::new`].
+    #[inline]
+    pub fn register_native(&mut self, symbol: symbol::Id, func: NativeFn) {
+        self.natives.register(symbol, func);
+    }
+
+    /// Sets the print callback for output.
+    ///
+    /// When `print` is called, the formatted output is passed to this callback.
+    #[inline]
+    pub fn set_print_callback(&mut self, callback: PrintCallback) {
+        self.print_callback = Some(callback);
+    }
+
+    /// Updates the print symbol cache.
+    ///
+    /// Call this after interning "print" if you want to use the built-in print.
+    #[inline]
+    pub const fn update_print_symbol(&mut self, symbol: symbol::Id) {
+        self.print_symbol = Some(symbol);
+    }
+
+    /// Sets a global variable.
+    ///
+    /// Used to register built-in functions as globals.
+    #[inline]
+    pub fn set_global(&mut self, symbol: symbol::Id, value: Value) {
+        self.globals.set(symbol, value);
+    }
+
     /// Returns a reference to the symbol interner.
+    #[inline]
     #[must_use]
     pub const fn interner(&self) -> &'interner Interner {
         self.interner
@@ -54,12 +102,14 @@ impl<'interner> Vm<'interner> {
     /// Returns a mutable reference to the global variables.
     ///
     /// Use this to register native functions or set initial global values.
+    #[inline]
     #[must_use]
-    pub fn globals_mut(&mut self) -> &mut Globals {
+    pub const fn globals_mut(&mut self) -> &mut Globals {
         &mut self.globals
     }
 
     /// Returns a reference to the global variables.
+    #[inline]
     #[must_use]
     pub const fn globals(&self) -> &Globals {
         &self.globals
@@ -75,6 +125,7 @@ impl<'interner> Vm<'interner> {
     /// - Undefined global variables
     /// - Division by zero
     /// - Stack overflow
+    #[inline]
     pub fn execute(&mut self, chunk: &Chunk) -> Result<Value, Error> {
         // Reset registers to nil
         for reg in &mut self.registers {
@@ -93,7 +144,7 @@ impl<'interner> Vm<'interner> {
                 return Ok(Value::Nil);
             };
 
-            let Some(opcode) = decode_opcode(instruction) else {
+            let Some(opcode) = decode_op(instruction) else {
                 return Err(Error::InvalidOpcode {
                     byte: decode_opcode_byte(instruction),
                     pc: frame.pc().saturating_sub(1),
@@ -105,7 +156,7 @@ impl<'interner> Vm<'interner> {
                 // Data Movement
                 Opcode::Move => self.op_move(instruction, frame)?,
                 Opcode::LoadK => self.op_load_k(instruction, frame)?,
-                Opcode::LoadNil => self.op_load_nil(instruction, frame)?,
+                Opcode::LoadNil => self.op_load_nil(instruction, frame),
                 Opcode::LoadTrue => self.op_load_true(instruction, frame)?,
                 Opcode::LoadFalse => self.op_load_false(instruction, frame)?,
 
@@ -130,25 +181,32 @@ impl<'interner> Vm<'interner> {
                 Opcode::Not => self.op_not(instruction, frame)?,
 
                 // Control Flow
-                Opcode::Jump => self.op_jump(instruction, frame),
+                Opcode::Jump => Self::op_jump(instruction, frame),
                 Opcode::JumpIf => self.op_jump_if(instruction, frame)?,
                 Opcode::JumpIfNot => self.op_jump_if_not(instruction, frame)?,
 
-                // Function Calls (not fully implemented yet)
+                // Function Calls
                 Opcode::Call => {
-                    return Err(Error::NotCallable {
-                        span: frame.current_span(),
-                    });
+                    self.op_call(instruction, frame)?;
                 }
                 Opcode::TailCall => {
-                    return Err(Error::NotCallable {
-                        span: frame.current_span(),
-                    });
+                    // TailCall will be fully implemented in Phase 4
+                    // For now, treat as regular call
+                    self.op_call(instruction, frame)?;
                 }
                 Opcode::Return => {
-                    let a = decode_a(instruction);
-                    let b = decode_b(instruction);
-                    return self.op_return(a, b, frame);
+                    let dest = decode_a(instruction);
+                    let count = decode_b(instruction);
+                    return self.op_return(dest, count, frame);
+                }
+
+                // Handle future Opcode variants (Opcode is #[non_exhaustive])
+                _ => {
+                    return Err(Error::InvalidOpcode {
+                        byte: decode_opcode_byte(instruction),
+                        pc: frame.pc().saturating_sub(1),
+                        span: frame.current_span(),
+                    });
                 }
             }
         }
@@ -160,52 +218,51 @@ impl<'interner> Vm<'interner> {
 
     /// `Move`: `R[A] = R[B]`
     fn op_move(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let value = self.get_register(b, frame)?;
-        self.set_register(a, value, frame)?;
+        let dest = decode_a(instruction);
+        let src = decode_b(instruction);
+        let value = self.get_register(src, frame)?;
+        self.set_register(dest, value, frame)?;
         Ok(())
     }
 
     /// `LoadK`: `R[A] = K[Bx]`
     fn op_load_k(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let bx = decode_bx(instruction);
-        let value = self.constant_to_value(frame.chunk(), bx, frame)?;
-        self.set_register(a, value, frame)?;
+        let dest = decode_a(instruction);
+        let const_idx = decode_bx(instruction);
+        let value = Self::constant_to_value(frame.chunk(), const_idx, frame)?;
+        self.set_register(dest, value, frame)?;
         Ok(())
     }
 
     /// `LoadNil`: `R[A]..R[A+B] = nil`
-    fn op_load_nil(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
+    fn op_load_nil(&mut self, instruction: u32, frame: &Frame<'_>) {
+        let start = decode_a(instruction);
+        let count = decode_b(instruction);
         let base = frame.base();
 
-        for i in 0_u16..=u16::from(b) {
+        for offset in 0_u16..=u16::from(count) {
             let reg_idx = base
-                .checked_add(usize::from(a))
-                .and_then(|x| x.checked_add(usize::from(i)));
-            if let Some(idx) = reg_idx {
-                if let Some(reg) = self.registers.get_mut(idx) {
-                    *reg = Value::Nil;
-                }
+                .checked_add(usize::from(start))
+                .and_then(|x| x.checked_add(usize::from(offset)));
+            if let Some(idx) = reg_idx
+                && let Some(reg) = self.registers.get_mut(idx)
+            {
+                *reg = Value::Nil;
             }
         }
-        Ok(())
     }
 
     /// `LoadTrue`: `R[A] = true`
     fn op_load_true(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        self.set_register(a, Value::Bool(true), frame)?;
+        let dest = decode_a(instruction);
+        self.set_register(dest, Value::Bool(true), frame)?;
         Ok(())
     }
 
     /// `LoadFalse`: `R[A] = false`
     fn op_load_false(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        self.set_register(a, Value::Bool(false), frame)?;
+        let dest = decode_a(instruction);
+        self.set_register(dest, Value::Bool(false), frame)?;
         Ok(())
     }
 
@@ -215,25 +272,28 @@ impl<'interner> Vm<'interner> {
 
     /// `GetGlobal`: `R[A] = globals[K[Bx]]`
     fn op_get_global(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let bx = decode_bx(instruction);
+        let dest = decode_a(instruction);
+        let const_idx = decode_bx(instruction);
 
-        let symbol = self.get_symbol_from_constant(frame.chunk(), bx, frame)?;
-        let value = self.globals.get(symbol).ok_or(Error::UndefinedGlobal {
-            symbol,
-            span: frame.current_span(),
-        })?;
-        self.set_register(a, value, frame)?;
+        let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
+        let value = self
+            .globals
+            .get(symbol)
+            .ok_or_else(|| Error::UndefinedGlobal {
+                symbol,
+                span: frame.current_span(),
+            })?;
+        self.set_register(dest, value, frame)?;
         Ok(())
     }
 
     /// `SetGlobal`: `globals[K[Bx]] = R[A]`
     fn op_set_global(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let bx = decode_bx(instruction);
+        let src = decode_a(instruction);
+        let const_idx = decode_bx(instruction);
 
-        let symbol = self.get_symbol_from_constant(frame.chunk(), bx, frame)?;
-        let value = self.get_register(a, frame)?;
+        let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
+        let value = self.get_register(src, frame)?;
         self.globals.set(symbol, value);
         Ok(())
     }
@@ -244,79 +304,79 @@ impl<'interner> Vm<'interner> {
 
     /// `Add`: `R[A] = RK[B] + RK[C]`
     fn op_add(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_add(left, right, frame)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result = Self::numeric_add(left, right, frame)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Sub`: `R[A] = RK[B] - RK[C]`
     fn op_sub(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_sub(left, right, frame)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result = Self::numeric_sub(left, right, frame)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Mul`: `R[A] = RK[B] * RK[C]`
     fn op_mul(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_mul(left, right, frame)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result = Self::numeric_mul(left, right, frame)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Div`: `R[A] = RK[B] / RK[C]`
     fn op_div(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_div(left, right, frame)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result = Self::numeric_div(left, right, frame)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Mod`: `R[A] = RK[B] % RK[C]`
     fn op_mod(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_mod(left, right, frame)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result = Self::numeric_mod(left, right, frame)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Neg`: `R[A] = -R[B]`
     fn op_neg(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
+        let dest = decode_a(instruction);
+        let src = decode_b(instruction);
 
-        let operand = self.get_register(b, frame)?;
+        let operand = self.get_register(src, frame)?;
         let result = match operand {
-            Value::Integer(i) => Value::Integer(i.saturating_neg()),
-            Value::Float(f) => Value::Float(-f),
-            _ => {
+            Value::Integer(int_val) => Value::Integer(int_val.saturating_neg()),
+            Value::Float(float_val) => Value::Float(-float_val),
+            Value::Nil | Value::Bool(_) | Value::Symbol(_) | _ => {
                 return Err(Error::TypeError {
                     expected: "number",
                     got: value_type_name(operand),
@@ -324,7 +384,7 @@ impl<'interner> Vm<'interner> {
                 });
             }
         };
-        self.set_register(a, result, frame)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
@@ -334,77 +394,79 @@ impl<'interner> Vm<'interner> {
 
     /// `Eq`: `R[A] = RK[B] == RK[C]`
     fn op_eq(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
         let result = Value::Bool(values_equal(left, right));
-        self.set_register(a, result, frame)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Lt`: `R[A] = RK[B] < RK[C]`
     fn op_lt(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_compare(left, right, frame, |l, r| l < r, |l, r| l < r)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result = Self::numeric_compare(left, right, frame, |lv, rv| lv < rv, |lv, rv| lv < rv)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Le`: `R[A] = RK[B] <= RK[C]`
     fn op_le(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_compare(left, right, frame, |l, r| l <= r, |l, r| l <= r)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result =
+            Self::numeric_compare(left, right, frame, |lv, rv| lv <= rv, |lv, rv| lv <= rv)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Gt`: `R[A] = RK[B] > RK[C]`
     fn op_gt(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_compare(left, right, frame, |l, r| l > r, |l, r| l > r)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result = Self::numeric_compare(left, right, frame, |lv, rv| lv > rv, |lv, rv| lv > rv)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Ge`: `R[A] = RK[B] >= RK[C]`
     fn op_ge(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let dest = decode_a(instruction);
+        let lhs_idx = decode_b(instruction);
+        let rhs_idx = decode_c(instruction);
 
-        let left = self.get_rk(b, frame)?;
-        let right = self.get_rk(c, frame)?;
-        let result = self.numeric_compare(left, right, frame, |l, r| l >= r, |l, r| l >= r)?;
-        self.set_register(a, result, frame)?;
+        let left = self.get_rk(lhs_idx, frame)?;
+        let right = self.get_rk(rhs_idx, frame)?;
+        let result =
+            Self::numeric_compare(left, right, frame, |lv, rv| lv >= rv, |lv, rv| lv >= rv)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
     /// `Not`: `R[A] = not R[B]`
     fn op_not(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
+        let dest = decode_a(instruction);
+        let src = decode_b(instruction);
 
-        let operand = self.get_register(b, frame)?;
+        let operand = self.get_register(src, frame)?;
         let result = Value::Bool(!operand.is_truthy());
-        self.set_register(a, result, frame)?;
+        self.set_register(dest, result, frame)?;
         Ok(())
     }
 
@@ -413,33 +475,125 @@ impl<'interner> Vm<'interner> {
     // =========================================================================
 
     /// `Jump`: `PC += sBx`
-    fn op_jump(&self, instruction: u32, frame: &mut Frame<'_>) {
+    const fn op_jump(instruction: u32, frame: &mut Frame<'_>) {
         let sbx = decode_sbx(instruction);
         frame.jump(sbx);
     }
 
     /// `JumpIf`: `if R[A] then PC += sBx`
-    fn op_jump_if(&mut self, instruction: u32, frame: &mut Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let sbx = decode_sbx(instruction);
+    fn op_jump_if(&self, instruction: u32, frame: &mut Frame<'_>) -> Result<(), Error> {
+        let cond_reg = decode_a(instruction);
+        let offset = decode_sbx(instruction);
 
-        let condition = self.get_register(a, frame)?;
+        let condition = self.get_register(cond_reg, frame)?;
         if condition.is_truthy() {
-            frame.jump(sbx);
+            frame.jump(offset);
         }
         Ok(())
     }
 
     /// `JumpIfNot`: `if not R[A] then PC += sBx`
-    fn op_jump_if_not(&mut self, instruction: u32, frame: &mut Frame<'_>) -> Result<(), Error> {
-        let a = decode_a(instruction);
-        let sbx = decode_sbx(instruction);
+    fn op_jump_if_not(&self, instruction: u32, frame: &mut Frame<'_>) -> Result<(), Error> {
+        let cond_reg = decode_a(instruction);
+        let offset = decode_sbx(instruction);
 
-        let condition = self.get_register(a, frame)?;
+        let condition = self.get_register(cond_reg, frame)?;
         if !condition.is_truthy() {
-            frame.jump(sbx);
+            frame.jump(offset);
         }
         Ok(())
+    }
+
+    // =========================================================================
+    // Function Call Operations
+    // =========================================================================
+
+    /// `Call`: `R[A] = R[A](R[A+1], ..., R[A+B])`
+    ///
+    /// Calls the function in R[A] with B arguments from R[A+1]..R[A+B].
+    /// The result is stored back in R[A].
+    fn op_call(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
+        let base = decode_a(instruction);
+        let argc = decode_b(instruction);
+        let _result_count = decode_c(instruction);
+
+        // Get function value from R[base]
+        let func_value = self.get_register(base, frame)?;
+
+        // Check if it's a symbol (global function reference)
+        let Value::Symbol(symbol) = func_value else {
+            return Err(Error::NotCallable {
+                span: frame.current_span(),
+            });
+        };
+
+        // Check if this is the built-in print function
+        if self.print_symbol == Some(symbol) {
+            return self.handle_print(base, argc, frame);
+        }
+
+        // Look up native function
+        let native_fn = self
+            .natives
+            .get(symbol)
+            .ok_or_else(|| Error::UndefinedFunction {
+                symbol,
+                span: frame.current_span(),
+            })?;
+
+        // Collect arguments from R[base+1] .. R[base+argc]
+        let arguments = self.collect_args(base, argc, frame)?;
+
+        // Call native function
+        let result = native_fn(&arguments, self.interner).map_err(|error| Error::Native {
+            error,
+            span: frame.current_span(),
+        })?;
+
+        // Store result in R[base]
+        self.set_register(base, result, frame)?;
+        Ok(())
+    }
+
+    /// Handles the built-in print function.
+    fn handle_print(&mut self, base: u8, arg_count: u8, frame: &Frame<'_>) -> Result<(), Error> {
+        // Collect arguments
+        let arguments = self.collect_args(base, arg_count, frame)?;
+
+        // Format the output
+        let output = format_print_args(&arguments, self.interner);
+
+        // Call the print callback if set
+        if let Some(callback) = self.print_callback {
+            callback(&output);
+        }
+
+        // Store nil as result in R[base]
+        self.set_register(base, Value::Nil, frame)?;
+        Ok(())
+    }
+
+    /// Collects function arguments from registers.
+    fn collect_args(
+        &self,
+        base: u8,
+        arg_count: u8,
+        frame: &Frame<'_>,
+    ) -> Result<Vec<Value>, Error> {
+        let mut arguments = Vec::with_capacity(usize::from(arg_count));
+
+        for offset in 0_u8..arg_count {
+            let reg_idx = base
+                .checked_add(1)
+                .and_then(|base_plus_one| base_plus_one.checked_add(offset));
+            let reg = reg_idx.ok_or_else(|| Error::InvalidRegister {
+                index: base,
+                span: frame.current_span(),
+            })?;
+            arguments.push(self.get_register(reg, frame)?);
+        }
+
+        Ok(arguments)
     }
 
     // =========================================================================
@@ -447,15 +601,15 @@ impl<'interner> Vm<'interner> {
     // =========================================================================
 
     /// `Return`: `return R[A]..R[A+B-1]`
-    fn op_return(&self, a: u8, b: u8, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn op_return(&self, start_reg: u8, count: u8, frame: &Frame<'_>) -> Result<Value, Error> {
         // For now, just return the first value (single return)
         // Full multi-value returns will come in Phase 4
-        if b == 0 {
+        if count == 0 {
             // Return all values - for now just return nil
             Ok(Value::Nil)
         } else {
-            // Return b values starting at R[A]
-            self.get_register(a, frame)
+            // Return count values starting at R[start_reg]
+            self.get_register(start_reg, frame)
         }
     }
 
@@ -469,7 +623,7 @@ impl<'interner> Vm<'interner> {
         self.registers
             .get(absolute_index)
             .copied()
-            .ok_or(Error::InvalidRegister {
+            .ok_or_else(|| Error::InvalidRegister {
                 index,
                 span: frame.current_span(),
             })
@@ -481,7 +635,7 @@ impl<'interner> Vm<'interner> {
         let reg = self
             .registers
             .get_mut(absolute_index)
-            .ok_or(Error::InvalidRegister {
+            .ok_or_else(|| Error::InvalidRegister {
                 index,
                 span: frame.current_span(),
             })?;
@@ -493,53 +647,53 @@ impl<'interner> Vm<'interner> {
     fn get_rk(&self, rk: u8, frame: &Frame<'_>) -> Result<Value, Error> {
         if rk_is_constant(rk) {
             let const_index = u16::from(rk_index(rk));
-            self.constant_to_value(frame.chunk(), const_index, frame)
+            Self::constant_to_value(frame.chunk(), const_index, frame)
         } else {
             self.get_register(rk, frame)
         }
     }
 
     /// Converts a constant pool entry to a value.
-    fn constant_to_value(
-        &self,
-        chunk: &Chunk,
-        index: u16,
-        frame: &Frame<'_>,
-    ) -> Result<Value, Error> {
-        let constant = chunk.get_constant(index).ok_or(Error::InvalidConstant {
-            index,
-            span: frame.current_span(),
-        })?;
+    fn constant_to_value(chunk: &Chunk, index: u16, frame: &Frame<'_>) -> Result<Value, Error> {
+        let constant = chunk
+            .get_constant(index)
+            .ok_or_else(|| Error::InvalidConstant {
+                index,
+                span: frame.current_span(),
+            })?;
 
-        Ok(match constant {
-            Constant::Nil => Value::Nil,
-            Constant::Bool(b) => Value::Bool(*b),
-            Constant::Integer(i) => Value::Integer(*i),
-            Constant::Float(f) => Value::Float(*f),
-            Constant::Symbol(id) => Value::Symbol(*id),
-            Constant::String(_s) => {
-                // String values will be fully supported in Phase 3.2
-                // For now, treat as nil
-                Value::Nil
-            }
+        Ok(match *constant {
+            Constant::Bool(val) => Value::Bool(val),
+            Constant::Integer(num) => Value::Integer(num),
+            Constant::Float(num) => Value::Float(num),
+            Constant::Symbol(id) => Value::Symbol(id),
+            // Constant::Nil, Constant::String, and future variants all become nil for now.
+            // String values will be fully supported in Phase 3.2.
+            Constant::Nil | Constant::String(_) | _ => Value::Nil,
         })
     }
 
     /// Gets a symbol ID from a constant pool entry.
     fn get_symbol_from_constant(
-        &self,
         chunk: &Chunk,
         index: u16,
         frame: &Frame<'_>,
     ) -> Result<symbol::Id, Error> {
-        let constant = chunk.get_constant(index).ok_or(Error::InvalidConstant {
-            index,
-            span: frame.current_span(),
-        })?;
+        let constant = chunk
+            .get_constant(index)
+            .ok_or_else(|| Error::InvalidConstant {
+                index,
+                span: frame.current_span(),
+            })?;
 
-        match constant {
-            Constant::Symbol(id) => Ok(*id),
-            _ => Err(Error::TypeError {
+        match *constant {
+            Constant::Symbol(id) => Ok(id),
+            Constant::Nil
+            | Constant::Bool(_)
+            | Constant::Integer(_)
+            | Constant::Float(_)
+            | Constant::String(_)
+            | _ => Err(Error::TypeError {
                 expected: "symbol",
                 got: constant_type_name(constant),
                 span: frame.current_span(),
@@ -552,27 +706,29 @@ impl<'interner> Vm<'interner> {
     // =========================================================================
 
     /// Performs addition with type promotion.
-    fn numeric_add(&self, left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_add(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(l), Value::Integer(r)) => Ok(Value::Integer(l.saturating_add(r))),
-            (Value::Float(l), Value::Float(r)) => Ok(Value::Float(l + r)),
-            (Value::Integer(l), Value::Float(r)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers, but this is acceptable for numeric operations"
-                )]
-                let lf = l as f64;
-                Ok(Value::Float(lf + r))
+            (Value::Integer(lhs), Value::Integer(rhs)) => {
+                Ok(Value::Integer(lhs.saturating_add(rhs)))
             }
-            (Value::Float(l), Value::Integer(r)) => {
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
+            (Value::Integer(lhs), Value::Float(rhs)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
                     reason = "i64 to f64 may lose precision for very large integers, but this is acceptable for numeric operations"
                 )]
-                let rf = r as f64;
-                Ok(Value::Float(l + rf))
+                let lhs_float = lhs as f64;
+                Ok(Value::Float(lhs_float + rhs))
+            }
+            (Value::Float(lhs), Value::Integer(rhs)) => {
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_precision_loss,
+                    reason = "i64 to f64 may lose precision for very large integers, but this is acceptable for numeric operations"
+                )]
+                let rhs_float = rhs as f64;
+                Ok(Value::Float(lhs + rhs_float))
             }
             _ => Err(Error::TypeError {
                 expected: "number",
@@ -583,27 +739,29 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs subtraction with type promotion.
-    fn numeric_sub(&self, left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_sub(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(l), Value::Integer(r)) => Ok(Value::Integer(l.saturating_sub(r))),
-            (Value::Float(l), Value::Float(r)) => Ok(Value::Float(l - r)),
-            (Value::Integer(l), Value::Float(r)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let lf = l as f64;
-                Ok(Value::Float(lf - r))
+            (Value::Integer(lhs), Value::Integer(rhs)) => {
+                Ok(Value::Integer(lhs.saturating_sub(rhs)))
             }
-            (Value::Float(l), Value::Integer(r)) => {
+            (Value::Float(lhs), Value::Float(rhs)) => Ok(Value::Float(lhs - rhs)),
+            (Value::Integer(lhs), Value::Float(rhs)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
                     reason = "i64 to f64 may lose precision for very large integers"
                 )]
-                let rf = r as f64;
-                Ok(Value::Float(l - rf))
+                let lhs_float = lhs as f64;
+                Ok(Value::Float(lhs_float - rhs))
+            }
+            (Value::Float(lhs), Value::Integer(rhs)) => {
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_precision_loss,
+                    reason = "i64 to f64 may lose precision for very large integers"
+                )]
+                let rhs_float = rhs as f64;
+                Ok(Value::Float(lhs - rhs_float))
             }
             _ => Err(Error::TypeError {
                 expected: "number",
@@ -614,27 +772,31 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs multiplication with type promotion.
-    fn numeric_mul(&self, left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_mul(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(l), Value::Integer(r)) => Ok(Value::Integer(l.saturating_mul(r))),
-            (Value::Float(l), Value::Float(r)) => Ok(Value::Float(l * r)),
-            (Value::Integer(l), Value::Float(r)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let lf = l as f64;
-                Ok(Value::Float(lf * r))
+            (Value::Integer(left_int), Value::Integer(right_int)) => {
+                Ok(Value::Integer(left_int.saturating_mul(right_int)))
             }
-            (Value::Float(l), Value::Integer(r)) => {
+            (Value::Float(left_float), Value::Float(right_float)) => {
+                Ok(Value::Float(left_float * right_float))
+            }
+            (Value::Integer(left_int), Value::Float(right_float)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
                     reason = "i64 to f64 may lose precision for very large integers"
                 )]
-                let rf = r as f64;
-                Ok(Value::Float(l * rf))
+                let left_as_float = left_int as f64;
+                Ok(Value::Float(left_as_float * right_float))
+            }
+            (Value::Float(left_float), Value::Integer(right_int)) => {
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_precision_loss,
+                    reason = "i64 to f64 may lose precision for very large integers"
+                )]
+                let right_as_float = right_int as f64;
+                Ok(Value::Float(left_float * right_as_float))
             }
             _ => Err(Error::TypeError {
                 expected: "number",
@@ -645,28 +807,28 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs division with type promotion.
-    fn numeric_div(&self, left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    fn numeric_div(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(l), Value::Integer(r)) => {
-                if r == 0 {
+            (Value::Integer(left_int), Value::Integer(right_int)) => {
+                if right_int == 0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    Ok(Value::Integer(l.checked_div(r).unwrap_or(0)))
+                    Ok(Value::Integer(left_int.checked_div(right_int).unwrap_or(0)))
                 }
             }
-            (Value::Float(l), Value::Float(r)) => {
-                if r == 0.0 {
+            (Value::Float(left_float), Value::Float(right_float)) => {
+                if right_float == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    Ok(Value::Float(l / r))
+                    Ok(Value::Float(left_float / right_float))
                 }
             }
-            (Value::Integer(l), Value::Float(r)) => {
-                if r == 0.0 {
+            (Value::Integer(left_int), Value::Float(right_float)) => {
+                if right_float == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
@@ -676,12 +838,12 @@ impl<'interner> Vm<'interner> {
                         clippy::cast_precision_loss,
                         reason = "i64 to f64 may lose precision for very large integers"
                     )]
-                    let lf = l as f64;
-                    Ok(Value::Float(lf / r))
+                    let left_as_float = left_int as f64;
+                    Ok(Value::Float(left_as_float / right_float))
                 }
             }
-            (Value::Float(l), Value::Integer(r)) => {
-                if r == 0 {
+            (Value::Float(left_float), Value::Integer(right_int)) => {
+                if right_int == 0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
@@ -691,8 +853,8 @@ impl<'interner> Vm<'interner> {
                         clippy::cast_precision_loss,
                         reason = "i64 to f64 may lose precision for very large integers"
                     )]
-                    let rf = r as f64;
-                    Ok(Value::Float(l / rf))
+                    let right_as_float = right_int as f64;
+                    Ok(Value::Float(left_float / right_as_float))
                 }
             }
             _ => Err(Error::TypeError {
@@ -704,28 +866,32 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs modulo with type promotion.
-    fn numeric_mod(&self, left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
+    #[expect(
+        clippy::modulo_arithmetic,
+        reason = "[approved] Standard IEEE 754 float modulo for language runtime"
+    )]
+    fn numeric_mod(left: Value, right: Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (Value::Integer(l), Value::Integer(r)) => {
-                if r == 0 {
+            (Value::Integer(left_int), Value::Integer(right_int)) => {
+                if right_int == 0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    Ok(Value::Integer(l.checked_rem(r).unwrap_or(0)))
+                    Ok(Value::Integer(left_int.checked_rem(right_int).unwrap_or(0)))
                 }
             }
-            (Value::Float(l), Value::Float(r)) => {
-                if r == 0.0 {
+            (Value::Float(left_float), Value::Float(right_float)) => {
+                if right_float == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    Ok(Value::Float(l % r))
+                    Ok(Value::Float(left_float % right_float))
                 }
             }
-            (Value::Integer(l), Value::Float(r)) => {
-                if r == 0.0 {
+            (Value::Integer(left_int), Value::Float(right_float)) => {
+                if right_float == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
@@ -735,12 +901,12 @@ impl<'interner> Vm<'interner> {
                         clippy::cast_precision_loss,
                         reason = "i64 to f64 may lose precision for very large integers"
                     )]
-                    let lf = l as f64;
-                    Ok(Value::Float(lf % r))
+                    let left_as_float = left_int as f64;
+                    Ok(Value::Float(left_as_float % right_float))
                 }
             }
-            (Value::Float(l), Value::Integer(r)) => {
-                if r == 0 {
+            (Value::Float(left_float), Value::Integer(right_int)) => {
+                if right_int == 0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
@@ -750,8 +916,8 @@ impl<'interner> Vm<'interner> {
                         clippy::cast_precision_loss,
                         reason = "i64 to f64 may lose precision for very large integers"
                     )]
-                    let rf = r as f64;
-                    Ok(Value::Float(l % rf))
+                    let right_as_float = right_int as f64;
+                    Ok(Value::Float(left_float % right_as_float))
                 }
             }
             _ => Err(Error::TypeError {
@@ -764,7 +930,6 @@ impl<'interner> Vm<'interner> {
 
     /// Performs a numeric comparison operation.
     fn numeric_compare<FI, FF>(
-        &self,
         left: Value,
         right: Value,
         frame: &Frame<'_>,
@@ -776,25 +941,29 @@ impl<'interner> Vm<'interner> {
         FF: Fn(f64, f64) -> bool,
     {
         match (left, right) {
-            (Value::Integer(l), Value::Integer(r)) => Ok(Value::Bool(int_cmp(l, r))),
-            (Value::Float(l), Value::Float(r)) => Ok(Value::Bool(float_cmp(l, r))),
-            (Value::Integer(l), Value::Float(r)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let lf = l as f64;
-                Ok(Value::Bool(float_cmp(lf, r)))
+            (Value::Integer(left_int), Value::Integer(right_int)) => {
+                Ok(Value::Bool(int_cmp(left_int, right_int)))
             }
-            (Value::Float(l), Value::Integer(r)) => {
+            (Value::Float(left_float), Value::Float(right_float)) => {
+                Ok(Value::Bool(float_cmp(left_float, right_float)))
+            }
+            (Value::Integer(left_int), Value::Float(right_float)) => {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_precision_loss,
                     reason = "i64 to f64 may lose precision for very large integers"
                 )]
-                let rf = r as f64;
-                Ok(Value::Bool(float_cmp(l, rf)))
+                let left_as_float = left_int as f64;
+                Ok(Value::Bool(float_cmp(left_as_float, right_float)))
+            }
+            (Value::Float(left_float), Value::Integer(right_int)) => {
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_precision_loss,
+                    reason = "i64 to f64 may lose precision for very large integers"
+                )]
+                let right_as_float = right_int as f64;
+                Ok(Value::Bool(float_cmp(left_float, right_as_float)))
             }
             _ => Err(Error::TypeError {
                 expected: "number",
@@ -824,13 +993,15 @@ const fn value_type_name(value: Value) -> &'static str {
 
 /// Returns the type name of a constant.
 const fn constant_type_name(constant: &Constant) -> &'static str {
-    match constant {
+    match *constant {
         Constant::Nil => "nil",
         Constant::Bool(_) => "boolean",
         Constant::Integer(_) => "integer",
         Constant::Float(_) => "float",
         Constant::String(_) => "string",
         Constant::Symbol(_) => "symbol",
+        // Constant is non-exhaustive, handle future variants
+        _ => "unknown",
     }
 }
 
@@ -845,31 +1016,35 @@ const fn binary_type_description(left: Value, right: Value) -> &'static str {
 }
 
 /// Tests if two values are equal.
+#[expect(
+    clippy::float_cmp,
+    reason = "[approved] VM equality semantics require exact float comparison"
+)]
 fn values_equal(left: Value, right: Value) -> bool {
     match (left, right) {
         (Value::Nil, Value::Nil) => true,
-        (Value::Bool(l), Value::Bool(r)) => l == r,
-        (Value::Integer(l), Value::Integer(r)) => l == r,
-        (Value::Float(l), Value::Float(r)) => l == r,
-        (Value::Symbol(l), Value::Symbol(r)) => l == r,
+        (Value::Bool(left_bool), Value::Bool(right_bool)) => left_bool == right_bool,
+        (Value::Integer(left_int), Value::Integer(right_int)) => left_int == right_int,
+        (Value::Float(left_float), Value::Float(right_float)) => left_float == right_float,
+        (Value::Symbol(left_sym), Value::Symbol(right_sym)) => left_sym == right_sym,
         // Cross-type numeric comparison
-        (Value::Integer(l), Value::Float(r)) => {
+        (Value::Integer(left_int), Value::Float(right_float)) => {
             #[expect(
                 clippy::as_conversions,
                 clippy::cast_precision_loss,
                 reason = "i64 to f64 for comparison"
             )]
-            let lf = l as f64;
-            lf == r
+            let left_as_float = left_int as f64;
+            left_as_float == right_float
         }
-        (Value::Float(l), Value::Integer(r)) => {
+        (Value::Float(left_float), Value::Integer(right_int)) => {
             #[expect(
                 clippy::as_conversions,
                 clippy::cast_precision_loss,
                 reason = "i64 to f64 for comparison"
             )]
-            let rf = r as f64;
-            l == rf
+            let right_as_float = right_int as f64;
+            left_float == right_as_float
         }
         _ => false,
     }
@@ -1695,5 +1870,204 @@ mod tests {
 
         let result = vm.execute(&chunk).unwrap();
         assert_eq!(result, Value::Nil);
+    }
+
+    // =========================================================================
+    // Native Function Call Tests
+    // =========================================================================
+
+    #[test]
+    fn execute_print_returns_nil() {
+        // Test that print call completes without error and returns nil
+        let mut interner = Interner::new();
+        let print_sym = interner.intern("print");
+
+        let mut vm = Vm::new(&interner);
+        vm.update_print_symbol(print_sym);
+        // Register print as a global (the value is the symbol itself)
+        vm.set_global(print_sym, Value::Symbol(print_sym));
+        // Note: No print callback set - output is discarded
+
+        let mut chunk = make_chunk();
+        // GetGlobal R0, K0 (print symbol)
+        let k_print = chunk.add_constant(Constant::Symbol(print_sym)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::GetGlobal, 0, k_print),
+            Span::new(0_usize, 5_usize),
+        );
+        // LoadK R1, K1 (42)
+        let k_42 = chunk.add_constant(Constant::Integer(42)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::LoadK, 1, k_42),
+            Span::new(6_usize, 8_usize),
+        );
+        // Call R0, 1, 1
+        let _idx = chunk.emit(
+            encode_abc(Opcode::Call, 0, 1, 1),
+            Span::new(0_usize, 10_usize),
+        );
+        // Return R0, 1
+        let _idx = chunk.emit(
+            encode_abc(Opcode::Return, 0, 1, 0),
+            Span::new(0_usize, 10_usize),
+        );
+
+        let result = vm.execute(&chunk).unwrap();
+        // Print returns nil
+        assert_eq!(result, Value::Nil);
+    }
+
+    #[test]
+    fn execute_print_with_multiple_args() {
+        let mut interner = Interner::new();
+        let print_sym = interner.intern("print");
+
+        let mut vm = Vm::new(&interner);
+        vm.update_print_symbol(print_sym);
+        vm.set_global(print_sym, Value::Symbol(print_sym));
+
+        let mut chunk = make_chunk();
+        // GetGlobal R0, K0 (print symbol)
+        let k_print = chunk.add_constant(Constant::Symbol(print_sym)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::GetGlobal, 0, k_print),
+            Span::new(0_usize, 5_usize),
+        );
+        // LoadK R1, K1 (1)
+        let k_1 = chunk.add_constant(Constant::Integer(1)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::LoadK, 1, k_1),
+            Span::new(0_usize, 1_usize),
+        );
+        // LoadK R2, K2 (2)
+        let k_2 = chunk.add_constant(Constant::Integer(2)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::LoadK, 2, k_2),
+            Span::new(0_usize, 1_usize),
+        );
+        // LoadK R3, K3 (3)
+        let k_3 = chunk.add_constant(Constant::Integer(3)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::LoadK, 3, k_3),
+            Span::new(0_usize, 1_usize),
+        );
+        // Call R0, 3, 1 (3 arguments)
+        let _idx = chunk.emit(
+            encode_abc(Opcode::Call, 0, 3, 1),
+            Span::new(0_usize, 10_usize),
+        );
+        // Return R0, 1
+        let _idx = chunk.emit(
+            encode_abc(Opcode::Return, 0, 1, 0),
+            Span::new(0_usize, 10_usize),
+        );
+
+        let result = vm.execute(&chunk).unwrap();
+        assert_eq!(result, Value::Nil);
+    }
+
+    #[test]
+    fn execute_native_function() {
+        use crate::vm::NativeError;
+
+        fn native_double(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+            if args.len() != 1_usize {
+                return Err(NativeError::ArityMismatch {
+                    expected: 1,
+                    got: args.len(),
+                });
+            }
+            let n = args
+                .first()
+                .and_then(Value::as_integer)
+                .ok_or(NativeError::TypeError {
+                    expected: "integer",
+                    got: "non-integer",
+                    arg_index: 0,
+                })?;
+            Ok(Value::Integer(n.saturating_mul(2)))
+        }
+
+        let mut interner = Interner::new();
+        let double_sym = interner.intern("double");
+
+        let mut vm = Vm::new(&interner);
+        vm.register_native(double_sym, native_double);
+        // Register the function as a global
+        vm.set_global(double_sym, Value::Symbol(double_sym));
+
+        let mut chunk = make_chunk();
+        // GetGlobal R0, K0 (double symbol)
+        let k_double = chunk.add_constant(Constant::Symbol(double_sym)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::GetGlobal, 0, k_double),
+            Span::new(0_usize, 6_usize),
+        );
+        // LoadK R1, K1 (21)
+        let k_21 = chunk.add_constant(Constant::Integer(21)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::LoadK, 1, k_21),
+            Span::new(0_usize, 2_usize),
+        );
+        // Call R0, 1, 1
+        let _idx = chunk.emit(
+            encode_abc(Opcode::Call, 0, 1, 1),
+            Span::new(0_usize, 10_usize),
+        );
+        // Return R0, 1
+        let _idx = chunk.emit(
+            encode_abc(Opcode::Return, 0, 1, 0),
+            Span::new(0_usize, 10_usize),
+        );
+
+        let result = vm.execute(&chunk).unwrap();
+        assert_eq!(result, Value::Integer(42));
+    }
+
+    #[test]
+    fn execute_undefined_function_error() {
+        let mut interner = Interner::new();
+        let unknown_sym = interner.intern("unknown");
+
+        let mut vm = Vm::new(&interner);
+        // Register the symbol as a global (so GetGlobal works)
+        // but don't register it as a native function
+        vm.set_global(unknown_sym, Value::Symbol(unknown_sym));
+
+        let mut chunk = make_chunk();
+        let k_unknown = chunk.add_constant(Constant::Symbol(unknown_sym)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::GetGlobal, 0, k_unknown),
+            Span::new(0_usize, 7_usize),
+        );
+        let _idx = chunk.emit(
+            encode_abc(Opcode::Call, 0, 0, 1),
+            Span::new(0_usize, 10_usize),
+        );
+
+        let result = vm.execute(&chunk);
+        assert!(matches!(result, Err(Error::UndefinedFunction { .. })));
+    }
+
+    #[test]
+    fn execute_call_non_symbol_error() {
+        let interner = Interner::new();
+        let mut vm = make_vm(&interner);
+
+        let mut chunk = make_chunk();
+        // Load an integer (not a symbol) into R0
+        let k_42 = chunk.add_constant(Constant::Integer(42)).unwrap();
+        let _idx = chunk.emit(
+            encode_abx(Opcode::LoadK, 0, k_42),
+            Span::new(0_usize, 2_usize),
+        );
+        // Try to call it
+        let _idx = chunk.emit(
+            encode_abc(Opcode::Call, 0, 0, 1),
+            Span::new(0_usize, 10_usize),
+        );
+
+        let result = vm.execute(&chunk);
+        assert!(matches!(result, Err(Error::NotCallable { .. })));
     }
 }

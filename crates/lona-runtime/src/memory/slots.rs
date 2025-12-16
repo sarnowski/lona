@@ -55,16 +55,4 @@ impl SlotAllocator {
         self.next = self.next.saturating_add(1);
         Some(slot)
     }
-
-    /// Returns the number of slots remaining.
-    #[expect(dead_code, reason = "useful for debugging and future diagnostics")]
-    pub const fn remaining(&self) -> usize {
-        self.end.saturating_sub(self.next)
-    }
-
-    /// Returns the number of slots allocated so far.
-    #[expect(dead_code, reason = "useful for debugging and future diagnostics")]
-    pub const fn allocated(&self) -> usize {
-        self.next.saturating_sub(self.start)
-    }
 }

@@ -34,7 +34,14 @@ mod platform;
 use alloc::vec;
 
 use lona_core::allocator::Allocator;
+use lona_core::symbol::Interner;
+use lona_core::value::Value;
+use lona_kernel::vm::Vm;
+use lonala_compiler::compile;
 use sel4_root_task::{Never, root_task};
+
+#[cfg(feature = "integration-test")]
+use lona_test::{Status, Test, run_tests};
 
 use crate::memory::Sel4PageProvider;
 
@@ -89,10 +96,16 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     println!("Lona runtime initialized successfully");
     println!("Hello from allocator + UART");
 
+    // Run integration tests if enabled, otherwise run the demo
+    #[cfg(feature = "integration-test")]
+    run_integration_tests();
+
+    #[cfg(not(feature = "integration-test"))]
+    run_demo();
+
     // For now, just halt. In the future, this will:
-    // 1. Set up the Lonala compiler/interpreter
-    // 2. Start the init process
-    // 3. Enter the scheduler loop
+    // 1. Start the init process
+    // 2. Enter the scheduler loop
     #[expect(
         clippy::infinite_loop,
         reason = "Root task must never exit - seL4 expects this to run forever"
@@ -140,6 +153,58 @@ fn init_uart(bootinfo: &sel4::BootInfoPtr) {
     }
 }
 
+/// Print callback for the VM that outputs to UART.
+///
+/// This function is passed to the VM to handle `print` output.
+#[cfg(not(feature = "integration-test"))]
+fn uart_print(output: &str) {
+    print!("{output}");
+}
+
+/// Runs the Phase 2.6 demo: `(print (+ 1 2))` should print "3".
+///
+/// Demonstrates end-to-end integration:
+/// 1. Parse Lonala source code
+/// 2. Compile to bytecode
+/// 3. Execute in the VM with print output to UART
+#[cfg(not(feature = "integration-test"))]
+fn run_demo() {
+    println!("Running demo: (print (+ 1 2))");
+
+    // Create symbol interner
+    let mut interner = Interner::new();
+
+    // Compile the demo expression
+    let source = "(print (+ 1 2))";
+    let chunk = match compile(source, &mut interner) {
+        Ok(chunk) => chunk,
+        Err(err) => {
+            println!("Compile error: {:?}", err);
+            return;
+        }
+    };
+
+    // Set up the VM with print callback
+    let mut vm = Vm::new(&interner);
+    vm.set_print_callback(uart_print);
+
+    // Register "print" as a global so the VM can find it
+    if let Some(print_sym) = interner.get("print") {
+        vm.update_print_symbol(print_sym);
+        vm.set_global(print_sym, Value::Symbol(print_sym));
+    }
+
+    // Execute and report result
+    match vm.execute(&chunk) {
+        Ok(result) => {
+            println!("Demo completed, result: {:?}", result);
+        }
+        Err(err) => {
+            println!("Execution error: {:?}", err);
+        }
+    }
+}
+
 /// Tests that heap allocation is working correctly.
 fn test_allocation() {
     sel4::debug_println!("Testing heap allocation...");
@@ -172,4 +237,58 @@ fn test_allocation() {
         stats.total_allocated,
         stats.pages_allocated
     );
+}
+
+/// Runs integration tests and outputs results via UART.
+///
+/// Tests are executed when the `integration-test` feature is enabled.
+/// Results are output in a structured format for the test harness to parse.
+#[cfg(feature = "integration-test")]
+fn run_integration_tests() {
+    println!("Running integration tests...");
+
+    let tests = [
+        Test::new("boot", test_boot),
+        Test::new("arithmetic", test_arithmetic),
+    ];
+
+    let status = run_tests(&tests, |s| print!("{s}"));
+
+    // Report final status
+    println!(
+        "Integration tests {}",
+        if status == Status::Pass {
+            "PASSED"
+        } else {
+            "FAILED"
+        }
+    );
+}
+
+/// Tests that the system booted successfully.
+///
+/// If we reach this code, boot has succeeded (implicit pass).
+#[cfg(feature = "integration-test")]
+fn test_boot() -> Status {
+    // If we're executing this code, boot succeeded
+    Status::Pass
+}
+
+/// Tests basic arithmetic: (+ 1 2) should evaluate to 3.
+#[cfg(feature = "integration-test")]
+fn test_arithmetic() -> Status {
+    let mut interner = Interner::new();
+
+    // Compile a simple arithmetic expression
+    let chunk = match compile("(+ 1 2)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    // Execute it
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == 3 => Status::Pass,
+        _ => Status::Fail,
+    }
 }

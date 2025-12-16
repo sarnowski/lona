@@ -29,12 +29,23 @@ pub struct Lexer<'src> {
     /// Current byte position in source.
     position: usize,
     /// Cached next token for peek support.
+    ///
+    /// Uses `Option<Option<T>>` intentionally to distinguish:
+    /// - `None`: not peeked yet
+    /// - `Some(None)`: peeked and found EOF
+    /// - `Some(Some(token))`: peeked and found token
+    #[expect(
+        clippy::option_option,
+        reason = "Intentional: distinguishes 'not peeked' from 'peeked EOF'"
+    )]
     peeked: Option<Option<Result<Token<'src>, Error>>>,
 }
 
 impl<'src> Lexer<'src> {
     /// Creates a new lexer for the given source code.
-    pub fn new(source: &'src str) -> Self {
+    #[inline]
+    #[must_use]
+    pub const fn new(source: &'src str) -> Self {
         Self {
             source,
             position: 0_usize,
@@ -46,11 +57,12 @@ impl<'src> Lexer<'src> {
     ///
     /// Returns `None` if there are no more tokens. The peeked token
     /// is cached and returned on the next call to `next()`.
+    #[inline]
     pub fn peek(&mut self) -> Option<&Result<Token<'src>, Error>> {
         if self.peeked.is_none() {
             self.peeked = Some(self.next_token());
         }
-        self.peeked.as_ref().and_then(|opt| opt.as_ref())
+        self.peeked.as_ref()?.as_ref()
     }
 
     /// Returns the remaining unparsed source.
@@ -70,9 +82,9 @@ impl<'src> Lexer<'src> {
         Some(ch)
     }
 
-    /// Advances the position by n bytes.
-    fn advance_by(&mut self, n: usize) {
-        self.position = self.position.saturating_add(n);
+    /// Advances the position by `byte_count` bytes.
+    const fn skip_bytes(&mut self, byte_count: usize) {
+        self.position = self.position.saturating_add(byte_count);
     }
 
     /// Skips whitespace and comments.
@@ -106,17 +118,17 @@ impl<'src> Lexer<'src> {
 
         let result = match ch {
             // Delimiters
-            '(' => self.single_char_token(TokenKind::LeftParen, start),
-            ')' => self.single_char_token(TokenKind::RightParen, start),
-            '[' => self.single_char_token(TokenKind::LeftBracket, start),
-            ']' => self.single_char_token(TokenKind::RightBracket, start),
-            '{' => self.single_char_token(TokenKind::LeftBrace, start),
-            '}' => self.single_char_token(TokenKind::RightBrace, start),
+            '(' => Ok(self.single_char_token(TokenKind::LeftParen, start)),
+            ')' => Ok(self.single_char_token(TokenKind::RightParen, start)),
+            '[' => Ok(self.single_char_token(TokenKind::LeftBracket, start)),
+            ']' => Ok(self.single_char_token(TokenKind::RightBracket, start)),
+            '{' => Ok(self.single_char_token(TokenKind::LeftBrace, start)),
+            '}' => Ok(self.single_char_token(TokenKind::RightBrace, start)),
 
             // Reader macros
-            '\'' => self.single_char_token(TokenKind::Quote, start),
-            '`' => self.single_char_token(TokenKind::SyntaxQuote, start),
-            '~' => self.tilde_token(start),
+            '\'' => Ok(self.single_char_token(TokenKind::Quote, start)),
+            '`' => Ok(self.single_char_token(TokenKind::SyntaxQuote, start)),
+            '~' => Ok(self.tilde_token(start)),
 
             // String literal
             '"' => self.string_token(start),
@@ -134,10 +146,10 @@ impl<'src> Lexer<'src> {
             '-' => self.minus_token(start),
 
             // Symbol starting with +
-            '+' => self.plus_token(start),
+            '+' => Ok(self.plus_token(start)),
 
             // Any other symbol character
-            _ if is_symbol_start(ch) => self.symbol_token(start),
+            _ if is_symbol_start(ch) => Ok(self.symbol_token(start)),
 
             // Unexpected character
             _ => {
@@ -153,31 +165,27 @@ impl<'src> Lexer<'src> {
     }
 
     /// Creates a single-character token.
-    fn single_char_token(&mut self, kind: TokenKind, start: usize) -> Result<Token<'src>, Error> {
+    fn single_char_token(&mut self, kind: TokenKind, start: usize) -> Token<'src> {
         self.advance();
         let end = self.position;
         let lexeme = self.source.get(start..end).unwrap_or("");
-        Ok(Token::new(kind, lexeme, Span::new(start, end)))
+        Token::new(kind, lexeme, Span::new(start, end))
     }
 
-    /// Handles `~` which could be `~` (Unquote) or `~@` (UnquoteSplice).
-    fn tilde_token(&mut self, start: usize) -> Result<Token<'src>, Error> {
+    /// Handles `~` which could be `~` (Unquote) or `~@` (`UnquoteSplice`).
+    fn tilde_token(&mut self, start: usize) -> Token<'src> {
         self.advance(); // consume ~
         if self.current_char() == Some('@') {
             self.advance(); // consume @
             let lexeme = self.source.get(start..self.position).unwrap_or("");
-            Ok(Token::new(
+            Token::new(
                 TokenKind::UnquoteSplice,
                 lexeme,
                 Span::new(start, self.position),
-            ))
+            )
         } else {
             let lexeme = self.source.get(start..self.position).unwrap_or("");
-            Ok(Token::new(
-                TokenKind::Unquote,
-                lexeme,
-                Span::new(start, self.position),
-            ))
+            Token::new(TokenKind::Unquote, lexeme, Span::new(start, self.position))
         }
     }
 
@@ -280,7 +288,7 @@ impl<'src> Lexer<'src> {
 
         // Check for ##NaN
         if remaining.starts_with("##NaN") {
-            self.advance_by(5_usize);
+            self.skip_bytes(5_usize);
             let lexeme = self.source.get(start..self.position).unwrap_or("");
             return Ok(Token::new(
                 TokenKind::Float,
@@ -291,7 +299,7 @@ impl<'src> Lexer<'src> {
 
         // Check for ##Inf
         if remaining.starts_with("##Inf") {
-            self.advance_by(5_usize);
+            self.skip_bytes(5_usize);
             let lexeme = self.source.get(start..self.position).unwrap_or("");
             return Ok(Token::new(
                 TokenKind::Float,
@@ -302,7 +310,7 @@ impl<'src> Lexer<'src> {
 
         // Check for ##-Inf
         if remaining.starts_with("##-Inf") {
-            self.advance_by(6_usize);
+            self.skip_bytes(6_usize);
             let lexeme = self.source.get(start..self.position).unwrap_or("");
             return Ok(Token::new(
                 TokenKind::Float,
@@ -524,7 +532,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Handles `+` which could be followed by digits or be a symbol.
-    fn plus_token(&mut self, start: usize) -> Result<Token<'src>, Error> {
+    fn plus_token(&mut self, start: usize) -> Token<'src> {
         self.advance(); // consume +
 
         // Check if followed by a digit (positive number - but we keep +)
@@ -533,11 +541,7 @@ impl<'src> Lexer<'src> {
             // + followed by digits is the symbol + followed by a number
             // So we just return the + symbol
             let lexeme = self.source.get(start..self.position).unwrap_or("");
-            return Ok(Token::new(
-                TokenKind::Symbol,
-                lexeme,
-                Span::new(start, self.position),
-            ));
+            return Token::new(TokenKind::Symbol, lexeme, Span::new(start, self.position));
         }
 
         // Otherwise continue as symbol
@@ -546,15 +550,11 @@ impl<'src> Lexer<'src> {
         }
 
         let lexeme = self.source.get(start..self.position).unwrap_or("");
-        Ok(Token::new(
-            TokenKind::Symbol,
-            lexeme,
-            Span::new(start, self.position),
-        ))
+        Token::new(TokenKind::Symbol, lexeme, Span::new(start, self.position))
     }
 
     /// Parses a symbol.
-    fn symbol_token(&mut self, start: usize) -> Result<Token<'src>, Error> {
+    fn symbol_token(&mut self, start: usize) -> Token<'src> {
         while self.current_char().is_some_and(is_symbol_continue) {
             self.advance();
         }
@@ -569,23 +569,21 @@ impl<'src> Lexer<'src> {
             _ => TokenKind::Symbol,
         };
 
-        Ok(Token::new(kind, lexeme, Span::new(start, self.position)))
+        Token::new(kind, lexeme, Span::new(start, self.position))
     }
 }
 
 impl<'src> Iterator for Lexer<'src> {
     type Item = Result<Token<'src>, Error>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        match self.peeked.take() {
-            Some(token) => token,
-            None => self.next_token(),
-        }
+        self.peeked.take().unwrap_or_else(|| self.next_token())
     }
 }
 
 /// Returns true if `ch` can start a symbol.
-fn is_symbol_start(ch: char) -> bool {
+const fn is_symbol_start(ch: char) -> bool {
     ch.is_ascii_alphabetic()
         || matches!(
             ch,
@@ -594,7 +592,7 @@ fn is_symbol_start(ch: char) -> bool {
 }
 
 /// Returns true if `ch` can continue a symbol.
-fn is_symbol_continue(ch: char) -> bool {
+const fn is_symbol_continue(ch: char) -> bool {
     is_symbol_start(ch) || ch.is_ascii_digit()
 }
 
@@ -603,6 +601,7 @@ fn is_symbol_continue(ch: char) -> bool {
 /// This is a convenience function that collects all tokens from the lexer.
 /// Returns an error if any token fails to parse.
 #[cfg(feature = "alloc")]
+#[inline]
 pub fn tokenize(source: &str) -> Result<Vec<Token<'_>>, Error> {
     Lexer::new(source).collect()
 }

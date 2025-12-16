@@ -11,14 +11,14 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::fmt::{self, Write as FmtWrite};
+use core::fmt::{self, Write as _};
 
 use lona_core::symbol;
 use lonala_parser::Span;
 
 use crate::error::Error;
 use crate::opcode::{
-    Opcode, decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, rk_index,
+    Opcode, decode_a, decode_b, decode_bx, decode_c, decode_op, decode_sbx, rk_index,
     rk_is_constant,
 };
 
@@ -27,6 +27,7 @@ use crate::opcode::{
 /// Constants are referenced by index from `LoadK` instructions and
 /// from the high bits of RK operands in arithmetic instructions.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum Constant {
     /// The nil value.
     Nil,
@@ -43,13 +44,14 @@ pub enum Constant {
 }
 
 impl fmt::Display for Constant {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match *self {
             Self::Nil => write!(f, "nil"),
-            Self::Bool(b) => write!(f, "{b}"),
-            Self::Integer(i) => write!(f, "{i}"),
-            Self::Float(fl) => write!(f, "{fl}"),
-            Self::String(s) => write!(f, "\"{s}\""),
+            Self::Bool(val) => write!(f, "{val}"),
+            Self::Integer(num) => write!(f, "{num}"),
+            Self::Float(num) => write!(f, "{num}"),
+            Self::String(ref text) => write!(f, "\"{text}\""),
             Self::Symbol(id) => write!(f, "sym#{}", id.as_u32()),
         }
     }
@@ -60,6 +62,7 @@ impl fmt::Display for Constant {
 /// Represents a function body or top-level expression. Contains all the
 /// information needed for the VM to execute the code.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Chunk {
     /// Bytecode instructions.
     code: Vec<u32>,
@@ -77,8 +80,9 @@ pub struct Chunk {
 
 impl Chunk {
     /// Creates a new empty chunk.
+    #[inline]
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             code: Vec::new(),
             constants: Vec::new(),
@@ -90,8 +94,9 @@ impl Chunk {
     }
 
     /// Creates a new chunk with the given name.
+    #[inline]
     #[must_use]
-    pub fn with_name(name: String) -> Self {
+    pub const fn with_name(name: String) -> Self {
         Self {
             code: Vec::new(),
             constants: Vec::new(),
@@ -103,35 +108,41 @@ impl Chunk {
     }
 
     /// Returns the chunk's name.
+    #[inline]
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
     /// Sets the chunk's name.
+    #[inline]
     pub fn set_name(&mut self, name: String) {
         self.name = name;
     }
 
     /// Returns the number of parameters this chunk expects.
+    #[inline]
     #[must_use]
     pub const fn arity(&self) -> u8 {
         self.arity
     }
 
     /// Sets the number of parameters.
-    pub fn set_arity(&mut self, arity: u8) {
+    #[inline]
+    pub const fn set_arity(&mut self, arity: u8) {
         self.arity = arity;
     }
 
     /// Returns the maximum number of registers used.
+    #[inline]
     #[must_use]
     pub const fn max_registers(&self) -> u8 {
         self.max_registers
     }
 
     /// Sets the maximum number of registers.
-    pub fn set_max_registers(&mut self, count: u8) {
+    #[inline]
+    pub const fn set_max_registers(&mut self, count: u8) {
         self.max_registers = count;
     }
 
@@ -141,6 +152,7 @@ impl Chunk {
     ///
     /// Returns `Error::TooManyConstants` if the code section would exceed
     /// the maximum size (though this is unlikely in practice).
+    #[inline]
     pub fn emit(&mut self, instruction: u32, span: Span) -> usize {
         let index = self.code.len();
         self.code.push(instruction);
@@ -151,6 +163,7 @@ impl Chunk {
     /// Patches an instruction at the given index.
     ///
     /// Used for fixing up jump targets after the target is known.
+    #[inline]
     pub fn patch(&mut self, index: usize, instruction: u32) {
         if let Some(slot) = self.code.get_mut(index) {
             *slot = instruction;
@@ -158,14 +171,16 @@ impl Chunk {
     }
 
     /// Returns the current instruction count (next instruction's index).
+    #[inline]
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.code.len()
     }
 
     /// Returns `true` if the chunk has no instructions.
+    #[inline]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.code.is_empty()
     }
 
@@ -177,17 +192,14 @@ impl Chunk {
     /// # Errors
     ///
     /// Returns `Error::TooManyConstants` if the constant pool is full (> 65535).
+    #[inline]
     pub fn add_constant(&mut self, constant: Constant) -> Result<u16, Error> {
         let index = self.constants.len();
-        if index > u16::MAX as usize {
-            return Err(Error::TooManyConstants {
-                span: Span::new(0_usize, 0_usize),
-            });
-        }
+        let index_u16 = u16::try_from(index).map_err(|_err| Error::TooManyConstants {
+            span: Span::new(0_usize, 0_usize),
+        })?;
         self.constants.push(constant);
-        // SAFETY: We checked that index <= u16::MAX
-        #[expect(clippy::as_conversions, reason = "checked above")]
-        Ok(index as u16)
+        Ok(index_u16)
     }
 
     /// Adds a constant with source span for error reporting.
@@ -195,48 +207,51 @@ impl Chunk {
     /// # Errors
     ///
     /// Returns `Error::TooManyConstants` with the span if the pool is full.
+    #[inline]
     pub fn add_constant_at(&mut self, constant: Constant, span: Span) -> Result<u16, Error> {
         let index = self.constants.len();
-        if index > u16::MAX as usize {
-            return Err(Error::TooManyConstants { span });
-        }
+        let index_u16 = u16::try_from(index).map_err(|_err| Error::TooManyConstants { span })?;
         self.constants.push(constant);
-        // SAFETY: We checked that index <= u16::MAX
-        #[expect(clippy::as_conversions, reason = "checked above")]
-        Ok(index as u16)
+        Ok(index_u16)
     }
 
     /// Gets a constant by index.
+    #[inline]
     #[must_use]
     pub fn get_constant(&self, index: u16) -> Option<&Constant> {
         self.constants.get(usize::from(index))
     }
 
     /// Returns the bytecode instructions.
+    #[inline]
     #[must_use]
     pub fn code(&self) -> &[u32] {
         &self.code
     }
 
     /// Returns the constant pool.
+    #[inline]
     #[must_use]
     pub fn constants(&self) -> &[Constant] {
         &self.constants
     }
 
     /// Returns the source spans for instructions.
+    #[inline]
     #[must_use]
     pub fn spans(&self) -> &[Span] {
         &self.spans
     }
 
     /// Returns the span for an instruction at the given index.
+    #[inline]
     #[must_use]
     pub fn span_at(&self, index: usize) -> Option<Span> {
         self.spans.get(index).copied()
     }
 
     /// Disassembles the entire chunk to a human-readable string.
+    #[inline]
     #[must_use]
     pub fn disassemble(&self) -> String {
         let mut output = String::new();
@@ -274,6 +289,7 @@ impl Chunk {
     }
 
     /// Disassembles a single instruction to a human-readable string.
+    #[inline]
     #[must_use]
     pub fn disassemble_instruction(&self, offset: usize, instruction: u32) -> String {
         let mut output = String::new();
@@ -289,7 +305,7 @@ impl Chunk {
         }
 
         // Decode and format
-        match decode_opcode(instruction) {
+        match decode_op(instruction) {
             Some(op) => {
                 let _result = write!(output, "{:<12}", op.name());
                 self.format_operands(&mut output, op, instruction, offset);
@@ -304,9 +320,9 @@ impl Chunk {
 
     /// Formats the operands for an instruction.
     fn format_operands(&self, output: &mut String, op: Opcode, instruction: u32, offset: usize) {
-        let a = decode_a(instruction);
-        let b = decode_b(instruction);
-        let c = decode_c(instruction);
+        let reg_a = decode_a(instruction);
+        let reg_b = decode_b(instruction);
+        let reg_c = decode_c(instruction);
         let bx = decode_bx(instruction);
         let sbx = decode_sbx(instruction);
 
@@ -322,41 +338,34 @@ impl Chunk {
             | Opcode::Le
             | Opcode::Gt
             | Opcode::Ge => {
-                let _result = write!(output, "R{a}, ");
-                self.format_rk(output, b);
+                let _result = write!(output, "R{reg_a}, ");
+                Self::format_rk(output, reg_b);
                 let _result = write!(output, ", ");
-                self.format_rk(output, c);
+                Self::format_rk(output, reg_c);
             }
 
             // iABC with A and B
             Opcode::Move | Opcode::Neg | Opcode::Not => {
-                let _result = write!(output, "R{a}, R{b}");
+                let _result = write!(output, "R{reg_a}, R{reg_b}");
             }
 
             // iABC with A and B (for range)
             Opcode::LoadNil => {
                 let _result = write!(
                     output,
-                    "R{a}..R{}",
-                    u16::from(a).saturating_add(u16::from(b))
+                    "R{reg_a}..R{}",
+                    u16::from(reg_a).saturating_add(u16::from(reg_b))
                 );
             }
 
             // iABC with just A
             Opcode::LoadTrue | Opcode::LoadFalse => {
-                let _result = write!(output, "R{a}");
+                let _result = write!(output, "R{reg_a}");
             }
 
             // iABx format
-            Opcode::LoadK => {
-                let _result = write!(output, "R{a}, K{bx}");
-                if let Some(constant) = self.get_constant(bx) {
-                    let _result = write!(output, "        ; {constant}");
-                }
-            }
-
-            Opcode::GetGlobal | Opcode::SetGlobal => {
-                let _result = write!(output, "R{a}, K{bx}");
+            Opcode::LoadK | Opcode::GetGlobal | Opcode::SetGlobal => {
+                let _result = write!(output, "R{reg_a}, K{bx}");
                 if let Some(constant) = self.get_constant(bx) {
                     let _result = write!(output, "        ; {constant}");
                 }
@@ -366,7 +375,11 @@ impl Chunk {
             Opcode::Jump => {
                 let _result = write!(output, "{sbx}");
                 // Show target address
-                #[expect(clippy::as_conversions, reason = "offset is small")]
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_wrap,
+                    reason = "instruction offset is small; used for display only"
+                )]
                 let target = (offset as i64)
                     .saturating_add(1)
                     .saturating_add(i64::from(sbx));
@@ -374,8 +387,12 @@ impl Chunk {
             }
 
             Opcode::JumpIf | Opcode::JumpIfNot => {
-                let _result = write!(output, "R{a}, {sbx}");
-                #[expect(clippy::as_conversions, reason = "offset is small")]
+                let _result = write!(output, "R{reg_a}, {sbx}");
+                #[expect(
+                    clippy::as_conversions,
+                    clippy::cast_possible_wrap,
+                    reason = "instruction offset is small; used for display only"
+                )]
                 let target = (offset as i64)
                     .saturating_add(1)
                     .saturating_add(i64::from(sbx));
@@ -384,28 +401,28 @@ impl Chunk {
 
             // Function calls
             Opcode::Call => {
-                let _result = write!(output, "R{a}, {b}, {c}");
-                let _result = write!(output, "        ; {b} args, {c} results");
+                let _result = write!(output, "R{reg_a}, {reg_b}, {reg_c}");
+                let _result = write!(output, "        ; {reg_b} args, {reg_c} results");
             }
 
             Opcode::TailCall => {
-                let _result = write!(output, "R{a}, {b}");
-                let _result = write!(output, "        ; {b} args");
+                let _result = write!(output, "R{reg_a}, {reg_b}");
+                let _result = write!(output, "        ; {reg_b} args");
             }
 
             Opcode::Return => {
-                let _result = write!(output, "R{a}, {b}");
-                if b == 0 {
+                let _result = write!(output, "R{reg_a}, {reg_b}");
+                if reg_b == 0 {
                     let _result = write!(output, "        ; return all");
                 } else {
-                    let _result = write!(output, "        ; return {b} values");
+                    let _result = write!(output, "        ; return {reg_b} values");
                 }
             }
         }
     }
 
     /// Formats an RK operand (register or constant).
-    fn format_rk(&self, output: &mut String, rk: u8) {
+    fn format_rk(output: &mut String, rk: u8) {
         if rk_is_constant(rk) {
             let idx = rk_index(rk);
             let _result = write!(output, "K{idx}");
@@ -416,6 +433,7 @@ impl Chunk {
 }
 
 impl Default for Chunk {
+    #[inline]
     fn default() -> Self {
         Self::new()
     }

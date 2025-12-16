@@ -44,10 +44,39 @@ lona/
 │   │           ├── uart.rs       # UART driver
 │   │           └── fdt.rs        # Device tree parsing
 │   │
-│   ├── lonala-parser/ (planned)  # Lexer and parser (100% host-testable)
-│   ├── lonala-compiler/ (planned)# Bytecode compiler (100% host-testable)
-│   ├── lona-kernel/ (planned)    # Process/scheduler abstractions (host-testable with mocks)
-│   └── lona-test/ (planned)      # Test harness for QEMU tests
+│   ├── lonala-parser/            # Lexer and parser (100% host-testable)
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── ast.rs            # Abstract syntax tree types
+│   │       ├── error.rs          # Error types and spans
+│   │       ├── lexer.rs          # Tokenizer
+│   │       ├── parser.rs         # S-expression parser
+│   │       └── token.rs          # Token types
+│   │
+│   ├── lonala-compiler/          # Bytecode compiler (100% host-testable)
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── chunk.rs          # Bytecode chunk format
+│   │       ├── compiler.rs       # AST to bytecode compiler
+│   │       ├── error.rs          # Compiler errors
+│   │       └── opcode.rs         # VM instruction encoding
+│   │
+│   ├── lona-kernel/              # Process/scheduler abstractions (host-testable with mocks)
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       └── vm/               # Bytecode virtual machine
+│   │           ├── mod.rs
+│   │           ├── error.rs      # Runtime errors
+│   │           ├── frame.rs      # Call frames
+│   │           ├── globals.rs    # Global variable storage
+│   │           ├── interpreter.rs# Bytecode execution
+│   │           ├── natives.rs    # Native function registry
+│   │           ├── output.rs     # Output abstraction
+│   │           └── primitives.rs # Built-in functions (print)
+│   │
+│   └── lona-test/                # Test harness for QEMU tests
+│       └── src/
+│           └── lib.rs            # Test utilities and markers
 │
 ├── docs/
 │   ├── goals.md                  # Project vision and design philosophy
@@ -76,6 +105,33 @@ lona/
 
 - **Before writing any Rust code**: Load the `develop-runtime` skill and follow its instructions
 - **When finishing all work**: Load the `finishing-work` skill and follow its instructions
+
+## Clippy Policy
+
+**CRITICAL: You MUST NOT disable any clippy check at any level (file, module, crate, or workspace).**
+
+A pre-tool hook (`.claude/hooks/check-clippy-directives.py`) automatically blocks any attempt to add `#[allow(...)]` or `#[expect(...)]` directives without proper approval.
+
+When encountering clippy warnings or errors:
+1. **Always attempt to fix the issue correctly first**
+2. **If the issue cannot be correctly resolved**:
+   - Explain the issue to the user in detail
+   - Provide your recommendation for how to handle it
+   - Wait for the user's EXPLICIT approval before taking any action
+3. **Never use `#[allow(...)]`, `#[expect(...)]`, `#[cfg_attr(..., allow(...))]`, `#[cfg_attr(..., expect(...))]`, or clippy.toml to suppress warnings without explicit user approval**
+4. **Never add `#![allow(clippy::...)]` or `#![expect(clippy::...)]` to any file**
+
+The user MUST give explicit approval for ANY exception to clippy rules. Do not assume approval.
+
+### Approved Directive Format
+
+When the user explicitly approves a suppression, include the `[approved]` marker in the directive's reason:
+
+```rust
+#[expect(clippy::lint_name, reason = "[approved] explanation of why this is needed")]
+```
+
+The hook checks for `[approved]` (case-insensitive) in the reason string. Without this marker, the hook will block the operation.
 
 ## Build Commands
 

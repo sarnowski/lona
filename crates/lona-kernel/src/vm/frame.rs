@@ -70,10 +70,11 @@ impl<'chunk> Frame<'chunk> {
     ///
     /// The offset is applied to the current program counter.
     #[inline]
-    pub fn jump(&mut self, offset: i16) {
+    pub const fn jump(&mut self, offset: i16) {
         if offset >= 0 {
             #[expect(
                 clippy::as_conversions,
+                clippy::cast_sign_loss,
                 reason = "i16 >= 0 is safe to convert to usize"
             )]
             let unsigned_offset = offset as usize;
@@ -81,6 +82,7 @@ impl<'chunk> Frame<'chunk> {
         } else {
             #[expect(
                 clippy::as_conversions,
+                clippy::cast_sign_loss,
                 reason = "negating negative i16 gives positive, safe for usize"
             )]
             let unsigned_offset = offset.saturating_neg() as usize;

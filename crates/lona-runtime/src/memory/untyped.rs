@@ -69,7 +69,6 @@ impl UntypedTracker {
                 // We can allocate from this untyped
                 let allocation = UntypedAllocation {
                     untyped_index: self.next_untyped_index,
-                    frame_offset: self.current_offset,
                 };
 
                 self.current_offset = self.current_offset.saturating_add(1);
@@ -98,9 +97,6 @@ impl UntypedTracker {
 pub struct UntypedAllocation {
     /// Index into the bootinfo untyped list.
     pub untyped_index: usize,
-    /// Frame offset within this untyped region.
-    #[expect(dead_code, reason = "will be used for sub-allocation tracking")]
-    pub frame_offset: usize,
 }
 
 /// Finds a device untyped capability containing the given physical address.

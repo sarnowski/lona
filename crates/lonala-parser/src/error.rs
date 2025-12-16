@@ -14,6 +14,7 @@ use core::fmt;
 /// into the source string. They enable precise error messages that can
 /// highlight the problematic portion of the input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Span {
     /// Byte offset of the start (inclusive).
     pub start: usize,
@@ -23,24 +24,32 @@ pub struct Span {
 
 impl Span {
     /// Creates a new span from start to end byte offsets.
+    #[inline]
+    #[must_use]
     pub const fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 
     /// Returns the length of this span in bytes.
-    pub fn len(&self) -> usize {
+    #[inline]
+    #[must_use]
+    pub const fn len(&self) -> usize {
         self.end.saturating_sub(self.start)
     }
 
     /// Returns true if this span has zero length.
-    pub fn is_empty(&self) -> bool {
+    #[inline]
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.start == self.end
     }
 }
 
 impl fmt::Display for Span {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}..{}", self.start, self.end)
+        let Self { start, end } = *self;
+        write!(f, "{start}..{end}")
     }
 }
 
@@ -49,6 +58,7 @@ impl fmt::Display for Span {
 /// Each variant captures the specific nature of the error,
 /// enabling precise error messages and potential recovery strategies.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Kind {
     // Lexer errors
     /// Encountered a character that cannot start any token.
@@ -91,12 +101,15 @@ pub enum Kind {
 }
 
 impl fmt::Display for Kind {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match *self {
             // Lexer errors
             Self::UnexpectedCharacter(ch) => write!(f, "unexpected character '{ch}'"),
             Self::UnterminatedString => write!(f, "unterminated string literal"),
-            Self::InvalidEscapeSequence(ch) => write!(f, "invalid escape sequence '\\{ch}'"),
+            Self::InvalidEscapeSequence(ch) => {
+                write!(f, "invalid escape sequence '\\{ch}'")
+            }
             Self::InvalidNumber => write!(f, "invalid numeric literal"),
             Self::InvalidUnicodeEscape => write!(f, "invalid unicode escape sequence"),
             // Parser errors
@@ -116,7 +129,9 @@ impl fmt::Display for Kind {
             Self::UnexpectedEof { expected } => {
                 write!(f, "unexpected end of input, expected {expected}")
             }
-            Self::OddMapEntries => write!(f, "map literal must have an even number of elements"),
+            Self::OddMapEntries => {
+                write!(f, "map literal must have an even number of elements")
+            }
             Self::ReaderMacroMissingExpr => {
                 write!(f, "reader macro must be followed by an expression")
             }
@@ -129,6 +144,7 @@ impl fmt::Display for Kind {
 /// Combines an error kind with its location in the source, enabling
 /// helpful error messages that point to the exact position of the problem.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Error {
     /// The kind of error.
     pub kind: Kind,
@@ -138,14 +154,18 @@ pub struct Error {
 
 impl Error {
     /// Creates a new lexer error.
+    #[inline]
+    #[must_use]
     pub const fn new(kind: Kind, span: Span) -> Self {
         Self { kind, span }
     }
 }
 
 impl fmt::Display for Error {
+    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} at {}", self.kind, self.span)
+        let Self { ref kind, span } = *self;
+        write!(f, "{kind} at {span}")
     }
 }
 

@@ -36,9 +36,8 @@ Before performing ANY review work, you MUST complete these steps in order:
    - Understand the broader context of how changes fit into the system architecture
 
 4. **Execute Verification:**
-   - Run `make check` to verify clippy compliance and static analysis
-   - Run `make test` to verify all tests pass
-   - Document any failures, warnings, or issues from these commands
+   - Run `make test` to verify the full suite (formatting, clippy, unit tests, integration tests)
+   - Document any failures, warnings, or issues from this command
 
 **Review Dimensions:**
 Evaluate all changes across these critical dimensions:

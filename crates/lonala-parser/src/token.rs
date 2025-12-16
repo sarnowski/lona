@@ -14,6 +14,7 @@ use crate::error::Span;
 /// Tokens are categorized into delimiters, literals, identifiers,
 /// and reader macros following Clojure/LISP syntax conventions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Kind {
     // Delimiters
     /// Left parenthesis `(`.
@@ -62,6 +63,8 @@ pub enum Kind {
 
 impl Kind {
     /// Returns a human-readable description of this token kind.
+    #[inline]
+    #[must_use]
     pub const fn description(self) -> &'static str {
         match self {
             Self::LeftParen => "left parenthesis",
@@ -92,6 +95,7 @@ impl Kind {
 /// copying it, enabling zero-copy parsing. The lifetime parameter ties
 /// the token to the source string's lifetime.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Token<'src> {
     /// The kind of token.
     pub kind: Kind,
@@ -103,6 +107,8 @@ pub struct Token<'src> {
 
 impl<'src> Token<'src> {
     /// Creates a new token.
+    #[inline]
+    #[must_use]
     pub const fn new(kind: Kind, lexeme: &'src str, span: Span) -> Self {
         Self { kind, lexeme, span }
     }

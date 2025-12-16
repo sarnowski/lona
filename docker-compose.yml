@@ -51,6 +51,20 @@ services:
         -serial mon:stdio
         -kernel build/lona.elf
 
+  # Test runner - runs integration tests in QEMU
+  tester:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: lona-builder:latest
+    volumes:
+      - .:/work:ro
+    working_dir: /work
+    command: make _test
+
 volumes:
   cargo-cache:
   cargo-git:
