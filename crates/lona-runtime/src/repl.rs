@@ -25,6 +25,7 @@ use alloc::string::String;
 use alloc::string::ToString;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
+use lona_kernel::vm::collections::{intern_primitives, register_primitives};
 use lona_kernel::vm::{Globals, Vm};
 use lonala_compiler::compile;
 
@@ -80,6 +81,9 @@ impl Repl {
         let chunk = compile(source, &mut self.interner)
             .map_err(|err| alloc::format!("Compile error: {err}"))?;
 
+        // Pre-intern collection primitive symbols before creating VM
+        let collection_symbols = intern_primitives(&mut self.interner);
+
         // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
 
@@ -91,6 +95,9 @@ impl Repl {
             vm.update_print_symbol(print_sym);
             vm.set_global(print_sym, Value::Symbol(print_sym));
         }
+
+        // Register collection primitives with pre-interned symbols
+        register_primitives(&mut vm, &collection_symbols);
 
         // Execute
         let result = vm
@@ -364,58 +371,8 @@ mod interactive {
         }
 
         fn print_value(&mut self, value: &Value) {
-            match *value {
-                Value::Nil => self.writeln("nil"),
-                Value::Integer(ref int_val) => {
-                    self.io.write_fmt(format_args!("{int_val}\n"));
-                }
-                Value::Float(float_val) => {
-                    self.io.write_fmt(format_args!("{float_val}\n"));
-                }
-                Value::Bool(bool_val) => {
-                    self.io.write_fmt(format_args!("{bool_val}\n"));
-                }
-                Value::Ratio(ref ratio_val) => {
-                    self.io.write_fmt(format_args!("{ratio_val}\n"));
-                }
-                Value::Symbol(sym_id) => {
-                    let name = self.repl.interner.resolve(sym_id);
-                    self.io.write_fmt(format_args!("{name}\n"));
-                }
-                Value::String(ref string) => {
-                    self.write("\"");
-                    for ch in string.as_str().chars() {
-                        match ch {
-                            '"' => self.write("\\\""),
-                            '\\' => self.write("\\\\"),
-                            '\n' => self.write("\\n"),
-                            '\t' => self.write("\\t"),
-                            '\r' => self.write("\\r"),
-                            other => self.io.write_fmt(format_args!("{other}")),
-                        }
-                    }
-                    self.writeln("\"");
-                }
-                Value::List(ref list) => {
-                    let displayable = list.display(&self.repl.interner);
-                    self.io.write_fmt(format_args!("{displayable}\n"));
-                }
-                Value::Vector(ref vector) => {
-                    let displayable = vector.display(&self.repl.interner);
-                    self.io.write_fmt(format_args!("{displayable}\n"));
-                }
-                Value::Map(ref map) => {
-                    let displayable = map.display(&self.repl.interner);
-                    self.io.write_fmt(format_args!("{displayable}\n"));
-                }
-                Value::Function(ref func) => {
-                    self.io.write_fmt(format_args!("{func}\n"));
-                }
-                // Value is non-exhaustive, handle future variants
-                _ => {
-                    self.io.write_fmt(format_args!("{value:?}\n"));
-                }
-            }
+            let displayable = value.display(&self.repl.interner);
+            self.io.write_fmt(format_args!("{displayable}\n"));
         }
 
         fn display_error(&mut self, source: &str, position: usize, message: &str) {

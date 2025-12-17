@@ -4,10 +4,10 @@
 //! Core value representation for the Lonala language.
 //!
 //! Values are the fundamental data units in Lonala. This module provides
-//! the initial set of primitive types. Future phases will extend this
-//! with heap-allocated types like strings, lists, and maps.
+//! all value types including primitives (nil, bool, integer, float, ratio)
+//! and heap-allocated types (string, symbol, list, vector, map, function).
 
-use core::fmt::{self, Display};
+use core::fmt::{self, Display, Write as _};
 use core::hash::{Hash, Hasher};
 
 #[cfg(feature = "alloc")]
@@ -524,7 +524,7 @@ impl Display for Value {
             Self::Ratio(ref value) => write!(f, "{value}"),
             Self::Symbol(id) => write!(f, "#<symbol:{}>", id.as_u32()),
             #[cfg(feature = "alloc")]
-            Self::String(ref string) => write!(f, "\"{string}\""),
+            Self::String(ref string) => write_escaped_string(string.as_str(), f),
             #[cfg(feature = "alloc")]
             Self::List(ref list) => write!(f, "{list}"),
             #[cfg(feature = "alloc")]
@@ -573,6 +573,25 @@ fn format_float(value: f64, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
     }
 }
 
+/// Writes a string with quotes and escape sequences.
+///
+/// Escapes backslashes, double quotes, newlines, carriage returns, and tabs.
+#[cfg(feature = "alloc")]
+fn write_escaped_string(string: &str, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.write_char('"')?;
+    for ch in string.chars() {
+        match ch {
+            '\\' => formatter.write_str("\\\\")?,
+            '"' => formatter.write_str("\\\"")?,
+            '\n' => formatter.write_str("\\n")?,
+            '\r' => formatter.write_str("\\r")?,
+            '\t' => formatter.write_str("\\t")?,
+            other => formatter.write_char(other)?,
+        }
+    }
+    formatter.write_char('"')
+}
+
 /// A wrapper for displaying a [`Value`] with symbol name resolution.
 ///
 /// Created via [`Value::display`].
@@ -594,7 +613,7 @@ impl Display for Displayable<'_> {
             Value::Integer(ref value) => write!(f, "{value}"),
             Value::Float(value) => format_float(value, f),
             Value::Ratio(ref value) => write!(f, "{value}"),
-            Value::String(ref string) => write!(f, "{string}"),
+            Value::String(ref string) => write_escaped_string(string.as_str(), f),
             Value::List(ref list) => write!(f, "{}", list.display(self.interner)),
             Value::Vector(ref vector) => write!(f, "{}", vector.display(self.interner)),
             Value::Map(ref map) => write!(f, "{}", map.display(self.interner)),
@@ -1118,8 +1137,64 @@ mod tests {
     fn display_string_with_interner() {
         let interner = Interner::new();
         let string = Value::String(HeapStr::new("hello"));
-        // With interner, string shows without quotes (raw content)
-        assert_eq!(string.display(&interner).to_string(), "hello");
+        // Strings should be quoted for readable output
+        assert_eq!(string.display(&interner).to_string(), "\"hello\"");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_string_with_interner_escapes_quotes() {
+        let interner = Interner::new();
+        // String containing a quote character
+        let string = Value::String(HeapStr::new("say \"hello\""));
+        // Quotes inside the string should be escaped
+        assert_eq!(
+            string.display(&interner).to_string(),
+            "\"say \\\"hello\\\"\""
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_string_with_interner_escapes_backslash() {
+        let interner = Interner::new();
+        // String containing a backslash
+        let string = Value::String(HeapStr::new("path\\to\\file"));
+        // Backslashes should be escaped
+        assert_eq!(
+            string.display(&interner).to_string(),
+            "\"path\\\\to\\\\file\""
+        );
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_string_with_interner_escapes_newline() {
+        let interner = Interner::new();
+        // String containing a newline
+        let string = Value::String(HeapStr::new("line1\nline2"));
+        // Newlines should be escaped
+        assert_eq!(string.display(&interner).to_string(), "\"line1\\nline2\"");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_string_with_interner_escapes_tab() {
+        let interner = Interner::new();
+        // String containing a tab
+        let string = Value::String(HeapStr::new("col1\tcol2"));
+        // Tabs should be escaped
+        assert_eq!(string.display(&interner).to_string(), "\"col1\\tcol2\"");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_string_with_interner_escapes_carriage_return() {
+        let interner = Interner::new();
+        // String containing a carriage return
+        let string = Value::String(HeapStr::new("line1\rline2"));
+        // Carriage returns should be escaped
+        assert_eq!(string.display(&interner).to_string(), "\"line1\\rline2\"");
     }
 
     #[cfg(feature = "alloc")]

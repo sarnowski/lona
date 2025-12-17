@@ -26,6 +26,7 @@
 //! // result == Value::Integer(3)
 //! ```
 
+pub mod collections;
 mod error;
 mod frame;
 mod globals;

@@ -1044,6 +1044,9 @@ fn eval_with_state(
     let chunk = lonala_compiler::compile(source, interner)
         .expect("compilation should succeed in eval_with_state");
 
+    // Pre-intern collection primitives before creating VM
+    let collection_symbols = super::collections::intern_primitives(interner);
+
     // Create VM and restore persistent globals
     let mut vm = Vm::new(interner);
     *vm.globals_mut() = globals.clone();
@@ -1053,6 +1056,9 @@ fn eval_with_state(
         vm.update_print_symbol(print_sym);
         vm.set_global(print_sym, Value::Symbol(print_sym));
     }
+
+    // Register collection primitives
+    super::collections::register_primitives(&mut vm, &collection_symbols);
 
     // Execute
     let result = vm.execute(&chunk)?;
@@ -1553,4 +1559,361 @@ fn integration_fn_recursive_via_global() {
     let result = eval_with_state("(factorial 5)", &mut interner, &mut globals)
         .expect("factorial 5 should succeed");
     assert_eq!(result, Value::Integer(Integer::from_i64(120)));
+}
+
+// =============================================================================
+// Collection Primitives Integration Tests
+// =============================================================================
+
+#[test]
+fn integration_cons_to_quoted_list() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(cons 1 '(2 3))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_cons_to_vector() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(cons 1 (vector 2 3))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_cons_to_nil() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(cons 1 nil)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 1);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_first_of_quoted_list() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(first '(1 2 3))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(1)));
+}
+
+#[test]
+fn integration_first_of_vector() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(first (vector 1 2 3))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(1)));
+}
+
+#[test]
+fn integration_first_of_empty() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result1 = eval_with_state("(first '())", &mut interner, &mut globals).unwrap();
+    assert_eq!(result1, Value::Nil);
+
+    let result2 = eval_with_state("(first (vector))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result2, Value::Nil);
+}
+
+#[test]
+fn integration_first_of_nil() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(first nil)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Nil);
+}
+
+#[test]
+fn integration_rest_of_quoted_list() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(rest '(1 2 3))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(2))));
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_rest_of_vector() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(rest (vector 1 2 3))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(2))));
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_rest_of_empty() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result1 = eval_with_state("(rest '())", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result1 {
+        assert!(list.is_empty());
+    } else {
+        panic!("expected List value, got {:?}", result1);
+    }
+
+    let result2 = eval_with_state("(rest (vector))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result2 {
+        assert!(list.is_empty());
+    } else {
+        panic!("expected List value, got {:?}", result2);
+    }
+}
+
+#[test]
+fn integration_rest_of_nil() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(rest nil)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert!(list.is_empty());
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_vector_empty() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(vector)", &mut interner, &mut globals).unwrap();
+    if let Value::Vector(vec) = result {
+        assert!(vec.is_empty());
+    } else {
+        panic!("expected Vector value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_vector_with_args() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(vector 1 2 3)", &mut interner, &mut globals).unwrap();
+    if let Value::Vector(vec) = result {
+        assert_eq!(vec.len(), 3);
+        assert_eq!(vec.get(0), Some(&Value::Integer(Integer::from_i64(1))));
+        assert_eq!(vec.get(1), Some(&Value::Integer(Integer::from_i64(2))));
+        assert_eq!(vec.get(2), Some(&Value::Integer(Integer::from_i64(3))));
+    } else {
+        panic!("expected Vector value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_hash_map_empty() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(hash-map)", &mut interner, &mut globals).unwrap();
+    if let Value::Map(map) = result {
+        assert!(map.is_empty());
+    } else {
+        panic!("expected Map value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_hash_map_with_pairs() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result =
+        eval_with_state("(hash-map \"a\" 1 \"b\" 2)", &mut interner, &mut globals).unwrap();
+    if let Value::Map(map) = result {
+        assert_eq!(map.len(), 2);
+        // Check values via get
+        let key_a = Value::String(lona_core::string::HeapStr::new("a"));
+        let key_b = Value::String(lona_core::string::HeapStr::new("b"));
+        assert_eq!(map.get(&key_a), Some(&Value::Integer(Integer::from_i64(1))));
+        assert_eq!(map.get(&key_b), Some(&Value::Integer(Integer::from_i64(2))));
+    } else {
+        panic!("expected Map value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_first_rest_composition() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (first (rest '(1 2 3))) => 2
+    let result = eval_with_state("(first (rest '(1 2 3)))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(2)));
+}
+
+#[test]
+fn integration_cons_with_computed_values() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (cons (+ 1 2) '(4 5)) => (3 4 5)
+    let result = eval_with_state("(cons (+ 1 2) '(4 5))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(3))));
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_vector_with_expressions() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (vector (+ 1 1) (* 2 2) (- 10 5)) => [2 4 5]
+    let result = eval_with_state(
+        "(vector (+ 1 1) (* 2 2) (- 10 5))",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    if let Value::Vector(vec) = result {
+        assert_eq!(vec.len(), 3);
+        assert_eq!(vec.get(0), Some(&Value::Integer(Integer::from_i64(2))));
+        assert_eq!(vec.get(1), Some(&Value::Integer(Integer::from_i64(4))));
+        assert_eq!(vec.get(2), Some(&Value::Integer(Integer::from_i64(5))));
+    } else {
+        panic!("expected Vector value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_collection_with_def() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Define a list
+    let _def = eval_with_state("(def my-list '(1 2 3))", &mut interner, &mut globals).unwrap();
+
+    // Use collection primitives with the defined list
+    let result1 = eval_with_state("(first my-list)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result1, Value::Integer(Integer::from_i64(1)));
+
+    let result2 = eval_with_state("(rest my-list)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result2 {
+        assert_eq!(list.len(), 2);
+    } else {
+        panic!("expected List value");
+    }
+
+    // cons to the defined list
+    let result3 = eval_with_state("(cons 0 my-list)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result3 {
+        assert_eq!(list.len(), 4);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(0))));
+    } else {
+        panic!("expected List value");
+    }
+}
+
+#[test]
+fn integration_first_of_hash_map() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result =
+        eval_with_state("(first (hash-map \"a\" 1))", &mut interner, &mut globals).unwrap();
+    // Should return a [key value] vector
+    if let Value::Vector(vec) = result {
+        assert_eq!(vec.len(), 2);
+    } else {
+        panic!("expected Vector value for first of map, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_rest_of_hash_map() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state(
+        "(rest (hash-map \"a\" 1 \"b\" 2))",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    // Should return a list with one [key value] vector
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 1);
+    } else {
+        panic!("expected List value for rest of map, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_cons_type_error() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // cons with non-collection should produce type error
+    let result = eval_with_state("(cons 1 42)", &mut interner, &mut globals);
+    assert!(result.is_err());
+}
+
+#[test]
+fn integration_first_type_error() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // first on non-collection should produce type error
+    let result = eval_with_state("(first 42)", &mut interner, &mut globals);
+    assert!(result.is_err());
+}
+
+#[test]
+fn integration_rest_type_error() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // rest on non-collection should produce type error
+    let result = eval_with_state("(rest 42)", &mut interner, &mut globals);
+    assert!(result.is_err());
+}
+
+#[test]
+fn integration_hash_map_odd_args_error() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // hash-map with odd number of args should error
+    let result = eval_with_state("(hash-map \"a\" 1 \"b\")", &mut interner, &mut globals);
+    assert!(result.is_err());
 }

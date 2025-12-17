@@ -732,8 +732,8 @@ All implementation tasks with status tracking.
 | 9 | 2.6 | Primitives | Arithmetic, comparison, output functions | done |
 | 10 | 3.1 | REPL Loop (Rust) | Read, parse, compile, execute, print cycle | done |
 | 11 | 3.2 | Extended Value Types | String, List, Vector, Map, arbitrary precision Integer, Ratio | done |
-| 12 | 3.3 | Special Forms | ~~def~~, let, ~~if~~, ~~do~~, fn, quote | partial |
-| 13 | 3.4 | Collection Primitives | cons, first, rest, vector, hash-map | open |
+| 12 | 3.3 | Special Forms | def, let, if, do, fn, quote | done |
+| 13 | 3.4 | Collection Primitives | cons, first, rest, vector, hash-map | done |
 | 14 | 4.1 | Quasiquote Expansion | Expand `` ` `` `~` `~@` into list construction code | open |
 | 15 | 4.2 | Macro Definition | defmacro special form, macro storage registry | open |
 | 16 | 4.3 | Macro Expansion Pass | Recursive expansion before compilation | open |
