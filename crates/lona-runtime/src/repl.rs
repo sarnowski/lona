@@ -292,6 +292,9 @@ impl Repl {
                 }
                 println!("\"");
             }
+            Value::List(ref list) => println!("{list}"),
+            Value::Vector(ref vector) => println!("{vector}"),
+            Value::Map(ref map) => println!("{map}"),
             // Handle future value variants (Value is non-exhaustive)
             _ => println!("{value:?}"),
         }

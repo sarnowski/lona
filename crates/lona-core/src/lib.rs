@@ -12,10 +12,13 @@
 //!
 //! - [`allocator`] - Memory allocation primitives including a bump allocator
 //! - [`integer`] - Hybrid arbitrary-precision integers (requires `alloc` feature)
+//! - [`list`] - Cons-cell linked lists (requires `alloc` feature)
+//! - [`map`] - Immutable ordered maps (requires `alloc` feature)
 //! - [`ratio`] - Exact rational numbers (requires `alloc` feature)
 //! - [`string`] - Immutable reference-counted strings (requires `alloc` feature)
 //! - [`symbol`] - Symbol interning for efficient identifier handling
 //! - [`value`] - Core value types for the Lonala language
+//! - [`vector`] - Immutable vectors (requires `alloc` feature)
 
 #![no_std]
 
@@ -26,8 +29,14 @@ pub mod allocator;
 #[cfg(feature = "alloc")]
 pub mod integer;
 #[cfg(feature = "alloc")]
+pub mod list;
+#[cfg(feature = "alloc")]
+pub mod map;
+#[cfg(feature = "alloc")]
 pub mod ratio;
 #[cfg(feature = "alloc")]
 pub mod string;
 pub mod symbol;
 pub mod value;
+#[cfg(feature = "alloc")]
+pub mod vector;

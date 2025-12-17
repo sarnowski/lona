@@ -8,14 +8,21 @@
 //! with heap-allocated types like strings, lists, and maps.
 
 use core::fmt::{self, Display};
+use core::hash::{Hash, Hasher};
 
 #[cfg(feature = "alloc")]
 use crate::integer::Integer;
+#[cfg(feature = "alloc")]
+use crate::list::List;
+#[cfg(feature = "alloc")]
+use crate::map::Map;
 #[cfg(feature = "alloc")]
 use crate::ratio::Ratio;
 #[cfg(feature = "alloc")]
 use crate::string::HeapStr;
 use crate::symbol;
+#[cfg(feature = "alloc")]
+use crate::vector::Vector;
 
 #[cfg(feature = "alloc")]
 use crate::symbol::Interner;
@@ -48,6 +55,15 @@ pub enum Value {
     /// Immutable string (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     String(HeapStr),
+    /// Cons-cell linked list (requires `alloc` feature).
+    #[cfg(feature = "alloc")]
+    List(List),
+    /// Immutable vector (requires `alloc` feature).
+    #[cfg(feature = "alloc")]
+    Vector(Vector),
+    /// Immutable map (requires `alloc` feature).
+    #[cfg(feature = "alloc")]
+    Map(Map),
 }
 
 impl Value {
@@ -75,7 +91,9 @@ impl Value {
             Self::Bool(value) => Some(value),
             Self::Nil | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
             #[cfg(feature = "alloc")]
-            Self::Ratio(_) | Self::String(_) => None,
+            Self::Ratio(_) | Self::String(_) | Self::List(_) | Self::Vector(_) | Self::Map(_) => {
+                None
+            }
         }
     }
 
@@ -91,7 +109,10 @@ impl Value {
             | Self::Float(_)
             | Self::Symbol(_)
             | Self::Ratio(_)
-            | Self::String(_) => None,
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_) => None,
         }
     }
 
@@ -121,7 +142,9 @@ impl Value {
             Self::Float(value) => Some(value),
             Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Symbol(_) => None,
             #[cfg(feature = "alloc")]
-            Self::Ratio(_) | Self::String(_) => None,
+            Self::Ratio(_) | Self::String(_) | Self::List(_) | Self::Vector(_) | Self::Map(_) => {
+                None
+            }
         }
     }
 
@@ -137,7 +160,10 @@ impl Value {
             | Self::Integer(_)
             | Self::Float(_)
             | Self::Symbol(_)
-            | Self::String(_) => None,
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_) => None,
         }
     }
 
@@ -157,7 +183,9 @@ impl Value {
             Self::Symbol(id) => Some(id),
             Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) => None,
             #[cfg(feature = "alloc")]
-            Self::Ratio(_) | Self::String(_) => None,
+            Self::Ratio(_) | Self::String(_) | Self::List(_) | Self::Vector(_) | Self::Map(_) => {
+                None
+            }
         }
     }
 
@@ -181,7 +209,91 @@ impl Value {
             | Self::Integer(_)
             | Self::Float(_)
             | Self::Ratio(_)
-            | Self::Symbol(_) => None,
+            | Self::Symbol(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `List`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_list(&self) -> bool {
+        matches!(self, Self::List(_))
+    }
+
+    /// Returns a reference to the contained list if this is a `List` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_list(&self) -> Option<&List> {
+        match *self {
+            Self::List(ref list) => Some(list),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Symbol(_)
+            | Self::String(_)
+            | Self::Vector(_)
+            | Self::Map(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `Vector`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_vector(&self) -> bool {
+        matches!(self, Self::Vector(_))
+    }
+
+    /// Returns a reference to the contained vector if this is a `Vector` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_vector(&self) -> Option<&Vector> {
+        match *self {
+            Self::Vector(ref vector) => Some(vector),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Symbol(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Map(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `Map`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_map(&self) -> bool {
+        matches!(self, Self::Map(_))
+    }
+
+    /// Returns a reference to the contained map if this is a `Map` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_map(&self) -> Option<&Map> {
+        match *self {
+            Self::Map(ref map) => Some(map),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Symbol(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_) => None,
         }
     }
 
@@ -213,7 +325,43 @@ impl PartialEq for Value {
             (&Self::Symbol(ref left), &Self::Symbol(ref right)) => left == right,
             #[cfg(feature = "alloc")]
             (&Self::String(ref left), &Self::String(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
+            (&Self::List(ref left), &Self::List(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
+            (&Self::Vector(ref left), &Self::Vector(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
+            (&Self::Map(ref left), &Self::Map(ref right)) => left == right,
             _ => false,
+        }
+    }
+}
+
+impl Hash for Value {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash the discriminant first
+        core::mem::discriminant(self).hash(state);
+
+        // Then hash the value
+        match *self {
+            Self::Nil => {}
+            Self::Bool(value) => value.hash(state),
+            Self::Integer(ref value) => value.hash(state),
+            Self::Float(value) => {
+                // Use to_bits for consistent float hashing
+                value.to_bits().hash(state);
+            }
+            #[cfg(feature = "alloc")]
+            Self::Ratio(ref value) => value.hash(state),
+            Self::Symbol(id) => id.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::String(ref string) => string.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::List(ref list) => list.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::Vector(ref vector) => vector.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::Map(ref map) => map.hash(state),
         }
     }
 }
@@ -232,6 +380,12 @@ impl Display for Value {
             Self::Symbol(id) => write!(f, "#<symbol:{}>", id.as_u32()),
             #[cfg(feature = "alloc")]
             Self::String(ref string) => write!(f, "\"{string}\""),
+            #[cfg(feature = "alloc")]
+            Self::List(ref list) => write!(f, "{list}"),
+            #[cfg(feature = "alloc")]
+            Self::Vector(ref vector) => write!(f, "{vector}"),
+            #[cfg(feature = "alloc")]
+            Self::Map(ref map) => write!(f, "{map}"),
         }
     }
 }
@@ -294,6 +448,9 @@ impl Display for Displayable<'_> {
             Value::Float(value) => format_float(value, f),
             Value::Ratio(ref value) => write!(f, "{value}"),
             Value::String(ref string) => write!(f, "{string}"),
+            Value::List(ref list) => write!(f, "{list}"),
+            Value::Vector(ref vector) => write!(f, "{vector}"),
+            Value::Map(ref map) => write!(f, "{map}"),
         }
     }
 }
@@ -382,6 +539,30 @@ impl From<&str> for Value {
     #[inline]
     fn from(text: &str) -> Self {
         Self::String(HeapStr::new(text))
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<List> for Value {
+    #[inline]
+    fn from(list: List) -> Self {
+        Self::List(list)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<Vector> for Value {
+    #[inline]
+    fn from(vector: Vector) -> Self {
+        Self::Vector(vector)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<Map> for Value {
+    #[inline]
+    fn from(map: Map) -> Self {
+        Self::Map(map)
     }
 }
 

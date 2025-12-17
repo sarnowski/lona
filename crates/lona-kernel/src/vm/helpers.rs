@@ -20,6 +20,9 @@ pub const fn value_type_name(value: &Value) -> &'static str {
         Value::Ratio(_) => "ratio",
         Value::Symbol(_) => "symbol",
         Value::String(_) => "string",
+        Value::List(_) => "list",
+        Value::Vector(_) => "vector",
+        Value::Map(_) => "map",
         // Value is non-exhaustive, handle future variants
         _ => "unknown",
     }
@@ -46,6 +49,9 @@ pub const fn binary_type_description(left: &Value, right: &Value) -> &'static st
         (&Value::Bool(_), _) | (_, &Value::Bool(_)) => "boolean",
         (&Value::Symbol(_), _) | (_, &Value::Symbol(_)) => "symbol",
         (&Value::String(_), _) | (_, &Value::String(_)) => "string",
+        (&Value::List(_), _) | (_, &Value::List(_)) => "list",
+        (&Value::Vector(_), _) | (_, &Value::Vector(_)) => "vector",
+        (&Value::Map(_), _) | (_, &Value::Map(_)) => "map",
         _ => "non-number",
     }
 }
@@ -66,6 +72,9 @@ pub fn values_equal(left: &Value, right: &Value) -> bool {
         }
         (&Value::Symbol(left_sym), &Value::Symbol(right_sym)) => left_sym == right_sym,
         (&Value::String(ref left_str), &Value::String(ref right_str)) => left_str == right_str,
+        (&Value::List(ref left_list), &Value::List(ref right_list)) => left_list == right_list,
+        (&Value::Vector(ref left_vec), &Value::Vector(ref right_vec)) => left_vec == right_vec,
+        (&Value::Map(ref left_map), &Value::Map(ref right_map)) => left_map == right_map,
         // Cross-type numeric comparison: Integer <=> Float
         (&Value::Integer(ref left_int), &Value::Float(right_float)) => {
             let left_as_float = integer_to_f64(left_int);
