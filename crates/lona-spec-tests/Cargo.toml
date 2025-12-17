@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Cargo.toml - Lonala Language Specification Tests
+
+[package]
+name = "lona-spec-tests"
+description = "End-to-end tests for Lonala language specification compliance"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = ["alloc"]
+alloc = ["lona-core/alloc", "lonala-compiler/alloc", "lonala-parser/alloc", "lona-kernel/alloc"]
+
+[dependencies]
+lona-core = { path = "../lona-core", default-features = false }
+lonala-compiler = { path = "../lonala-compiler", default-features = false }
+lonala-parser = { path = "../lonala-parser", default-features = false }
+lona-kernel = { path = "../lona-kernel", default-features = false }
+
+[lints]
+workspace = true

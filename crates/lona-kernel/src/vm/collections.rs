@@ -28,14 +28,13 @@ use alloc::vec::Vec;
 
 use lona_core::list::List;
 use lona_core::map::Map;
-use lona_core::symbol::Interner;
 use lona_core::value::Value;
 use lona_core::vector::Vector;
 
 use lona_core::symbol;
 
 use super::interpreter::Vm;
-use super::natives::NativeError;
+use super::natives::{NativeContext, NativeError};
 
 /// Returns a type name for error messages.
 const fn type_name(value: &Value) -> &'static str {
@@ -68,7 +67,7 @@ const fn type_name(value: &Value) -> &'static str {
 /// - nil: Single-element list (x)
 /// - Other: `TypeError`
 #[inline]
-pub fn native_cons(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_cons(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let &[ref element, ref collection] = args else {
         return Err(NativeError::ArityMismatch {
             expected: 2,
@@ -123,7 +122,7 @@ pub fn native_cons(args: &[Value], _interner: &Interner) -> Result<Value, Native
 /// - nil: nil
 /// - Other: `TypeError`
 #[inline]
-pub fn native_first(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_first(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let &[ref collection] = args else {
         return Err(NativeError::ArityMismatch {
             expected: 1,
@@ -177,7 +176,7 @@ pub fn native_first(args: &[Value], _interner: &Interner) -> Result<Value, Nativ
 /// - nil: Empty list
 /// - Other: `TypeError`
 #[inline]
-pub fn native_rest(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_rest(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let &[ref collection] = args else {
         return Err(NativeError::ArityMismatch {
             expected: 1,
@@ -235,7 +234,7 @@ pub fn native_rest(args: &[Value], _interner: &Interner) -> Result<Value, Native
 /// Creates a new vector containing all arguments in order.
 /// Accepts any number of arguments (including zero).
 #[inline]
-pub fn native_vector(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_vector(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let vec = Vector::from_vec(args.to_vec());
     Ok(Value::Vector(vec))
 }
@@ -245,7 +244,7 @@ pub fn native_vector(args: &[Value], _interner: &Interner) -> Result<Value, Nati
 /// Creates a new list containing all arguments in order.
 /// Accepts any number of arguments (including zero).
 #[inline]
-pub fn native_list(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_list(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let list = List::from_vec(args.to_vec());
     Ok(Value::List(list))
 }
@@ -259,7 +258,7 @@ pub fn native_list(args: &[Value], _interner: &Interner) -> Result<Value, Native
 ///
 /// Returns a type error if any argument is not a list, vector, or nil.
 #[inline]
-pub fn native_concat(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_concat(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let mut result = Vec::new();
     for (idx, arg) in args.iter().enumerate() {
         match *arg {
@@ -297,7 +296,7 @@ pub fn native_concat(args: &[Value], _interner: &Interner) -> Result<Value, Nati
 /// Returns a type error if the argument is not a list, vector, or nil.
 /// Returns an arity error if called with more or fewer than one argument.
 #[inline]
-pub fn native_vec(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_vec(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let &[ref collection] = args else {
         return Err(NativeError::ArityMismatch {
             expected: 1,
@@ -339,7 +338,7 @@ pub fn native_vec(args: &[Value], _interner: &Interner) -> Result<Value, NativeE
 ///
 /// Returns an error if an odd number of arguments is provided.
 #[inline]
-pub fn native_hash_map(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_hash_map(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     if !args.len().is_multiple_of(2) {
         return Err(NativeError::Error(
             "hash-map requires even number of arguments",
@@ -433,6 +432,11 @@ mod tests {
         Value::String(HeapStr::new(text))
     }
 
+    /// Helper to create a native context for testing.
+    fn ctx(interner: &Interner) -> NativeContext<'_> {
+        NativeContext::new(interner, None)
+    }
+
     // =========================================================================
     // cons tests
     // =========================================================================
@@ -443,7 +447,7 @@ mod tests {
         let list = List::from_vec(alloc::vec![int(2), int(3)]);
         let args = alloc::vec![int(1), Value::List(list)];
 
-        let result = native_cons(&args, &interner).unwrap();
+        let result = native_cons(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert_eq!(list.len(), 3);
@@ -459,7 +463,7 @@ mod tests {
         let vec = Vector::from_vec(alloc::vec![int(2), int(3)]);
         let args = alloc::vec![int(1), Value::Vector(vec)];
 
-        let result = native_cons(&args, &interner).unwrap();
+        let result = native_cons(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert_eq!(list.len(), 3);
@@ -477,7 +481,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(1), Value::Nil];
 
-        let result = native_cons(&args, &interner).unwrap();
+        let result = native_cons(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert_eq!(list.len(), 1);
@@ -492,7 +496,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(1), int(2)];
 
-        let result = native_cons(&args, &interner);
+        let result = native_cons(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -511,7 +515,7 @@ mod tests {
         let map = Map::from_pairs(alloc::vec![(string("a"), int(1))]);
         let args = alloc::vec![int(1), Value::Map(map)];
 
-        let result = native_cons(&args, &interner);
+        let result = native_cons(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -528,7 +532,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(1)];
 
-        let result = native_cons(&args, &interner);
+        let result = native_cons(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -549,7 +553,7 @@ mod tests {
         let list = List::from_vec(alloc::vec![int(1), int(2), int(3)]);
         let args = alloc::vec![Value::List(list)];
 
-        let result = native_first(&args, &interner).unwrap();
+        let result = native_first(&args, &ctx(&interner)).unwrap();
         assert_eq!(result, int(1));
     }
 
@@ -559,7 +563,7 @@ mod tests {
         let list = List::empty();
         let args = alloc::vec![Value::List(list)];
 
-        let result = native_first(&args, &interner).unwrap();
+        let result = native_first(&args, &ctx(&interner)).unwrap();
         assert_eq!(result, Value::Nil);
     }
 
@@ -569,7 +573,7 @@ mod tests {
         let vec = Vector::from_vec(alloc::vec![int(1), int(2), int(3)]);
         let args = alloc::vec![Value::Vector(vec)];
 
-        let result = native_first(&args, &interner).unwrap();
+        let result = native_first(&args, &ctx(&interner)).unwrap();
         assert_eq!(result, int(1));
     }
 
@@ -579,7 +583,7 @@ mod tests {
         let vec = Vector::empty();
         let args = alloc::vec![Value::Vector(vec)];
 
-        let result = native_first(&args, &interner).unwrap();
+        let result = native_first(&args, &ctx(&interner)).unwrap();
         assert_eq!(result, Value::Nil);
     }
 
@@ -589,7 +593,7 @@ mod tests {
         let map = Map::from_pairs(alloc::vec![(string("a"), int(1))]);
         let args = alloc::vec![Value::Map(map)];
 
-        let result = native_first(&args, &interner).unwrap();
+        let result = native_first(&args, &ctx(&interner)).unwrap();
 
         // Should be a vector [key value]
         if let Value::Vector(vec) = result {
@@ -605,7 +609,7 @@ mod tests {
         let map = Map::empty();
         let args = alloc::vec![Value::Map(map)];
 
-        let result = native_first(&args, &interner).unwrap();
+        let result = native_first(&args, &ctx(&interner)).unwrap();
         assert_eq!(result, Value::Nil);
     }
 
@@ -614,7 +618,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![Value::Nil];
 
-        let result = native_first(&args, &interner).unwrap();
+        let result = native_first(&args, &ctx(&interner)).unwrap();
         assert_eq!(result, Value::Nil);
     }
 
@@ -623,7 +627,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(42)];
 
-        let result = native_first(&args, &interner);
+        let result = native_first(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -640,7 +644,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![];
 
-        let result = native_first(&args, &interner);
+        let result = native_first(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -661,7 +665,7 @@ mod tests {
         let list = List::from_vec(alloc::vec![int(1), int(2), int(3)]);
         let args = alloc::vec![Value::List(list)];
 
-        let result = native_rest(&args, &interner).unwrap();
+        let result = native_rest(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(rest_list) = result {
             assert_eq!(rest_list.len(), 2);
@@ -677,7 +681,7 @@ mod tests {
         let list = List::from_vec(alloc::vec![int(1)]);
         let args = alloc::vec![Value::List(list)];
 
-        let result = native_rest(&args, &interner).unwrap();
+        let result = native_rest(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(rest_list) = result {
             assert!(rest_list.is_empty());
@@ -692,7 +696,7 @@ mod tests {
         let list = List::empty();
         let args = alloc::vec![Value::List(list)];
 
-        let result = native_rest(&args, &interner).unwrap();
+        let result = native_rest(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(rest_list) = result {
             assert!(rest_list.is_empty());
@@ -707,7 +711,7 @@ mod tests {
         let vec = Vector::from_vec(alloc::vec![int(1), int(2), int(3)]);
         let args = alloc::vec![Value::Vector(vec)];
 
-        let result = native_rest(&args, &interner).unwrap();
+        let result = native_rest(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(rest_list) = result {
             assert_eq!(rest_list.len(), 2);
@@ -723,7 +727,7 @@ mod tests {
         let vec = Vector::empty();
         let args = alloc::vec![Value::Vector(vec)];
 
-        let result = native_rest(&args, &interner).unwrap();
+        let result = native_rest(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(rest_list) = result {
             assert!(rest_list.is_empty());
@@ -737,7 +741,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![Value::Nil];
 
-        let result = native_rest(&args, &interner).unwrap();
+        let result = native_rest(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(rest_list) = result {
             assert!(rest_list.is_empty());
@@ -753,7 +757,7 @@ mod tests {
         let map = Map::from_pairs(alloc::vec![(string("a"), int(1)), (string("b"), int(2)),]);
         let args = alloc::vec![Value::Map(map)];
 
-        let result = native_rest(&args, &interner).unwrap();
+        let result = native_rest(&args, &ctx(&interner)).unwrap();
 
         // Should return a list with one [key value] vector (the second entry)
         if let Value::List(rest_list) = result {
@@ -774,7 +778,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![];
 
-        let result = native_rest(&args, &interner);
+        let result = native_rest(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -790,7 +794,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(42)];
 
-        let result = native_rest(&args, &interner);
+        let result = native_rest(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -811,7 +815,7 @@ mod tests {
         let interner = Interner::new();
         let args: Vec<Value> = alloc::vec![];
 
-        let result = native_vector(&args, &interner).unwrap();
+        let result = native_vector(&args, &ctx(&interner)).unwrap();
 
         if let Value::Vector(vec) = result {
             assert!(vec.is_empty());
@@ -825,7 +829,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(1), int(2), int(3)];
 
-        let result = native_vector(&args, &interner).unwrap();
+        let result = native_vector(&args, &ctx(&interner)).unwrap();
 
         if let Value::Vector(vec) = result {
             assert_eq!(vec.len(), 3);
@@ -842,7 +846,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![string("a"), string("b"), string("c")];
 
-        let result = native_vector(&args, &interner).unwrap();
+        let result = native_vector(&args, &ctx(&interner)).unwrap();
 
         if let Value::Vector(vec) = result {
             assert_eq!(vec.get(0_usize), Some(&string("a")));
@@ -862,7 +866,7 @@ mod tests {
         let interner = Interner::new();
         let args: Vec<Value> = alloc::vec![];
 
-        let result = native_hash_map(&args, &interner).unwrap();
+        let result = native_hash_map(&args, &ctx(&interner)).unwrap();
 
         if let Value::Map(map) = result {
             assert!(map.is_empty());
@@ -876,7 +880,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![string("a"), int(1), string("b"), int(2)];
 
-        let result = native_hash_map(&args, &interner).unwrap();
+        let result = native_hash_map(&args, &ctx(&interner)).unwrap();
 
         if let Value::Map(map) = result {
             assert_eq!(map.len(), 2);
@@ -892,7 +896,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![string("a"), int(1), string("b")];
 
-        let result = native_hash_map(&args, &interner);
+        let result = native_hash_map(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -908,7 +912,7 @@ mod tests {
         // Later value wins
         let args = alloc::vec![string("a"), int(1), string("a"), int(2)];
 
-        let result = native_hash_map(&args, &interner).unwrap();
+        let result = native_hash_map(&args, &ctx(&interner)).unwrap();
 
         if let Value::Map(map) = result {
             // Only one entry since key is duplicated
@@ -925,7 +929,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![string("str"), int(1), int(42), int(2), Value::Nil, int(3)];
 
-        let result = native_hash_map(&args, &interner).unwrap();
+        let result = native_hash_map(&args, &ctx(&interner)).unwrap();
 
         if let Value::Map(map) = result {
             assert_eq!(map.len(), 3);
@@ -946,7 +950,7 @@ mod tests {
         let interner = Interner::new();
         let args: Vec<Value> = alloc::vec![];
 
-        let result = native_list(&args, &interner).unwrap();
+        let result = native_list(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert!(list.is_empty());
@@ -960,7 +964,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(42)];
 
-        let result = native_list(&args, &interner).unwrap();
+        let result = native_list(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert_eq!(list.len(), 1);
@@ -975,7 +979,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(1), int(2), int(3)];
 
-        let result = native_list(&args, &interner).unwrap();
+        let result = native_list(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert_eq!(list.len(), 3);
@@ -991,7 +995,7 @@ mod tests {
         let inner = List::from_vec(alloc::vec![int(1), int(2)]);
         let args = alloc::vec![Value::List(inner), int(3)];
 
-        let result = native_list(&args, &interner).unwrap();
+        let result = native_list(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert_eq!(list.len(), 2);
@@ -1009,7 +1013,7 @@ mod tests {
         let interner = Interner::new();
         let args: Vec<Value> = alloc::vec![];
 
-        let result = native_concat(&args, &interner).unwrap();
+        let result = native_concat(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert!(list.is_empty());
@@ -1024,7 +1028,7 @@ mod tests {
         let list = List::from_vec(alloc::vec![int(1), int(2)]);
         let args = alloc::vec![Value::List(list)];
 
-        let result = native_concat(&args, &interner).unwrap();
+        let result = native_concat(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(result_list) = result {
             assert_eq!(result_list.len(), 2);
@@ -1040,7 +1044,7 @@ mod tests {
         let vec = Vector::from_vec(alloc::vec![int(1), int(2)]);
         let args = alloc::vec![Value::Vector(vec)];
 
-        let result = native_concat(&args, &interner).unwrap();
+        let result = native_concat(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert_eq!(list.len(), 2);
@@ -1057,7 +1061,7 @@ mod tests {
         let list2 = List::from_vec(alloc::vec![int(3), int(4)]);
         let args = alloc::vec![Value::List(list1), Value::List(list2)];
 
-        let result = native_concat(&args, &interner).unwrap();
+        let result = native_concat(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(list) = result {
             assert_eq!(list.len(), 4);
@@ -1074,7 +1078,7 @@ mod tests {
         let vec = Vector::from_vec(alloc::vec![int(3), int(4)]);
         let args = alloc::vec![Value::List(list), Value::Vector(vec)];
 
-        let result = native_concat(&args, &interner).unwrap();
+        let result = native_concat(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(result_list) = result {
             assert_eq!(result_list.len(), 4);
@@ -1089,7 +1093,7 @@ mod tests {
         let list = List::from_vec(alloc::vec![int(1), int(2)]);
         let args = alloc::vec![Value::Nil, Value::List(list), Value::Nil];
 
-        let result = native_concat(&args, &interner).unwrap();
+        let result = native_concat(&args, &ctx(&interner)).unwrap();
 
         if let Value::List(result_list) = result {
             assert_eq!(result_list.len(), 2);
@@ -1104,7 +1108,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(42)];
 
-        let result = native_concat(&args, &interner);
+        let result = native_concat(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -1122,7 +1126,7 @@ mod tests {
         let list = List::from_vec(alloc::vec![int(1)]);
         let args = alloc::vec![Value::List(list), int(42)];
 
-        let result = native_concat(&args, &interner);
+        let result = native_concat(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -1143,7 +1147,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![Value::Nil];
 
-        let result = native_vec(&args, &interner).unwrap();
+        let result = native_vec(&args, &ctx(&interner)).unwrap();
 
         if let Value::Vector(vec) = result {
             assert!(vec.is_empty());
@@ -1158,7 +1162,7 @@ mod tests {
         let list = List::from_vec(alloc::vec![int(1), int(2), int(3)]);
         let args = alloc::vec![Value::List(list)];
 
-        let result = native_vec(&args, &interner).unwrap();
+        let result = native_vec(&args, &ctx(&interner)).unwrap();
 
         if let Value::Vector(vec) = result {
             assert_eq!(vec.len(), 3);
@@ -1176,7 +1180,7 @@ mod tests {
         let original = Vector::from_vec(alloc::vec![int(1), int(2)]);
         let args = alloc::vec![Value::Vector(original.clone())];
 
-        let result = native_vec(&args, &interner).unwrap();
+        let result = native_vec(&args, &ctx(&interner)).unwrap();
 
         if let Value::Vector(vec) = result {
             assert_eq!(vec.len(), 2);
@@ -1191,7 +1195,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![int(42)];
 
-        let result = native_vec(&args, &interner);
+        let result = native_vec(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -1208,7 +1212,7 @@ mod tests {
         let interner = Interner::new();
         let args: Vec<Value> = alloc::vec![];
 
-        let result = native_vec(&args, &interner);
+        let result = native_vec(&args, &ctx(&interner));
 
         assert!(matches!(
             result,
@@ -1224,7 +1228,7 @@ mod tests {
         let interner = Interner::new();
         let args = alloc::vec![Value::Nil, Value::Nil];
 
-        let result = native_vec(&args, &interner);
+        let result = native_vec(&args, &ctx(&interner));
 
         assert!(matches!(
             result,

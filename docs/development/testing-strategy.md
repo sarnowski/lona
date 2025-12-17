@@ -247,7 +247,22 @@ lona/
 │   │
 │   ├── lona-kernel/              # Kernel abstractions (Tier 1 + mocks)
 │   │   ├── Cargo.toml            # no_std, partially testable
-│   │   └── src/lib.rs
+│   │   └── src/lib.rs            # VM bytecode tests (opcode-level)
+│   │
+│   ├── lona-spec-tests/          # Language specification tests (Tier 1)
+│   │   ├── Cargo.toml            # no_std, testable on host
+│   │   └── src/
+│   │       ├── lib.rs            # Test infrastructure
+│   │       ├── context.rs        # SpecTestContext for evaluating Lonala
+│   │       ├── data_types.rs     # Section 3: Data Types
+│   │       ├── literals.rs       # Section 4: Literals
+│   │       ├── evaluation.rs     # Section 5: Symbols and Evaluation
+│   │       ├── special_forms.rs  # Section 6: Special Forms
+│   │       ├── operators.rs      # Section 7: Operators
+│   │       ├── functions.rs      # Section 8: Functions
+│   │       ├── builtins.rs       # Section 9: Built-in Functions
+│   │       ├── reader_macros.rs  # Section 10: Reader Macros
+│   │       └── macros.rs         # Section 11: Macros
 │   │
 │   ├── lona-test/                # Test harness for QEMU tests
 │   │   ├── Cargo.toml
@@ -263,6 +278,22 @@ lona/
     └── integration/
         └── boot_test.rs
 ```
+
+### Language Specification Tests
+
+The `lona-spec-tests` crate provides end-to-end tests for the Lonala language against its specification (`docs/lonala.md`). These tests:
+
+- **Compile and execute** actual Lonala source code through the full pipeline
+- **Test spec compliance** by verifying behavior matches documented semantics
+- **Include spec references** in assertion messages: `[Spec X.Y Topic] description`
+- **Organize by spec section** with one test file per major section
+
+Test naming convention: `test_<section>_<subsection>_<description>`
+
+Examples:
+- `test_3_2_nil_is_falsy`
+- `test_6_3_if_no_else_returns_nil`
+- `test_7_1_1_addition_mixed_types`
 
 ### Crate Dependencies
 

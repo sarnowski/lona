@@ -20,8 +20,7 @@ use super::error::Error;
 use super::frame::Frame;
 use super::globals::Globals;
 use super::helpers::{constant_type_name, value_type_name, values_equal};
-use super::introspection;
-use super::natives::{NativeFn, Registry as NativeRegistry};
+use super::natives::{NativeContext, NativeFn, Registry as NativeRegistry};
 use super::numeric;
 use super::primitives::{PrintCallback, format_print_args};
 
@@ -49,13 +48,8 @@ pub struct Vm<'interner> {
     /// Symbol ID for "print" - cached for fast lookup.
     print_symbol: Option<symbol::Id>,
     /// Optional macro registry for introspection functions.
+    /// Passed to native functions via `NativeContext`.
     macro_registry: Option<&'interner MacroRegistry>,
-    /// Symbol ID for "macro?" - cached for fast lookup.
-    macro_predicate_symbol: Option<symbol::Id>,
-    /// Symbol ID for "macroexpand-1" - cached for fast lookup.
-    macroexpand_1_symbol: Option<symbol::Id>,
-    /// Symbol ID for "macroexpand" - cached for fast lookup.
-    macroexpand_symbol: Option<symbol::Id>,
     /// Current call depth for stack overflow protection.
     call_depth: usize,
 }
@@ -67,9 +61,6 @@ impl<'interner> Vm<'interner> {
     pub fn new(interner: &'interner Interner) -> Self {
         // Look up special symbols if they exist in the interner
         let print_symbol = interner.get("print");
-        let macro_predicate_symbol = interner.get("macro?");
-        let macroexpand_1_symbol = interner.get("macroexpand-1");
-        let macroexpand_symbol = interner.get("macroexpand");
 
         Self {
             registers: vec![Value::Nil; DEFAULT_REGISTER_COUNT],
@@ -79,9 +70,6 @@ impl<'interner> Vm<'interner> {
             print_callback: None,
             print_symbol,
             macro_registry: None,
-            macro_predicate_symbol,
-            macroexpand_1_symbol,
-            macroexpand_symbol,
             call_depth: 0,
         }
     }
@@ -112,26 +100,12 @@ impl<'interner> Vm<'interner> {
 
     /// Sets the macro registry for introspection functions.
     ///
-    /// When set, the VM can handle `macro?`, `macroexpand-1`, and `macroexpand`
-    /// functions that query and expand macros at runtime.
+    /// When set, the macro registry is passed to native functions via
+    /// `NativeContext`, allowing `macro?`, `macroexpand-1`, and `macroexpand`
+    /// to access macro definitions.
     #[inline]
     pub const fn set_macro_registry(&mut self, registry: &'interner MacroRegistry) {
         self.macro_registry = Some(registry);
-    }
-
-    /// Updates the introspection symbol caches.
-    ///
-    /// Call this after interning the introspection function names.
-    #[inline]
-    pub const fn update_introspection_symbols(
-        &mut self,
-        macro_predicate: symbol::Id,
-        macroexpand_1: symbol::Id,
-        macroexpand: symbol::Id,
-    ) {
-        self.macro_predicate_symbol = Some(macro_predicate);
-        self.macroexpand_1_symbol = Some(macroexpand_1);
-        self.macroexpand_symbol = Some(macroexpand);
     }
 
     /// Sets a global variable.
@@ -709,19 +683,9 @@ impl<'interner> Vm<'interner> {
         frame: &Frame<'_>,
     ) -> Result<(), Error> {
         // Check if this is the built-in print function
+        // (print is handled specially because it needs the print callback)
         if self.print_symbol == Some(symbol) {
             return self.handle_print(base, argc, frame);
-        }
-
-        // Check if this is a macro introspection function
-        if self.macro_predicate_symbol == Some(symbol) {
-            return self.handle_macro_predicate(base, argc, frame);
-        }
-        if self.macroexpand_1_symbol == Some(symbol) {
-            return self.handle_macroexpand_1(base, argc, frame);
-        }
-        if self.macroexpand_symbol == Some(symbol) {
-            return self.handle_macroexpand(base, argc, frame);
         }
 
         // Look up native function
@@ -736,8 +700,11 @@ impl<'interner> Vm<'interner> {
         // Collect arguments from R[base+1] .. R[base+argc]
         let arguments = self.collect_args(base, argc, frame)?;
 
+        // Create native context with interner and macro registry
+        let ctx = NativeContext::new(self.interner, self.macro_registry);
+
         // Call native function
-        let result = native_fn(&arguments, self.interner).map_err(|error| Error::Native {
+        let result = native_fn(&arguments, &ctx).map_err(|error| Error::Native {
             error,
             span: frame.current_span(),
         })?;
@@ -762,93 +729,6 @@ impl<'interner> Vm<'interner> {
 
         // Store nil as result in R[base]
         self.set_register(base, Value::Nil, frame)?;
-        Ok(())
-    }
-
-    /// Handles the `macro?` introspection function.
-    ///
-    /// Returns true if the argument is a symbol naming a registered macro.
-    fn handle_macro_predicate(
-        &mut self,
-        base: u8,
-        arg_count: u8,
-        frame: &Frame<'_>,
-    ) -> Result<(), Error> {
-        let arguments = self.collect_args(base, arg_count, frame)?;
-
-        let Some(registry) = self.macro_registry else {
-            // No macro registry - no macros exist
-            self.set_register(base, Value::Bool(false), frame)?;
-            return Ok(());
-        };
-
-        let result =
-            introspection::is_macro(&arguments, registry).map_err(|error| Error::Native {
-                error,
-                span: frame.current_span(),
-            })?;
-
-        self.set_register(base, result, frame)?;
-        Ok(())
-    }
-
-    /// Handles the `macroexpand-1` introspection function.
-    ///
-    /// Expands a macro call one level if the argument is a macro call.
-    fn handle_macroexpand_1(
-        &mut self,
-        base: u8,
-        arg_count: u8,
-        frame: &Frame<'_>,
-    ) -> Result<(), Error> {
-        let arguments = self.collect_args(base, arg_count, frame)?;
-
-        let Some(registry) = self.macro_registry else {
-            // No macro registry - return form unchanged
-            let form = arguments.into_iter().next().unwrap_or(Value::Nil);
-            self.set_register(base, form, frame)?;
-            return Ok(());
-        };
-
-        let result =
-            introspection::expand_once(&arguments, registry, self.interner).map_err(|error| {
-                Error::Native {
-                    error,
-                    span: frame.current_span(),
-                }
-            })?;
-
-        self.set_register(base, result, frame)?;
-        Ok(())
-    }
-
-    /// Handles the `macroexpand` introspection function.
-    ///
-    /// Fully expands a macro call by repeatedly applying `macroexpand-1`.
-    fn handle_macroexpand(
-        &mut self,
-        base: u8,
-        arg_count: u8,
-        frame: &Frame<'_>,
-    ) -> Result<(), Error> {
-        let arguments = self.collect_args(base, arg_count, frame)?;
-
-        let Some(registry) = self.macro_registry else {
-            // No macro registry - return form unchanged
-            let form = arguments.into_iter().next().unwrap_or(Value::Nil);
-            self.set_register(base, form, frame)?;
-            return Ok(());
-        };
-
-        let result =
-            introspection::expand_fully(&arguments, registry, self.interner).map_err(|error| {
-                Error::Native {
-                    error,
-                    span: frame.current_span(),
-                }
-            })?;
-
-        self.set_register(base, result, frame)?;
         Ok(())
     }
 

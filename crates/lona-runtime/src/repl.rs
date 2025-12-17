@@ -25,7 +25,14 @@ use alloc::string::String;
 use alloc::string::ToString;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
-use lona_kernel::vm::collections::{intern_primitives, register_primitives};
+use lona_kernel::vm::collections::{
+    intern_primitives as intern_collection_primitives,
+    register_primitives as register_collection_primitives,
+};
+use lona_kernel::vm::introspection::{
+    intern_primitives as intern_introspection_primitives,
+    register_primitives as register_introspection_primitives,
+};
 use lona_kernel::vm::{Globals, MacroExpander, Vm};
 use lonala_compiler::{MacroRegistry, compile_with_expansion};
 
@@ -105,13 +112,9 @@ impl Repl {
             compile_with_expansion(source, &mut self.interner, &mut self.macros, &mut expander)
                 .map_err(|err| alloc::format!("Compile error: {err}"))?;
 
-        // Pre-intern collection primitive symbols before creating VM
-        let collection_symbols = intern_primitives(&mut self.interner);
-
-        // Pre-intern introspection function symbols
-        let macro_predicate_sym = self.interner.intern("macro?");
-        let macroexpand_1_sym = self.interner.intern("macroexpand-1");
-        let macroexpand_sym = self.interner.intern("macroexpand");
+        // Pre-intern primitive symbols before creating VM
+        let collection_symbols = intern_collection_primitives(&mut self.interner);
+        let introspection_symbols = intern_introspection_primitives(&mut self.interner);
 
         // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
@@ -126,16 +129,11 @@ impl Repl {
         }
 
         // Register collection primitives with pre-interned symbols
-        register_primitives(&mut vm, &collection_symbols);
+        register_collection_primitives(&mut vm, &collection_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
-        vm.update_introspection_symbols(macro_predicate_sym, macroexpand_1_sym, macroexpand_sym);
-
-        // Register introspection functions as globals
-        vm.set_global(macro_predicate_sym, Value::Symbol(macro_predicate_sym));
-        vm.set_global(macroexpand_1_sym, Value::Symbol(macroexpand_1_sym));
-        vm.set_global(macroexpand_sym, Value::Symbol(macroexpand_sym));
+        register_introspection_primitives(&mut vm, &introspection_symbols);
 
         // Execute
         let result = vm

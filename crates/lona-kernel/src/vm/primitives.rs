@@ -13,7 +13,7 @@ use core::fmt::Write as _;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
 
-use super::natives::NativeError;
+use super::natives::{NativeContext, NativeError};
 
 /// Formats values for print output.
 ///
@@ -58,11 +58,11 @@ pub type PrintCallback = fn(&str);
 ///
 /// This function does not return errors - any arguments are accepted.
 #[inline]
-pub fn native_print(args: &[Value], interner: &Interner) -> Result<Value, NativeError> {
+pub fn native_print(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     // Format but don't output - the VM handles output via callback
     // This function exists for signature compatibility; actual print
     // is handled specially by the VM
-    let _formatted = format_print_args(args, interner);
+    let _formatted = format_print_args(args, ctx.interner());
     Ok(Value::Nil)
 }
 
@@ -160,7 +160,8 @@ mod tests {
     #[test]
     fn native_print_returns_nil() {
         let interner = Interner::new();
-        let result = native_print(&[int(42)], &interner).unwrap();
+        let ctx = NativeContext::new(&interner, None);
+        let result = native_print(&[int(42)], &ctx).unwrap();
         assert_eq!(result, Value::Nil);
     }
 

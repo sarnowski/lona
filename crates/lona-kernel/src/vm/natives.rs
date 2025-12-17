@@ -13,22 +13,58 @@ use core::fmt::{self, Display};
 
 use lona_core::symbol::{self, Interner};
 use lona_core::value::Value;
+use lonala_compiler::MacroRegistry;
+
+/// Context passed to native functions during execution.
+///
+/// Provides access to VM state that native functions may need, such as
+/// the symbol interner for resolving names and the macro registry for
+/// introspection functions.
+pub struct NativeContext<'vm> {
+    /// Symbol interner for resolving symbol names.
+    interner: &'vm Interner,
+    /// Optional macro registry for introspection functions.
+    macros: Option<&'vm MacroRegistry>,
+}
+
+impl<'vm> NativeContext<'vm> {
+    /// Creates a new native context.
+    #[inline]
+    #[must_use]
+    pub const fn new(interner: &'vm Interner, macros: Option<&'vm MacroRegistry>) -> Self {
+        Self { interner, macros }
+    }
+
+    /// Returns a reference to the symbol interner.
+    #[inline]
+    #[must_use]
+    pub const fn interner(&self) -> &'vm Interner {
+        self.interner
+    }
+
+    /// Returns a reference to the macro registry, if available.
+    #[inline]
+    #[must_use]
+    pub const fn macros(&self) -> Option<&'vm MacroRegistry> {
+        self.macros
+    }
+}
 
 /// Signature for native functions.
 ///
 /// Native functions receive their arguments as a slice along with
-/// the symbol interner for resolving symbol names. Returns either
-/// a value or an error.
+/// a context providing access to VM state. Returns either a value
+/// or an error.
 ///
 /// # Arguments
 ///
 /// * `args` - Slice of argument values passed to the function
-/// * `interner` - Symbol interner for resolving symbol names
+/// * `ctx` - Context providing access to interner, macro registry, etc.
 ///
 /// # Returns
 ///
 /// The function result or an error.
-pub type NativeFn = fn(args: &[Value], interner: &Interner) -> Result<Value, NativeError>;
+pub type NativeFn = fn(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError>;
 
 /// Errors that can occur in native functions.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,7 +180,7 @@ mod tests {
     use lona_core::symbol::Interner;
 
     /// Simple native function for testing.
-    fn test_add(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+    fn test_add(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
         if args.len() != 2_usize {
             return Err(NativeError::ArityMismatch {
                 expected: 2,
@@ -174,7 +210,7 @@ mod tests {
     }
 
     /// Native function that returns nil.
-    fn test_nil(_args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+    fn test_nil(_args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
         Ok(Value::Nil)
     }
 
@@ -211,7 +247,8 @@ mod tests {
             Value::Integer(Integer::from_i64(1)),
             Value::Integer(Integer::from_i64(2)),
         ];
-        let result = native_fn(&args, &interner).unwrap();
+        let ctx = NativeContext::new(&interner, None);
+        let result = native_fn(&args, &ctx).unwrap();
 
         assert_eq!(result, Value::Integer(Integer::from_i64(3)));
     }
@@ -219,7 +256,8 @@ mod tests {
     #[test]
     fn native_arity_error() {
         let interner = Interner::new();
-        let result = test_add(&[Value::Integer(Integer::from_i64(1))], &interner);
+        let ctx = NativeContext::new(&interner, None);
+        let result = test_add(&[Value::Integer(Integer::from_i64(1))], &ctx);
         assert!(matches!(
             result,
             Err(NativeError::ArityMismatch {
@@ -232,9 +270,10 @@ mod tests {
     #[test]
     fn native_type_error() {
         let interner = Interner::new();
+        let ctx = NativeContext::new(&interner, None);
         let result = test_add(
             &[Value::Bool(true), Value::Integer(Integer::from_i64(2))],
-            &interner,
+            &ctx,
         );
         assert!(matches!(
             result,
@@ -275,7 +314,8 @@ mod tests {
 
         // Should use the new function
         let native_fn = registry.get(sym).unwrap();
-        let result = native_fn(&[], &interner).unwrap();
+        let ctx = NativeContext::new(&interner, None);
+        let result = native_fn(&[], &ctx).unwrap();
         assert_eq!(result, Value::Nil);
     }
 

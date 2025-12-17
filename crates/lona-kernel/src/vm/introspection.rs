@@ -3,43 +3,46 @@
 
 //! Macro introspection functions.
 //!
-//! This module provides helper functions for macro introspection:
-//! - `is_macro` - Check if a symbol names a macro
-//! - `expand_once` - Expand a macro call one level
-//! - `expand_fully` - Fully expand a macro call
+//! This module provides native functions for macro introspection:
+//! - `native_is_macro` - Check if a symbol names a macro
+//! - `native_expand_once` - Expand a macro call one level
+//! - `native_expand_fully` - Fully expand a macro call
 //!
-//! These functions are called by the interpreter when the special symbols
-//! `macro?`, `macroexpand-1`, and `macroexpand` are invoked.
+//! These are registered as normal native functions, using the `NativeContext`
+//! to access the macro registry.
 
 use alloc::vec::Vec;
 
-use lona_core::symbol::Interner;
+use lona_core::symbol::{self, Interner};
 use lona_core::value::Value;
 use lonala_compiler::MacroRegistry;
 
 use super::Vm;
-use super::collections::{lookup_primitives, register_primitives};
-use super::natives::NativeError;
+use super::collections::lookup_primitives;
+use super::natives::{NativeContext, NativeError};
 
 /// Maximum depth for recursive macro expansion in `macroexpand`.
 const MAX_EXPANSION_DEPTH: usize = 256;
 
+/// Native implementation of `macro?`.
+///
 /// Checks if a symbol names a macro in the registry.
 ///
 /// # Arguments
 ///
 /// * `args` - Should contain exactly one argument: a symbol
-/// * `registry` - The macro registry to check
+/// * `ctx` - Native context providing access to macro registry
 ///
 /// # Returns
 ///
 /// `Value::Bool(true)` if the symbol is a registered macro, `false` otherwise.
+/// Returns `false` if no macro registry is available.
 ///
 /// # Errors
 ///
 /// Returns an error if the argument count is wrong or the argument is not a symbol.
 #[inline]
-pub fn is_macro(args: &[Value], registry: &MacroRegistry) -> Result<Value, NativeError> {
+pub fn native_is_macro(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     if args.len() != 1_usize {
         return Err(NativeError::ArityMismatch {
             expected: 1,
@@ -60,20 +63,24 @@ pub fn is_macro(args: &[Value], registry: &MacroRegistry) -> Result<Value, Nativ
         });
     };
 
+    // If no macro registry, no macros exist
+    let Some(registry) = ctx.macros() else {
+        return Ok(Value::Bool(false));
+    };
+
     Ok(Value::Bool(registry.contains(sym_id)))
 }
 
-/// Expands a macro call one level.
+/// Native implementation of `macroexpand-1`.
 ///
-/// If the form is a list whose first element is a symbol that names a macro,
-/// expands the macro once and returns the result. Otherwise returns the
-/// form unchanged.
+/// Expands a macro call one level. If the form is a list whose first element
+/// is a symbol that names a macro, expands the macro once and returns the result.
+/// Otherwise returns the form unchanged.
 ///
 /// # Arguments
 ///
 /// * `args` - Should contain exactly one argument: the form to expand
-/// * `registry` - The macro registry
-/// * `interner` - Symbol interner (primitives must already be interned)
+/// * `ctx` - Native context providing access to macro registry and interner
 ///
 /// # Returns
 ///
@@ -83,11 +90,7 @@ pub fn is_macro(args: &[Value], registry: &MacroRegistry) -> Result<Value, Nativ
 ///
 /// Returns an error if the argument count is wrong or expansion fails.
 #[inline]
-pub fn expand_once(
-    args: &[Value],
-    registry: &MacroRegistry,
-    interner: &Interner,
-) -> Result<Value, NativeError> {
+pub fn native_expand_once(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     if args.len() != 1_usize {
         return Err(NativeError::ArityMismatch {
             expected: 1,
@@ -100,6 +103,20 @@ pub fn expand_once(
         got: 0,
     })?;
 
+    // If no macro registry, return form unchanged
+    let Some(registry) = ctx.macros() else {
+        return Ok(form.clone());
+    };
+
+    expand_once_internal(form, registry, ctx.interner())
+}
+
+/// Internal implementation of macro expansion (one level).
+fn expand_once_internal(
+    form: &Value,
+    registry: &MacroRegistry,
+    interner: &Interner,
+) -> Result<Value, NativeError> {
     // Must be a list to be a macro call
     let Value::List(ref list) = *form else {
         return Ok(form.clone());
@@ -145,16 +162,16 @@ pub fn expand_once(
     Ok(result)
 }
 
-/// Fully expands a macro call by repeatedly calling `expand_once` until stable.
+/// Native implementation of `macroexpand`.
 ///
+/// Fully expands a macro call by repeatedly expanding until stable.
 /// Keeps expanding the form until it no longer changes (i.e., the outer form
 /// is no longer a macro call).
 ///
 /// # Arguments
 ///
 /// * `args` - Should contain exactly one argument: the form to expand
-/// * `registry` - The macro registry
-/// * `interner` - Symbol interner (primitives must already be interned)
+/// * `ctx` - Native context providing access to macro registry and interner
 ///
 /// # Returns
 ///
@@ -165,11 +182,7 @@ pub fn expand_once(
 /// Returns an error if the argument count is wrong, expansion fails, or
 /// the expansion depth limit is exceeded.
 #[inline]
-pub fn expand_fully(
-    args: &[Value],
-    registry: &MacroRegistry,
-    interner: &Interner,
-) -> Result<Value, NativeError> {
+pub fn native_expand_fully(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     if args.len() != 1_usize {
         return Err(NativeError::ArityMismatch {
             expected: 1,
@@ -185,9 +198,14 @@ pub fn expand_fully(
         })?
         .clone();
 
+    // If no macro registry, return form unchanged
+    let Some(registry) = ctx.macros() else {
+        return Ok(form);
+    };
+
     // Keep expanding until the form doesn't change
     for _ in 0_usize..MAX_EXPANSION_DEPTH {
-        let expanded = expand_once(&[form.clone()], registry, interner)?;
+        let expanded = expand_once_internal(&form, registry, ctx.interner())?;
 
         if values_equal(&expanded, &form) {
             return Ok(form);
@@ -254,6 +272,35 @@ const fn floats_equal(lhs: f64, rhs: f64) -> bool {
     lhs.to_bits() == rhs.to_bits()
 }
 
+/// The names of all introspection primitives.
+pub const PRIMITIVE_NAMES: &[&str] = &["macro?", "macroexpand-1", "macroexpand"];
+
+/// Pre-interns all introspection primitive symbols.
+///
+/// This must be called before creating the VM to avoid borrow conflicts.
+/// Returns a vector of symbol IDs in the same order as `PRIMITIVE_NAMES`.
+#[inline]
+pub fn intern_primitives(interner: &mut symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
+    PRIMITIVE_NAMES
+        .iter()
+        .map(|name| interner.intern(name))
+        .collect()
+}
+
+/// Registers all introspection primitives with the VM using pre-interned symbols.
+///
+/// `symbols` must be the result of calling `intern_primitives` with the same interner.
+#[inline]
+pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
+    let funcs: &[super::natives::NativeFn] =
+        &[native_is_macro, native_expand_once, native_expand_fully];
+
+    for (sym, func) in symbols.iter().zip(funcs.iter()) {
+        vm.register_native(*sym, *func);
+        vm.set_global(*sym, Value::Symbol(*sym));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::collections::intern_primitives;
@@ -280,6 +327,19 @@ mod tests {
         chunk
     }
 
+    /// Helper to create a native context with a macro registry.
+    fn ctx_with_macros<'a>(
+        interner: &'a Interner,
+        registry: &'a MacroRegistry,
+    ) -> NativeContext<'a> {
+        NativeContext::new(interner, Some(registry))
+    }
+
+    /// Helper to create a native context without a macro registry.
+    fn ctx_without_macros(interner: &Interner) -> NativeContext<'_> {
+        NativeContext::new(interner, None)
+    }
+
     #[test]
     fn is_macro_returns_true_for_registered_macro() {
         let mut interner = Interner::new();
@@ -290,8 +350,9 @@ mod tests {
         let def = MacroDefinition::new(chunk, 1_u8, String::from("my-macro"));
         registry.register(macro_name, def);
 
+        let ctx = ctx_with_macros(&interner, &registry);
         let args = [Value::Symbol(macro_name)];
-        let result = is_macro(&args, &registry).unwrap();
+        let result = native_is_macro(&args, &ctx).unwrap();
 
         assert_eq!(result, Value::Bool(true));
     }
@@ -302,36 +363,55 @@ mod tests {
         let registry = MacroRegistry::new();
 
         let unknown_sym = interner.intern("unknown");
+        let ctx = ctx_with_macros(&interner, &registry);
         let args = [Value::Symbol(unknown_sym)];
-        let result = is_macro(&args, &registry).unwrap();
+        let result = native_is_macro(&args, &ctx).unwrap();
+
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn is_macro_returns_false_without_registry() {
+        let mut interner = Interner::new();
+
+        let sym = interner.intern("anything");
+        let ctx = ctx_without_macros(&interner);
+        let args = [Value::Symbol(sym)];
+        let result = native_is_macro(&args, &ctx).unwrap();
 
         assert_eq!(result, Value::Bool(false));
     }
 
     #[test]
     fn is_macro_rejects_non_symbol() {
+        let interner = Interner::new();
         let registry = MacroRegistry::new();
 
+        let ctx = ctx_with_macros(&interner, &registry);
         let args = [Value::Integer(Integer::from_i64(42_i64))];
-        let result = is_macro(&args, &registry);
+        let result = native_is_macro(&args, &ctx);
 
         assert!(result.is_err());
     }
 
     #[test]
     fn is_macro_rejects_wrong_arity() {
+        let mut interner = Interner::new();
         let registry = MacroRegistry::new();
 
         // No arguments
-        let result = is_macro(&[], &registry);
-        assert!(result.is_err());
+        {
+            let ctx = ctx_with_macros(&interner, &registry);
+            let result = native_is_macro(&[], &ctx);
+            assert!(result.is_err());
+        }
 
         // Two arguments
-        let mut interner = Interner::new();
         let sym1 = interner.intern("foo");
         let sym2 = interner.intern("bar");
+        let ctx = ctx_with_macros(&interner, &registry);
         let args = [Value::Symbol(sym1), Value::Symbol(sym2)];
-        let result = is_macro(&args, &registry);
+        let result = native_is_macro(&args, &ctx);
         assert!(result.is_err());
     }
 
@@ -341,8 +421,9 @@ mod tests {
         let registry = MacroRegistry::new();
 
         let sym = interner.intern("foo");
+        let ctx = ctx_with_macros(&interner, &registry);
         let args = [Value::Symbol(sym)];
-        let result = expand_once(&args, &registry, &interner).unwrap();
+        let result = native_expand_once(&args, &ctx).unwrap();
 
         assert_eq!(result, Value::Symbol(sym));
     }
@@ -357,8 +438,9 @@ mod tests {
             Value::Symbol(sym),
             Value::Integer(Integer::from_i64(1_i64)),
         ]);
+        let ctx = ctx_with_macros(&interner, &registry);
         let args = [Value::List(list.clone())];
-        let result = expand_once(&args, &registry, &interner).unwrap();
+        let result = native_expand_once(&args, &ctx).unwrap();
 
         assert_eq!(result, Value::List(list));
     }
@@ -382,9 +464,10 @@ mod tests {
             Value::Symbol(macro_name),
             Value::Integer(Integer::from_i64(42_i64)),
         ]);
+        let ctx = ctx_with_macros(&interner, &registry);
         let args = [Value::List(list)];
 
-        let result = expand_once(&args, &registry, &interner).unwrap();
+        let result = native_expand_once(&args, &ctx).unwrap();
 
         // Should return the argument (identity returns first arg)
         assert_eq!(result, Value::Integer(Integer::from_i64(42_i64)));
@@ -397,8 +480,9 @@ mod tests {
 
         // A non-macro form should return immediately
         let sym = interner.intern("foo");
+        let ctx = ctx_with_macros(&interner, &registry);
         let args = [Value::Symbol(sym)];
-        let result = expand_fully(&args, &registry, &interner).unwrap();
+        let result = native_expand_fully(&args, &ctx).unwrap();
 
         assert_eq!(result, Value::Symbol(sym));
     }
