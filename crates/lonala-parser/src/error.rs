@@ -8,50 +8,8 @@
 
 use core::fmt;
 
-/// A byte range in source code for error reporting.
-///
-/// Spans are half-open intervals `[start, end)` representing byte offsets
-/// into the source string. They enable precise error messages that can
-/// highlight the problematic portion of the input.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Span {
-    /// Byte offset of the start (inclusive).
-    pub start: usize,
-    /// Byte offset of the end (exclusive).
-    pub end: usize,
-}
-
-impl Span {
-    /// Creates a new span from start to end byte offsets.
-    #[inline]
-    #[must_use]
-    pub const fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
-    }
-
-    /// Returns the length of this span in bytes.
-    #[inline]
-    #[must_use]
-    pub const fn len(&self) -> usize {
-        self.end.saturating_sub(self.start)
-    }
-
-    /// Returns true if this span has zero length.
-    #[inline]
-    #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.start == self.end
-    }
-}
-
-impl fmt::Display for Span {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { start, end } = *self;
-        write!(f, "{start}..{end}")
-    }
-}
+// Re-export Span from lona-core for consistency across the compiler pipeline.
+pub use lona_core::span::Span;
 
 /// Kinds of errors that can occur during lexing and parsing.
 ///

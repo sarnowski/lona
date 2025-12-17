@@ -27,6 +27,101 @@ use crate::vector::Vector;
 #[cfg(feature = "alloc")]
 use crate::symbol::Interner;
 
+/// A compiled function value.
+///
+/// Functions are first-class values in Lonala. Each function stores its
+/// compiled bytecode chunk directly (via an `Arc` for cheap cloning), the
+/// number of expected parameters, and an optional name for debugging.
+///
+/// Note: In Phase 3.3, closures are not supported - functions cannot capture
+/// variables from enclosing scopes.
+#[cfg(feature = "alloc")]
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct Function {
+    /// The compiled bytecode chunk for this function.
+    /// Uses Arc for cheap cloning when passing functions around.
+    chunk: alloc::sync::Arc<crate::chunk::Chunk>,
+    /// Number of parameters this function expects.
+    arity: u8,
+    /// Optional function name for debugging and error messages.
+    name: Option<alloc::string::String>,
+}
+
+#[cfg(feature = "alloc")]
+impl Function {
+    /// Creates a new function value from a chunk.
+    #[inline]
+    #[must_use]
+    pub const fn new(
+        chunk: alloc::sync::Arc<crate::chunk::Chunk>,
+        arity: u8,
+        name: Option<alloc::string::String>,
+    ) -> Self {
+        Self { chunk, arity, name }
+    }
+
+    /// Returns a reference to the function's bytecode chunk.
+    #[inline]
+    #[must_use]
+    pub fn chunk(&self) -> &crate::chunk::Chunk {
+        &self.chunk
+    }
+
+    /// Returns the Arc containing the function's chunk (for cloning).
+    #[inline]
+    #[must_use]
+    pub const fn chunk_arc(&self) -> &alloc::sync::Arc<crate::chunk::Chunk> {
+        &self.chunk
+    }
+
+    /// Returns the number of parameters this function expects.
+    #[inline]
+    #[must_use]
+    pub const fn arity(&self) -> u8 {
+        self.arity
+    }
+
+    /// Returns the function name, if any.
+    #[inline]
+    #[must_use]
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl PartialEq for Function {
+    /// Two functions are equal if they have the same chunk (by Arc pointer equality).
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        alloc::sync::Arc::ptr_eq(&self.chunk, &other.chunk)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl Eq for Function {}
+
+#[cfg(feature = "alloc")]
+impl Hash for Function {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash by pointer address for consistency with PartialEq
+        alloc::sync::Arc::as_ptr(&self.chunk).hash(state);
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl Display for Function {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.name {
+            Some(ref func_name) => write!(f, "#<function {func_name}>"),
+            None => write!(f, "#<function>"),
+        }
+    }
+}
+
 /// Core value representation for Lonala.
 ///
 /// Values can be stack-allocated primitives or heap-allocated types.
@@ -64,6 +159,9 @@ pub enum Value {
     /// Immutable map (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     Map(Map),
+    /// Compiled function (requires `alloc` feature).
+    #[cfg(feature = "alloc")]
+    Function(Function),
 }
 
 impl Value {
@@ -91,9 +189,12 @@ impl Value {
             Self::Bool(value) => Some(value),
             Self::Nil | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
             #[cfg(feature = "alloc")]
-            Self::Ratio(_) | Self::String(_) | Self::List(_) | Self::Vector(_) | Self::Map(_) => {
-                None
-            }
+            Self::Ratio(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -112,7 +213,8 @@ impl Value {
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
-            | Self::Map(_) => None,
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -142,9 +244,12 @@ impl Value {
             Self::Float(value) => Some(value),
             Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Symbol(_) => None,
             #[cfg(feature = "alloc")]
-            Self::Ratio(_) | Self::String(_) | Self::List(_) | Self::Vector(_) | Self::Map(_) => {
-                None
-            }
+            Self::Ratio(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -163,7 +268,8 @@ impl Value {
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
-            | Self::Map(_) => None,
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -183,9 +289,12 @@ impl Value {
             Self::Symbol(id) => Some(id),
             Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) => None,
             #[cfg(feature = "alloc")]
-            Self::Ratio(_) | Self::String(_) | Self::List(_) | Self::Vector(_) | Self::Map(_) => {
-                None
-            }
+            Self::Ratio(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -212,7 +321,8 @@ impl Value {
             | Self::Symbol(_)
             | Self::List(_)
             | Self::Vector(_)
-            | Self::Map(_) => None,
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -239,7 +349,8 @@ impl Value {
             | Self::Symbol(_)
             | Self::String(_)
             | Self::Vector(_)
-            | Self::Map(_) => None,
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -266,7 +377,8 @@ impl Value {
             | Self::Symbol(_)
             | Self::String(_)
             | Self::List(_)
-            | Self::Map(_) => None,
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -293,7 +405,36 @@ impl Value {
             | Self::Symbol(_)
             | Self::String(_)
             | Self::List(_)
-            | Self::Vector(_) => None,
+            | Self::Vector(_)
+            | Self::Function(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `Function`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_function(&self) -> bool {
+        matches!(self, Self::Function(_))
+    }
+
+    /// Returns a reference to the contained function if this is a `Function` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_function(&self) -> Option<&Function> {
+        match *self {
+            Self::Function(ref func) => Some(func),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Symbol(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_) => None,
         }
     }
 
@@ -331,6 +472,8 @@ impl PartialEq for Value {
             (&Self::Vector(ref left), &Self::Vector(ref right)) => left == right,
             #[cfg(feature = "alloc")]
             (&Self::Map(ref left), &Self::Map(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
+            (&Self::Function(ref left), &Self::Function(ref right)) => left == right,
             _ => false,
         }
     }
@@ -362,6 +505,8 @@ impl Hash for Value {
             Self::Vector(ref vector) => vector.hash(state),
             #[cfg(feature = "alloc")]
             Self::Map(ref map) => map.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::Function(ref func) => func.hash(state),
         }
     }
 }
@@ -386,6 +531,8 @@ impl Display for Value {
             Self::Vector(ref vector) => write!(f, "{vector}"),
             #[cfg(feature = "alloc")]
             Self::Map(ref map) => write!(f, "{map}"),
+            #[cfg(feature = "alloc")]
+            Self::Function(ref func) => write!(f, "{func}"),
         }
     }
 }
@@ -451,6 +598,7 @@ impl Display for Displayable<'_> {
             Value::List(ref list) => write!(f, "{}", list.display(self.interner)),
             Value::Vector(ref vector) => write!(f, "{}", vector.display(self.interner)),
             Value::Map(ref map) => write!(f, "{}", map.display(self.interner)),
+            Value::Function(ref func) => write!(f, "{func}"),
         }
     }
 }
@@ -563,6 +711,14 @@ impl From<Map> for Value {
     #[inline]
     fn from(map: Map) -> Self {
         Self::Map(map)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<Function> for Value {
+    #[inline]
+    fn from(func: Function) -> Self {
+        Self::Function(func)
     }
 }
 

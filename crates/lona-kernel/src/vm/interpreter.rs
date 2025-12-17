@@ -6,14 +6,14 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use lona_core::chunk::{Chunk, Constant};
 use lona_core::integer::Integer;
-use lona_core::symbol::{self, Interner};
-use lona_core::value::Value;
-use lonala_compiler::opcode::{
+use lona_core::opcode::{
     Opcode, decode_a, decode_b, decode_bx, decode_c, decode_op, decode_opcode_byte, decode_sbx,
     rk_index, rk_is_constant,
 };
-use lonala_compiler::{Chunk, Constant};
+use lona_core::symbol::{self, Interner};
+use lona_core::value::{Function, Value};
 
 use super::error::Error;
 use super::frame::Frame;
@@ -22,6 +22,9 @@ use super::helpers::{constant_type_name, value_type_name, values_equal};
 use super::natives::{NativeFn, Registry as NativeRegistry};
 use super::numeric;
 use super::primitives::{PrintCallback, format_print_args};
+
+/// Maximum call stack depth to prevent stack overflow.
+const MAX_CALL_DEPTH: usize = 256;
 
 /// Default register file size.
 const DEFAULT_REGISTER_COUNT: usize = 256;
@@ -43,6 +46,8 @@ pub struct Vm<'interner> {
     print_callback: Option<PrintCallback>,
     /// Symbol ID for "print" - cached for fast lookup.
     print_symbol: Option<symbol::Id>,
+    /// Current call depth for stack overflow protection.
+    call_depth: usize,
 }
 
 impl<'interner> Vm<'interner> {
@@ -60,6 +65,7 @@ impl<'interner> Vm<'interner> {
             natives: NativeRegistry::new(),
             print_callback: None,
             print_symbol,
+            call_depth: 0,
         }
     }
 
@@ -134,6 +140,9 @@ impl<'interner> Vm<'interner> {
         for reg in &mut self.registers {
             *reg = Value::Nil;
         }
+
+        // Reset call depth
+        self.call_depth = 0;
 
         let mut frame = Frame::new(chunk, 0);
         self.run(&mut frame)
@@ -232,7 +241,7 @@ impl<'interner> Vm<'interner> {
     fn op_load_k(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
         let dest = decode_a(instruction);
         let const_idx = decode_bx(instruction);
-        let value = Self::constant_to_value(frame.chunk(), const_idx, frame)?;
+        let value = Self::load_constant(frame.chunk(), const_idx, frame)?;
         self.set_register(dest, value, frame)?;
         Ok(())
     }
@@ -526,13 +535,103 @@ impl<'interner> Vm<'interner> {
         // Get function value from R[base]
         let func_value = self.get_register(base, frame)?;
 
-        // Check if it's a symbol (global function reference)
-        let Value::Symbol(symbol) = func_value else {
-            return Err(Error::NotCallable {
+        match func_value {
+            Value::Function(ref func) => {
+                // User-defined function call
+                self.call_user_function(func, base, argc, frame)
+            }
+            Value::Symbol(symbol) => {
+                // Symbol-based function call (native or builtin)
+                self.call_symbol_function(symbol, base, argc, frame)
+            }
+            // All other types are not callable
+            Value::Nil
+            | Value::Bool(_)
+            | Value::Integer(_)
+            | Value::Float(_)
+            | Value::Ratio(_)
+            | Value::String(_)
+            | Value::List(_)
+            | Value::Vector(_)
+            | Value::Map(_)
+            | _ => Err(Error::NotCallable {
+                span: frame.current_span(),
+            }),
+        }
+    }
+
+    /// Calls a user-defined function.
+    fn call_user_function(
+        &mut self,
+        func: &Function,
+        base: u8,
+        argc: u8,
+        frame: &Frame<'_>,
+    ) -> Result<(), Error> {
+        // Check for stack overflow
+        if self.call_depth >= MAX_CALL_DEPTH {
+            return Err(Error::StackOverflow {
+                max_depth: MAX_CALL_DEPTH,
                 span: frame.current_span(),
             });
-        };
+        }
 
+        // Verify arity
+        if argc != func.arity() {
+            return Err(Error::ArityMismatch {
+                expected: func.arity(),
+                got: argc,
+                span: frame.current_span(),
+            });
+        }
+
+        // Get the function's chunk directly from the Function value
+        let fn_chunk = func.chunk();
+
+        // Collect arguments from R[base+1] .. R[base+argc]
+        let arguments = self.collect_args(base, argc, frame)?;
+
+        // Calculate the new frame's base register
+        // We'll use registers starting after the caller's current registers
+        let new_base = frame
+            .base()
+            .saturating_add(usize::from(base))
+            .saturating_add(1);
+
+        // Ensure we have enough registers
+        let needed_registers = new_base.saturating_add(usize::from(fn_chunk.max_registers()));
+        if needed_registers > self.registers.len() {
+            self.registers.resize(needed_registers, Value::Nil);
+        }
+
+        // Set up argument registers for the function (R[0], R[1], ... relative to new_base)
+        for (idx, arg) in arguments.into_iter().enumerate() {
+            let reg_idx = new_base.saturating_add(idx);
+            if let Some(reg) = self.registers.get_mut(reg_idx) {
+                *reg = arg;
+            }
+        }
+
+        // Create new frame and execute
+        let mut fn_frame = Frame::new(fn_chunk, new_base);
+        self.call_depth = self.call_depth.saturating_add(1);
+        let result = self.run(&mut fn_frame);
+        self.call_depth = self.call_depth.saturating_sub(1);
+
+        // Store result in R[base]
+        let result_value = result?;
+        self.set_register(base, result_value, frame)?;
+        Ok(())
+    }
+
+    /// Calls a symbol-based function (native or builtin).
+    fn call_symbol_function(
+        &mut self,
+        symbol: symbol::Id,
+        base: u8,
+        argc: u8,
+        frame: &Frame<'_>,
+    ) -> Result<(), Error> {
         // Check if this is the built-in print function
         if self.print_symbol == Some(symbol) {
             return self.handle_print(base, argc, frame);
@@ -650,17 +749,23 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Gets a value from an RK field (register or constant).
+    ///
+    /// Note: Function constants are not expected in RK operands, so this
+    /// method uses the static conversion that doesn't handle them.
     fn get_rk(&self, rk: u8, frame: &Frame<'_>) -> Result<Value, Error> {
         if rk_is_constant(rk) {
             let const_index = u16::from(rk_index(rk));
-            Self::constant_to_value(frame.chunk(), const_index, frame)
+            Self::rk_constant_to_value(frame.chunk(), const_index, frame)
         } else {
             self.get_register(rk, frame)
         }
     }
 
-    /// Converts a constant pool entry to a value.
-    fn constant_to_value(chunk: &Chunk, index: u16, frame: &Frame<'_>) -> Result<Value, Error> {
+    /// Loads a constant and converts it to a value.
+    ///
+    /// Handles function constants by creating a `Value::Function` with an
+    /// `Arc<Chunk>` for the function's bytecode.
+    fn load_constant(chunk: &Chunk, index: u16, frame: &Frame<'_>) -> Result<Value, Error> {
         let constant = chunk
             .get_constant(index)
             .ok_or_else(|| Error::InvalidConstant {
@@ -668,11 +773,11 @@ impl<'interner> Vm<'interner> {
                 span: frame.current_span(),
             })?;
 
-        Self::convert_constant_to_value(constant)
+        Self::convert_constant(constant)
     }
 
-    /// Recursively converts a Constant to a Value.
-    fn convert_constant_to_value(constant: &Constant) -> Result<Value, Error> {
+    /// Converts a constant to a value, handling function constants.
+    fn convert_constant(constant: &Constant) -> Result<Value, Error> {
         Ok(match *constant {
             Constant::Bool(val) => Value::Bool(val),
             Constant::Integer(num) => Value::Integer(Integer::from_i64(num)),
@@ -682,21 +787,65 @@ impl<'interner> Vm<'interner> {
                 Value::String(lona_core::string::HeapStr::from(text.as_str()))
             }
             Constant::List(ref elements) => {
-                let values: Result<alloc::vec::Vec<Value>, Error> = elements
-                    .iter()
-                    .map(Self::convert_constant_to_value)
-                    .collect();
+                let values: Result<alloc::vec::Vec<Value>, Error> =
+                    elements.iter().map(Self::convert_constant).collect();
                 Value::List(lona_core::list::List::from_vec(values?))
             }
             Constant::Vector(ref elements) => {
-                let values: Result<alloc::vec::Vec<Value>, Error> = elements
-                    .iter()
-                    .map(Self::convert_constant_to_value)
-                    .collect();
+                let values: Result<alloc::vec::Vec<Value>, Error> =
+                    elements.iter().map(Self::convert_constant).collect();
                 Value::Vector(lona_core::vector::Vector::from_vec(values?))
+            }
+            Constant::Function {
+                ref chunk,
+                arity,
+                ref name,
+            } => {
+                // Create Arc from the chunk and wrap in Function value
+                let chunk_arc = alloc::sync::Arc::new((**chunk).clone());
+                Value::Function(Function::new(chunk_arc, arity, name.clone()))
             }
             // Handle Nil and future Constant variants (Constant is #[non_exhaustive])
             Constant::Nil | _ => Value::Nil,
+        })
+    }
+
+    /// Converts a constant pool entry to a value (static version for RK operands).
+    ///
+    /// Does not handle function constants since they are not expected in RK positions.
+    fn rk_constant_to_value(chunk: &Chunk, index: u16, frame: &Frame<'_>) -> Result<Value, Error> {
+        let constant = chunk
+            .get_constant(index)
+            .ok_or_else(|| Error::InvalidConstant {
+                index,
+                span: frame.current_span(),
+            })?;
+
+        Self::convert_simple_constant(constant)
+    }
+
+    /// Converts a simple (non-function) constant to a value.
+    fn convert_simple_constant(constant: &Constant) -> Result<Value, Error> {
+        Ok(match *constant {
+            Constant::Bool(val) => Value::Bool(val),
+            Constant::Integer(num) => Value::Integer(Integer::from_i64(num)),
+            Constant::Float(num) => Value::Float(num),
+            Constant::Symbol(id) => Value::Symbol(id),
+            Constant::String(ref text) => {
+                Value::String(lona_core::string::HeapStr::from(text.as_str()))
+            }
+            Constant::List(ref elements) => {
+                let values: Result<alloc::vec::Vec<Value>, Error> =
+                    elements.iter().map(Self::convert_simple_constant).collect();
+                Value::List(lona_core::list::List::from_vec(values?))
+            }
+            Constant::Vector(ref elements) => {
+                let values: Result<alloc::vec::Vec<Value>, Error> =
+                    elements.iter().map(Self::convert_simple_constant).collect();
+                Value::Vector(lona_core::vector::Vector::from_vec(values?))
+            }
+            // Handle Nil, Function, and future Constant variants
+            Constant::Nil | Constant::Function { .. } | _ => Value::Nil,
         })
     }
 

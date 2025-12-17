@@ -5,8 +5,8 @@
 //!
 //! Provides type name utilities and value comparison functions.
 
+use lona_core::chunk::Constant;
 use lona_core::value::Value;
-use lonala_compiler::Constant;
 
 use super::numeric::integer_to_f64;
 
@@ -23,6 +23,7 @@ pub const fn value_type_name(value: &Value) -> &'static str {
         Value::List(_) => "list",
         Value::Vector(_) => "vector",
         Value::Map(_) => "map",
+        Value::Function(_) => "function",
         // Value is non-exhaustive, handle future variants
         _ => "unknown",
     }
@@ -39,6 +40,7 @@ pub const fn constant_type_name(constant: &Constant) -> &'static str {
         Constant::Symbol(_) => "symbol",
         Constant::List(_) => "list",
         Constant::Vector(_) => "vector",
+        Constant::Function { .. } => "function",
         // Constant is non-exhaustive, handle future variants
         _ => "unknown",
     }

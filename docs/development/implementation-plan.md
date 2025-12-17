@@ -346,10 +346,10 @@ lona> (join ", " ["a" "b" "c"])
 
 | Task | Description |
 |------|-------------|
-| 7.1 Build System Integration | `build.rs` embeds `stdlib/*.lona`, compile at boot |
-| 7.2 `stdlib/lona.core` | `map`, `filter`, `reduce`, `comp`, `partial`, `str` |
+| 7.1 Build System Integration | `build.rs` embeds `lona/*.lona`, compile at boot |
+| 7.2 `lona/core.lona` | `map`, `filter`, `reduce`, `comp`, `partial`, `str` |
 | 7.3 Native Primitives | `native/read-string`, `native/eval`, `native/uart-*` |
-| 7.4 `stdlib/lona.repl` | `read-line`, `print-result`, `repl-loop` |
+| 7.4 `lona/repl.lona` | `read-line`, `print-result`, `repl-loop` |
 | 7.5 Boot Sequence | Load core, load repl, call `(lona.repl/main)` |
 
 **Deliverable**: REPL is Lonala code: `(source lona.repl/main)` works
@@ -408,7 +408,7 @@ Hello from process!
 | 10.2 send Primitive | Copy message to target's mailbox |
 | 10.3 receive Special Form | Pattern matching, selective receive, blocking |
 | 10.4 Timeouts | `(after ms expr)` clause, timer management |
-| 10.5 `stdlib/lona.process` | `call` (sync), `cast` (async) |
+| 10.5 `lona/process.lona` | `call` (sync), `cast` (async) |
 
 **Deliverable**:
 ```clojure
@@ -450,7 +450,7 @@ lona> (receive n n)
 | 12.2 Process Monitoring | `monitor`, `demonitor`, `:DOWN` messages |
 | 12.3 Exit Signals | Normal/abnormal exits, propagation, `trap-exit` |
 | 12.4 Preemptive Scheduling | Reduction counting, fair preemption |
-| 12.5 `stdlib/lona.supervisor` | Supervisor behavior, restart strategies |
+| 12.5 `lona/supervisor.lona` | Supervisor behavior, restart strategies |
 
 **Deliverable**:
 ```clojure
@@ -471,7 +471,7 @@ lona> (def-supervisor my-sup
 | 13.2 Breakpoints | `break-on-entry`, `break-on-exit`, conditional |
 | 13.3 Tracing | `trace-calls`, `trace-messages` |
 | 13.4 Condition/Restart System | `signal`, `restart-case`, `handler-bind` |
-| 13.5 `stdlib/lona.debug` | Debugger UI, inspector |
+| 13.5 `lona/debug.lona` | Debugger UI, inspector |
 
 **Deliverable**: Fix bugs in running system without restart
 
@@ -663,7 +663,7 @@ lona/
 │   │
 │   └── lona-runtime/             # seL4 root task (Tier 2/3 tests)
 │       ├── Cargo.toml
-│       ├── build.rs              # Embeds stdlib/*.lona
+│       ├── build.rs              # Embeds lona/*.lona
 │       ├── src/
 │       │   ├── main.rs           # Entry point, receives bootinfo
 │       │   ├── platform/
@@ -676,16 +676,17 @@ lona/
 │       │       ├── vspace.rs     # Address space management
 │       │       ├── cspace.rs     # Capability space management
 │       │       └── ipc.rs        # Inter-domain IPC
-│       ├── tests/                # On-target tests (Tier 2)
-│       │   └── basic.rs
-│       └── stdlib/               # Lonala standard library
-│           ├── core.lona       # Core functions
-│           ├── collections.lona
-│           ├── process.lona    # Process utilities
-│           ├── supervisor.lona # Supervision trees
-│           ├── repl.lona       # REPL implementation
-│           ├── debug.lona      # Debugging tools
-│           └── io.lona         # I/O abstractions
+│       └── tests/                # On-target tests (Tier 2)
+│           └── basic.rs
+│
+├── lona/                         # Lonala standard library
+│   ├── core.lona                 # lona.core namespace
+│   ├── collections.lona          # lona.collections namespace
+│   ├── process.lona              # lona.process namespace
+│   ├── supervisor.lona           # lona.supervisor namespace
+│   ├── repl.lona                 # lona.repl namespace
+│   ├── debug.lona                # lona.debug namespace
+│   └── io.lona                   # lona.io namespace
 │
 ├── tests/                        # Integration tests (Tier 3)
 │   └── integration/
@@ -745,7 +746,7 @@ All implementation tasks with status tracking.
 | 23 | 6.2 | Namespace Declaration | ns special form, namespace registry, current namespace | open |
 | 24 | 6.3 | Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution | open |
 | 25 | 6.4 | Require/Use/Refer | Load namespaces, create aliases, selectively import | open |
-| 26 | 7.1 | Build Integration | build.rs embeds stdlib/*.lona files | open |
+| 26 | 7.1 | Build Integration | build.rs embeds lona/*.lona files | open |
 | 27 | 7.2 | lona.core | map, filter, reduce, comp, partial, str | open |
 | 28 | 7.3 | Native Primitives | read-string, eval, uart-read, uart-write | open |
 | 29 | 7.4 | lona.repl | read-line, print-result, repl-loop | open |

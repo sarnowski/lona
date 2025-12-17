@@ -11,11 +11,15 @@ Lona is a general-purpose operating system combining:
 
 The runtime is written in Rust (`no_std`) and runs as seL4's root task. Userspace will be programmed in Lonala, a custom Clojure/Erlang-inspired language.
 
-### Required Reading
+## Required Reading
 
 **Read when planning new features or tasks:**
 - `docs/goals.md` - The complete vision and design philosophy. Consult when making architectural decisions.
 - `docs/development/implementation-plan.md` - The phased roadmap, component dependencies, and current status.
+
+## Required Principle
+
+Always aim for the correct solution. Never take a shortcut, workaround, hack or defer a solution. We always favor the correct solution, even if it is more effort.
 
 ## Directory Structure
 

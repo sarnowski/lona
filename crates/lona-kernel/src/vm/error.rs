@@ -5,8 +5,8 @@
 
 use core::fmt::{self, Display};
 
+use lona_core::span::Span;
 use lona_core::symbol;
-use lonala_parser::Span;
 
 use super::natives::NativeError;
 
@@ -93,95 +93,93 @@ pub enum Error {
         /// Source location of the call.
         span: Span,
     },
+
+    /// Function was called with wrong number of arguments.
+    ArityMismatch {
+        /// Expected number of arguments.
+        expected: u8,
+        /// Actual number of arguments provided.
+        got: u8,
+        /// Source location of the call.
+        span: Span,
+    },
 }
 
 impl Display for Error {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Self::InvalidOpcode { byte, pc, ref span } => {
-                let start = span.start;
-                let end = span.end;
-                write!(
-                    f,
-                    "invalid opcode 0x{byte:02X} at pc={pc} (span {start}-{end})"
-                )
-            }
-            Self::UndefinedGlobal { symbol, ref span } => {
-                let sym_id = symbol.as_u32();
-                let start = span.start;
-                let end = span.end;
-                write!(
-                    f,
-                    "undefined global variable (symbol #{sym_id}) at span {start}-{end}"
-                )
-            }
+            Self::InvalidOpcode { byte, pc, ref span } => write!(
+                f,
+                "invalid opcode 0x{byte:02X} at pc={pc} (span {}-{})",
+                span.start, span.end
+            ),
+            Self::UndefinedGlobal { symbol, ref span } => write!(
+                f,
+                "undefined global variable (symbol #{}) at span {}-{}",
+                symbol.as_u32(),
+                span.start,
+                span.end
+            ),
             Self::TypeError {
                 expected,
                 got,
                 ref span,
-            } => {
-                let start = span.start;
-                let end = span.end;
-                write!(
-                    f,
-                    "type error: expected {expected}, got {got} at span {start}-{end}"
-                )
-            }
+            } => write!(
+                f,
+                "type error: expected {expected}, got {got} at span {}-{}",
+                span.start, span.end
+            ),
             Self::DivisionByZero { ref span } => {
-                let start = span.start;
-                let end = span.end;
-                write!(f, "division by zero at span {start}-{end}")
+                write!(f, "division by zero at span {}-{}", span.start, span.end)
             }
             Self::StackOverflow {
                 max_depth,
                 ref span,
-            } => {
-                let start = span.start;
-                let end = span.end;
-                write!(
-                    f,
-                    "stack overflow (max depth {max_depth}) at span {start}-{end}"
-                )
-            }
-            Self::NotCallable { ref span } => {
-                let start = span.start;
-                let end = span.end;
-                write!(
-                    f,
-                    "attempted to call non-callable value at span {start}-{end}"
-                )
-            }
-            Self::InvalidConstant { index, ref span } => {
-                let start = span.start;
-                let end = span.end;
-                write!(
-                    f,
-                    "invalid constant pool index {index} at span {start}-{end}"
-                )
-            }
-            Self::InvalidRegister { index, ref span } => {
-                let start = span.start;
-                let end = span.end;
-                write!(f, "invalid register index {index} at span {start}-{end}")
-            }
-            Self::UndefinedFunction { symbol, ref span } => {
-                let sym_id = symbol.as_u32();
-                let start = span.start;
-                let end = span.end;
-                write!(
-                    f,
-                    "undefined function (symbol #{sym_id}) at span {start}-{end}"
-                )
-            }
+            } => write!(
+                f,
+                "stack overflow (max depth {max_depth}) at span {}-{}",
+                span.start, span.end
+            ),
+            Self::NotCallable { ref span } => write!(
+                f,
+                "attempted to call non-callable value at span {}-{}",
+                span.start, span.end
+            ),
+            Self::InvalidConstant { index, ref span } => write!(
+                f,
+                "invalid constant pool index {index} at span {}-{}",
+                span.start, span.end
+            ),
+            Self::InvalidRegister { index, ref span } => write!(
+                f,
+                "invalid register index {index} at span {}-{}",
+                span.start, span.end
+            ),
+            Self::UndefinedFunction { symbol, ref span } => write!(
+                f,
+                "undefined function (symbol #{}) at span {}-{}",
+                symbol.as_u32(),
+                span.start,
+                span.end
+            ),
             Self::Native {
                 ref error,
                 ref span,
-            } => {
-                let start = span.start;
-                let end = span.end;
-                write!(f, "native function error: {error} at span {start}-{end}")
-            }
+            } => write!(
+                f,
+                "native function error: {error} at span {}-{}",
+                span.start, span.end
+            ),
+            Self::ArityMismatch {
+                expected,
+                got,
+                ref span,
+            } => write!(
+                f,
+                "arity mismatch: expected {expected} arguments, got {got} at span {}-{}",
+                span.start, span.end
+            ),
         }
     }
 }

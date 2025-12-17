@@ -5,23 +5,22 @@
 
 extern crate alloc;
 
+use lona_core::chunk::{Chunk, Constant};
+use lona_core::opcode::{Opcode, decode_a, decode_b, decode_bx, decode_c, decode_op};
+use lona_core::span::Span;
 use lona_core::symbol;
 
-use crate::chunk::Constant;
 use crate::compiler::{CompileError, compile};
 use crate::error::Error;
-use crate::opcode::{Opcode, decode_a, decode_b, decode_bx, decode_c, decode_op};
-
-use lonala_parser::Span;
 
 /// Helper to compile source and return the chunk.
-fn compile_source(source: &str) -> crate::chunk::Chunk {
+fn compile_source(source: &str) -> Chunk {
     let mut interner = symbol::Interner::new();
     compile(source, &mut interner).expect("compilation should succeed")
 }
 
 /// Helper to compile and return chunk + interner for symbol checks.
-fn compile_with_interner(source: &str) -> (crate::chunk::Chunk, symbol::Interner) {
+fn compile_with_interner(source: &str) -> (Chunk, symbol::Interner) {
     let mut interner = symbol::Interner::new();
     let chunk = compile(source, &mut interner).expect("compilation should succeed");
     (chunk, interner)

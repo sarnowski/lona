@@ -9,18 +9,36 @@
 //!
 //! See `docs/architecture/register-based-vm.md` (from the repository root) for design rationale.
 
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use core::fmt::{self, Write as _};
+use core::fmt::{self, Display, Write as _};
 
-use lona_core::symbol;
-use lonala_parser::Span;
-
-use crate::error::Error;
 use crate::opcode::{
     Opcode, decode_a, decode_b, decode_bx, decode_c, decode_op, decode_sbx, rk_index,
     rk_is_constant,
 };
+use crate::span::Span;
+use crate::symbol;
+
+/// Error when the constant pool exceeds its maximum size.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ConstantPoolFullError {
+    /// Source location where the error occurred.
+    pub span: Span,
+}
+
+impl Display for ConstantPoolFullError {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "too many constants in chunk (maximum 65535) at {}",
+            self.span
+        )
+    }
+}
 
 /// A constant value stored in a chunk's constant pool.
 ///
@@ -45,6 +63,18 @@ pub enum Constant {
     List(Vec<Self>),
     /// A vector of constants (for quoted vectors).
     Vector(Vec<Self>),
+    /// A compiled function.
+    ///
+    /// Contains the function's bytecode chunk, arity (parameter count),
+    /// and an optional name for debugging. Used when compiling `fn` expressions.
+    Function {
+        /// The compiled bytecode for the function body.
+        chunk: Box<Chunk>,
+        /// Number of parameters the function expects.
+        arity: u8,
+        /// Optional function name for debugging and error messages.
+        name: Option<String>,
+    },
 }
 
 impl fmt::Display for Constant {
@@ -77,6 +107,12 @@ impl fmt::Display for Constant {
                 }
                 write!(f, "]")
             }
+            Self::Function {
+                ref name, arity, ..
+            } => match *name {
+                Some(ref func_name) => write!(f, "#<fn {func_name}/{arity}>"),
+                None => write!(f, "#<fn/{arity}>"),
+            },
         }
     }
 }
@@ -85,7 +121,7 @@ impl fmt::Display for Constant {
 ///
 /// Represents a function body or top-level expression. Contains all the
 /// information needed for the VM to execute the code.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Chunk {
     /// Bytecode instructions.
@@ -171,11 +207,6 @@ impl Chunk {
     }
 
     /// Emits an instruction with its source span, returning the instruction index.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Error::TooManyConstants` if the code section would exceed
-    /// the maximum size (though this is unlikely in practice).
     #[inline]
     pub fn emit(&mut self, instruction: u32, span: Span) -> usize {
         let index = self.code.len();
@@ -211,30 +242,29 @@ impl Chunk {
     /// Adds a constant to the constant pool, returning its index.
     ///
     /// This method does not track source spans - if you need span-aware
-    /// error reporting, use the compiler's `add_constant` wrapper instead.
+    /// error reporting, use `add_constant_at` instead.
     ///
     /// # Errors
     ///
-    /// Returns `Error::TooManyConstants` if the constant pool is full (> 65535).
+    /// Returns `ConstantPoolFullError` if the constant pool is full (> 65535).
     #[inline]
-    pub fn add_constant(&mut self, constant: Constant) -> Result<u16, Error> {
-        let index = self.constants.len();
-        let index_u16 = u16::try_from(index).map_err(|_err| Error::TooManyConstants {
-            span: Span::new(0_usize, 0_usize),
-        })?;
-        self.constants.push(constant);
-        Ok(index_u16)
+    pub fn add_constant(&mut self, constant: Constant) -> Result<u16, ConstantPoolFullError> {
+        self.add_constant_at(constant, Span::new(0_usize, 0_usize))
     }
 
     /// Adds a constant with source span for error reporting.
     ///
     /// # Errors
     ///
-    /// Returns `Error::TooManyConstants` with the span if the pool is full.
+    /// Returns `ConstantPoolFullError` with the span if the pool is full.
     #[inline]
-    pub fn add_constant_at(&mut self, constant: Constant, span: Span) -> Result<u16, Error> {
+    pub fn add_constant_at(
+        &mut self,
+        constant: Constant,
+        span: Span,
+    ) -> Result<u16, ConstantPoolFullError> {
         let index = self.constants.len();
-        let index_u16 = u16::try_from(index).map_err(|_err| Error::TooManyConstants { span })?;
+        let index_u16 = u16::try_from(index).map_err(|_err| ConstantPoolFullError { span })?;
         self.constants.push(constant);
         Ok(index_u16)
     }
@@ -304,8 +334,8 @@ impl Chunk {
         if !self.constants.is_empty() {
             let _result = writeln!(output);
             let _result = writeln!(output, "Constants:");
-            for (i, constant) in self.constants.iter().enumerate() {
-                let _result = writeln!(output, "  K{i}: {constant}");
+            for (idx, constant) in self.constants.iter().enumerate() {
+                let _result = writeln!(output, "  K{idx}: {constant}");
             }
         }
 
@@ -402,7 +432,7 @@ impl Chunk {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_possible_wrap,
-                    reason = "instruction offset is small; used for display only"
+                    reason = "[approved] instruction offset is small; used for display only"
                 )]
                 let target = (offset as i64)
                     .saturating_add(1)
@@ -415,7 +445,7 @@ impl Chunk {
                 #[expect(
                     clippy::as_conversions,
                     clippy::cast_possible_wrap,
-                    reason = "instruction offset is small; used for display only"
+                    reason = "[approved] instruction offset is small; used for display only"
                 )]
                 let target = (offset as i64)
                     .saturating_add(1)

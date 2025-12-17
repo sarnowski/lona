@@ -8,7 +8,8 @@
 
 use core::fmt;
 
-use lonala_parser::Span;
+use lona_core::chunk::ConstantPoolFullError;
+use lona_core::span::Span;
 
 /// Errors that can occur during compilation.
 ///
@@ -92,6 +93,13 @@ impl Error {
             | Self::NotImplemented { span, .. }
             | Self::InvalidSpecialForm { span, .. } => span,
         }
+    }
+}
+
+impl From<ConstantPoolFullError> for Error {
+    #[inline]
+    fn from(err: ConstantPoolFullError) -> Self {
+        Self::TooManyConstants { span: err.span }
     }
 }
 

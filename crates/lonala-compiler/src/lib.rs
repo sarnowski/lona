@@ -15,8 +15,8 @@
 //!
 //! # Modules
 //!
-//! - [`opcode`] - Opcode enum and instruction encoding/decoding
-//! - [`chunk`] - Bytecode chunk and constant pool structures
+//! - [`opcode`] - Opcode enum and instruction encoding/decoding (re-exported from lona-core)
+//! - [`chunk`] - Bytecode chunk and constant pool structures (re-exported from lona-core)
 //! - [`error`] - Compilation error types
 //! - [`compiler`] - AST to bytecode compiler
 //!
@@ -39,15 +39,15 @@
 extern crate alloc;
 
 #[cfg(feature = "alloc")]
-pub mod chunk;
-#[cfg(feature = "alloc")]
 pub mod compiler;
 pub mod error;
-pub mod opcode;
 
+// Re-export bytecode types from lona-core
 #[cfg(feature = "alloc")]
-pub use chunk::{Chunk, Constant};
+pub use lona_core::chunk::{Chunk, Constant, ConstantPoolFullError};
+pub use lona_core::opcode::{self, Opcode};
+pub use lona_core::span::Span;
+
 #[cfg(feature = "alloc")]
 pub use compiler::{CompileError, Compiler, compile};
 pub use error::Error;
-pub use opcode::Opcode;

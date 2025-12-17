@@ -71,6 +71,7 @@ impl ValueKey {
             Value::List(_) => 7,
             Value::Vector(_) => 8,
             Value::Map(_) => 9,
+            Value::Function(_) => 10,
         }
     }
 }

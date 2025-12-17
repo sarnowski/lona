@@ -3,12 +3,12 @@
 
 //! Tests for the VM interpreter.
 
+use lona_core::chunk::{Chunk, Constant};
 use lona_core::integer::Integer;
+use lona_core::opcode::{Opcode, encode_abc, encode_abx, encode_asbx, rk_constant};
+use lona_core::span::Span;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
-use lonala_compiler::opcode::{Opcode, encode_abc, encode_abx, encode_asbx, rk_constant};
-use lonala_compiler::{Chunk, Constant};
-use lonala_parser::Span;
 
 use super::NativeError;
 use super::error::Error;
@@ -1386,4 +1386,171 @@ fn integration_quote_nested_list() {
     } else {
         panic!("expected List value, got {:?}", result);
     }
+}
+
+// =============================================================================
+// fn (Lambda Functions) Tests
+// =============================================================================
+
+#[test]
+fn integration_fn_identity() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ((fn [x] x) 42) → 42
+    let result = eval_with_state("((fn [x] x) 42)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(42)));
+}
+
+#[test]
+fn integration_fn_two_params() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ((fn [x y] (+ x y)) 1 2) → 3
+    let result = eval_with_state("((fn [x y] (+ x y)) 1 2)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(3)));
+}
+
+#[test]
+fn integration_fn_no_params() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ((fn [] 42)) → 42
+    let result = eval_with_state("((fn [] 42))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(42)));
+}
+
+#[test]
+fn integration_fn_stored_in_global() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Define function and store in global
+    let _def_result = eval_with_state("(def square (fn [n] (* n n)))", &mut interner, &mut globals)
+        .expect("def should succeed");
+
+    // Call the stored function
+    let result =
+        eval_with_state("(square 5)", &mut interner, &mut globals).expect("call should succeed");
+    assert_eq!(result, Value::Integer(Integer::from_i64(25)));
+}
+
+#[test]
+fn integration_fn_with_let() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ((fn [x] (let [y 10] (+ x y))) 5) → 15
+    let result = eval_with_state(
+        "((fn [x] (let [y 10] (+ x y))) 5)",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(15)));
+}
+
+#[test]
+fn integration_fn_multiple_body_exprs() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ((fn [x] 1 2 (+ x 1)) 5) → 6
+    // (like do, returns last expression)
+    let result = eval_with_state("((fn [x] 1 2 (+ x 1)) 5)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(6)));
+}
+
+#[test]
+fn integration_fn_named() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ((fn add [x y] (+ x y)) 3 4) → 7
+    let result =
+        eval_with_state("((fn add [x y] (+ x y)) 3 4)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(7)));
+}
+
+#[test]
+fn integration_fn_arity_error() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ((fn [x y] (+ x y)) 1) → error: expected 2 args, got 1
+    let result = eval_with_state("((fn [x y] (+ x y)) 1)", &mut interner, &mut globals);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    // Should be ArityMismatch error
+    assert!(
+        matches!(
+            err,
+            super::Error::ArityMismatch {
+                expected: 2,
+                got: 1,
+                ..
+            }
+        ),
+        "Expected ArityMismatch error, got: {err:?}"
+    );
+}
+
+#[test]
+fn integration_fn_nested_calls() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Define two functions
+    let _def1 = eval_with_state("(def add (fn [x y] (+ x y)))", &mut interner, &mut globals)
+        .expect("def add should succeed");
+    let _def2 = eval_with_state("(def mul (fn [x y] (* x y)))", &mut interner, &mut globals)
+        .expect("def mul should succeed");
+
+    // (add (mul 2 3) (mul 4 5)) → 6 + 20 = 26
+    let result = eval_with_state("(add (mul 2 3) (mul 4 5))", &mut interner, &mut globals)
+        .expect("nested calls should succeed");
+    assert_eq!(result, Value::Integer(Integer::from_i64(26)));
+}
+
+#[test]
+fn integration_fn_empty_body_returns_nil() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ((fn [])) → nil
+    let result = eval_with_state("((fn []))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Nil);
+}
+
+#[test]
+fn integration_fn_value_is_function() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (fn [x] x) should return a Function value
+    let result = eval_with_state("(fn [x] x)", &mut interner, &mut globals).unwrap();
+    assert!(
+        result.is_function(),
+        "Expected function value, got: {result:?}"
+    );
+}
+
+#[test]
+fn integration_fn_recursive_via_global() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Factorial using global binding for recursion
+    let _def = eval_with_state(
+        "(def factorial (fn [n] (if (= n 0) 1 (* n (factorial (- n 1))))))",
+        &mut interner,
+        &mut globals,
+    )
+    .expect("def factorial should succeed");
+
+    let result = eval_with_state("(factorial 5)", &mut interner, &mut globals)
+        .expect("factorial 5 should succeed");
+    assert_eq!(result, Value::Integer(Integer::from_i64(120)));
 }

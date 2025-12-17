@@ -262,7 +262,7 @@ impl fmt::Display for Opcode {
 #[must_use]
 #[expect(
     clippy::as_conversions,
-    reason = "const fn requires as; widening u8->u32 is safe"
+    reason = "[approved] const fn requires as; widening u8->u32 is safe"
 )]
 pub const fn encode_abc(op: Opcode, dest: u8, op_b: u8, op_c: u8) -> u32 {
     let op_byte = op as u8;
@@ -276,7 +276,7 @@ pub const fn encode_abc(op: Opcode, dest: u8, op_b: u8, op_c: u8) -> u32 {
 #[must_use]
 #[expect(
     clippy::as_conversions,
-    reason = "const fn requires as; widening u8/u16->u32 is safe"
+    reason = "[approved] const fn requires as; widening u8/u16->u32 is safe"
 )]
 pub const fn encode_abx(op: Opcode, dest: u8, bx: u16) -> u32 {
     let op_byte = op as u8;
@@ -294,7 +294,7 @@ pub const fn encode_abx(op: Opcode, dest: u8, bx: u16) -> u32 {
 #[expect(
     clippy::as_conversions,
     clippy::cast_sign_loss,
-    reason = "const fn requires as; i16->u16 bitcast is intentional"
+    reason = "[approved] const fn requires as; i16->u16 bitcast is intentional"
 )]
 pub const fn encode_asbx(op: Opcode, dest: u8, sbx: i16) -> u32 {
     let op_byte = op as u8;
@@ -312,7 +312,10 @@ pub const fn encode_asbx(op: Opcode, dest: u8, sbx: i16) -> u32 {
 /// Returns `None` if the opcode byte is invalid.
 #[inline]
 #[must_use]
-#[expect(clippy::as_conversions, reason = "masking guarantees value fits in u8")]
+#[expect(
+    clippy::as_conversions,
+    reason = "[approved] masking guarantees value fits in u8"
+)]
 pub const fn decode_op(instruction: u32) -> Option<Opcode> {
     let byte = (instruction & 0xFF) as u8;
     Opcode::from_u8(byte)
@@ -323,7 +326,10 @@ pub const fn decode_op(instruction: u32) -> Option<Opcode> {
 /// Use `decode_op` for safe decoding with validation.
 #[inline]
 #[must_use]
-#[expect(clippy::as_conversions, reason = "masking guarantees value fits in u8")]
+#[expect(
+    clippy::as_conversions,
+    reason = "[approved] masking guarantees value fits in u8"
+)]
 pub const fn decode_opcode_byte(instruction: u32) -> u8 {
     (instruction & 0xFF) as u8
 }
@@ -333,7 +339,7 @@ pub const fn decode_opcode_byte(instruction: u32) -> u8 {
 #[must_use]
 #[expect(
     clippy::as_conversions,
-    reason = "masking and shifting guarantees value fits in u8"
+    reason = "[approved] masking and shifting guarantees value fits in u8"
 )]
 pub const fn decode_a(instruction: u32) -> u8 {
     ((instruction >> 8) & 0xFF) as u8
@@ -344,7 +350,7 @@ pub const fn decode_a(instruction: u32) -> u8 {
 #[must_use]
 #[expect(
     clippy::as_conversions,
-    reason = "masking and shifting guarantees value fits in u8"
+    reason = "[approved] masking and shifting guarantees value fits in u8"
 )]
 pub const fn decode_b(instruction: u32) -> u8 {
     ((instruction >> 16) & 0xFF) as u8
@@ -355,7 +361,7 @@ pub const fn decode_b(instruction: u32) -> u8 {
 #[must_use]
 #[expect(
     clippy::as_conversions,
-    reason = "masking and shifting guarantees value fits in u8"
+    reason = "[approved] masking and shifting guarantees value fits in u8"
 )]
 pub const fn decode_c(instruction: u32) -> u8 {
     ((instruction >> 24) & 0xFF) as u8
@@ -366,7 +372,7 @@ pub const fn decode_c(instruction: u32) -> u8 {
 #[must_use]
 #[expect(
     clippy::as_conversions,
-    reason = "shifting guarantees value fits in u16"
+    reason = "[approved] shifting guarantees value fits in u16"
 )]
 pub const fn decode_bx(instruction: u32) -> u16 {
     (instruction >> 16) as u16
@@ -378,7 +384,7 @@ pub const fn decode_bx(instruction: u32) -> u16 {
 #[expect(
     clippy::as_conversions,
     clippy::cast_possible_wrap,
-    reason = "u16 to i16 bitcast is intentional for signed decoding"
+    reason = "[approved] u16 to i16 bitcast is intentional for signed decoding"
 )]
 pub const fn decode_sbx(instruction: u32) -> i16 {
     let unsigned = (instruction >> 16_i32) as u16;
@@ -507,14 +513,14 @@ mod tests {
     fn encode_abc_roundtrip() {
         for op in 0_u8..=Opcode::MAX {
             let opcode = Opcode::from_u8(op).unwrap();
-            for a in [0_u8, 1, 127, 255] {
-                for b in [0_u8, 1, 127, 255] {
-                    for c in [0_u8, 1, 127, 255] {
-                        let instr = encode_abc(opcode, a, b, c);
+            for dest in [0_u8, 1, 127, 255] {
+                for op_b in [0_u8, 1, 127, 255] {
+                    for op_c in [0_u8, 1, 127, 255] {
+                        let instr = encode_abc(opcode, dest, op_b, op_c);
                         assert_eq!(decode_op(instr), Some(opcode));
-                        assert_eq!(decode_a(instr), a);
-                        assert_eq!(decode_b(instr), b);
-                        assert_eq!(decode_c(instr), c);
+                        assert_eq!(decode_a(instr), dest);
+                        assert_eq!(decode_b(instr), op_b);
+                        assert_eq!(decode_c(instr), op_c);
                     }
                 }
             }
@@ -653,17 +659,17 @@ mod tests {
     #[test]
     fn rk_roundtrip() {
         // Register roundtrip
-        for r in 0_u8..=127 {
-            let encoded = rk_register(r).unwrap();
+        for reg in 0_u8..=127 {
+            let encoded = rk_register(reg).unwrap();
             assert!(!rk_is_constant(encoded));
-            assert_eq!(rk_index(encoded), r);
+            assert_eq!(rk_index(encoded), reg);
         }
 
         // Constant roundtrip
-        for c in 0_u8..=127 {
-            let encoded = rk_constant(c).unwrap();
+        for const_idx in 0_u8..=127 {
+            let encoded = rk_constant(const_idx).unwrap();
             assert!(rk_is_constant(encoded));
-            assert_eq!(rk_index(encoded), c);
+            assert_eq!(rk_index(encoded), const_idx);
         }
     }
 

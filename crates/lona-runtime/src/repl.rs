@@ -408,6 +408,10 @@ mod interactive {
                     let displayable = map.display(&self.repl.interner);
                     self.io.write_fmt(format_args!("{displayable}\n"));
                 }
+                Value::Function(ref func) => {
+                    self.io.write_fmt(format_args!("{func}\n"));
+                }
+                // Value is non-exhaustive, handle future variants
                 _ => {
                     self.io.write_fmt(format_args!("{value:?}\n"));
                 }

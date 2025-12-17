@@ -27,6 +27,8 @@ extern crate alloc;
 
 pub mod allocator;
 #[cfg(feature = "alloc")]
+pub mod chunk;
+#[cfg(feature = "alloc")]
 mod fnv;
 #[cfg(feature = "alloc")]
 mod hamt;
@@ -36,10 +38,12 @@ pub mod integer;
 pub mod list;
 #[cfg(feature = "alloc")]
 pub mod map;
+pub mod opcode;
 #[cfg(feature = "alloc")]
 mod pvec;
 #[cfg(feature = "alloc")]
 pub mod ratio;
+pub mod span;
 #[cfg(feature = "alloc")]
 pub mod string;
 pub mod symbol;

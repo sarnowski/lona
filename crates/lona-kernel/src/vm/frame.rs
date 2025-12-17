@@ -3,8 +3,8 @@
 
 //! Call frame for tracking execution state within a function.
 
-use lonala_compiler::Chunk;
-use lonala_parser::Span;
+use lona_core::chunk::Chunk;
+use lona_core::span::Span;
 
 /// A call frame representing execution state within a single function.
 ///
@@ -125,7 +125,7 @@ impl<'chunk> Frame<'chunk> {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
-    use lonala_compiler::opcode::{Opcode, encode_abc};
+    use lona_core::opcode::{Opcode, encode_abc};
 
     /// Creates a test chunk with the given instructions.
     fn make_chunk(instructions: &[(u32, Span)]) -> Chunk {
