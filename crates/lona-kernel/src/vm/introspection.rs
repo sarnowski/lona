@@ -18,7 +18,9 @@ use lona_core::value::Value;
 use lonala_compiler::MacroRegistry;
 
 use super::Vm;
-use super::collections::lookup_primitives;
+use super::collections::{
+    lookup_primitives, register_primitives as register_collection_primitives,
+};
 use super::natives::{NativeContext, NativeError};
 
 /// Maximum depth for recursive macro expansion in `macroexpand`.
@@ -152,7 +154,7 @@ fn expand_once_internal(
 
     // Create a fresh VM for macro expansion
     let mut vm = Vm::new(interner);
-    register_primitives(&mut vm, &collection_symbols);
+    register_collection_primitives(&mut vm, &collection_symbols);
 
     // Execute the macro's chunk with arguments
     let result = vm

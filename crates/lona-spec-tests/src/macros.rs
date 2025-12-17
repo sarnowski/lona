@@ -119,10 +119,8 @@ fn test_11_2_macro_predicate_false_function() {
     );
 }
 
-/// [IGNORED] Spec 11.2: macroexpand-1 expands exactly once
-/// Tracking: macroexpand-1 not yet fully implemented
+/// Spec 11.2: macroexpand-1 expands exactly once
 #[test]
-#[ignore]
 fn test_11_2_macroexpand_1() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx
@@ -146,10 +144,8 @@ fn test_11_2_macroexpand_1_non_macro() {
     );
 }
 
-/// [IGNORED] Spec 11.2: macroexpand keeps expanding until top-level is not a macro
-/// Tracking: macroexpand not yet fully implemented
+/// Spec 11.2: macroexpand keeps expanding until top-level is not a macro
 #[test]
-#[ignore]
 fn test_11_2_macroexpand_full() {
     let mut ctx = SpecTestContext::new();
     // Define two macros where one expands to another
