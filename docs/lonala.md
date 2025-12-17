@@ -1269,19 +1269,30 @@ Macros enable compile-time code transformation. They receive unevaluated code as
 ; => when
 ```
 
-> **Note**: Macros are currently defined and stored but not yet expanded during compilation. Macro expansion is Phase 4.3.
+> **Note**: Macros are fully functional. They are defined with `defmacro`, stored in a persistent registry, and expanded at compile time using the VM-based macro expander. Introspection primitives (`macro?`, `macroexpand-1`, `macroexpand`) are also available.
 
-### 11.2 Macro Expansion (Planned)
+### 11.2 Macro Introspection
 
 ```clojure
-(macroexpand '(unless false (print "hi")))
-; => (if (not false) (print "hi") nil)
+;; Check if a symbol names a macro
+(macro? 'unless)  ; => true
+(macro? 'if)      ; => false (special form)
+(macro? 'foo)     ; => false (undefined)
 
+;; macroexpand-1: expand exactly once
 (macroexpand-1 '(unless false (print "hi")))
-; => (if (not false) (print "hi") nil)
+; => (when (not false) (print "hi"))   ; if unless expands to when
+
+;; macroexpand: keep expanding while top-level is a macro
+(macroexpand '(unless false (print "hi")))
+; => (if (not false) (print "hi") nil) ; unless -> when -> if
 ```
 
+**Key difference**: `macroexpand-1` performs a single expansion step. `macroexpand` iterates until the top-level form is no longer a macro call.
+
 ### 11.3 Common Macro Patterns (Planned)
+
+> **Note**: These patterns require rest arguments (`& args`), which is planned for Phase 5.
 
 ```clojure
 ; when - one-armed if

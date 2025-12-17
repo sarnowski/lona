@@ -14,11 +14,13 @@ use lona_core::opcode::{
 };
 use lona_core::symbol::{self, Interner};
 use lona_core::value::{Function, Value};
+use lonala_compiler::MacroRegistry;
 
 use super::error::Error;
 use super::frame::Frame;
 use super::globals::Globals;
 use super::helpers::{constant_type_name, value_type_name, values_equal};
+use super::introspection;
 use super::natives::{NativeFn, Registry as NativeRegistry};
 use super::numeric;
 use super::primitives::{PrintCallback, format_print_args};
@@ -46,6 +48,14 @@ pub struct Vm<'interner> {
     print_callback: Option<PrintCallback>,
     /// Symbol ID for "print" - cached for fast lookup.
     print_symbol: Option<symbol::Id>,
+    /// Optional macro registry for introspection functions.
+    macro_registry: Option<&'interner MacroRegistry>,
+    /// Symbol ID for "macro?" - cached for fast lookup.
+    macro_predicate_symbol: Option<symbol::Id>,
+    /// Symbol ID for "macroexpand-1" - cached for fast lookup.
+    macroexpand_1_symbol: Option<symbol::Id>,
+    /// Symbol ID for "macroexpand" - cached for fast lookup.
+    macroexpand_symbol: Option<symbol::Id>,
     /// Current call depth for stack overflow protection.
     call_depth: usize,
 }
@@ -55,8 +65,11 @@ impl<'interner> Vm<'interner> {
     #[inline]
     #[must_use]
     pub fn new(interner: &'interner Interner) -> Self {
-        // Look up "print" symbol if it exists in the interner
+        // Look up special symbols if they exist in the interner
         let print_symbol = interner.get("print");
+        let macro_predicate_symbol = interner.get("macro?");
+        let macroexpand_1_symbol = interner.get("macroexpand-1");
+        let macroexpand_symbol = interner.get("macroexpand");
 
         Self {
             registers: vec![Value::Nil; DEFAULT_REGISTER_COUNT],
@@ -65,6 +78,10 @@ impl<'interner> Vm<'interner> {
             natives: NativeRegistry::new(),
             print_callback: None,
             print_symbol,
+            macro_registry: None,
+            macro_predicate_symbol,
+            macroexpand_1_symbol,
+            macroexpand_symbol,
             call_depth: 0,
         }
     }
@@ -91,6 +108,30 @@ impl<'interner> Vm<'interner> {
     #[inline]
     pub const fn update_print_symbol(&mut self, symbol: symbol::Id) {
         self.print_symbol = Some(symbol);
+    }
+
+    /// Sets the macro registry for introspection functions.
+    ///
+    /// When set, the VM can handle `macro?`, `macroexpand-1`, and `macroexpand`
+    /// functions that query and expand macros at runtime.
+    #[inline]
+    pub const fn set_macro_registry(&mut self, registry: &'interner MacroRegistry) {
+        self.macro_registry = Some(registry);
+    }
+
+    /// Updates the introspection symbol caches.
+    ///
+    /// Call this after interning the introspection function names.
+    #[inline]
+    pub const fn update_introspection_symbols(
+        &mut self,
+        macro_predicate: symbol::Id,
+        macroexpand_1: symbol::Id,
+        macroexpand: symbol::Id,
+    ) {
+        self.macro_predicate_symbol = Some(macro_predicate);
+        self.macroexpand_1_symbol = Some(macroexpand_1);
+        self.macroexpand_symbol = Some(macroexpand);
     }
 
     /// Sets a global variable.
@@ -139,6 +180,41 @@ impl<'interner> Vm<'interner> {
         // Reset registers to nil
         for reg in &mut self.registers {
             *reg = Value::Nil;
+        }
+
+        // Reset call depth
+        self.call_depth = 0;
+
+        let mut frame = Frame::new(chunk, 0);
+        self.run(&mut frame)
+    }
+
+    /// Executes a chunk of bytecode with initial argument values.
+    ///
+    /// The arguments are placed in registers R[0], R[1], ..., R[n-1] before
+    /// execution begins. This is used for macro expansion where the macro
+    /// transformer receives its arguments as register values.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if execution fails due to:
+    /// - Invalid opcodes
+    /// - Type errors in operations
+    /// - Undefined global variables
+    /// - Division by zero
+    /// - Stack overflow
+    #[inline]
+    pub fn execute_with_args(&mut self, chunk: &Chunk, args: &[Value]) -> Result<Value, Error> {
+        // Reset registers to nil
+        for reg in &mut self.registers {
+            *reg = Value::Nil;
+        }
+
+        // Set up argument registers
+        for (idx, arg) in args.iter().enumerate() {
+            if let Some(reg) = self.registers.get_mut(idx) {
+                *reg = arg.clone();
+            }
         }
 
         // Reset call depth
@@ -637,6 +713,17 @@ impl<'interner> Vm<'interner> {
             return self.handle_print(base, argc, frame);
         }
 
+        // Check if this is a macro introspection function
+        if self.macro_predicate_symbol == Some(symbol) {
+            return self.handle_macro_predicate(base, argc, frame);
+        }
+        if self.macroexpand_1_symbol == Some(symbol) {
+            return self.handle_macroexpand_1(base, argc, frame);
+        }
+        if self.macroexpand_symbol == Some(symbol) {
+            return self.handle_macroexpand(base, argc, frame);
+        }
+
         // Look up native function
         let native_fn = self
             .natives
@@ -675,6 +762,93 @@ impl<'interner> Vm<'interner> {
 
         // Store nil as result in R[base]
         self.set_register(base, Value::Nil, frame)?;
+        Ok(())
+    }
+
+    /// Handles the `macro?` introspection function.
+    ///
+    /// Returns true if the argument is a symbol naming a registered macro.
+    fn handle_macro_predicate(
+        &mut self,
+        base: u8,
+        arg_count: u8,
+        frame: &Frame<'_>,
+    ) -> Result<(), Error> {
+        let arguments = self.collect_args(base, arg_count, frame)?;
+
+        let Some(registry) = self.macro_registry else {
+            // No macro registry - no macros exist
+            self.set_register(base, Value::Bool(false), frame)?;
+            return Ok(());
+        };
+
+        let result =
+            introspection::is_macro(&arguments, registry).map_err(|error| Error::Native {
+                error,
+                span: frame.current_span(),
+            })?;
+
+        self.set_register(base, result, frame)?;
+        Ok(())
+    }
+
+    /// Handles the `macroexpand-1` introspection function.
+    ///
+    /// Expands a macro call one level if the argument is a macro call.
+    fn handle_macroexpand_1(
+        &mut self,
+        base: u8,
+        arg_count: u8,
+        frame: &Frame<'_>,
+    ) -> Result<(), Error> {
+        let arguments = self.collect_args(base, arg_count, frame)?;
+
+        let Some(registry) = self.macro_registry else {
+            // No macro registry - return form unchanged
+            let form = arguments.into_iter().next().unwrap_or(Value::Nil);
+            self.set_register(base, form, frame)?;
+            return Ok(());
+        };
+
+        let result =
+            introspection::expand_once(&arguments, registry, self.interner).map_err(|error| {
+                Error::Native {
+                    error,
+                    span: frame.current_span(),
+                }
+            })?;
+
+        self.set_register(base, result, frame)?;
+        Ok(())
+    }
+
+    /// Handles the `macroexpand` introspection function.
+    ///
+    /// Fully expands a macro call by repeatedly applying `macroexpand-1`.
+    fn handle_macroexpand(
+        &mut self,
+        base: u8,
+        arg_count: u8,
+        frame: &Frame<'_>,
+    ) -> Result<(), Error> {
+        let arguments = self.collect_args(base, arg_count, frame)?;
+
+        let Some(registry) = self.macro_registry else {
+            // No macro registry - return form unchanged
+            let form = arguments.into_iter().next().unwrap_or(Value::Nil);
+            self.set_register(base, form, frame)?;
+            return Ok(());
+        };
+
+        let result =
+            introspection::expand_fully(&arguments, registry, self.interner).map_err(|error| {
+                Error::Native {
+                    error,
+                    span: frame.current_span(),
+                }
+            })?;
+
+        self.set_register(base, result, frame)?;
         Ok(())
     }
 

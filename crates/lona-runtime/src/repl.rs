@@ -26,8 +26,8 @@ use alloc::string::ToString;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
 use lona_kernel::vm::collections::{intern_primitives, register_primitives};
-use lona_kernel::vm::{Globals, Vm};
-use lonala_compiler::compile;
+use lona_kernel::vm::{Globals, MacroExpander, Vm};
+use lonala_compiler::{MacroRegistry, compile_with_expansion};
 
 // =============================================================================
 // Core REPL (Always Available - Used by Both Tests and Production)
@@ -35,8 +35,18 @@ use lonala_compiler::compile;
 
 /// REPL evaluation engine with persistent state.
 ///
-/// Maintains state across evaluations including the symbol interner and global
-/// variables. Variables defined with `def` persist between calls to [`eval`].
+/// Maintains state across evaluations including:
+/// - Symbol interner for sharing symbols between compiler and VM
+/// - Global variables defined with `def`
+/// - Macro definitions that persist across sessions
+///
+/// # Macro Support
+///
+/// Macros can be defined with `defmacro` and are stored in a persistent registry.
+/// When macro calls are encountered during compilation, they are expanded at
+/// compile time using the VM-based `MacroExpander`. The macro transformer
+/// function is executed to produce the expanded code, which is then compiled
+/// in place of the macro call.
 ///
 /// # Example
 ///
@@ -52,18 +62,21 @@ pub struct Repl {
     interner: Interner,
     /// Global variables that persist between evaluations.
     globals: Globals,
+    /// Macro definitions that persist between evaluations.
+    macros: MacroRegistry,
 }
 
 impl Repl {
     /// Creates a new REPL instance with empty state.
     ///
-    /// The REPL starts with an empty symbol interner and no global variables.
-    /// Globals defined via `def` during evaluation will persist across
-    /// subsequent calls to [`eval`].
+    /// The REPL starts with an empty symbol interner, no global variables,
+    /// and no macro definitions. State defined via `def` and `defmacro`
+    /// during evaluation will persist across subsequent calls to [`eval`].
     pub const fn new() -> Self {
         Self {
             interner: Interner::new(),
             globals: Globals::new(),
+            macros: MacroRegistry::new(),
         }
     }
 
@@ -71,18 +84,34 @@ impl Repl {
     ///
     /// This is the core REPL function used by both integration tests and the
     /// interactive console. It compiles and executes the source, maintaining
-    /// persistent state for globals defined with `def`.
+    /// persistent state for globals defined with `def` and macros defined
+    /// with `defmacro`.
+    ///
+    /// # Macro Expansion
+    ///
+    /// Macros are expanded at compile time using the VM-based macro expander.
+    /// When a macro is called, its transformer function is executed by a
+    /// temporary VM instance to produce the expanded code.
     ///
     /// # Errors
     ///
     /// Returns an error string if compilation or execution fails.
     pub fn eval(&mut self, source: &str) -> Result<Value, String> {
-        // Compile the source
-        let chunk = compile(source, &mut self.interner)
-            .map_err(|err| alloc::format!("Compile error: {err}"))?;
+        // Create a macro expander
+        let mut expander = MacroExpander::new();
+
+        // Compile the source with macro expansion
+        let chunk =
+            compile_with_expansion(source, &mut self.interner, &mut self.macros, &mut expander)
+                .map_err(|err| alloc::format!("Compile error: {err}"))?;
 
         // Pre-intern collection primitive symbols before creating VM
         let collection_symbols = intern_primitives(&mut self.interner);
+
+        // Pre-intern introspection function symbols
+        let macro_predicate_sym = self.interner.intern("macro?");
+        let macroexpand_1_sym = self.interner.intern("macroexpand-1");
+        let macroexpand_sym = self.interner.intern("macroexpand");
 
         // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
@@ -98,6 +127,15 @@ impl Repl {
 
         // Register collection primitives with pre-interned symbols
         register_primitives(&mut vm, &collection_symbols);
+
+        // Set up macro introspection functions
+        vm.set_macro_registry(&self.macros);
+        vm.update_introspection_symbols(macro_predicate_sym, macroexpand_1_sym, macroexpand_sym);
+
+        // Register introspection functions as globals
+        vm.set_global(macro_predicate_sym, Value::Symbol(macro_predicate_sym));
+        vm.set_global(macroexpand_1_sym, Value::Symbol(macroexpand_1_sym));
+        vm.set_global(macroexpand_sym, Value::Symbol(macroexpand_sym));
 
         // Execute
         let result = vm
@@ -127,7 +165,7 @@ impl Repl {
 
 #[cfg(not(feature = "integration-test"))]
 mod interactive {
-    use super::{Repl, String, ToString, Value, compile};
+    use super::{MacroExpander, Repl, String, ToString, Value, compile_with_expansion};
     use alloc::vec::Vec;
     use core::fmt::Write;
     use lonala_compiler::CompileError;
@@ -328,7 +366,13 @@ mod interactive {
             }
 
             // First, try to compile to check if input is complete
-            match compile(&self.accumulated, &mut self.repl.interner) {
+            let mut expander = MacroExpander::new();
+            match compile_with_expansion(
+                &self.accumulated,
+                &mut self.repl.interner,
+                &mut self.repl.macros,
+                &mut expander,
+            ) {
                 Ok(_chunk) => {
                     // Input is complete - evaluate using the core eval() function
                     // This ensures the same code path is used as in tests

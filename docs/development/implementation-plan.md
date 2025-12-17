@@ -736,8 +736,8 @@ All implementation tasks with status tracking.
 | 13 | 3.4 | Collection Primitives | cons, first, rest, vector, hash-map | done |
 | 14 | 4.1 | Quasiquote Expansion | Expand `` ` `` `~` `~@` into list construction code | done |
 | 15 | 4.2 | Macro Definition | defmacro special form, macro storage registry | done |
-| 16 | 4.3 | Macro Expansion Pass | Recursive expansion before compilation | open |
-| 17 | 4.4 | Macro Introspection | macroexpand, macroexpand-1 primitives | open |
+| 16 | 4.3 | Macro Expansion Pass | Recursive expansion before compilation | done |
+| 17 | 4.4 | Macro Introspection | macroexpand, macroexpand-1 primitives | done |
 | 18 | 5.1 | Named Functions | defn macro expands to def + fn, multi-arity | open |
 | 19 | 5.2 | Closures | Lexical capture, upvalue handling | open |
 | 20 | 5.3 | Tail Call Optimization | Tail position detection, frame reuse, recur | open |

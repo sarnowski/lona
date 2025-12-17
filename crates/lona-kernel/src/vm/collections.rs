@@ -379,6 +379,21 @@ pub fn intern_primitives(interner: &mut symbol::Interner) -> alloc::vec::Vec<sym
         .collect()
 }
 
+/// Looks up collection primitive symbols from an immutable interner.
+///
+/// This is used when primitives should already be interned (e.g., by the REPL)
+/// and we only have an immutable reference to the interner.
+///
+/// Returns `Some(symbols)` if all primitives are found, `None` otherwise.
+#[inline]
+#[must_use]
+pub fn lookup_primitives(interner: &symbol::Interner) -> Option<alloc::vec::Vec<symbol::Id>> {
+    PRIMITIVE_NAMES
+        .iter()
+        .map(|name| interner.get(name))
+        .collect()
+}
+
 /// Registers all collection primitives with the VM using pre-interned symbols.
 ///
 /// `symbols` must be the result of calling `intern_primitives` with the same interner.

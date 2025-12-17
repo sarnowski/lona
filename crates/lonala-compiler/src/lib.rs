@@ -49,5 +49,8 @@ pub use lona_core::opcode::{self, Opcode};
 pub use lona_core::span::Span;
 
 #[cfg(feature = "alloc")]
-pub use compiler::{CompileError, Compiler, compile};
+pub use compiler::{
+    CompileError, Compiler, MacroDefinition, MacroExpander, MacroExpansionError, MacroRegistry,
+    compile, compile_with_expansion, compile_with_registry,
+};
 pub use error::Error;

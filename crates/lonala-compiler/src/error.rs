@@ -6,6 +6,9 @@
 //! This module defines errors that can occur during compilation of Lonala
 //! source code to bytecode.
 
+extern crate alloc;
+
+use alloc::string::String;
 use core::fmt;
 
 use lona_core::chunk::ConstantPoolFullError;
@@ -78,6 +81,38 @@ pub enum Error {
         /// Source location where the error occurred.
         span: Span,
     },
+
+    /// Invalid macro expansion result.
+    ///
+    /// The macro returned a value that cannot be converted back to AST
+    /// for further compilation (e.g., a function value or ratio).
+    InvalidMacroResult {
+        /// Description of why the result is invalid.
+        message: String,
+        /// Source location of the macro call.
+        span: Span,
+    },
+
+    /// Macro expansion failed at runtime.
+    ///
+    /// The macro transformer function threw an error during execution.
+    MacroExpansionFailed {
+        /// The error message from the macro.
+        message: String,
+        /// Source location of the macro call.
+        span: Span,
+    },
+
+    /// Macro expansion exceeded maximum depth.
+    ///
+    /// This typically indicates infinite macro recursion where a macro
+    /// expands to code that calls itself (directly or indirectly).
+    MacroExpansionDepthExceeded {
+        /// The depth at which expansion was stopped.
+        depth: usize,
+        /// Source location of the macro call that exceeded the limit.
+        span: Span,
+    },
 }
 
 impl Error {
@@ -91,7 +126,10 @@ impl Error {
             | Self::JumpTooLarge { span }
             | Self::EmptyCall { span }
             | Self::NotImplemented { span, .. }
-            | Self::InvalidSpecialForm { span, .. } => span,
+            | Self::InvalidSpecialForm { span, .. }
+            | Self::InvalidMacroResult { span, .. }
+            | Self::MacroExpansionFailed { span, .. }
+            | Self::MacroExpansionDepthExceeded { span, .. } => span,
         }
     }
 }
@@ -128,6 +166,18 @@ impl fmt::Display for Error {
                 span,
             } => {
                 write!(f, "invalid '{form}' form: {message} at {span}")
+            }
+            Self::InvalidMacroResult { ref message, span } => {
+                write!(f, "invalid macro result: {message} at {span}")
+            }
+            Self::MacroExpansionFailed { ref message, span } => {
+                write!(f, "macro expansion failed: {message} at {span}")
+            }
+            Self::MacroExpansionDepthExceeded { depth, span } => {
+                write!(
+                    f,
+                    "macro expansion exceeded maximum depth ({depth}) at {span}"
+                )
             }
         }
     }
@@ -184,6 +234,36 @@ mod tests {
             ),
             "invalid 'if' form: expected (if test then) or (if test then else) at 10..20"
         );
+        assert_eq!(
+            format!(
+                "{}",
+                Error::InvalidMacroResult {
+                    message: String::from("function cannot be converted to AST"),
+                    span: test_span()
+                }
+            ),
+            "invalid macro result: function cannot be converted to AST at 10..20"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                Error::MacroExpansionFailed {
+                    message: String::from("division by zero"),
+                    span: test_span()
+                }
+            ),
+            "macro expansion failed: division by zero at 10..20"
+        );
+        assert_eq!(
+            format!(
+                "{}",
+                Error::MacroExpansionDepthExceeded {
+                    depth: 256_usize,
+                    span: test_span()
+                }
+            ),
+            "macro expansion exceeded maximum depth (256) at 10..20"
+        );
     }
 
     #[test]
@@ -205,6 +285,30 @@ mod tests {
             Error::InvalidSpecialForm {
                 form: "if",
                 message: "test",
+                span
+            }
+            .span(),
+            span
+        );
+        assert_eq!(
+            Error::InvalidMacroResult {
+                message: String::from("test"),
+                span
+            }
+            .span(),
+            span
+        );
+        assert_eq!(
+            Error::MacroExpansionFailed {
+                message: String::from("test"),
+                span
+            }
+            .span(),
+            span
+        );
+        assert_eq!(
+            Error::MacroExpansionDepthExceeded {
+                depth: 256_usize,
                 span
             }
             .span(),

@@ -20,6 +20,11 @@ use lonala_parser::{Ast, Spanned};
 
 use crate::error::Error;
 
+pub mod conversion;
+pub mod macros;
+
+pub use macros::{MacroDefinition, MacroExpander, MacroExpansionError, MacroRegistry};
+
 #[cfg(test)]
 mod tests;
 
@@ -82,44 +87,6 @@ impl LocalEnv {
     }
 }
 
-/// A compiled macro definition.
-///
-/// Macros are compile-time functions that transform AST. The macro body
-/// is compiled to bytecode and stored here for later expansion.
-#[derive(Debug, Clone)]
-pub struct MacroDefinition {
-    /// Compiled bytecode for the macro transformer function.
-    /// When called, receives unevaluated arguments and returns transformed AST.
-    chunk: Arc<Chunk>,
-    /// Number of parameters the macro expects.
-    arity: u8,
-    /// Macro name for error messages and debugging.
-    name: alloc::string::String,
-}
-
-impl MacroDefinition {
-    /// Returns a reference to the macro's compiled chunk.
-    #[inline]
-    #[must_use]
-    pub const fn chunk(&self) -> &Arc<Chunk> {
-        &self.chunk
-    }
-
-    /// Returns the macro's arity.
-    #[inline]
-    #[must_use]
-    pub const fn arity(&self) -> u8 {
-        self.arity
-    }
-
-    /// Returns the macro's name.
-    #[inline]
-    #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-}
-
 /// Result of compiling an expression.
 ///
 /// Contains the register where the expression's value is stored after
@@ -131,11 +98,23 @@ pub struct ExprResult {
     pub register: u8,
 }
 
+/// Maximum depth for nested macro expansions.
+///
+/// This limit prevents infinite macro recursion where a macro expands
+/// to code that calls itself (directly or indirectly).
+const MAX_MACRO_EXPANSION_DEPTH: usize = 256;
+
 /// Compiler state for transforming AST to bytecode.
 ///
 /// Manages register allocation, constant pool, and instruction emission
 /// during compilation of a single chunk (function or top-level code).
-pub struct Compiler<'interner> {
+///
+/// # Macro Expansion
+///
+/// The compiler supports optional macro expansion through the `MacroExpander` trait.
+/// When an expander is provided, macro calls are expanded at compile time.
+/// Without an expander, macro calls are compiled as regular function calls.
+pub struct Compiler<'interner, 'registry, 'expander> {
     /// The bytecode chunk being built.
     chunk: Chunk,
     /// Symbol interner for looking up and creating symbol IDs.
@@ -147,22 +126,58 @@ pub struct Compiler<'interner> {
     /// Local variable bindings across nested scopes.
     locals: LocalEnv,
     /// Registry of macro definitions.
-    /// Maps macro symbol ID to its compiled definition.
-    macros: BTreeMap<symbol::Id, MacroDefinition>,
+    /// Macros defined during this compilation are added here.
+    registry: &'registry mut MacroRegistry,
+    /// Optional macro expander for compile-time expansion.
+    expander: Option<&'expander mut dyn MacroExpander>,
+    /// Current depth of nested macro expansions.
+    /// Used to detect and prevent infinite macro recursion.
+    macro_expansion_depth: usize,
 }
 
-impl<'interner> Compiler<'interner> {
-    /// Creates a new compiler with the given symbol interner.
+impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> {
+    /// Creates a new compiler with the given symbol interner and macro registry.
+    ///
+    /// This creates a compiler without macro expansion capability. Macro calls
+    /// will be compiled as regular function calls.
     #[inline]
     #[must_use]
-    pub const fn new(interner: &'interner mut symbol::Interner) -> Self {
+    pub fn new(
+        interner: &'interner mut symbol::Interner,
+        registry: &'registry mut MacroRegistry,
+    ) -> Self {
         Self {
             chunk: Chunk::new(),
             interner,
             next_register: 0,
             max_register: 0,
             locals: LocalEnv::new(),
-            macros: BTreeMap::new(),
+            registry,
+            expander: None,
+            macro_expansion_depth: 0,
+        }
+    }
+
+    /// Creates a new compiler with macro expansion capability.
+    ///
+    /// The expander will be used to execute macro transformers at compile time,
+    /// expanding macro calls into their expanded forms before compilation.
+    #[inline]
+    #[must_use]
+    pub fn with_expander(
+        interner: &'interner mut symbol::Interner,
+        registry: &'registry mut MacroRegistry,
+        expander: &'expander mut dyn MacroExpander,
+    ) -> Self {
+        Self {
+            chunk: Chunk::new(),
+            interner,
+            next_register: 0,
+            max_register: 0,
+            locals: LocalEnv::new(),
+            registry,
+            expander: Some(expander),
+            macro_expansion_depth: 0,
         }
     }
 
@@ -170,14 +185,14 @@ impl<'interner> Compiler<'interner> {
     #[inline]
     #[must_use]
     pub fn is_macro(&self, symbol: symbol::Id) -> bool {
-        self.macros.contains_key(&symbol)
+        self.registry.contains(symbol)
     }
 
     /// Returns the macro definition for a symbol, if it exists.
     #[inline]
     #[must_use]
     pub fn get_macro(&self, symbol: symbol::Id) -> Option<&MacroDefinition> {
-        self.macros.get(&symbol)
+        self.registry.get(symbol)
     }
 
     /// Returns `true` if a macro with the given name is defined.
@@ -188,7 +203,7 @@ impl<'interner> Compiler<'interner> {
     #[must_use]
     pub fn is_macro_by_name(&mut self, name: &str) -> bool {
         let sym_id = self.interner.intern(name);
-        self.macros.contains_key(&sym_id)
+        self.registry.contains(sym_id)
     }
 
     /// Returns the macro definition for a name, if it exists.
@@ -199,7 +214,14 @@ impl<'interner> Compiler<'interner> {
     #[must_use]
     pub fn get_macro_by_name(&mut self, name: &str) -> Option<&MacroDefinition> {
         let sym_id = self.interner.intern(name);
-        self.macros.get(&sym_id)
+        self.registry.get(sym_id)
+    }
+
+    /// Returns a reference to the macro registry.
+    #[inline]
+    #[must_use]
+    pub const fn registry(&self) -> &MacroRegistry {
+        self.registry
     }
 
     /// Compiles a sequence of expressions into a chunk.
@@ -427,10 +449,95 @@ impl<'interner> Compiler<'interner> {
             if let Some(opcode) = Self::binary_opcode(name) {
                 return self.compile_binary_op(opcode, elements, span);
             }
+
+            // Check for macro call - only if we have an expander to actually expand it
+            // Without an expander, macro calls are treated as regular (undefined) function calls
+            if self.expander.is_some() {
+                let sym_id = self.interner.intern(name);
+                if self.registry.contains(sym_id) {
+                    return self.compile_macro_call(sym_id, args, span);
+                }
+            }
         }
 
         // General function call
         self.compile_call(elements, span)
+    }
+
+    /// Compiles a macro call by expanding and then compiling the result.
+    ///
+    /// This method is only called when an expander is available (checked by
+    /// `compile_list` before calling this method). The macro transformer is
+    /// executed at compile time to produce the expanded form.
+    ///
+    /// # Expansion Depth
+    ///
+    /// The compiler tracks macro expansion depth to prevent infinite recursion.
+    /// If a macro expands to code that calls itself (directly or indirectly),
+    /// the depth will eventually exceed `MAX_MACRO_EXPANSION_DEPTH` and
+    /// compilation will fail with `Error::MacroExpansionDepthExceeded`.
+    fn compile_macro_call(
+        &mut self,
+        macro_name: symbol::Id,
+        args: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        // Check expansion depth before proceeding
+        if self.macro_expansion_depth >= MAX_MACRO_EXPANSION_DEPTH {
+            return Err(Error::MacroExpansionDepthExceeded {
+                depth: self.macro_expansion_depth,
+                span,
+            });
+        }
+
+        // Get the macro definition
+        let macro_def = self
+            .registry
+            .get(macro_name)
+            .ok_or(Error::InvalidSpecialForm {
+                form: "macro",
+                message: "macro not found in registry",
+                span,
+            })?
+            .clone();
+
+        // Get the expander (we know it exists because compile_list checked)
+        let Some(ref mut expander) = self.expander else {
+            // This should not happen - compile_list only calls us with an expander
+            return Err(Error::InvalidSpecialForm {
+                form: "macro",
+                message: "internal error: macro expansion without expander",
+                span,
+            });
+        };
+
+        // Convert AST arguments to Values
+        let value_args: Vec<lona_core::value::Value> = args
+            .iter()
+            .map(|arg| conversion::ast_to_value(arg, self.interner))
+            .collect();
+
+        // Run the macro transformer
+        let expanded_value = expander
+            .expand(&macro_def, value_args, self.interner)
+            .map_err(|err| Error::MacroExpansionFailed {
+                message: err.message,
+                span,
+            })?;
+
+        // Convert result back to AST
+        let expanded_ast = conversion::value_to_ast(&expanded_value, self.interner, span)?;
+
+        // Increment depth before recursive compilation
+        self.macro_expansion_depth = self.macro_expansion_depth.saturating_add(1);
+
+        // Recursively compile the expanded AST
+        let result = self.compile_expr(&expanded_ast);
+
+        // Decrement depth after compilation (even on error, for consistency)
+        self.macro_expansion_depth = self.macro_expansion_depth.saturating_sub(1);
+
+        result
     }
 
     /// Returns the opcode for a binary operator symbol, if any.
@@ -1425,7 +1532,8 @@ impl<'interner> Compiler<'interner> {
         let arity = u8::try_from(params.len()).map_err(|_err| Error::TooManyRegisters { span })?;
 
         // Create a new compiler for the function body
-        let mut fn_compiler = Compiler::new(self.interner);
+        // Note: We share the registry so macros are available inside function bodies
+        let mut fn_compiler = Compiler::new(self.interner, self.registry);
         let fn_name_str = name
             .clone()
             .unwrap_or_else(|| alloc::string::String::from("lambda"));
@@ -1618,10 +1726,8 @@ impl<'interner> Compiler<'interner> {
         let name_id = self.interner.intern(&name);
 
         // Create a child compiler for the macro body.
-        // Note: The child compiler has an empty macro registry. Macro calls in
-        // the body are compiled as regular function calls. Macro expansion will
-        // be handled in Phase 4.3 when the expansion pass is implemented.
-        let mut macro_compiler = Compiler::new(self.interner);
+        // Note: We share the registry so macros can be used inside macro bodies.
+        let mut macro_compiler = Compiler::new(self.interner, self.registry);
         macro_compiler.chunk = Chunk::with_name(alloc::format!("macro:{name}"));
         macro_compiler.chunk.set_arity(arity);
 
@@ -1669,13 +1775,9 @@ impl<'interner> Compiler<'interner> {
         let macro_chunk = macro_compiler.chunk;
 
         // Store in macro registry
-        let _previous = self.macros.insert(
+        self.registry.register(
             name_id,
-            MacroDefinition {
-                chunk: Arc::new(macro_chunk),
-                arity,
-                name,
-            },
+            MacroDefinition::new(Arc::new(macro_chunk), arity, name),
         );
 
         // Return the macro's symbol name
@@ -1777,8 +1879,105 @@ impl From<Error> for CompileError {
 /// ```
 #[inline]
 pub fn compile(source: &str, interner: &mut symbol::Interner) -> Result<Chunk, CompileError> {
+    let mut registry = MacroRegistry::new();
+    compile_with_registry(source, interner, &mut registry)
+}
+
+/// Compiles Lonala source code to bytecode with a persistent macro registry.
+///
+/// This is the full-featured compilation function that accepts an external
+/// macro registry. Use this for REPL sessions where macros should persist
+/// across evaluations.
+///
+/// # Errors
+///
+/// Returns `CompileError::Parse` if parsing fails, or
+/// `CompileError::Compile` if compilation fails.
+///
+/// # Example
+///
+/// ```
+/// use lona_core::symbol::Interner;
+/// use lonala_compiler::{compile_with_registry, MacroRegistry};
+///
+/// let mut interner = Interner::new();
+/// let mut registry = MacroRegistry::new();
+///
+/// // Define a macro
+/// let chunk1 = compile_with_registry(
+///     "(defmacro double [x] (list '+ x x))",
+///     &mut interner,
+///     &mut registry
+/// ).unwrap();
+///
+/// // Use the macro (it persists in the registry)
+/// let chunk2 = compile_with_registry(
+///     "(double 5)",
+///     &mut interner,
+///     &mut registry
+/// ).unwrap();
+/// ```
+#[inline]
+pub fn compile_with_registry(
+    source: &str,
+    interner: &mut symbol::Interner,
+    registry: &mut MacroRegistry,
+) -> Result<Chunk, CompileError> {
     let exprs = lonala_parser::parse(source)?;
-    let mut compiler = Compiler::new(interner);
+    let mut compiler = Compiler::new(interner, registry);
+    let chunk = compiler.compile_program(&exprs)?;
+    Ok(chunk)
+}
+
+/// Compiles Lonala source code with macro expansion capability.
+///
+/// This is the most complete compilation function that supports:
+/// - Persistent macro registry for cross-session macro definitions
+/// - Compile-time macro expansion using the provided expander
+///
+/// Use this for REPL sessions where you want macros to be expanded at
+/// compile time rather than called at runtime.
+///
+/// # Errors
+///
+/// Returns `CompileError::Parse` if parsing fails, or
+/// `CompileError::Compile` if compilation or macro expansion fails.
+///
+/// # Example
+///
+/// ```ignore
+/// use lona_core::symbol::Interner;
+/// use lonala_compiler::{compile_with_expansion, MacroRegistry, MacroExpander};
+///
+/// let mut interner = Interner::new();
+/// let mut registry = MacroRegistry::new();
+/// let mut expander = MyMacroExpander::new(); // Implements MacroExpander
+///
+/// // Define a macro
+/// let chunk1 = compile_with_expansion(
+///     "(defmacro double [x] `(+ ~x ~x))",
+///     &mut interner,
+///     &mut registry,
+///     &mut expander
+/// ).unwrap();
+///
+/// // Use the macro - it will be expanded at compile time
+/// let chunk2 = compile_with_expansion(
+///     "(double 5)",
+///     &mut interner,
+///     &mut registry,
+///     &mut expander
+/// ).unwrap();
+/// ```
+#[inline]
+pub fn compile_with_expansion(
+    source: &str,
+    interner: &mut symbol::Interner,
+    registry: &mut MacroRegistry,
+    expander: &mut dyn MacroExpander,
+) -> Result<Chunk, CompileError> {
+    let exprs = lonala_parser::parse(source)?;
+    let mut compiler = Compiler::with_expander(interner, registry, expander);
     let chunk = compiler.compile_program(&exprs)?;
     Ok(chunk)
 }

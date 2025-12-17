@@ -2271,3 +2271,94 @@ fn integration_syntax_quote_nil_splice() {
         panic!("expected List");
     }
 }
+
+// =============================================================================
+// Macro Integration Tests
+// =============================================================================
+
+/// Helper function to evaluate code with full macro expansion support.
+fn eval_with_macros(
+    source: &str,
+    interner: &mut Interner,
+    globals: &mut super::Globals,
+    macros: &mut lonala_compiler::MacroRegistry,
+) -> Result<Value, alloc::string::String> {
+    // Create macro expander
+    let mut expander = super::MacroExpander::new();
+
+    // Compile with macro expansion
+    let chunk = lonala_compiler::compile_with_expansion(source, interner, macros, &mut expander)
+        .map_err(|e| alloc::format!("compile error: {e}"))?;
+
+    // Pre-intern collection primitives before creating VM
+    let collection_symbols = super::collections::intern_primitives(interner);
+
+    // Create VM and restore persistent globals
+    let mut vm = Vm::new(interner);
+    *vm.globals_mut() = globals.clone();
+
+    // Register print function
+    if let Some(print_sym) = interner.get("print") {
+        vm.update_print_symbol(print_sym);
+        vm.set_global(print_sym, Value::Symbol(print_sym));
+    }
+
+    // Register collection primitives
+    super::collections::register_primitives(&mut vm, &collection_symbols);
+
+    // Execute
+    let result = vm
+        .execute(&chunk)
+        .map_err(|e| alloc::format!("runtime error: {e:?}"))?;
+
+    // Save globals back
+    *globals = vm.globals().clone();
+
+    Ok(result)
+}
+
+#[test]
+fn integration_macro_definition_and_expansion() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+    let mut macros = lonala_compiler::MacroRegistry::new();
+
+    // Define a simple identity macro
+    let def_result = eval_with_macros(
+        "(defmacro id [x] x)",
+        &mut interner,
+        &mut globals,
+        &mut macros,
+    );
+    assert!(def_result.is_ok());
+
+    // Use the macro
+    let result = eval_with_macros("(id 42)", &mut interner, &mut globals, &mut macros).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(42)));
+}
+
+#[test]
+fn integration_macro_arity_mismatch_error() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+    let mut macros = lonala_compiler::MacroRegistry::new();
+
+    // Define a macro that expects 1 argument
+    let _def_result = eval_with_macros(
+        "(defmacro single [x] x)",
+        &mut interner,
+        &mut globals,
+        &mut macros,
+    )
+    .unwrap();
+
+    // Call with wrong arity - should produce a clear error
+    let result = eval_with_macros("(single 1 2)", &mut interner, &mut globals, &mut macros);
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err();
+    assert!(
+        err_msg.contains("expects 1 arguments"),
+        "Error message should mention arity mismatch: {}",
+        err_msg
+    );
+}
