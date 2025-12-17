@@ -31,16 +31,24 @@ lona/
 │   ├── lona-core/                # Foundational types (100% host-testable)
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       └── allocator.rs      # Bump allocator traits
+│   │       ├── allocator.rs      # Bump allocator traits
+│   │       ├── integer.rs        # Arbitrary-precision integers
+│   │       ├── ratio.rs          # Arbitrary-precision ratios
+│   │       ├── string.rs         # Immutable string type
+│   │       ├── symbol.rs         # Interned symbols
+│   │       └── value.rs          # Core value types
 │   │
 │   ├── lona-runtime/             # seL4 root task (QEMU-tested only)
 │   │   └── src/
 │   │       ├── main.rs           # Entry point, receives bootinfo
+│   │       ├── repl.rs           # Interactive REPL
 │   │       ├── memory/           # seL4 memory management
+│   │       │   ├── mod.rs
 │   │       │   ├── provider.rs   # Memory provider implementation
 │   │       │   ├── untyped.rs    # Untyped memory handling
 │   │       │   └── slots.rs      # Capability slot management
 │   │       └── platform/         # Hardware abstraction
+│   │           ├── mod.rs
 │   │           ├── uart.rs       # UART driver
 │   │           └── fdt.rs        # Device tree parsing
 │   │
@@ -49,17 +57,23 @@ lona/
 │   │       ├── lib.rs
 │   │       ├── ast.rs            # Abstract syntax tree types
 │   │       ├── error.rs          # Error types and spans
-│   │       ├── lexer.rs          # Tokenizer
-│   │       ├── parser.rs         # S-expression parser
-│   │       └── token.rs          # Token types
+│   │       ├── token.rs          # Token types
+│   │       ├── lexer/            # Tokenizer
+│   │       │   ├── mod.rs
+│   │       │   └── tests.rs
+│   │       └── parser/           # S-expression parser
+│   │           ├── mod.rs
+│   │           └── tests.rs
 │   │
 │   ├── lonala-compiler/          # Bytecode compiler (100% host-testable)
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── chunk.rs          # Bytecode chunk format
-│   │       ├── compiler.rs       # AST to bytecode compiler
 │   │       ├── error.rs          # Compiler errors
-│   │       └── opcode.rs         # VM instruction encoding
+│   │       ├── opcode.rs         # VM instruction encoding
+│   │       └── compiler/         # AST to bytecode compiler
+│   │           ├── mod.rs
+│   │           └── tests.rs
 │   │
 │   ├── lona-kernel/              # Process/scheduler abstractions (host-testable with mocks)
 │   │   └── src/
@@ -69,17 +83,24 @@ lona/
 │   │           ├── error.rs      # Runtime errors
 │   │           ├── frame.rs      # Call frames
 │   │           ├── globals.rs    # Global variable storage
+│   │           ├── helpers.rs    # Interpreter helper functions
 │   │           ├── interpreter.rs# Bytecode execution
 │   │           ├── natives.rs    # Native function registry
+│   │           ├── numeric.rs    # Numeric operations
 │   │           ├── output.rs     # Output abstraction
-│   │           └── primitives.rs # Built-in functions (print)
+│   │           ├── primitives.rs # Built-in functions (print)
+│   │           └── tests.rs      # VM tests
 │   │
 │   └── lona-test/                # Test harness for QEMU tests
 │       └── src/
 │           └── lib.rs            # Test utilities and markers
 │
 ├── docs/
+│   ├── index.md                  # Documentation index
 │   ├── goals.md                  # Project vision and design philosophy
+│   ├── license.md                # License information
+│   ├── architecture/
+│   │   └── register-based-vm.md  # VM architecture documentation
 │   └── development/
 │       ├── implementation-plan.md    # Phased roadmap and task checklist
 │       ├── testing-strategy.md       # Three-tier testing pyramid

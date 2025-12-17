@@ -29,10 +29,15 @@
 mod error;
 mod frame;
 mod globals;
+mod helpers;
 mod interpreter;
 pub mod natives;
+mod numeric;
 pub mod output;
 pub mod primitives;
+
+#[cfg(test)]
+mod tests;
 
 pub use error::Error;
 pub use frame::Frame;
