@@ -355,12 +355,6 @@ impl PageProvider for Sel4PageProvider {
             return None;
         }
 
-        sel4::debug_println!(
-            "Allocated and mapped frame {} at 0x{:x}",
-            state.frames_allocated,
-            vaddr
-        );
-
         // Step 3: Update state
         state.next_vaddr = vaddr.saturating_add(FRAME_SIZE);
         state.frames_allocated = state.frames_allocated.saturating_add(1);

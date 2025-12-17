@@ -30,7 +30,6 @@ extern crate alloc;
 
 mod memory;
 mod platform;
-#[cfg(not(feature = "integration-test"))]
 mod repl;
 
 use alloc::vec;
@@ -45,7 +44,7 @@ use lona_core::symbol::Interner;
 #[cfg(feature = "integration-test")]
 use lona_core::value::Value;
 #[cfg(feature = "integration-test")]
-use lona_kernel::vm::Vm;
+use lona_kernel::vm::{Globals, Vm};
 #[cfg(feature = "integration-test")]
 use lona_test::{Status, Test, run_tests};
 #[cfg(feature = "integration-test")]
@@ -114,8 +113,8 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     // Start the interactive REPL (never returns)
     #[cfg(not(feature = "integration-test"))]
     {
-        let mut repl_instance = repl::Repl::new();
-        repl_instance.run()
+        let mut interactive = repl::InteractiveRepl::new(repl::UartConsole);
+        interactive.run()
     }
 }
 
@@ -216,6 +215,21 @@ fn run_integration_tests() {
         Test::new("boolean_not", test_boolean_not),
         Test::new("nested_expr", test_nested_expression),
         Test::new("string_literal", test_string_literal),
+        // Special form tests
+        Test::new("do_empty", test_do_empty),
+        Test::new("do_single", test_do_single),
+        Test::new("do_multiple", test_do_multiple),
+        Test::new("if_true", test_if_true),
+        Test::new("if_false", test_if_false),
+        Test::new("if_no_else", test_if_no_else),
+        Test::new("def_simple", test_def_simple),
+        // REPL-like persistent state tests
+        Test::new("repl_def_persist", test_repl_def_persist),
+        Test::new("repl_def_use_in_if", test_repl_def_use_in_if),
+        // Test using actual Repl struct
+        Test::new("actual_repl_test", test_actual_repl_def_use_in_if),
+        // Error handling test
+        Test::new("incomplete_input", test_incomplete_input_error),
     ];
 
     let status = run_tests(&tests, |s| print!("{s}"));
@@ -358,5 +372,246 @@ fn test_string_literal() -> Status {
     match vm.execute(&chunk) {
         Ok(Value::String(ref string)) if string.as_str() == "hello" => Status::Pass,
         _ => Status::Fail,
+    }
+}
+
+// =============================================================================
+// Special Form Tests
+// =============================================================================
+
+/// Tests empty do: (do) should return nil.
+#[cfg(feature = "integration-test")]
+fn test_do_empty() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(do)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Nil) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests single do: (do 42) should return 42.
+#[cfg(feature = "integration-test")]
+fn test_do_single() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(do 42)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == Integer::from_i64(42) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests multiple do: (do 1 2 3) should return 3.
+#[cfg(feature = "integration-test")]
+fn test_do_multiple() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(do 1 2 3)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == Integer::from_i64(3) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests if true branch: (if true 1 2) should return 1.
+#[cfg(feature = "integration-test")]
+fn test_if_true() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(if true 1 2)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == Integer::from_i64(1) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests if false branch: (if false 1 2) should return 2.
+#[cfg(feature = "integration-test")]
+fn test_if_false() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(if false 1 2)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == Integer::from_i64(2) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests if without else: (if false 1) should return nil.
+#[cfg(feature = "integration-test")]
+fn test_if_no_else() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(if false 1)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Nil) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests simple def: (def x 42) should define x and return symbol.
+#[cfg(feature = "integration-test")]
+fn test_def_simple() -> Status {
+    let mut interner = Interner::new();
+
+    let chunk = match compile("(do (def x 42) x)", &mut interner) {
+        Ok(chunk) => chunk,
+        Err(_err) => return Status::Fail,
+    };
+
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(result)) if result == Integer::from_i64(42) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+// =============================================================================
+// REPL-like Persistent State Tests
+// =============================================================================
+
+/// Helper to evaluate source with persistent state (like the REPL does).
+#[cfg(feature = "integration-test")]
+fn eval_with_state(
+    source: &str,
+    interner: &mut Interner,
+    globals: &mut Globals,
+) -> Result<Value, ()> {
+    let chunk = compile(source, interner).map_err(|err| {
+        println!("Compile error: {err}");
+    })?;
+
+    let mut vm = Vm::new(interner);
+    *vm.globals_mut() = globals.clone();
+
+    // Register print function like the REPL does
+    if let Some(print_sym) = interner.get("print") {
+        vm.update_print_symbol(print_sym);
+        vm.set_global(print_sym, Value::Symbol(print_sym));
+    }
+
+    let result = vm.execute(&chunk).map_err(|err| {
+        println!("Runtime error: {err:?}");
+    })?;
+
+    *globals = vm.globals().clone();
+
+    Ok(result)
+}
+
+/// Tests that def persists across evaluations.
+#[cfg(feature = "integration-test")]
+fn test_repl_def_persist() -> Status {
+    let mut interner = Interner::new();
+    let mut globals = Globals::new();
+
+    // First evaluation: define x
+    if eval_with_state("(def x 42)", &mut interner, &mut globals).is_err() {
+        return Status::Fail;
+    }
+
+    // Second evaluation: use x
+    match eval_with_state("x", &mut interner, &mut globals) {
+        Ok(Value::Integer(result)) if result == Integer::from_i64(42) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests the exact failing scenario: def x, then use x in if condition.
+#[cfg(feature = "integration-test")]
+fn test_repl_def_use_in_if() -> Status {
+    let mut interner = Interner::new();
+    let mut globals = Globals::new();
+
+    // First evaluation: define x
+    if eval_with_state("(def x 42)", &mut interner, &mut globals).is_err() {
+        return Status::Fail;
+    }
+
+    // Second evaluation: use x in if condition
+    match eval_with_state(
+        "(if (> x 10) \"big\" \"small\")",
+        &mut interner,
+        &mut globals,
+    ) {
+        Ok(Value::String(ref s)) if s.as_str() == "big" => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+/// Tests using the core Repl struct - this is the real end-to-end test.
+///
+/// Uses `Repl::eval()` which is the same core function used by the interactive console.
+#[cfg(feature = "integration-test")]
+fn test_actual_repl_def_use_in_if() -> Status {
+    let mut repl_instance = repl::Repl::new();
+
+    // First evaluation: define x
+    if repl_instance.eval("(def x 42)").is_err() {
+        return Status::Fail;
+    }
+
+    // Second evaluation: use x in if condition
+    match repl_instance.eval("(if (> x 10) \"big\" \"small\")") {
+        Ok(Value::String(ref s)) if s.as_str() == "big" => Status::Pass,
+        other => {
+            // Print debug info
+            println!("test_actual_repl_def_use_in_if failed: {other:?}");
+            Status::Fail
+        }
+    }
+}
+
+/// Tests that incomplete input returns an appropriate error.
+///
+/// Incomplete input (unbalanced parentheses) should result in a parse error,
+/// not a crash or hang.
+#[cfg(feature = "integration-test")]
+fn test_incomplete_input_error() -> Status {
+    let mut repl_instance = repl::Repl::new();
+
+    // This input has unbalanced parentheses - it's incomplete
+    match repl_instance.eval("(def x") {
+        Err(ref msg) if msg.contains("Compile error") => Status::Pass,
+        Ok(value) => {
+            println!("test_incomplete_input_error: expected error, got value: {value:?}");
+            Status::Fail
+        }
+        Err(ref msg) => {
+            println!("test_incomplete_input_error: unexpected error format: {msg}");
+            Status::Fail
+        }
     }
 }

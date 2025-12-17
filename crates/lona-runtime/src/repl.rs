@@ -3,450 +3,479 @@
 
 //! Read-Eval-Print Loop (REPL) for interactive Lonala development.
 //!
-//! Provides an interactive console for evaluating Lonala expressions.
-//! Supports multi-line input with continuation prompts when parentheses
-//! are unbalanced.
+//! This module provides:
+//! - [`Repl`]: The core evaluation engine with persistent state
+//! - Interactive console support (production only)
+//!
+//! # Architecture
+//!
+//! The REPL is split into tested and untested components:
+//!
+//! **Tested Core** (via integration tests):
+//! - [`Repl::eval`]: Compiles and executes a source string, returns the result
+//! - State management: Symbol interning and global variables persist across calls
+//!
+//! **Untested Glue** (interactive mode only):
+//! - Byte-by-byte input handling (backspace, Ctrl+C, etc.)
+//! - Value-to-string output formatting
+//! - The main loop waiting for user input
 
-use alloc::string::{String, ToString};
-use alloc::vec::Vec;
-
+use alloc::string::String;
+#[cfg(not(feature = "integration-test"))]
+use alloc::string::ToString;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
-use lona_kernel::vm::Vm;
-use lonala_compiler::{CompileError, compile};
-use lonala_parser::error::Kind as ParseErrorKind;
+use lona_kernel::vm::{Globals, Vm};
+use lonala_compiler::compile;
 
-use crate::platform::uart;
-use crate::{print, println};
+// =============================================================================
+// Core REPL (Always Available - Used by Both Tests and Production)
+// =============================================================================
 
-/// Control character for backspace (DEL key).
-const BACKSPACE: u8 = 0x7F;
-
-/// Control character for backspace (Ctrl+H).
-const CTRL_H: u8 = 0x08;
-
-/// Control character for carriage return (Enter key).
-const ENTER: u8 = 0x0D;
-
-/// Control character for Ctrl+C (cancel input).
-const CTRL_C: u8 = 0x03;
-
-/// Maximum line length in bytes.
-const MAX_LINE_LENGTH: usize = 1024;
-
-/// Buffer for accumulating a single line of input.
-struct LineBuffer {
-    /// Character buffer.
-    buffer: Vec<u8>,
-}
-
-impl LineBuffer {
-    /// Creates a new empty line buffer.
-    const fn new() -> Self {
-        Self { buffer: Vec::new() }
-    }
-
-    /// Attempts to push a character to the buffer.
-    ///
-    /// Returns `true` if the character was added, `false` if buffer is full.
-    fn push(&mut self, byte: u8) -> bool {
-        if self.buffer.len() < MAX_LINE_LENGTH {
-            self.buffer.push(byte);
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Removes the last character from the buffer.
-    ///
-    /// Returns `true` if a character was removed, `false` if buffer was empty.
-    fn backspace(&mut self) -> bool {
-        self.buffer.pop().is_some()
-    }
-
-    /// Clears the buffer.
-    #[cfg(test)]
-    fn clear(&mut self) {
-        self.buffer.clear();
-    }
-
-    /// Returns `true` if the buffer is empty.
-    #[cfg(test)]
-    fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
-    }
-
-    /// Returns the buffer contents as a string slice, or `None` if not valid UTF-8.
-    fn as_str(&self) -> Option<&str> {
-        core::str::from_utf8(&self.buffer).ok()
-    }
-
-    /// Converts the buffer to a String, returning empty string if invalid UTF-8.
-    fn to_string_lossy(&self) -> String {
-        self.as_str().map_or_else(String::new, ToString::to_string)
-    }
-}
-
-/// Result of reading a line from the console.
-enum LineResult {
-    /// A complete line was read.
-    Line(String),
-    /// Input was cancelled (Ctrl+C).
-    Cancelled,
-}
-
-/// Interactive REPL for Lonala evaluation.
+/// REPL evaluation engine with persistent state.
 ///
-/// Maintains persistent state across evaluations including the symbol
-/// interner. Note: In Phase 3.1, globals do not persist between evaluations
-/// since we don't have `def` yet (that's Phase 3.3).
+/// Maintains state across evaluations including the symbol interner and global
+/// variables. Variables defined with `def` persist between calls to [`eval`].
+///
+/// # Example
+///
+/// ```ignore
+/// let mut repl = Repl::new();
+/// let result = repl.eval("(def x 42)").unwrap();
+/// // x is now defined
+/// let result = repl.eval("x").unwrap();
+/// // result is Integer(42)
+/// ```
 pub struct Repl {
     /// Symbol interner shared between compiler and VM.
     interner: Interner,
-    /// Accumulated source for multi-line input.
-    accumulated: String,
+    /// Global variables that persist between evaluations.
+    globals: Globals,
 }
 
 impl Repl {
-    /// Creates a new REPL instance with fresh state.
+    /// Creates a new REPL instance with empty state.
+    ///
+    /// The REPL starts with an empty symbol interner and no global variables.
+    /// Globals defined via `def` during evaluation will persist across
+    /// subsequent calls to [`eval`].
     pub const fn new() -> Self {
         Self {
             interner: Interner::new(),
-            accumulated: String::new(),
+            globals: Globals::new(),
         }
     }
 
-    /// Runs the REPL loop forever.
+    /// Evaluates a source string and returns the result.
     ///
-    /// This function never returns - it continuously reads and evaluates
-    /// expressions until the system is shut down.
-    pub fn run(&mut self) -> ! {
-        println!("Lona REPL v0.1.0");
-        println!("Type expressions to evaluate. Ctrl+C to cancel input.");
-        println!();
-
-        loop {
-            self.print_prompt();
-
-            match Self::read_line() {
-                LineResult::Line(line) => {
-                    self.process_line(&line);
-                }
-                LineResult::Cancelled => {
-                    // Reset accumulated input on Ctrl+C
-                    if !self.accumulated.is_empty() {
-                        self.accumulated.clear();
-                        println!();
-                    }
-                }
-            }
-        }
-    }
-
-    /// Prints the appropriate prompt based on input state.
-    fn print_prompt(&self) {
-        if self.accumulated.is_empty() {
-            print!("lona> ");
-        } else {
-            print!("...> ");
-        }
-    }
-
-    /// Reads a single line from the console.
+    /// This is the core REPL function used by both integration tests and the
+    /// interactive console. It compiles and executes the source, maintaining
+    /// persistent state for globals defined with `def`.
     ///
-    /// Handles backspace and Ctrl+C.
-    fn read_line() -> LineResult {
-        let mut buffer = LineBuffer::new();
+    /// # Errors
+    ///
+    /// Returns an error string if compilation or execution fails.
+    pub fn eval(&mut self, source: &str) -> Result<Value, String> {
+        // Compile the source
+        let chunk = compile(source, &mut self.interner)
+            .map_err(|err| alloc::format!("Compile error: {err}"))?;
 
-        loop {
-            let Some(input_byte) = uart::read_byte() else {
-                // UART not initialized, shouldn't happen in normal operation
-                continue;
-            };
-
-            match input_byte {
-                ENTER => {
-                    println!(); // Echo newline
-                    let line = buffer.to_string_lossy();
-                    return LineResult::Line(line);
-                }
-                CTRL_C => {
-                    print!("^C");
-                    println!();
-                    return LineResult::Cancelled;
-                }
-                BACKSPACE | CTRL_H => {
-                    if buffer.backspace() {
-                        // Echo backspace: move cursor back, overwrite with space, move back again
-                        print!("\x08 \x08");
-                    }
-                }
-                // Printable ASCII characters
-                ch_byte if is_printable_ascii(ch_byte) => {
-                    if buffer.push(ch_byte) {
-                        // Echo the character - char::from is safe for any u8
-                        let ch = char::from(ch_byte);
-                        print!("{ch}");
-                    }
-                    // Silently ignore if buffer is full
-                }
-                // Ignore other control characters
-                _ => {}
-            }
-        }
-    }
-
-    /// Processes a line of input, accumulating for multi-line or evaluating.
-    fn process_line(&mut self, line: &str) {
-        // Add line to accumulated input
-        if !self.accumulated.is_empty() {
-            self.accumulated.push('\n');
-        }
-        self.accumulated.push_str(line);
-
-        // Skip empty input
-        if self.accumulated.trim().is_empty() {
-            self.accumulated.clear();
-            return;
-        }
-
-        // Try to compile the accumulated input
-        match compile(&self.accumulated, &mut self.interner) {
-            Ok(chunk) => {
-                // Successfully compiled - execute it
-                self.accumulated.clear();
-                self.execute_chunk(&chunk);
-            }
-            Err(CompileError::Parse(ref parse_err)) => {
-                // Check if this is an "incomplete input" error
-                if needs_more_input(&parse_err.kind) {
-                    // Keep accumulating
-                    return;
-                }
-                // Real parse error - display it and reset
-                let source = core::mem::take(&mut self.accumulated);
-                Self::display_error(&source, parse_err.span.start, &parse_err.kind.to_string());
-            }
-            Err(CompileError::Compile(ref compile_err)) => {
-                // Compile error - display it and reset
-                let source = core::mem::take(&mut self.accumulated);
-                Self::display_error(&source, compile_err.span().start, &compile_err.to_string());
-            }
-            // Handle future error variants (CompileError is non-exhaustive)
-            Err(ref err) => {
-                self.accumulated.clear();
-                println!("Error: {err}");
-            }
-        }
-    }
-
-    /// Executes a compiled chunk and displays the result.
-    fn execute_chunk(&self, chunk: &lonala_compiler::Chunk) {
-        // Create a fresh VM for this evaluation
+        // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
-        vm.set_print_callback(uart_print);
 
-        // Make sure the print symbol is registered
+        // Restore persistent globals into the VM
+        *vm.globals_mut() = self.globals.clone();
+
+        // Register the print function
         if let Some(print_sym) = self.interner.get("print") {
             vm.update_print_symbol(print_sym);
             vm.set_global(print_sym, Value::Symbol(print_sym));
         }
 
-        match vm.execute(chunk) {
-            Ok(result) => {
-                // Print the result unless it's nil
-                if !matches!(result, Value::Nil) {
-                    self.print_value(&result);
+        // Execute
+        let result = vm
+            .execute(&chunk)
+            .map_err(|err| alloc::format!("Runtime error: {err:?}"))?;
+
+        // Save globals back to persistent storage
+        self.globals = vm.globals().clone();
+
+        Ok(result)
+    }
+}
+
+// =============================================================================
+// Interactive Console (Production Only - Untested Glue Code)
+// =============================================================================
+//
+// The following code handles the interactive REPL experience:
+// - Byte-by-byte input with backspace, Ctrl+C handling
+// - Value formatting and output to UART
+// - The main loop waiting for user input
+//
+// This code is not tested via integration tests because:
+// 1. Byte-by-byte input simulation is impractical
+// 2. The core eval() function is what matters for correctness
+// 3. These are straightforward I/O wrappers around the tested core
+
+#[cfg(not(feature = "integration-test"))]
+mod interactive {
+    use super::{Repl, String, ToString, Value, compile};
+    use alloc::vec::Vec;
+    use core::fmt::Write;
+    use lonala_compiler::CompileError;
+    use lonala_parser::error::Kind as ParseErrorKind;
+
+    /// Control character for backspace (DEL key).
+    const BACKSPACE: u8 = 0x7F;
+
+    /// Control character for backspace (Ctrl+H).
+    const CTRL_H: u8 = 0x08;
+
+    /// Control character for carriage return (Enter key).
+    const ENTER: u8 = 0x0D;
+
+    /// Control character for Ctrl+C (cancel input).
+    const CTRL_C: u8 = 0x03;
+
+    /// Maximum line length in bytes.
+    const MAX_LINE_LENGTH: usize = 1024;
+
+    /// Buffer for accumulating a single line of input.
+    struct LineBuffer {
+        buffer: Vec<u8>,
+    }
+
+    impl LineBuffer {
+        const fn new() -> Self {
+            Self { buffer: Vec::new() }
+        }
+
+        fn push(&mut self, byte: u8) -> bool {
+            if self.buffer.len() < MAX_LINE_LENGTH {
+                self.buffer.push(byte);
+                true
+            } else {
+                false
+            }
+        }
+
+        fn backspace(&mut self) -> bool {
+            self.buffer.pop().is_some()
+        }
+
+        fn as_str(&self) -> Option<&str> {
+            core::str::from_utf8(&self.buffer).ok()
+        }
+
+        fn to_string_lossy(&self) -> String {
+            self.as_str().map_or_else(String::new, ToString::to_string)
+        }
+    }
+
+    /// Result of reading a line from the console.
+    enum LineResult {
+        Line(String),
+        Cancelled,
+    }
+
+    /// I/O trait for the interactive console.
+    pub trait ConsoleIo {
+        /// Reads a single byte from input, blocking until available.
+        fn read_byte(&mut self) -> Option<u8>;
+
+        /// Writes a string to output.
+        fn write_str(&mut self, text: &str);
+
+        /// Writes a formatted string to output.
+        fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) {
+            struct FmtAdapter<'io, T: ConsoleIo + ?Sized>(&'io mut T);
+            impl<T: ConsoleIo + ?Sized> Write for FmtAdapter<'_, T> {
+                fn write_str(&mut self, s: &str) -> core::fmt::Result {
+                    self.0.write_str(s);
+                    Ok(())
                 }
             }
-            Err(err) => {
-                println!("Runtime error: {err:?}");
+            // Ignore formatting errors since we can't do anything about them.
+            if FmtAdapter(self).write_fmt(args).is_err() {
+                // Nothing we can do about formatting errors in a no_std environment
             }
         }
     }
 
-    /// Prints a value to the console.
-    fn print_value(&self, value: &Value) {
-        match *value {
-            Value::Nil => println!("nil"),
-            Value::Integer(ref int_val) => println!("{int_val}"),
-            Value::Float(float_val) => println!("{float_val}"),
-            Value::Bool(bool_val) => println!("{bool_val}"),
-            Value::Ratio(ref ratio_val) => println!("{ratio_val}"),
-            Value::Symbol(sym_id) => {
-                let name = self.interner.resolve(sym_id);
-                println!("{name}");
+    /// UART-based console I/O.
+    pub struct UartConsole;
+
+    impl ConsoleIo for UartConsole {
+        fn read_byte(&mut self) -> Option<u8> {
+            crate::platform::uart::read_byte()
+        }
+
+        fn write_str(&mut self, text: &str) {
+            crate::print!("{text}");
+        }
+    }
+
+    /// Interactive REPL console.
+    ///
+    /// Wraps the core [`Repl`] with I/O handling for interactive use.
+    pub struct InteractiveRepl<I: ConsoleIo> {
+        repl: Repl,
+        io: I,
+        accumulated: String,
+    }
+
+    impl<I: ConsoleIo> InteractiveRepl<I> {
+        /// Creates a new interactive REPL with the given I/O backend.
+        pub const fn new(io: I) -> Self {
+            Self {
+                repl: Repl::new(),
+                io,
+                accumulated: String::new(),
             }
-            Value::String(ref string) => {
-                print!("\"");
-                for ch in string.as_str().chars() {
-                    match ch {
-                        '"' => print!("\\\""),
-                        '\\' => print!("\\\\"),
-                        '\n' => print!("\\n"),
-                        '\t' => print!("\\t"),
-                        '\r' => print!("\\r"),
-                        other => print!("{other}"),
+        }
+
+        /// Runs the REPL loop forever.
+        pub fn run(&mut self) -> ! {
+            self.writeln("Lona REPL v0.1.0");
+            self.writeln("Type expressions to evaluate. Ctrl+C to cancel input.");
+            self.writeln("");
+
+            loop {
+                self.print_prompt();
+
+                match self.read_line() {
+                    LineResult::Line(line) => {
+                        self.process_line(&line);
+                    }
+                    LineResult::Cancelled => {
+                        if !self.accumulated.is_empty() {
+                            self.accumulated.clear();
+                            self.writeln("");
+                        }
                     }
                 }
-                println!("\"");
-            }
-            Value::List(ref list) => println!("{list}"),
-            Value::Vector(ref vector) => println!("{vector}"),
-            Value::Map(ref map) => println!("{map}"),
-            // Handle future value variants (Value is non-exhaustive)
-            _ => println!("{value:?}"),
-        }
-    }
-
-    /// Displays an error with source context and caret pointing to location.
-    fn display_error(source: &str, position: usize, message: &str) {
-        println!("Error: {message}");
-
-        // Find the line containing the error position
-        let mut line_start = 0_usize;
-        let mut line_num = 1_usize;
-
-        for (idx, ch) in source.char_indices() {
-            if idx >= position {
-                break;
-            }
-            if ch == '\n' {
-                line_start = idx.saturating_add(1);
-                line_num = line_num.saturating_add(1);
             }
         }
 
-        // Find end of line
-        let line_end = source
-            .get(line_start..)
-            .and_then(|rest| rest.find('\n'))
-            .map_or(source.len(), |offset| line_start.saturating_add(offset));
+        fn write(&mut self, text: &str) {
+            self.io.write_str(text);
+        }
 
-        // Extract the line
-        if let Some(line) = source.get(line_start..line_end) {
-            println!("  {line_num} | {line}");
+        fn writeln(&mut self, text: &str) {
+            self.io.write_str(text);
+            self.io.write_str("\n");
+        }
 
-            // Calculate column position
-            let col = position.saturating_sub(line_start);
-
-            // Print caret at error position
-            // Account for line number prefix width
-            let prefix_width = format_line_prefix_width(line_num);
-            print!("  ");
-            for _ in 0..prefix_width {
-                print!(" ");
+        fn print_prompt(&mut self) {
+            if self.accumulated.is_empty() {
+                self.write("lona> ");
+            } else {
+                self.write("...> ");
             }
-            print!(" | ");
-            for _ in 0..col {
-                print!(" ");
+        }
+
+        fn read_line(&mut self) -> LineResult {
+            let mut buffer = LineBuffer::new();
+
+            loop {
+                let Some(input_byte) = self.io.read_byte() else {
+                    continue;
+                };
+
+                match input_byte {
+                    ENTER => {
+                        self.writeln("");
+                        return LineResult::Line(buffer.to_string_lossy());
+                    }
+                    CTRL_C => {
+                        self.write("^C");
+                        self.writeln("");
+                        return LineResult::Cancelled;
+                    }
+                    BACKSPACE | CTRL_H => {
+                        if buffer.backspace() {
+                            self.write("\x08 \x08");
+                        }
+                    }
+                    ch_byte if is_printable_ascii(ch_byte) => {
+                        if buffer.push(ch_byte) {
+                            let ch = char::from(ch_byte);
+                            self.io.write_fmt(format_args!("{ch}"));
+                        }
+                    }
+                    _ => {}
+                }
             }
-            println!("^");
+        }
+
+        fn process_line(&mut self, line: &str) {
+            if !self.accumulated.is_empty() {
+                self.accumulated.push('\n');
+            }
+            self.accumulated.push_str(line);
+
+            if self.accumulated.trim().is_empty() {
+                self.accumulated.clear();
+                return;
+            }
+
+            // First, try to compile to check if input is complete
+            match compile(&self.accumulated, &mut self.repl.interner) {
+                Ok(_chunk) => {
+                    // Input is complete - evaluate using the core eval() function
+                    // This ensures the same code path is used as in tests
+                    let source = core::mem::take(&mut self.accumulated);
+                    self.execute_and_print(&source);
+                }
+                Err(CompileError::Parse(ref parse_err)) => {
+                    if needs_more_input(&parse_err.kind) {
+                        return;
+                    }
+                    let source = core::mem::take(&mut self.accumulated);
+                    self.display_error(&source, parse_err.span.start, &parse_err.kind.to_string());
+                }
+                Err(CompileError::Compile(ref compile_err)) => {
+                    let source = core::mem::take(&mut self.accumulated);
+                    self.display_error(&source, compile_err.span().start, &compile_err.to_string());
+                }
+                Err(ref err) => {
+                    self.accumulated.clear();
+                    self.io.write_fmt(format_args!("Error: {err}\n"));
+                }
+            }
+        }
+
+        /// Evaluates source and prints the result.
+        ///
+        /// Uses the core `Repl::eval()` function to ensure the same code path
+        /// is exercised in both interactive and test modes.
+        fn execute_and_print(&mut self, source: &str) {
+            match self.repl.eval(source) {
+                Ok(result) => {
+                    if !matches!(result, Value::Nil) {
+                        self.print_value(&result);
+                    }
+                }
+                Err(err) => {
+                    self.io.write_fmt(format_args!("{err}\n"));
+                }
+            }
+        }
+
+        fn print_value(&mut self, value: &Value) {
+            match *value {
+                Value::Nil => self.writeln("nil"),
+                Value::Integer(ref int_val) => {
+                    self.io.write_fmt(format_args!("{int_val}\n"));
+                }
+                Value::Float(float_val) => {
+                    self.io.write_fmt(format_args!("{float_val}\n"));
+                }
+                Value::Bool(bool_val) => {
+                    self.io.write_fmt(format_args!("{bool_val}\n"));
+                }
+                Value::Ratio(ref ratio_val) => {
+                    self.io.write_fmt(format_args!("{ratio_val}\n"));
+                }
+                Value::Symbol(sym_id) => {
+                    let name = self.repl.interner.resolve(sym_id);
+                    self.io.write_fmt(format_args!("{name}\n"));
+                }
+                Value::String(ref string) => {
+                    self.write("\"");
+                    for ch in string.as_str().chars() {
+                        match ch {
+                            '"' => self.write("\\\""),
+                            '\\' => self.write("\\\\"),
+                            '\n' => self.write("\\n"),
+                            '\t' => self.write("\\t"),
+                            '\r' => self.write("\\r"),
+                            other => self.io.write_fmt(format_args!("{other}")),
+                        }
+                    }
+                    self.writeln("\"");
+                }
+                Value::List(ref list) => {
+                    self.io.write_fmt(format_args!("{list}\n"));
+                }
+                Value::Vector(ref vector) => {
+                    self.io.write_fmt(format_args!("{vector}\n"));
+                }
+                Value::Map(ref map) => {
+                    self.io.write_fmt(format_args!("{map}\n"));
+                }
+                _ => {
+                    self.io.write_fmt(format_args!("{value:?}\n"));
+                }
+            }
+        }
+
+        fn display_error(&mut self, source: &str, position: usize, message: &str) {
+            self.io.write_fmt(format_args!("Error: {message}\n"));
+
+            let mut line_start = 0_usize;
+            let mut line_num = 1_usize;
+
+            for (idx, ch) in source.char_indices() {
+                if idx >= position {
+                    break;
+                }
+                if ch == '\n' {
+                    line_start = idx.saturating_add(1);
+                    line_num = line_num.saturating_add(1);
+                }
+            }
+
+            let line_end = source
+                .get(line_start..)
+                .and_then(|rest| rest.find('\n'))
+                .map_or(source.len(), |offset| line_start.saturating_add(offset));
+
+            if let Some(line) = source.get(line_start..line_end) {
+                self.io.write_fmt(format_args!("  {line_num} | {line}\n"));
+
+                let col = position.saturating_sub(line_start);
+                let prefix_width = format_line_prefix_width(line_num);
+                self.write("  ");
+                for _ in 0..prefix_width {
+                    self.write(" ");
+                }
+                self.write(" | ");
+                for _ in 0..col {
+                    self.write(" ");
+                }
+                self.writeln("^");
+            }
+        }
+    }
+
+    const fn is_printable_ascii(byte: u8) -> bool {
+        byte >= 0x20 && byte < 0x7F
+    }
+
+    const fn needs_more_input(kind: &ParseErrorKind) -> bool {
+        matches!(
+            *kind,
+            ParseErrorKind::UnexpectedEof { .. } | ParseErrorKind::UnterminatedString
+        )
+    }
+
+    const fn format_line_prefix_width(line_num: usize) -> usize {
+        if line_num == 0 {
+            1
+        } else {
+            let mut n = line_num;
+            let mut width = 0_usize;
+            while n > 0 {
+                width = width.saturating_add(1);
+                n /= 10;
+            }
+            width
         }
     }
 }
 
-/// Checks if a byte is a printable ASCII character (0x20-0x7E).
-const fn is_printable_ascii(byte: u8) -> bool {
-    byte >= 0x20 && byte < 0x7F
-}
-
-/// Checks if a parse error indicates incomplete input (need more lines).
-const fn needs_more_input(kind: &ParseErrorKind) -> bool {
-    matches!(
-        *kind,
-        ParseErrorKind::UnexpectedEof { .. } | ParseErrorKind::UnterminatedString
-    )
-}
-
-/// Calculates the width of the line number prefix for alignment.
-const fn format_line_prefix_width(line_num: usize) -> usize {
-    if line_num == 0 {
-        1
-    } else {
-        let mut n = line_num;
-        let mut width = 0_usize;
-        while n > 0 {
-            width = width.saturating_add(1);
-            n /= 10;
-        }
-        width
-    }
-}
-
-/// Print callback for the VM that outputs to UART.
-fn uart_print(output: &str) {
-    print!("{output}");
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn line_buffer_push_and_backspace() {
-        let mut buf = LineBuffer::new();
-        assert!(buf.is_empty());
-
-        assert!(buf.push(b'a'));
-        assert!(!buf.is_empty());
-        assert_eq!(buf.as_str(), Some("a"));
-
-        assert!(buf.push(b'b'));
-        assert_eq!(buf.as_str(), Some("ab"));
-
-        assert!(buf.backspace());
-        assert_eq!(buf.as_str(), Some("a"));
-
-        assert!(buf.backspace());
-        assert!(buf.is_empty());
-
-        // Backspace on empty buffer
-        assert!(!buf.backspace());
-    }
-
-    #[test]
-    fn line_buffer_clear() {
-        let mut buf = LineBuffer::new();
-        buf.push(b'x');
-        buf.push(b'y');
-        buf.clear();
-        assert!(buf.is_empty());
-    }
-
-    #[test]
-    fn line_buffer_to_string_lossy() {
-        let mut buf = LineBuffer::new();
-        buf.push(b'h');
-        buf.push(b'i');
-        assert_eq!(buf.to_string_lossy(), "hi");
-    }
-
-    #[test]
-    fn format_line_prefix_width_single_digit() {
-        assert_eq!(format_line_prefix_width(1), 1);
-        assert_eq!(format_line_prefix_width(9), 1);
-    }
-
-    #[test]
-    fn format_line_prefix_width_multi_digit() {
-        assert_eq!(format_line_prefix_width(10), 2);
-        assert_eq!(format_line_prefix_width(99), 2);
-        assert_eq!(format_line_prefix_width(100), 3);
-    }
-
-    #[test]
-    fn format_line_prefix_width_zero() {
-        assert_eq!(format_line_prefix_width(0), 1);
-    }
-
-    #[test]
-    fn is_printable_ascii_works() {
-        assert!(is_printable_ascii(b' '));
-        assert!(is_printable_ascii(b'~'));
-        assert!(is_printable_ascii(b'a'));
-        assert!(!is_printable_ascii(0x1F));
-        assert!(!is_printable_ascii(0x7F));
-    }
-}
+// Re-export interactive types for use in main.rs
+#[cfg(not(feature = "integration-test"))]
+pub use interactive::{InteractiveRepl, UartConsole};

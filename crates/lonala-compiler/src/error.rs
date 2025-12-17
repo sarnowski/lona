@@ -38,7 +38,9 @@ pub enum Error {
     /// Jump offset too large to encode.
     ///
     /// Jump offsets use signed 16-bit fields, limiting jumps to
-    /// -32768 to +32767 instructions.
+    /// -32768 to +32767 instructions. This error is effectively unreachable
+    /// in practice since it would require a single branch body to generate
+    /// over 32,000 bytecode instructions, which exceeds realistic program sizes.
     JumpTooLarge {
         /// Source location where the error occurred.
         span: Span,
@@ -62,6 +64,19 @@ pub enum Error {
         /// Source location where the feature was used.
         span: Span,
     },
+
+    /// Invalid special form syntax.
+    ///
+    /// Indicates that a special form (like `def`, `if`, `let`, etc.)
+    /// was used with incorrect syntax.
+    InvalidSpecialForm {
+        /// Name of the special form.
+        form: &'static str,
+        /// Description of what went wrong.
+        message: &'static str,
+        /// Source location where the error occurred.
+        span: Span,
+    },
 }
 
 impl Error {
@@ -74,7 +89,8 @@ impl Error {
             | Self::TooManyRegisters { span }
             | Self::JumpTooLarge { span }
             | Self::EmptyCall { span }
-            | Self::NotImplemented { span, .. } => span,
+            | Self::NotImplemented { span, .. }
+            | Self::InvalidSpecialForm { span, .. } => span,
         }
     }
 }
@@ -97,6 +113,13 @@ impl fmt::Display for Error {
             }
             Self::NotImplemented { feature, span } => {
                 write!(f, "not implemented: {feature} at {span}")
+            }
+            Self::InvalidSpecialForm {
+                form,
+                message,
+                span,
+            } => {
+                write!(f, "invalid '{form}' form: {message} at {span}")
             }
         }
     }
@@ -142,6 +165,17 @@ mod tests {
             ),
             "not implemented: closures at 10..20"
         );
+        assert_eq!(
+            format!(
+                "{}",
+                Error::InvalidSpecialForm {
+                    form: "if",
+                    message: "expected (if test then) or (if test then else)",
+                    span: test_span()
+                }
+            ),
+            "invalid 'if' form: expected (if test then) or (if test then else) at 10..20"
+        );
     }
 
     #[test]
@@ -154,6 +188,15 @@ mod tests {
         assert_eq!(
             Error::NotImplemented {
                 feature: "test",
+                span
+            }
+            .span(),
+            span
+        );
+        assert_eq!(
+            Error::InvalidSpecialForm {
+                form: "if",
+                message: "test",
                 span
             }
             .span(),

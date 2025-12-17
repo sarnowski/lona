@@ -1027,3 +1027,194 @@ fn execute_call_non_symbol_error() {
     let result = vm.execute(&chunk);
     assert!(matches!(result, Err(Error::NotCallable { .. })));
 }
+
+// =============================================================================
+// Integration Tests: End-to-End Compile + Execute with Persistent State
+// =============================================================================
+
+/// Simulates REPL-like evaluation: compiles source, executes with persistent
+/// globals, and returns the result. This tests the full pipeline that the
+/// REPL uses, ensuring globals persist between evaluations.
+fn eval_with_state(
+    source: &str,
+    interner: &mut Interner,
+    globals: &mut super::Globals,
+) -> Result<Value, super::Error> {
+    // Compile the source
+    let chunk = lonala_compiler::compile(source, interner)
+        .expect("compilation should succeed in eval_with_state");
+
+    // Create VM and restore persistent globals
+    let mut vm = Vm::new(interner);
+    *vm.globals_mut() = globals.clone();
+
+    // Register print function
+    if let Some(print_sym) = interner.get("print") {
+        vm.update_print_symbol(print_sym);
+        vm.set_global(print_sym, Value::Symbol(print_sym));
+    }
+
+    // Execute
+    let result = vm.execute(&chunk)?;
+
+    // Save globals back (including any newly defined)
+    *globals = vm.globals().clone();
+
+    Ok(result)
+}
+
+#[test]
+fn integration_def_persists_across_evaluations() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // First evaluation: define x
+    let result1 = eval_with_state("(def x 42)", &mut interner, &mut globals).unwrap();
+    // def returns the symbol
+    assert!(matches!(result1, Value::Symbol(_)));
+
+    // Second evaluation: use x
+    let result2 = eval_with_state("x", &mut interner, &mut globals).unwrap();
+    assert_eq!(result2, Value::Integer(Integer::from_i64(42)));
+}
+
+#[test]
+fn integration_def_multiple_variables() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Define two variables in separate evaluations
+    let _r1 = eval_with_state("(def a 10)", &mut interner, &mut globals).unwrap();
+    let _r2 = eval_with_state("(def b 20)", &mut interner, &mut globals).unwrap();
+
+    // Use both in arithmetic
+    let result = eval_with_state("(+ a b)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(30)));
+}
+
+#[test]
+fn integration_def_overwrite() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Define x
+    let _r1 = eval_with_state("(def x 1)", &mut interner, &mut globals).unwrap();
+    let result1 = eval_with_state("x", &mut interner, &mut globals).unwrap();
+    assert_eq!(result1, Value::Integer(Integer::from_i64(1)));
+
+    // Redefine x
+    let _r2 = eval_with_state("(def x 2)", &mut interner, &mut globals).unwrap();
+    let result2 = eval_with_state("x", &mut interner, &mut globals).unwrap();
+    assert_eq!(result2, Value::Integer(Integer::from_i64(2)));
+}
+
+#[test]
+fn integration_if_with_defined_variable() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Define x
+    let _r1 = eval_with_state("(def x 42)", &mut interner, &mut globals).unwrap();
+
+    // Use x in if condition
+    let result = eval_with_state(
+        "(if (> x 10) \"big\" \"small\")",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    assert_eq!(
+        result,
+        Value::String(lona_core::string::HeapStr::new("big"))
+    );
+}
+
+#[test]
+fn integration_do_with_def() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Use do to define and immediately use a variable
+    let result = eval_with_state("(do (def y 10) (+ y 5))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(15)));
+
+    // y should persist after the do block
+    let result2 = eval_with_state("y", &mut interner, &mut globals).unwrap();
+    assert_eq!(result2, Value::Integer(Integer::from_i64(10)));
+}
+
+#[test]
+fn integration_complex_expression_sequence() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Session 1: Define initial values
+    let _r1 = eval_with_state("(def x 10)", &mut interner, &mut globals).unwrap();
+    let _r2 = eval_with_state("(def y 20)", &mut interner, &mut globals).unwrap();
+
+    // Session 2: Compute and store result
+    let _r3 = eval_with_state("(def sum (+ x y))", &mut interner, &mut globals).unwrap();
+
+    // Session 3: Verify and use computed value
+    let result = eval_with_state("(* sum 2)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(60)));
+}
+
+#[test]
+fn integration_undefined_global_error() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Try to use an undefined variable
+    let result = eval_with_state("undefined_var", &mut interner, &mut globals);
+    assert!(matches!(result, Err(Error::UndefinedGlobal { .. })));
+}
+
+#[test]
+fn integration_if_branches() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Test true branch
+    let result1 = eval_with_state("(if true 1 2)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result1, Value::Integer(Integer::from_i64(1)));
+
+    // Test false branch
+    let result2 = eval_with_state("(if false 1 2)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result2, Value::Integer(Integer::from_i64(2)));
+
+    // Test nil is falsy
+    let result3 = eval_with_state("(if nil 1 2)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result3, Value::Integer(Integer::from_i64(2)));
+
+    // Test 0 is truthy
+    let result4 = eval_with_state("(if 0 1 2)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result4, Value::Integer(Integer::from_i64(1)));
+}
+
+#[test]
+fn integration_if_no_else_returns_nil() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(if false 1)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Nil);
+}
+
+#[test]
+fn integration_do_empty() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(do)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Nil);
+}
+
+#[test]
+fn integration_do_returns_last() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(do 1 2 3)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(3)));
+}

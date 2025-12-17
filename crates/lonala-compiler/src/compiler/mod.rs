@@ -11,7 +11,9 @@ use lonala_parser::{Ast, Span, Spanned};
 
 use crate::chunk::{Chunk, Constant};
 use crate::error::Error;
-use crate::opcode::{Opcode, RK_MAX_CONSTANT, encode_abc, encode_abx, rk_constant, rk_register};
+use crate::opcode::{
+    Opcode, RK_MAX_CONSTANT, encode_abc, encode_abx, encode_asbx, rk_constant, rk_register,
+};
 
 #[cfg(test)]
 mod tests;
@@ -218,16 +220,25 @@ impl<'interner> Compiler<'interner> {
     // List (Call) Compilation
     // =========================================================================
 
-    /// Compiles a list as a function call or arithmetic operation.
+    /// Compiles a list as a function call, special form, or arithmetic operation.
     fn compile_list(&mut self, elements: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
         if elements.is_empty() {
             return Err(Error::EmptyCall { span });
         }
 
-        // Check if the first element is a known operator symbol
+        // Check if the first element is a symbol (could be special form or operator)
         if let Some(spanned_func) = elements.first()
             && let Ast::Symbol(ref name) = spanned_func.node
         {
+            // Check for special forms first
+            let args = elements.get(1_usize..).unwrap_or(&[]);
+            match name.as_str() {
+                "do" => return self.compile_do(args, span),
+                "if" => return self.compile_if(args, span),
+                "def" => return self.compile_def(args, span),
+                _ => {}
+            }
+
             // Check for unary 'not'
             if name == "not" && elements.len() == 2_usize {
                 return self.compile_not(elements, span);
@@ -417,6 +428,190 @@ impl<'interner> Compiler<'interner> {
         self.free_registers_to(base.saturating_add(1));
 
         Ok(ExprResult { register: base })
+    }
+
+    // =========================================================================
+    // Special Forms
+    // =========================================================================
+
+    /// Compiles a `do` special form.
+    ///
+    /// Syntax: `(do)` or `(do expr1 expr2 ... exprN)`
+    ///
+    /// Evaluates expressions left to right and returns the value of the last
+    /// expression. Empty `(do)` returns nil.
+    fn compile_do(&mut self, args: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
+        if args.is_empty() {
+            // Empty do returns nil
+            let dest = self.alloc_register(span)?;
+            self.chunk
+                .emit(encode_abc(Opcode::LoadNil, dest, 0, 0), span);
+            return Ok(ExprResult { register: dest });
+        }
+
+        // Compile all but last expression, discarding results
+        for expr in args
+            .get(..args.len().saturating_sub(1_usize))
+            .unwrap_or(&[])
+        {
+            let checkpoint = self.next_register;
+            let _result = self.compile_expr(expr)?;
+            self.free_registers_to(checkpoint);
+        }
+
+        // Compile last expression and return its result
+        let last_expr = args.last().ok_or(Error::EmptyCall { span })?;
+        self.compile_expr(last_expr)
+    }
+
+    /// Compiles an `if` special form.
+    ///
+    /// Syntax: `(if test then)` or `(if test then else)`
+    ///
+    /// Evaluates `test`. If truthy (not nil or false), evaluates and returns
+    /// `then`. Otherwise evaluates and returns `else` (or nil if no else).
+    fn compile_if(&mut self, args: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
+        // Validate: need 2 or 3 args (test, then, [else])
+        if args.len() < 2_usize || args.len() > 3_usize {
+            return Err(Error::InvalidSpecialForm {
+                form: "if",
+                message: "expected (if test then) or (if test then else)",
+                span,
+            });
+        }
+
+        let test_expr = args.first().ok_or(Error::EmptyCall { span })?;
+        let then_expr = args.get(1_usize).ok_or(Error::EmptyCall { span })?;
+        let else_expr = args.get(2_usize);
+
+        // Compile test expression
+        let checkpoint = self.next_register;
+        let test_result = self.compile_expr(test_expr)?;
+
+        // Emit JumpIfNot (will patch offset later)
+        let jump_to_else_idx = self.chunk.emit(
+            encode_asbx(Opcode::JumpIfNot, test_result.register, 0),
+            span,
+        );
+
+        // Free test register
+        self.free_registers_to(checkpoint);
+
+        // Allocate destination register for result
+        let dest = self.alloc_register(span)?;
+
+        // Compile then branch into dest
+        let then_result = self.compile_expr(then_expr)?;
+        if then_result.register != dest {
+            self.chunk.emit(
+                encode_abc(Opcode::Move, dest, then_result.register, 0),
+                then_expr.span,
+            );
+        }
+        // Free any temps from then branch but keep dest
+        self.free_registers_to(dest.saturating_add(1));
+
+        // Emit Jump over else branch (will patch offset later)
+        let jump_to_end_idx = self.chunk.emit(encode_asbx(Opcode::Jump, 0, 0), span);
+
+        // Patch jump_to_else to point here (current instruction index)
+        let else_offset = self
+            .chunk
+            .len()
+            .saturating_sub(jump_to_else_idx)
+            .saturating_sub(1);
+        let else_offset_i16 =
+            i16::try_from(else_offset).map_err(|_err| Error::JumpTooLarge { span })?;
+        self.chunk.patch(
+            jump_to_else_idx,
+            encode_asbx(Opcode::JumpIfNot, test_result.register, else_offset_i16),
+        );
+
+        // Compile else branch (or nil) into dest
+        if let Some(else_branch) = else_expr {
+            let else_result = self.compile_expr(else_branch)?;
+            if else_result.register != dest {
+                self.chunk.emit(
+                    encode_abc(Opcode::Move, dest, else_result.register, 0),
+                    else_branch.span,
+                );
+            }
+        } else {
+            self.chunk
+                .emit(encode_abc(Opcode::LoadNil, dest, 0, 0), span);
+        }
+        // Free any temps from else branch but keep dest
+        self.free_registers_to(dest.saturating_add(1));
+
+        // Patch jump_to_end to point here
+        let end_offset = self
+            .chunk
+            .len()
+            .saturating_sub(jump_to_end_idx)
+            .saturating_sub(1);
+        let end_offset_i16 =
+            i16::try_from(end_offset).map_err(|_err| Error::JumpTooLarge { span })?;
+        self.chunk.patch(
+            jump_to_end_idx,
+            encode_asbx(Opcode::Jump, 0, end_offset_i16),
+        );
+
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles a `def` special form.
+    ///
+    /// Syntax: `(def name value)`
+    ///
+    /// Evaluates `value` and binds it to the global variable `name`.
+    /// Returns the symbol `name`.
+    fn compile_def(&mut self, args: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
+        // Validate: need exactly 2 args (name, value)
+        if args.len() != 2_usize {
+            return Err(Error::InvalidSpecialForm {
+                form: "def",
+                message: "expected (def name value)",
+                span,
+            });
+        }
+
+        // First arg must be a symbol
+        let name_expr = args.first().ok_or(Error::EmptyCall { span })?;
+        let Ast::Symbol(ref name) = name_expr.node else {
+            return Err(Error::InvalidSpecialForm {
+                form: "def",
+                message: "first argument must be a symbol",
+                span: name_expr.span,
+            });
+        };
+
+        let value_expr = args.get(1_usize).ok_or(Error::EmptyCall { span })?;
+
+        // Compile value expression
+        let checkpoint = self.next_register;
+        let value_result = self.compile_expr(value_expr)?;
+
+        // Intern the symbol and add to constants
+        let symbol_id = self.interner.intern(name);
+        let symbol_const = self
+            .chunk
+            .add_constant_at(Constant::Symbol(symbol_id), span)?;
+
+        // Emit SetGlobal
+        self.chunk.emit(
+            encode_abx(Opcode::SetGlobal, value_result.register, symbol_const),
+            span,
+        );
+
+        // Free value register
+        self.free_registers_to(checkpoint);
+
+        // Return the symbol (load it into destination)
+        let dest = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, dest, symbol_const), span);
+
+        Ok(ExprResult { register: dest })
     }
 
     // =========================================================================
