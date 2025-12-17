@@ -7,6 +7,7 @@
 //! This module implements the core compilation logic for the Lonala language.
 
 use alloc::collections::BTreeMap;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use lona_core::chunk::{Chunk, Constant};
@@ -81,6 +82,44 @@ impl LocalEnv {
     }
 }
 
+/// A compiled macro definition.
+///
+/// Macros are compile-time functions that transform AST. The macro body
+/// is compiled to bytecode and stored here for later expansion.
+#[derive(Debug, Clone)]
+pub struct MacroDefinition {
+    /// Compiled bytecode for the macro transformer function.
+    /// When called, receives unevaluated arguments and returns transformed AST.
+    chunk: Arc<Chunk>,
+    /// Number of parameters the macro expects.
+    arity: u8,
+    /// Macro name for error messages and debugging.
+    name: alloc::string::String,
+}
+
+impl MacroDefinition {
+    /// Returns a reference to the macro's compiled chunk.
+    #[inline]
+    #[must_use]
+    pub const fn chunk(&self) -> &Arc<Chunk> {
+        &self.chunk
+    }
+
+    /// Returns the macro's arity.
+    #[inline]
+    #[must_use]
+    pub const fn arity(&self) -> u8 {
+        self.arity
+    }
+
+    /// Returns the macro's name.
+    #[inline]
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 /// Result of compiling an expression.
 ///
 /// Contains the register where the expression's value is stored after
@@ -107,6 +146,9 @@ pub struct Compiler<'interner> {
     max_register: u8,
     /// Local variable bindings across nested scopes.
     locals: LocalEnv,
+    /// Registry of macro definitions.
+    /// Maps macro symbol ID to its compiled definition.
+    macros: BTreeMap<symbol::Id, MacroDefinition>,
 }
 
 impl<'interner> Compiler<'interner> {
@@ -120,7 +162,44 @@ impl<'interner> Compiler<'interner> {
             next_register: 0,
             max_register: 0,
             locals: LocalEnv::new(),
+            macros: BTreeMap::new(),
         }
+    }
+
+    /// Returns `true` if the given symbol is defined as a macro.
+    #[inline]
+    #[must_use]
+    pub fn is_macro(&self, symbol: symbol::Id) -> bool {
+        self.macros.contains_key(&symbol)
+    }
+
+    /// Returns the macro definition for a symbol, if it exists.
+    #[inline]
+    #[must_use]
+    pub fn get_macro(&self, symbol: symbol::Id) -> Option<&MacroDefinition> {
+        self.macros.get(&symbol)
+    }
+
+    /// Returns `true` if a macro with the given name is defined.
+    ///
+    /// This is a convenience method that interns the name and checks the
+    /// macro registry. Prefer `is_macro` if you already have a symbol ID.
+    #[inline]
+    #[must_use]
+    pub fn is_macro_by_name(&mut self, name: &str) -> bool {
+        let sym_id = self.interner.intern(name);
+        self.macros.contains_key(&sym_id)
+    }
+
+    /// Returns the macro definition for a name, if it exists.
+    ///
+    /// This is a convenience method that interns the name and looks up the
+    /// macro. Prefer `get_macro` if you already have a symbol ID.
+    #[inline]
+    #[must_use]
+    pub fn get_macro_by_name(&mut self, name: &str) -> Option<&MacroDefinition> {
+        let sym_id = self.interner.intern(name);
+        self.macros.get(&sym_id)
     }
 
     /// Compiles a sequence of expressions into a chunk.
@@ -128,12 +207,16 @@ impl<'interner> Compiler<'interner> {
     /// Compiles each expression in order and emits a `Return` for the
     /// last expression's value (or nil if the sequence is empty).
     ///
+    /// The compiled chunk is extracted from the compiler. After calling this
+    /// method, the compiler can still be inspected (e.g., for macro definitions)
+    /// but should not be used to compile more code.
+    ///
     /// # Errors
     ///
     /// Returns an error if compilation fails (too many constants,
     /// registers, or unsupported features).
     #[inline]
-    pub fn compile_program(mut self, exprs: &[Spanned<Ast>]) -> Result<Chunk, Error> {
+    pub fn compile_program(&mut self, exprs: &[Spanned<Ast>]) -> Result<Chunk, Error> {
         let last_result = if exprs.is_empty() {
             // Empty program returns nil
             let span = Span::new(0_usize, 0_usize);
@@ -163,7 +246,8 @@ impl<'interner> Compiler<'interner> {
         self.chunk
             .set_max_registers(self.max_register.saturating_add(1));
 
-        Ok(self.chunk)
+        // Extract the chunk from the compiler
+        Ok(core::mem::take(&mut self.chunk))
     }
 
     /// Compiles a single expression.
@@ -330,6 +414,7 @@ impl<'interner> Compiler<'interner> {
                     });
                 }
                 "fn" => return self.compile_fn(args, span),
+                "defmacro" => return self.compile_defmacro(args, span),
                 _ => {}
             }
 
@@ -1478,6 +1563,133 @@ impl<'interner> Compiler<'interner> {
         Ok(params)
     }
 
+    /// Compiles a `defmacro` special form.
+    ///
+    /// Syntax: `(defmacro name [params...] body...)`
+    ///
+    /// Defines a compile-time macro. The macro body is compiled to bytecode
+    /// and stored in the compiler's macro registry. When the macro is called,
+    /// it receives unevaluated arguments and returns transformed AST.
+    ///
+    /// Returns the macro's symbol name.
+    fn compile_defmacro(&mut self, args: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
+        // Need at least name and params
+        if args.len() < 2_usize {
+            return Err(Error::InvalidSpecialForm {
+                form: "defmacro",
+                message: "expected (defmacro name [params...] body...)",
+                span,
+            });
+        }
+
+        // Extract name (must be a symbol)
+        let name_ast = args.first().ok_or(Error::EmptyCall { span })?;
+        let Ast::Symbol(ref name_ref) = name_ast.node else {
+            return Err(Error::InvalidSpecialForm {
+                form: "defmacro",
+                message: "macro name must be a symbol",
+                span: name_ast.span,
+            });
+        };
+        let name = name_ref.clone();
+
+        // Extract params (must be a vector of symbols)
+        let params_ast = args.get(1_usize).ok_or(Error::EmptyCall { span })?;
+        let params =
+            Self::extract_params(params_ast).map_err(|_err| Error::InvalidSpecialForm {
+                form: "defmacro",
+                message: "parameters must be a vector of symbols",
+                span: params_ast.span,
+            })?;
+        let arity = u8::try_from(params.len()).map_err(|_err| Error::TooManyRegisters { span })?;
+
+        // Body is everything after params
+        let body = args.get(2_usize..).unwrap_or(&[]);
+        if body.is_empty() {
+            return Err(Error::InvalidSpecialForm {
+                form: "defmacro",
+                message: "macro body cannot be empty",
+                span,
+            });
+        }
+
+        // Intern the macro name before creating the child compiler to avoid
+        // double mutable borrow of self.interner
+        let name_id = self.interner.intern(&name);
+
+        // Create a child compiler for the macro body.
+        // Note: The child compiler has an empty macro registry. Macro calls in
+        // the body are compiled as regular function calls. Macro expansion will
+        // be handled in Phase 4.3 when the expansion pass is implemented.
+        let mut macro_compiler = Compiler::new(self.interner);
+        macro_compiler.chunk = Chunk::with_name(alloc::format!("macro:{name}"));
+        macro_compiler.chunk.set_arity(arity);
+
+        // Parameters become locals at R[0], R[1], etc.
+        macro_compiler.locals.push_scope();
+        for (i, param) in params.iter().enumerate() {
+            let symbol_id = macro_compiler.interner.intern(param);
+            let reg = u8::try_from(i).map_err(|_err| Error::TooManyRegisters { span })?;
+            macro_compiler.locals.define(symbol_id, reg);
+            macro_compiler.next_register = reg.saturating_add(1);
+            if reg > macro_compiler.max_register {
+                macro_compiler.max_register = reg;
+            }
+        }
+
+        // Compile body (all expressions, last one is return value)
+        let result_reg = {
+            // Compile all but last, discarding results
+            for expr in body
+                .get(..body.len().saturating_sub(1_usize))
+                .unwrap_or(&[])
+            {
+                let checkpoint = macro_compiler.next_register;
+                let _result = macro_compiler.compile_expr(expr)?;
+                macro_compiler.free_registers_to(checkpoint);
+            }
+            // Compile last expression as return value
+            let last = body.last().ok_or(Error::EmptyCall { span })?;
+            let result = macro_compiler.compile_expr(last)?;
+            result.register
+        };
+
+        // Emit return instruction
+        macro_compiler
+            .chunk
+            .emit(encode_abc(Opcode::Return, result_reg, 1, 0), span);
+        macro_compiler.locals.pop_scope();
+
+        // Finalize the macro chunk
+        macro_compiler
+            .chunk
+            .set_max_registers(macro_compiler.max_register.saturating_add(1));
+
+        // Extract the macro chunk before using self again
+        let macro_chunk = macro_compiler.chunk;
+
+        // Store in macro registry
+        let _previous = self.macros.insert(
+            name_id,
+            MacroDefinition {
+                chunk: Arc::new(macro_chunk),
+                arity,
+                name,
+            },
+        );
+
+        // Return the macro's symbol name
+        // This mimics `def` behavior - the expression evaluates to the defined name
+        let const_idx = self
+            .chunk
+            .add_constant_at(Constant::Symbol(name_id), span)?;
+        let dest = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
+
+        Ok(ExprResult { register: dest })
+    }
+
     // =========================================================================
     // Register Management
     // =========================================================================
@@ -1566,7 +1778,7 @@ impl From<Error> for CompileError {
 #[inline]
 pub fn compile(source: &str, interner: &mut symbol::Interner) -> Result<Chunk, CompileError> {
     let exprs = lonala_parser::parse(source)?;
-    let compiler = Compiler::new(interner);
+    let mut compiler = Compiler::new(interner);
     let chunk = compiler.compile_program(&exprs)?;
     Ok(chunk)
 }

@@ -2,7 +2,7 @@
 
 **LISP Machines Never Died. They Evolved.**
 
-Lona is a general-purpose operating system that brings together three powerful paradigms: the **seL4 microkernel** for formally verified, capability-based security; the **LISP machine philosophy** for complete runtime introspection and hot-patching; and the **Erlang/OTP concurrency model** for massive concurrency, fault tolerance, and the "let it crash" philosophy. The result is an operating system where users have complete visibility and control over every aspect of the running system, where failures are contained and automatically recoverable, and where the full power of modern concurrent programming is available at every level of the stack.
+Lona (/ˈloːna/) is a general-purpose operating system that brings together three powerful paradigms: the **seL4 microkernel** for formally verified, capability-based security; the **LISP machine philosophy** for complete runtime introspection and hot-patching; and the **Erlang/OTP concurrency model** for massive concurrency, fault tolerance, and the "let it crash" philosophy. The result is an operating system where users have complete visibility and control over every aspect of the running system, where failures are contained and automatically recoverable, and where the full power of modern concurrent programming is available at every level of the stack.
 
 ## Prerequisites
 
@@ -35,6 +35,7 @@ Run `make help` for all available targets.
 See the [docs/](docs/) directory for detailed documentation, including:
 
 - [Goals and Design](docs/goals.md) - Detailed technical vision and architecture
+- [Lonala Language Specification](docs/lonala.md) - Complete language reference
 - [License](docs/license.md) - Full license text
 
 ## License

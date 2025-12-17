@@ -1449,3 +1449,173 @@ fn compile_syntax_quote_invalid_two_args() {
         panic!("expected InvalidSpecialForm error for syntax-quote with two args");
     }
 }
+
+// =========================================================================
+// Special Form: defmacro
+// =========================================================================
+
+#[test]
+fn defmacro_basic_definition() {
+    let mut interner = symbol::Interner::new();
+    let exprs = lonala_parser::parse("(defmacro identity [x] x)").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let result = compiler.compile_program(&exprs);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn defmacro_stores_in_registry() {
+    let mut interner = symbol::Interner::new();
+    let exprs = lonala_parser::parse("(defmacro my-macro [x] x)").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let _chunk = compiler.compile_program(&exprs).unwrap();
+
+    assert!(compiler.is_macro_by_name("my-macro"));
+
+    let macro_def = compiler.get_macro_by_name("my-macro").unwrap();
+    assert_eq!(macro_def.arity(), 1);
+    assert_eq!(macro_def.name(), "my-macro");
+}
+
+#[test]
+fn defmacro_requires_name() {
+    let mut interner = symbol::Interner::new();
+    // (defmacro [x] x) - first arg is vector, not symbol
+    let exprs = lonala_parser::parse("(defmacro [x] x)").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let result = compiler.compile_program(&exprs);
+    assert!(result.is_err());
+
+    if let Err(Error::InvalidSpecialForm { form, message, .. }) = result {
+        assert_eq!(form, "defmacro");
+        assert!(message.contains("symbol"));
+    } else {
+        panic!("expected InvalidSpecialForm error for defmacro with non-symbol name");
+    }
+}
+
+#[test]
+fn defmacro_requires_params_vector() {
+    let mut interner = symbol::Interner::new();
+    // (defmacro foo x x) - params is symbol, not vector
+    let exprs = lonala_parser::parse("(defmacro foo x x)").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let result = compiler.compile_program(&exprs);
+    assert!(result.is_err());
+
+    if let Err(Error::InvalidSpecialForm { form, message, .. }) = result {
+        assert_eq!(form, "defmacro");
+        assert!(message.contains("vector"));
+    } else {
+        panic!("expected InvalidSpecialForm error for defmacro with non-vector params");
+    }
+}
+
+#[test]
+fn defmacro_requires_body() {
+    let mut interner = symbol::Interner::new();
+    let exprs = lonala_parser::parse("(defmacro foo [x])").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let result = compiler.compile_program(&exprs);
+    assert!(result.is_err());
+
+    if let Err(Error::InvalidSpecialForm { form, message, .. }) = result {
+        assert_eq!(form, "defmacro");
+        assert!(message.contains("empty"));
+    } else {
+        panic!("expected InvalidSpecialForm error for defmacro without body");
+    }
+}
+
+#[test]
+fn defmacro_multiple_params() {
+    let mut interner = symbol::Interner::new();
+    let exprs = lonala_parser::parse("(defmacro swap [a b] b)").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let _chunk = compiler.compile_program(&exprs).unwrap();
+
+    let macro_def = compiler.get_macro_by_name("swap").unwrap();
+    assert_eq!(macro_def.arity(), 2);
+}
+
+#[test]
+fn defmacro_zero_params() {
+    let mut interner = symbol::Interner::new();
+    let exprs = lonala_parser::parse("(defmacro always-nil [] nil)").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let _chunk = compiler.compile_program(&exprs).unwrap();
+
+    let macro_def = compiler.get_macro_by_name("always-nil").unwrap();
+    assert_eq!(macro_def.arity(), 0);
+}
+
+#[test]
+fn defmacro_with_quasiquote() {
+    let mut interner = symbol::Interner::new();
+    // unless macro that uses quasiquote
+    let exprs =
+        lonala_parser::parse("(defmacro unless [test body] `(if (not ~test) ~body nil))").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let result = compiler.compile_program(&exprs);
+    assert!(result.is_ok());
+
+    assert!(compiler.is_macro_by_name("unless"));
+}
+
+#[test]
+fn defmacro_multiple_body_expressions() {
+    let mut interner = symbol::Interner::new();
+    // Macro with multiple body expressions (last is return value)
+    let exprs =
+        lonala_parser::parse("(defmacro with-logging [expr] (print \"expanding\") expr)").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let result = compiler.compile_program(&exprs);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn defmacro_returns_symbol() {
+    let mut interner = symbol::Interner::new();
+    let chunk = compile("(defmacro foo [x] x)", &mut interner).unwrap();
+    let code = chunk.code();
+
+    // The defmacro expression should return the symbol 'foo.
+    // Verify the bytecode loads the symbol constant before returning.
+    // (VM execution test is in lona-kernel integration tests)
+    let last_loadk = code
+        .iter()
+        .rev()
+        .skip(1) // Skip Return
+        .find(|&&instr| decode_op(instr) == Some(Opcode::LoadK))
+        .expect("expected LoadK instruction");
+
+    let const_idx = decode_bx(*last_loadk);
+    if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(const_idx) {
+        assert_eq!(interner.resolve(*sym_id), "foo");
+    } else {
+        panic!("expected Symbol constant for defmacro return value");
+    }
+}
+
+#[test]
+fn defmacro_multiple_definitions() {
+    let mut interner = symbol::Interner::new();
+    let exprs = lonala_parser::parse("(do (defmacro foo [x] x) (defmacro bar [y] y))").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let _chunk = compiler.compile_program(&exprs).unwrap();
+
+    assert!(compiler.is_macro_by_name("foo"));
+    assert!(compiler.is_macro_by_name("bar"));
+}
+
+#[test]
+fn defmacro_redefine() {
+    let mut interner = symbol::Interner::new();
+    let exprs = lonala_parser::parse("(do (defmacro foo [x] x) (defmacro foo [x y] y))").unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner);
+    let _chunk = compiler.compile_program(&exprs).unwrap();
+
+    let macro_def = compiler.get_macro_by_name("foo").unwrap();
+    // Should have the latest definition (2 params)
+    assert_eq!(macro_def.arity(), 2);
+}
