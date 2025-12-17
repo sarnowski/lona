@@ -3,17 +3,25 @@
 
 //! Immutable map type for Lonala.
 //!
-//! Provides an immutable, reference-counted map that enables efficient
-//! sharing of map data. Uses `Rc<BTreeMap<ValueKey, Value>>` for heap
-//! allocation with reference counting.
+//! Provides an immutable, persistent map that enables efficient structural
+//! sharing between versions. Uses a Hash Array Mapped Trie (HAMT) internally
+//! for O(log32 n) access and update operations, which is effectively constant
+//! for practical collection sizes.
+//!
+//! # Structural Sharing
+//!
+//! When a map is modified (via [`Map::assoc`] or [`Map::dissoc`]), only the
+//! nodes along the path to the modification are copied. All other nodes are
+//! shared between the old and new maps, making operations memory-efficient.
 
-use alloc::collections::BTreeMap;
-use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 use core::cmp::Ordering;
 use core::fmt::{self, Debug, Display};
 use core::hash::{Hash, Hasher};
 
+use crate::fnv::FnvHasher;
+use crate::hamt::Hamt;
 use crate::list::List;
 use crate::value::Value;
 use crate::vector::Vector;
@@ -125,7 +133,11 @@ impl From<Value> for ValueKey {
     }
 }
 
-/// Total ordering for floats, handling NaN consistently.
+/// Provides total ordering for floats, handling NaN consistently.
+///
+/// NaN values are placed at the end of the ordering (greater than all
+/// non-NaN values) to ensure consistent, reflexive ordering even for
+/// special float values.
 fn float_total_order(left: f64, right: f64) -> Ordering {
     // Place NaN at the end for consistent ordering
     match (left.is_nan(), right.is_nan()) {
@@ -137,6 +149,10 @@ fn float_total_order(left: f64, right: f64) -> Ordering {
 }
 
 /// Compares two lists lexicographically.
+///
+/// Lists are compared element by element. The first differing element
+/// determines the ordering. If one list is a prefix of the other, the
+/// shorter list is considered less.
 fn compare_lists(left: &List, right: &List) -> Ordering {
     let mut left_iter = left.iter();
     let mut right_iter = right.iter();
@@ -157,6 +173,10 @@ fn compare_lists(left: &List, right: &List) -> Ordering {
 }
 
 /// Compares two vectors lexicographically.
+///
+/// Vectors are compared element by element. The first differing element
+/// determines the ordering. If one vector is a prefix of the other, the
+/// shorter vector is considered less.
 fn compare_vectors(left: &Vector, right: &Vector) -> Ordering {
     let mut left_iter = left.iter();
     let mut right_iter = right.iter();
@@ -177,9 +197,19 @@ fn compare_vectors(left: &Vector, right: &Vector) -> Ordering {
 }
 
 /// Compares two maps by comparing their sorted entries.
+///
+/// Maps are first compared by their sorted keys. For equal keys,
+/// the corresponding values are compared. This ensures a consistent
+/// total ordering regardless of internal iteration order.
 fn compare_maps(left: &Map, right: &Map) -> Ordering {
-    let mut left_iter = left.iter();
-    let mut right_iter = right.iter();
+    // Collect and sort entries for comparison
+    let mut left_entries: Vec<_> = left.iter().collect();
+    let mut right_entries: Vec<_> = right.iter().collect();
+    left_entries.sort_by(|&(ref k1, _), &(ref k2, _)| k1.cmp(k2));
+    right_entries.sort_by(|&(ref k1, _), &(ref k2, _)| k1.cmp(k2));
+
+    let mut left_iter = left_entries.into_iter();
+    let mut right_iter = right_entries.into_iter();
 
     loop {
         match (left_iter.next(), right_iter.next()) {
@@ -203,11 +233,14 @@ fn compare_maps(left: &Map, right: &Map) -> Ordering {
     }
 }
 
-/// An immutable, reference-counted map.
+/// An immutable, persistent map.
 ///
-/// Wraps `Rc<BTreeMap<ValueKey, Value>>` to provide efficient cloning through
-/// reference counting. Maps are immutable once created; modification operations
-/// return new maps.
+/// Internally uses a Hash Array Mapped Trie (HAMT) for efficient operations.
+/// Lookup, insert, and remove operations are O(log32 n), effectively constant
+/// for practical sizes.
+///
+/// Maps are immutable once created; modification operations return new maps
+/// that share structure with the original.
 ///
 /// # Example
 ///
@@ -220,14 +253,14 @@ fn compare_maps(left: &Map, right: &Map) -> Ordering {
 /// assert_eq!(map.len(), 2);
 /// ```
 #[derive(Clone)]
-pub struct Map(Rc<BTreeMap<ValueKey, Value>>);
+pub struct Map(Hamt<ValueKey, Value>);
 
 impl Map {
     /// Creates an empty map.
     #[inline]
     #[must_use]
-    pub fn empty() -> Self {
-        Self(Rc::new(BTreeMap::new()))
+    pub const fn empty() -> Self {
+        Self(Hamt::new())
     }
 
     /// Creates a map from an iterator of key-value pairs.
@@ -237,11 +270,11 @@ impl Map {
     where
         I: IntoIterator<Item = (Value, Value)>,
     {
-        let inner: BTreeMap<ValueKey, Value> = pairs
-            .into_iter()
-            .map(|(key, val)| (ValueKey::new(key), val))
-            .collect();
-        Self(Rc::new(inner))
+        let mut hamt = Hamt::new();
+        for (key, val) in pairs {
+            hamt = hamt.insert(ValueKey::new(key), val);
+        }
+        Self(hamt)
     }
 
     /// Returns a reference to the value associated with the key, if any.
@@ -254,14 +287,14 @@ impl Map {
     /// Returns the number of entries in the map.
     #[inline]
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.0.len()
     }
 
     /// Returns `true` if the map is empty.
     #[inline]
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
@@ -274,24 +307,20 @@ impl Map {
 
     /// Returns a new map with the key-value pair inserted or updated.
     ///
-    /// This is a copy-on-write operation that creates a new map.
+    /// This operation shares structure with the original map.
     #[inline]
     #[must_use]
     pub fn assoc(&self, key: Value, value: Value) -> Self {
-        let mut new_map = (*self.0).clone();
-        let _old = new_map.insert(ValueKey::new(key), value);
-        Self(Rc::new(new_map))
+        Self(self.0.insert(ValueKey::new(key), value))
     }
 
     /// Returns a new map with the key removed.
     ///
-    /// This is a copy-on-write operation that creates a new map.
+    /// This operation shares structure with the original map.
     #[inline]
     #[must_use]
     pub fn dissoc(&self, key: &Value) -> Self {
-        let mut new_map = (*self.0).clone();
-        let _old = new_map.remove(&ValueKey::new(key.clone()));
-        Self(Rc::new(new_map))
+        Self(self.0.remove(&ValueKey::new(key.clone())))
     }
 
     /// Returns an iterator over the keys.
@@ -307,6 +336,9 @@ impl Map {
     }
 
     /// Returns an iterator over key-value pairs.
+    ///
+    /// Note: Iteration order is based on hash values, not sorted order.
+    /// For sorted iteration, collect and sort the results.
     #[inline]
     pub fn iter(&self) -> impl Iterator<Item = (&ValueKey, &Value)> {
         self.0.iter()
@@ -325,7 +357,7 @@ impl Display for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{{")?;
         let mut first = true;
-        for (key, value) in self.0.iter() {
+        for (key, value) in self.iter() {
             if first {
                 first = false;
             } else {
@@ -342,7 +374,7 @@ impl Debug for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Map({{")?;
         let mut first = true;
-        for (key, value) in self.0.iter() {
+        for (key, value) in self.iter() {
             if first {
                 first = false;
             } else {
@@ -361,8 +393,8 @@ impl PartialEq for Map {
             return false;
         }
 
-        for (key, value) in self.0.iter() {
-            match other.0.get(key) {
+        for (key, value) in self.iter() {
+            match other.get(key.value()) {
                 Some(other_value) if value == other_value => {}
                 _ => return false,
             }
@@ -391,10 +423,16 @@ impl Hash for Map {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.len().hash(state);
-        for (key, value) in self.0.iter() {
-            key.hash(state);
-            value.hash(state);
+        // For consistent hashing regardless of iteration order,
+        // we XOR together the hashes of all entries
+        let mut combined: u64 = 0;
+        for (key, value) in self.iter() {
+            let mut entry_hasher = FnvHasher::default();
+            key.hash(&mut entry_hasher);
+            value.hash(&mut entry_hasher);
+            combined ^= entry_hasher.finish();
         }
+        combined.hash(state);
     }
 }
 
@@ -405,7 +443,6 @@ mod tests {
     use crate::string::HeapStr;
     use alloc::string::ToString;
     use alloc::vec;
-    use alloc::vec::Vec;
 
     /// Helper to create an integer value.
     fn int(value: i64) -> Value {
@@ -606,8 +643,7 @@ mod tests {
         let m1 = Map::from_pairs(vec![(string("a"), int(1))]);
         let m2 = m1.clone();
 
-        // Both point to the same data (Rc)
-        assert!(Rc::ptr_eq(&m1.0, &m2.0));
+        // Both have the same elements
         assert_eq!(m1, m2);
     }
 
@@ -705,6 +741,61 @@ mod tests {
             assert_eq!(inner_map.get(&string("x")), Some(&int(1)));
         } else {
             panic!("Expected Map value");
+        }
+    }
+
+    // =========================================================================
+    // Structural Sharing Tests
+    // =========================================================================
+
+    #[test]
+    fn structural_sharing_on_assoc() {
+        let m1 = Map::from_pairs(vec![(string("a"), int(1))]);
+        let m2 = m1.assoc(string("b"), int(2));
+
+        // m1 unchanged
+        assert_eq!(m1.len(), 1);
+        assert_eq!(m1.get(&string("a")), Some(&int(1)));
+        assert_eq!(m1.get(&string("b")), None);
+
+        // m2 has both
+        assert_eq!(m2.len(), 2);
+        assert_eq!(m2.get(&string("a")), Some(&int(1)));
+        assert_eq!(m2.get(&string("b")), Some(&int(2)));
+    }
+
+    #[test]
+    fn structural_sharing_on_dissoc() {
+        let m1 = Map::from_pairs(vec![(string("a"), int(1)), (string("b"), int(2))]);
+        let m2 = m1.dissoc(&string("a"));
+
+        // m1 unchanged
+        assert_eq!(m1.len(), 2);
+        assert_eq!(m1.get(&string("a")), Some(&int(1)));
+
+        // m2 has removal
+        assert_eq!(m2.len(), 1);
+        assert_eq!(m2.get(&string("a")), None);
+        assert_eq!(m2.get(&string("b")), Some(&int(2)));
+    }
+
+    // =========================================================================
+    // Large Map Tests
+    // =========================================================================
+
+    #[test]
+    fn large_map_operations() {
+        let mut map = Map::empty();
+        let count = 100_i64;
+
+        for i in 0..count {
+            map = map.assoc(int(i), int(i.saturating_mul(10)));
+        }
+
+        assert_eq!(map.len(), count as usize);
+
+        for i in 0..count {
+            assert_eq!(map.get(&int(i)), Some(&int(i.saturating_mul(10))));
         }
     }
 }
