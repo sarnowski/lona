@@ -9,6 +9,9 @@
 //! - `rest` - get rest of a collection (tail)
 //! - `vector` - create a vector from arguments
 //! - `hash-map` - create a map from key-value pairs
+//! - `list` - create a list from arguments
+//! - `concat` - concatenate sequences into a list
+//! - `vec` - convert collection to vector
 //!
 //! # Registration Pattern
 //!
@@ -237,6 +240,96 @@ pub fn native_vector(args: &[Value], _interner: &Interner) -> Result<Value, Nati
     Ok(Value::Vector(vec))
 }
 
+/// `(list & args)` - create list from arguments.
+///
+/// Creates a new list containing all arguments in order.
+/// Accepts any number of arguments (including zero).
+#[inline]
+pub fn native_list(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+    let list = List::from_vec(args.to_vec());
+    Ok(Value::List(list))
+}
+
+/// `(concat & seqs)` - concatenate sequences into a list.
+///
+/// Concatenates all arguments (which must be sequences) into a single list.
+/// Accepts lists, vectors, and nil (treated as empty sequence).
+///
+/// # Errors
+///
+/// Returns a type error if any argument is not a list, vector, or nil.
+#[inline]
+pub fn native_concat(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+    let mut result = Vec::new();
+    for (idx, arg) in args.iter().enumerate() {
+        match *arg {
+            Value::List(ref list) => result.extend(list.iter().cloned()),
+            Value::Vector(ref vec) => result.extend(vec.iter().cloned()),
+            Value::Nil => {} // Empty sequence, skip
+            // All other types are errors
+            Value::Bool(_)
+            | Value::Integer(_)
+            | Value::Float(_)
+            | Value::Ratio(_)
+            | Value::Symbol(_)
+            | Value::String(_)
+            | Value::Map(_)
+            | Value::Function(_)
+            | _ => {
+                return Err(NativeError::TypeError {
+                    expected: "list, vector, or nil",
+                    got: type_name(arg),
+                    arg_index: idx,
+                });
+            }
+        }
+    }
+    Ok(Value::List(List::from_vec(result)))
+}
+
+/// `(vec coll)` - convert collection to vector.
+///
+/// Creates a new vector from a collection.
+/// Accepts lists, vectors, and nil (produces empty vector).
+///
+/// # Errors
+///
+/// Returns a type error if the argument is not a list, vector, or nil.
+/// Returns an arity error if called with more or fewer than one argument.
+#[inline]
+pub fn native_vec(args: &[Value], _interner: &Interner) -> Result<Value, NativeError> {
+    let &[ref collection] = args else {
+        return Err(NativeError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
+    };
+
+    let result = match *collection {
+        Value::Vector(ref vec) => vec.clone(),
+        Value::List(ref list) => Vector::from_vec(list.iter().cloned().collect()),
+        Value::Nil => Vector::empty(),
+        // All other types are errors
+        Value::Bool(_)
+        | Value::Integer(_)
+        | Value::Float(_)
+        | Value::Ratio(_)
+        | Value::Symbol(_)
+        | Value::String(_)
+        | Value::Map(_)
+        | Value::Function(_)
+        | _ => {
+            return Err(NativeError::TypeError {
+                expected: "list, vector, or nil",
+                got: type_name(collection),
+                arg_index: 0,
+            });
+        }
+    };
+
+    Ok(Value::Vector(result))
+}
+
 /// `(hash-map & kvs)` - create map from key-value pairs.
 ///
 /// Creates a new map from alternating key-value pairs.
@@ -270,7 +363,9 @@ pub fn native_hash_map(args: &[Value], _interner: &Interner) -> Result<Value, Na
 }
 
 /// The names of all collection primitives.
-pub const PRIMITIVE_NAMES: &[&str] = &["cons", "first", "rest", "vector", "hash-map"];
+pub const PRIMITIVE_NAMES: &[&str] = &[
+    "cons", "first", "rest", "vector", "hash-map", "list", "concat", "vec",
+];
 
 /// Pre-interns all collection primitive symbols.
 ///
@@ -295,6 +390,9 @@ pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
         native_rest,
         native_vector,
         native_hash_map,
+        native_list,
+        native_concat,
+        native_vec,
     ];
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
@@ -822,5 +920,303 @@ mod tests {
         } else {
             panic!("Expected Map");
         }
+    }
+
+    // =========================================================================
+    // list tests
+    // =========================================================================
+
+    #[test]
+    fn list_empty() {
+        let interner = Interner::new();
+        let args: Vec<Value> = alloc::vec![];
+
+        let result = native_list(&args, &interner).unwrap();
+
+        if let Value::List(list) = result {
+            assert!(list.is_empty());
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn list_single_element() {
+        let interner = Interner::new();
+        let args = alloc::vec![int(42)];
+
+        let result = native_list(&args, &interner).unwrap();
+
+        if let Value::List(list) = result {
+            assert_eq!(list.len(), 1);
+            assert_eq!(list.first(), Some(&int(42)));
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn list_multiple_elements() {
+        let interner = Interner::new();
+        let args = alloc::vec![int(1), int(2), int(3)];
+
+        let result = native_list(&args, &interner).unwrap();
+
+        if let Value::List(list) = result {
+            assert_eq!(list.len(), 3);
+            assert_eq!(list.first(), Some(&int(1)));
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn list_nested() {
+        let interner = Interner::new();
+        let inner = List::from_vec(alloc::vec![int(1), int(2)]);
+        let args = alloc::vec![Value::List(inner), int(3)];
+
+        let result = native_list(&args, &interner).unwrap();
+
+        if let Value::List(list) = result {
+            assert_eq!(list.len(), 2);
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    // =========================================================================
+    // concat tests
+    // =========================================================================
+
+    #[test]
+    fn concat_empty() {
+        let interner = Interner::new();
+        let args: Vec<Value> = alloc::vec![];
+
+        let result = native_concat(&args, &interner).unwrap();
+
+        if let Value::List(list) = result {
+            assert!(list.is_empty());
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn concat_single_list() {
+        let interner = Interner::new();
+        let list = List::from_vec(alloc::vec![int(1), int(2)]);
+        let args = alloc::vec![Value::List(list)];
+
+        let result = native_concat(&args, &interner).unwrap();
+
+        if let Value::List(result_list) = result {
+            assert_eq!(result_list.len(), 2);
+            assert_eq!(result_list.first(), Some(&int(1)));
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn concat_single_vector() {
+        let interner = Interner::new();
+        let vec = Vector::from_vec(alloc::vec![int(1), int(2)]);
+        let args = alloc::vec![Value::Vector(vec)];
+
+        let result = native_concat(&args, &interner).unwrap();
+
+        if let Value::List(list) = result {
+            assert_eq!(list.len(), 2);
+            assert_eq!(list.first(), Some(&int(1)));
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn concat_multiple_lists() {
+        let interner = Interner::new();
+        let list1 = List::from_vec(alloc::vec![int(1), int(2)]);
+        let list2 = List::from_vec(alloc::vec![int(3), int(4)]);
+        let args = alloc::vec![Value::List(list1), Value::List(list2)];
+
+        let result = native_concat(&args, &interner).unwrap();
+
+        if let Value::List(list) = result {
+            assert_eq!(list.len(), 4);
+            assert_eq!(list.first(), Some(&int(1)));
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn concat_mixed_types() {
+        let interner = Interner::new();
+        let list = List::from_vec(alloc::vec![int(1), int(2)]);
+        let vec = Vector::from_vec(alloc::vec![int(3), int(4)]);
+        let args = alloc::vec![Value::List(list), Value::Vector(vec)];
+
+        let result = native_concat(&args, &interner).unwrap();
+
+        if let Value::List(result_list) = result {
+            assert_eq!(result_list.len(), 4);
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn concat_with_nil() {
+        let interner = Interner::new();
+        let list = List::from_vec(alloc::vec![int(1), int(2)]);
+        let args = alloc::vec![Value::Nil, Value::List(list), Value::Nil];
+
+        let result = native_concat(&args, &interner).unwrap();
+
+        if let Value::List(result_list) = result {
+            assert_eq!(result_list.len(), 2);
+            assert_eq!(result_list.first(), Some(&int(1)));
+        } else {
+            panic!("Expected List");
+        }
+    }
+
+    #[test]
+    fn concat_type_error() {
+        let interner = Interner::new();
+        let args = alloc::vec![int(42)];
+
+        let result = native_concat(&args, &interner);
+
+        assert!(matches!(
+            result,
+            Err(NativeError::TypeError {
+                expected: "list, vector, or nil",
+                got: "integer",
+                arg_index: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn concat_type_error_second_arg() {
+        let interner = Interner::new();
+        let list = List::from_vec(alloc::vec![int(1)]);
+        let args = alloc::vec![Value::List(list), int(42)];
+
+        let result = native_concat(&args, &interner);
+
+        assert!(matches!(
+            result,
+            Err(NativeError::TypeError {
+                expected: "list, vector, or nil",
+                got: "integer",
+                arg_index: 1
+            })
+        ));
+    }
+
+    // =========================================================================
+    // vec tests
+    // =========================================================================
+
+    #[test]
+    fn vec_from_nil() {
+        let interner = Interner::new();
+        let args = alloc::vec![Value::Nil];
+
+        let result = native_vec(&args, &interner).unwrap();
+
+        if let Value::Vector(vec) = result {
+            assert!(vec.is_empty());
+        } else {
+            panic!("Expected Vector");
+        }
+    }
+
+    #[test]
+    fn vec_from_list() {
+        let interner = Interner::new();
+        let list = List::from_vec(alloc::vec![int(1), int(2), int(3)]);
+        let args = alloc::vec![Value::List(list)];
+
+        let result = native_vec(&args, &interner).unwrap();
+
+        if let Value::Vector(vec) = result {
+            assert_eq!(vec.len(), 3);
+            assert_eq!(vec.get(0_usize), Some(&int(1)));
+            assert_eq!(vec.get(1_usize), Some(&int(2)));
+            assert_eq!(vec.get(2_usize), Some(&int(3)));
+        } else {
+            panic!("Expected Vector");
+        }
+    }
+
+    #[test]
+    fn vec_from_vector() {
+        let interner = Interner::new();
+        let original = Vector::from_vec(alloc::vec![int(1), int(2)]);
+        let args = alloc::vec![Value::Vector(original.clone())];
+
+        let result = native_vec(&args, &interner).unwrap();
+
+        if let Value::Vector(vec) = result {
+            assert_eq!(vec.len(), 2);
+            assert_eq!(vec, original);
+        } else {
+            panic!("Expected Vector");
+        }
+    }
+
+    #[test]
+    fn vec_type_error() {
+        let interner = Interner::new();
+        let args = alloc::vec![int(42)];
+
+        let result = native_vec(&args, &interner);
+
+        assert!(matches!(
+            result,
+            Err(NativeError::TypeError {
+                expected: "list, vector, or nil",
+                got: "integer",
+                arg_index: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn vec_arity_error_too_few() {
+        let interner = Interner::new();
+        let args: Vec<Value> = alloc::vec![];
+
+        let result = native_vec(&args, &interner);
+
+        assert!(matches!(
+            result,
+            Err(NativeError::ArityMismatch {
+                expected: 1,
+                got: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn vec_arity_error_too_many() {
+        let interner = Interner::new();
+        let args = alloc::vec![Value::Nil, Value::Nil];
+
+        let result = native_vec(&args, &interner);
+
+        assert!(matches!(
+            result,
+            Err(NativeError::ArityMismatch {
+                expected: 1,
+                got: 2
+            })
+        ));
     }
 }

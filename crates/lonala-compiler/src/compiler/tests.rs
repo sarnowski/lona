@@ -1269,3 +1269,183 @@ fn compile_quote_invalid_two_args() {
         panic!("expected InvalidSpecialForm error for quote with two args");
     }
 }
+
+// =========================================================================
+// Special Form: syntax-quote (quasiquote)
+// =========================================================================
+
+#[test]
+fn compile_syntax_quote_literal() {
+    // Literals are quoted
+    let chunk = compile_source("`42");
+    let code = chunk.code();
+
+    // Should generate (quote 42)
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+    let const_idx = decode_bx(instr0);
+    assert_eq!(chunk.get_constant(const_idx), Some(&Constant::Integer(42)));
+}
+
+#[test]
+fn compile_syntax_quote_symbol() {
+    // Symbols are quoted
+    let (chunk, interner) = compile_with_interner("`foo");
+    let code = chunk.code();
+
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+    let const_idx = decode_bx(instr0);
+    if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(const_idx) {
+        assert_eq!(interner.resolve(*sym_id), "foo");
+    } else {
+        panic!("expected Symbol constant for syntax-quoted symbol");
+    }
+}
+
+#[test]
+fn compile_syntax_quote_empty_list() {
+    // Empty list stays empty
+    let chunk = compile_source("`()");
+    let code = chunk.code();
+
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+    let const_idx = decode_bx(instr0);
+    if let Some(Constant::List(elements)) = chunk.get_constant(const_idx) {
+        assert!(elements.is_empty());
+    } else {
+        panic!("expected empty List constant");
+    }
+}
+
+#[test]
+fn compile_syntax_quote_simple_list() {
+    // `(a b) expands to (list 'a 'b)
+    let chunk = compile_source("`(a b)");
+    let code = chunk.code();
+
+    // Should have Call instruction for (list ...)
+    let mut has_call = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Call) {
+            has_call = true;
+            break;
+        }
+    }
+    assert!(
+        has_call,
+        "syntax-quote should generate function calls to list"
+    );
+}
+
+#[test]
+fn compile_unquote_in_syntax_quote() {
+    // `(a ~x) with unquote should evaluate x
+    let chunk = compile_source("(let [x 1] `(a ~x))");
+    let code = chunk.code();
+
+    // Should have Call instruction for list
+    let mut has_call = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Call) {
+            has_call = true;
+            break;
+        }
+    }
+    assert!(
+        has_call,
+        "unquote should be compiled in syntax-quote context"
+    );
+}
+
+#[test]
+fn compile_unquote_splicing_in_syntax_quote() {
+    // `(a ~@xs b) should use concat
+    let chunk = compile_source("(let [xs (vector 1 2)] `(a ~@xs b))");
+    let code = chunk.code();
+
+    // Should have multiple Call instructions (for concat, list)
+    let mut call_count = 0_usize;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Call) {
+            call_count = call_count.saturating_add(1);
+        }
+    }
+    // At least 2 calls: vector constructor and the concat/list calls
+    assert!(
+        call_count >= 2,
+        "unquote-splicing should generate multiple function calls"
+    );
+}
+
+#[test]
+fn compile_syntax_quote_vector() {
+    // `[a b] should produce a vector
+    let chunk = compile_source("`[a b]");
+    let code = chunk.code();
+
+    // Should have Call instruction for vec
+    let mut has_call = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Call) {
+            has_call = true;
+            break;
+        }
+    }
+    assert!(has_call, "syntax-quote vector should generate calls to vec");
+}
+
+#[test]
+fn compile_unquote_outside_syntax_quote_error() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("~x", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+        assert_eq!(form, "unquote");
+        assert!(message.contains("not inside syntax-quote"));
+    } else {
+        panic!("expected InvalidSpecialForm error for unquote outside syntax-quote");
+    }
+}
+
+#[test]
+fn compile_unquote_splicing_outside_syntax_quote_error() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("~@x", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+        assert_eq!(form, "unquote-splicing");
+        assert!(message.contains("not inside syntax-quote"));
+    } else {
+        panic!("expected InvalidSpecialForm error for unquote-splicing outside syntax-quote");
+    }
+}
+
+#[test]
+fn compile_syntax_quote_invalid_no_args() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("(syntax-quote)", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+        assert_eq!(form, "syntax-quote");
+    } else {
+        panic!("expected InvalidSpecialForm error for syntax-quote");
+    }
+}
+
+#[test]
+fn compile_syntax_quote_invalid_two_args() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("(syntax-quote a b)", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+        assert_eq!(form, "syntax-quote");
+    } else {
+        panic!("expected InvalidSpecialForm error for syntax-quote with two args");
+    }
+}

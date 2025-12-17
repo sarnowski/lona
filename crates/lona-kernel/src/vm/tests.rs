@@ -1917,3 +1917,357 @@ fn integration_hash_map_odd_args_error() {
     let result = eval_with_state("(hash-map \"a\" 1 \"b\")", &mut interner, &mut globals);
     assert!(result.is_err());
 }
+
+// =============================================================================
+// Quasiquote Integration Tests
+// =============================================================================
+
+#[test]
+fn integration_list_primitive() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (list) returns empty list
+    let result1 = eval_with_state("(list)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result1 {
+        assert!(list.is_empty());
+    } else {
+        panic!("expected List");
+    }
+
+    // (list 1 2 3) returns (1 2 3)
+    let result2 = eval_with_state("(list 1 2 3)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result2 {
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List");
+    }
+}
+
+#[test]
+fn integration_concat_primitive() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (concat) returns empty list
+    let result1 = eval_with_state("(concat)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result1 {
+        assert!(list.is_empty());
+    } else {
+        panic!("expected List");
+    }
+
+    // (concat [1 2] [3 4]) returns (1 2 3 4)
+    let result2 = eval_with_state(
+        "(concat (vector 1 2) (vector 3 4))",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    if let Value::List(list) = result2 {
+        assert_eq!(list.len(), 4);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List");
+    }
+
+    // (concat '(1) [2] '(3)) returns (1 2 3)
+    let result3 =
+        eval_with_state("(concat '(1) (vector 2) '(3))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result3 {
+        assert_eq!(list.len(), 3);
+    } else {
+        panic!("expected List");
+    }
+
+    // (concat nil [1 2]) returns (1 2)
+    let result4 =
+        eval_with_state("(concat nil (vector 1 2))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result4 {
+        assert_eq!(list.len(), 2);
+    } else {
+        panic!("expected List");
+    }
+}
+
+#[test]
+fn integration_vec_primitive() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (vec nil) returns []
+    let result1 = eval_with_state("(vec nil)", &mut interner, &mut globals).unwrap();
+    if let Value::Vector(vec) = result1 {
+        assert!(vec.is_empty());
+    } else {
+        panic!("expected Vector");
+    }
+
+    // (vec '(1 2 3)) returns [1 2 3]
+    let result2 = eval_with_state("(vec '(1 2 3))", &mut interner, &mut globals).unwrap();
+    if let Value::Vector(vec) = result2 {
+        assert_eq!(vec.len(), 3);
+        assert_eq!(vec.get(0), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected Vector");
+    }
+}
+
+#[test]
+fn integration_syntax_quote_literal() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // `42 returns 42
+    let result = eval_with_state("`42", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(42)));
+
+    // `true returns true
+    let result2 = eval_with_state("`true", &mut interner, &mut globals).unwrap();
+    assert_eq!(result2, Value::Bool(true));
+
+    // `"hello" returns "hello"
+    let result3 = eval_with_state("`\"hello\"", &mut interner, &mut globals).unwrap();
+    assert_eq!(
+        result3,
+        Value::String(lona_core::string::HeapStr::new("hello"))
+    );
+}
+
+#[test]
+fn integration_syntax_quote_symbol() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // `foo returns symbol foo
+    let result = eval_with_state("`foo", &mut interner, &mut globals).unwrap();
+    assert!(matches!(result, Value::Symbol(_)));
+}
+
+#[test]
+fn integration_syntax_quote_empty_list() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("`()", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert!(list.is_empty());
+    } else {
+        panic!("expected empty List");
+    }
+}
+
+#[test]
+fn integration_syntax_quote_simple_list() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("`(a b c)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        // All elements should be symbols
+        assert!(matches!(list.first(), Some(Value::Symbol(_))));
+    } else {
+        panic!("expected List");
+    }
+}
+
+#[test]
+fn integration_syntax_quote_with_unquote() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (let [x 1] `(a ~x c)) => (a 1 c)
+    let result = eval_with_state("(let [x 1] `(a ~x c))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        // First element is symbol 'a'
+        assert!(matches!(list.first(), Some(Value::Symbol(_))));
+        // Second element is integer 1
+        let rest = list.rest();
+        assert_eq!(rest.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List");
+    }
+}
+
+#[test]
+fn integration_syntax_quote_unquote_only() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (let [x 42] `~x) => 42
+    let result = eval_with_state("(let [x 42] `~x)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(42)));
+}
+
+#[test]
+fn integration_syntax_quote_with_unquote_splicing() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (let [xs [1 2 3]] `(a ~@xs b)) => (a 1 2 3 b)
+    let result = eval_with_state(
+        "(let [xs (vector 1 2 3)] `(a ~@xs b))",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 5);
+        assert!(matches!(list.first(), Some(Value::Symbol(_))));
+    } else {
+        panic!("expected List, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_syntax_quote_empty_splice() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (let [xs []] `(a ~@xs b)) => (a b)
+    let result = eval_with_state(
+        "(let [xs (vector)] `(a ~@xs b))",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 2);
+    } else {
+        panic!("expected List");
+    }
+}
+
+#[test]
+fn integration_syntax_quote_multiple_splices() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // `(~@[1 2] ~@[3 4]) => (1 2 3 4)
+    let result = eval_with_state(
+        "`(~@(vector 1 2) ~@(vector 3 4))",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 4);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List");
+    }
+}
+
+#[test]
+fn integration_syntax_quote_vector() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // `[a b c] returns vector [a b c]
+    let result = eval_with_state("`[a b c]", &mut interner, &mut globals).unwrap();
+    if let Value::Vector(vec) = result {
+        assert_eq!(vec.len(), 3);
+        assert!(matches!(vec.get(0), Some(Value::Symbol(_))));
+    } else {
+        panic!("expected Vector, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_syntax_quote_vector_with_unquote() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (let [x 2] `[1 ~x 3]) => [1 2 3]
+    let result = eval_with_state("(let [x 2] `[1 ~x 3])", &mut interner, &mut globals).unwrap();
+    if let Value::Vector(vec) = result {
+        assert_eq!(vec.len(), 3);
+        assert_eq!(vec.get(0), Some(&Value::Integer(Integer::from_i64(1))));
+        assert_eq!(vec.get(1), Some(&Value::Integer(Integer::from_i64(2))));
+        assert_eq!(vec.get(2), Some(&Value::Integer(Integer::from_i64(3))));
+    } else {
+        panic!("expected Vector, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_syntax_quote_vector_with_splice() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (let [xs [2 3]] `[1 ~@xs 4]) => [1 2 3 4]
+    let result = eval_with_state(
+        "(let [xs (vector 2 3)] `[1 ~@xs 4])",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    if let Value::Vector(vec) = result {
+        assert_eq!(vec.len(), 4);
+        assert_eq!(vec.get(0), Some(&Value::Integer(Integer::from_i64(1))));
+        assert_eq!(vec.get(1), Some(&Value::Integer(Integer::from_i64(2))));
+    } else {
+        panic!("expected Vector, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_syntax_quote_mixed() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (let [op '+ args [1 2]] `(~op ~@args)) => (+ 1 2)
+    let result = eval_with_state(
+        "(let [op '+ args (vector 1 2)] `(~op ~@args))",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        // First element should be symbol +
+        assert!(matches!(list.first(), Some(Value::Symbol(_))));
+        // Second and third should be integers
+        let rest = list.rest();
+        assert_eq!(rest.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List");
+    }
+}
+
+#[test]
+fn integration_syntax_quote_preserves_list_type() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Lists from quasiquote should be lists
+    let result = eval_with_state("`(a b)", &mut interner, &mut globals).unwrap();
+    assert!(matches!(result, Value::List(_)));
+}
+
+#[test]
+fn integration_syntax_quote_preserves_vector_type() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Vectors from quasiquote should be vectors
+    let result = eval_with_state("`[a b]", &mut interner, &mut globals).unwrap();
+    assert!(matches!(result, Value::Vector(_)));
+}
+
+#[test]
+fn integration_syntax_quote_nil_splice() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // ~@nil should splice nothing
+    let result = eval_with_state("`(a ~@nil b)", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 2);
+    } else {
+        panic!("expected List");
+    }
+}
