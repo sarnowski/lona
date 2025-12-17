@@ -23,6 +23,7 @@ use core::hash::{Hash, Hasher};
 use crate::fnv::FnvHasher;
 use crate::hamt::Hamt;
 use crate::list::List;
+use crate::symbol::Interner;
 use crate::value::Value;
 use crate::vector::Vector;
 
@@ -342,6 +343,49 @@ impl Map {
     #[inline]
     pub fn iter(&self) -> impl Iterator<Item = (&ValueKey, &Value)> {
         self.0.iter()
+    }
+
+    /// Creates a wrapper for displaying this map with symbol resolution.
+    #[inline]
+    #[must_use]
+    pub const fn display<'interner>(
+        &'interner self,
+        interner: &'interner Interner,
+    ) -> Displayable<'interner> {
+        Displayable {
+            map: self,
+            interner,
+        }
+    }
+}
+
+/// A wrapper for displaying a [`Map`] with symbol name resolution.
+///
+/// Created via [`Map::display`].
+pub struct Displayable<'interner> {
+    map: &'interner Map,
+    interner: &'interner Interner,
+}
+
+impl Display for Displayable<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{")?;
+        let mut first = true;
+        for (key, value) in self.map.iter() {
+            if first {
+                first = false;
+            } else {
+                write!(f, " ")?;
+            }
+            write!(
+                f,
+                "{} {}",
+                key.value().display(self.interner),
+                value.display(self.interner)
+            )?;
+        }
+        write!(f, "}}")
     }
 }
 

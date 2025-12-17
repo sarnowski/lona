@@ -316,31 +316,55 @@ lona> (factorial 10)
 
 ---
 
-### Phase 6: Embedded Standard Library
+### Phase 6: Namespace System
+
+**Goal**: Organize code into namespaces, avoid name collisions
+
+| Task | Description |
+|------|-------------|
+| 6.1 Qualified Symbols | Parse `ns/name` syntax, extend Symbol representation |
+| 6.2 Namespace Declaration | `ns` special form, namespace registry, current namespace tracking |
+| 6.3 Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution |
+| 6.4 Require/Use/Refer | Load namespaces, create aliases, selectively import symbols |
+
+**Deliverable**:
+```clojure
+lona> (ns my.app
+        (:require [lona.core :as c]
+                  [lona.string :refer [join]]))
+lona> (c/map inc [1 2 3])
+(2 3 4)
+lona> (join ", " ["a" "b" "c"])
+"a, b, c"
+```
+
+---
+
+### Phase 7: Embedded Standard Library
 
 **Goal**: Load Lonala code at boot, self-hosting REPL
 
 | Task | Description |
 |------|-------------|
-| 6.1 Build System Integration | `build.rs` embeds `stdlib/*.lona`, compile at boot |
-| 6.2 `stdlib/core.lona` | `map`, `filter`, `reduce`, `comp`, `partial`, `str` |
-| 6.3 Native Primitives | `native/read-string`, `native/eval`, `native/uart-*` |
-| 6.4 `stdlib/repl.lona` | `read-line`, `print-result`, `repl-loop` |
-| 6.5 Boot Sequence | Load core, load repl, call `(repl/main)` |
+| 7.1 Build System Integration | `build.rs` embeds `stdlib/*.lona`, compile at boot |
+| 7.2 `stdlib/lona.core` | `map`, `filter`, `reduce`, `comp`, `partial`, `str` |
+| 7.3 Native Primitives | `native/read-string`, `native/eval`, `native/uart-*` |
+| 7.4 `stdlib/lona.repl` | `read-line`, `print-result`, `repl-loop` |
+| 7.5 Boot Sequence | Load core, load repl, call `(lona.repl/main)` |
 
-**Deliverable**: REPL is Lonala code: `(source repl/main)` works
+**Deliverable**: REPL is Lonala code: `(source lona.repl/main)` works
 
 ---
 
-### Phase 7: Basic Introspection
+### Phase 8: Basic Introspection
 
 **Goal**: Inspect and modify the running system
 
 | Task | Description |
 |------|-------------|
-| 7.1 Source Storage | Store source per-definition, track provenance |
-| 7.2 Introspection Primitives | `source`, `doc`, `ns-publics` |
-| 7.3 Hot Patching | Redefine updates dispatch table immediately |
+| 8.1 Source Storage | Store source per-definition, track provenance |
+| 8.2 Introspection Primitives | `source`, `doc`, `ns-publics`, `ns-map` |
+| 8.3 Hot Patching | Redefine updates dispatch table immediately |
 
 **Deliverable**:
 ```clojure
@@ -354,16 +378,16 @@ lona> (greet "Alice")
 
 ---
 
-### Phase 8: Multiple Processes
+### Phase 9: Multiple Processes
 
 **Goal**: Concurrent execution within single domain
 
 | Task | Description |
 |------|-------------|
-| 8.1 Process Data Structure | PID, status, heap, stack, mailbox |
-| 8.2 Per-Process Heap | Each process gets own allocator |
-| 8.3 Cooperative Scheduler | Run queue, yield points, context switching |
-| 8.4 Process Primitives | `spawn`, `self`, `exit` |
+| 9.1 Process Data Structure | PID, status, heap, stack, mailbox |
+| 9.2 Per-Process Heap | Each process gets own allocator |
+| 9.3 Cooperative Scheduler | Run queue, yield points, context switching |
+| 9.4 Process Primitives | `spawn`, `self`, `exit` |
 
 **Deliverable**:
 ```clojure
@@ -374,17 +398,17 @@ Hello from process!
 
 ---
 
-### Phase 9: Message Passing
+### Phase 10: Message Passing
 
 **Goal**: Processes communicate via messages
 
 | Task | Description |
 |------|-------------|
-| 9.1 Mailbox | FIFO message queue per process |
-| 9.2 send Primitive | Copy message to target's mailbox |
-| 9.3 receive Special Form | Pattern matching, selective receive, blocking |
-| 9.4 Timeouts | `(after ms expr)` clause, timer management |
-| 9.5 `stdlib/process.lona` | `call` (sync), `cast` (async) |
+| 10.1 Mailbox | FIFO message queue per process |
+| 10.2 send Primitive | Copy message to target's mailbox |
+| 10.3 receive Special Form | Pattern matching, selective receive, blocking |
+| 10.4 Timeouts | `(after ms expr)` clause, timer management |
+| 10.5 `stdlib/lona.process` | `call` (sync), `cast` (async) |
 
 **Deliverable**:
 ```clojure
@@ -402,31 +426,31 @@ lona> (receive n n)
 
 ---
 
-### Phase 10: Garbage Collection
+### Phase 11: Garbage Collection
 
 **Goal**: Automatic memory management
 
 | Task | Description |
 |------|-------------|
-| 10.1 Root Discovery | Stack, dispatch table, mailbox roots |
-| 10.2 Mark-Sweep Collector | Per-process, triggered on allocation pressure |
-| 10.3 GC Primitives | `gc`, `gc-stats` |
+| 11.1 Root Discovery | Stack, dispatch table, mailbox roots |
+| 11.2 Mark-Sweep Collector | Per-process, triggered on allocation pressure |
+| 11.3 GC Primitives | `gc`, `gc-stats` |
 
 **Deliverable**: Long-running processes without OOM
 
 ---
 
-### Phase 11: Fault Tolerance
+### Phase 12: Fault Tolerance
 
 **Goal**: Supervision trees, let it crash
 
 | Task | Description |
 |------|-------------|
-| 11.1 Process Linking | `link`, `unlink`, `spawn-link` |
-| 11.2 Process Monitoring | `monitor`, `demonitor`, `:DOWN` messages |
-| 11.3 Exit Signals | Normal/abnormal exits, propagation, `trap-exit` |
-| 11.4 Preemptive Scheduling | Reduction counting, fair preemption |
-| 11.5 `stdlib/supervisor.lona` | Supervisor behavior, restart strategies |
+| 12.1 Process Linking | `link`, `unlink`, `spawn-link` |
+| 12.2 Process Monitoring | `monitor`, `demonitor`, `:DOWN` messages |
+| 12.3 Exit Signals | Normal/abnormal exits, propagation, `trap-exit` |
+| 12.4 Preemptive Scheduling | Reduction counting, fair preemption |
+| 12.5 `stdlib/lona.supervisor` | Supervisor behavior, restart strategies |
 
 **Deliverable**:
 ```clojure
@@ -437,32 +461,32 @@ lona> (def-supervisor my-sup
 
 ---
 
-### Phase 12: Advanced Debugging
+### Phase 13: Advanced Debugging
 
 **Goal**: LISP-machine-style debugging
 
 | Task | Description |
 |------|-------------|
-| 12.1 Stack Introspection | `current-stack-frames`, `frame-locals`, `frame-source` |
-| 12.2 Breakpoints | `break-on-entry`, `break-on-exit`, conditional |
-| 12.3 Tracing | `trace-calls`, `trace-messages` |
-| 12.4 Condition/Restart System | `signal`, `restart-case`, `handler-bind` |
-| 12.5 `stdlib/debug.lona` | Debugger UI, inspector |
+| 13.1 Stack Introspection | `current-stack-frames`, `frame-locals`, `frame-source` |
+| 13.2 Breakpoints | `break-on-entry`, `break-on-exit`, conditional |
+| 13.3 Tracing | `trace-calls`, `trace-messages` |
+| 13.4 Condition/Restart System | `signal`, `restart-case`, `handler-bind` |
+| 13.5 `stdlib/lona.debug` | Debugger UI, inspector |
 
 **Deliverable**: Fix bugs in running system without restart
 
 ---
 
-### Phase 13: Domain Isolation
+### Phase 14: Domain Isolation
 
 **Goal**: Security boundaries via seL4
 
 | Task | Description |
 |------|-------------|
-| 13.1 VSpace Manager | Create address spaces, map pages |
-| 13.2 CSpace Manager | Capability space creation, slots, delegation |
-| 13.3 Domain Creation | `spawn` with `:domain`, capability specification |
-| 13.4 Domain Registry | Hierarchical naming, metadata, `find-domains` |
+| 14.1 VSpace Manager | Create address spaces, map pages |
+| 14.2 CSpace Manager | Capability space creation, slots, delegation |
+| 14.3 Domain Creation | `spawn` with `:domain`, capability specification |
+| 14.4 Domain Registry | Hierarchical naming, metadata, `find-domains` |
 
 **Deliverable**:
 ```clojure
@@ -473,48 +497,48 @@ lona> (spawn sandboxed-fn []
 
 ---
 
-### Phase 14: Inter-Domain Communication
+### Phase 15: Inter-Domain Communication
 
 **Goal**: Secure message passing across domains
 
 | Task | Description |
 |------|-------------|
-| 14.1 seL4 IPC Integration | Endpoints, seL4 Call/Send/Recv |
-| 14.2 Serialization | Values to bytes, capability transfer |
-| 14.3 Transparent Routing | `send` works across domains automatically |
-| 14.4 Cross-Domain Supervision | Link/monitor work cross-domain |
+| 15.1 seL4 IPC Integration | Endpoints, seL4 Call/Send/Recv |
+| 15.2 Serialization | Values to bytes, capability transfer |
+| 15.3 Transparent Routing | `send` works across domains automatically |
+| 15.4 Cross-Domain Supervision | Link/monitor work cross-domain |
 
 **Deliverable**: Supervision trees span domain boundaries
 
 ---
 
-### Phase 15: Code Sharing & Zero-Copy
+### Phase 16: Code Sharing & Zero-Copy
 
 **Goal**: Efficient resource sharing
 
 | Task | Description |
 |------|-------------|
-| 15.1 Read-Only Code Mapping | Share bytecode/source pages across domains |
-| 15.2 Dispatch Table Cloning | Child gets copy of parent's bindings |
-| 15.3 Shared Memory Regions | `create-shared-region`, `grant-capability` |
-| 15.4 Code Propagation | `push-code`, `pull-code`, `on-code-push` |
+| 16.1 Read-Only Code Mapping | Share bytecode/source pages across domains |
+| 16.2 Dispatch Table Cloning | Child gets copy of parent's bindings |
+| 16.3 Shared Memory Regions | `create-shared-region`, `grant-capability` |
+| 16.4 Code Propagation | `push-code`, `pull-code`, `on-code-push` |
 
 **Deliverable**: Zero-copy data pipelines across domains
 
 ---
 
-### Phase 16: I/O & Drivers
+### Phase 17: I/O & Drivers
 
 **Goal**: Real hardware interaction
 
 | Task | Description |
 |------|-------------|
-| 16.1 IRQ Handling | seL4 IRQ notifications, IRQ to process message |
-| 16.2 MMIO Abstraction | Memory-mapped device access |
-| 16.3 Driver Framework | Driver behaviors in Lonala |
-| 16.4 VirtIO Drivers | virtio-net, virtio-blk |
-| 16.5 TCP/IP Stack | IP, TCP, UDP in Lonala |
-| 16.6 Telnet Server | Network REPL, per-user domains |
+| 17.1 IRQ Handling | seL4 IRQ notifications, IRQ to process message |
+| 17.2 MMIO Abstraction | Memory-mapped device access |
+| 17.3 Driver Framework | Driver behaviors in Lonala |
+| 17.4 VirtIO Drivers | virtio-net, virtio-blk |
+| 17.5 TCP/IP Stack | IP, TCP, UDP in Lonala |
+| 17.6 Telnet Server | Network REPL, per-user domains |
 
 **Deliverable**: Connect via network, interactive REPL
 
@@ -525,14 +549,14 @@ lona> (spawn sandboxed-fn []
 | Phase | Milestone | Key Deliverable |
 |-------|-----------|-----------------|
 | 1-3 | **"Hello REPL"** | Interactive Lonala over UART |
-| 4-6 | **"Self-Hosting"** | Macros, functions, REPL is Lonala code |
-| 7 | **"Inspectable"** | View source, hot-patch functions |
-| 8-9 | **"Concurrent"** | Spawn processes, send messages |
-| 10 | **"Sustainable"** | Long-running without memory exhaustion |
-| 11 | **"Resilient"** | Supervision trees, automatic restart |
-| 12 | **"Debuggable"** | Fix production bugs without restart |
-| 13-15 | **"Isolated"** | Untrusted code in sandboxes |
-| 16 | **"Connected"** | Network access, telnet REPL |
+| 4-7 | **"Self-Hosting"** | Macros, functions, namespaces, REPL is Lonala code |
+| 8 | **"Inspectable"** | View source, hot-patch functions |
+| 9-10 | **"Concurrent"** | Spawn processes, send messages |
+| 11 | **"Sustainable"** | Long-running without memory exhaustion |
+| 12 | **"Resilient"** | Supervision trees, automatic restart |
+| 13 | **"Debuggable"** | Fix production bugs without restart |
+| 14-16 | **"Isolated"** | Untrusted code in sandboxes |
+| 17 | **"Connected"** | Network access, telnet REPL |
 
 ---
 
@@ -717,51 +741,55 @@ All implementation tasks with status tracking.
 | 19 | 5.2 | Closures | Lexical capture, upvalue handling | open |
 | 20 | 5.3 | Tail Call Optimization | Tail position detection, frame reuse, recur | open |
 | 21 | 5.4 | Dispatch Table | Symbol-to-function mapping, late binding | open |
-| 22 | 6.1 | Build Integration | build.rs embeds stdlib/*.lona files | open |
-| 23 | 6.2 | core.lona | map, filter, reduce, comp, partial, str | open |
-| 24 | 6.3 | Native Primitives | read-string, eval, uart-read, uart-write | open |
-| 25 | 6.4 | repl.lona | read-line, print-result, repl-loop | open |
-| 26 | 6.5 | Boot Sequence | Load core, load repl, start REPL process | open |
-| 27 | 7.1 | Source Storage | Per-definition source, provenance tracking | open |
-| 28 | 7.2 | Introspection Primitives | source, doc, ns-publics | open |
-| 29 | 7.3 | Hot Patching | Redefine updates dispatch table | open |
-| 30 | 8.1 | Process Data Structure | PID, status, heap, stack, mailbox | open |
-| 31 | 8.2 | Per-Process Heap | Independent allocator per process | open |
-| 32 | 8.3 | Cooperative Scheduler | Run queue, yield points, context switch | open |
-| 33 | 8.4 | Process Primitives | spawn, self, exit | open |
-| 34 | 9.1 | Mailbox | FIFO message queue per process | open |
-| 35 | 9.2 | send Primitive | Copy message to target mailbox | open |
-| 36 | 9.3 | receive Special Form | Pattern matching, selective receive | open |
-| 37 | 9.4 | Timeouts | after clause, timer management | open |
-| 38 | 9.5 | process.lona | call (sync), cast (async) helpers | open |
-| 39 | 10.1 | Root Discovery | Stack, dispatch table, mailbox roots | open |
-| 40 | 10.2 | Mark-Sweep Collector | Per-process GC on allocation pressure | open |
-| 41 | 10.3 | GC Primitives | gc, gc-stats functions | open |
-| 42 | 11.1 | Process Linking | link, unlink, spawn-link | open |
-| 43 | 11.2 | Process Monitoring | monitor, demonitor, DOWN messages | open |
-| 44 | 11.3 | Exit Signals | Normal/abnormal exits, propagation | open |
-| 45 | 11.4 | Preemptive Scheduling | Reduction counting, fair preemption | open |
-| 46 | 11.5 | supervisor.lona | Supervisor behavior, restart strategies | open |
-| 47 | 12.1 | Stack Introspection | current-stack-frames, frame-locals | open |
-| 48 | 12.2 | Breakpoints | break-on-entry, break-on-exit | open |
-| 49 | 12.3 | Tracing | trace-calls, trace-messages | open |
-| 50 | 12.4 | Condition/Restart System | signal, restart-case, handler-bind | open |
-| 51 | 12.5 | debug.lona | Debugger UI, inspector | open |
-| 52 | 13.1 | VSpace Manager | Address space creation, page mapping | open |
-| 53 | 13.2 | CSpace Manager | Capability space, slots, delegation | open |
-| 54 | 13.3 | Domain Creation | spawn with :domain, capabilities | open |
-| 55 | 13.4 | Domain Registry | Hierarchical naming, metadata | open |
-| 56 | 14.1 | seL4 IPC Integration | Endpoints, Call/Send/Recv | open |
-| 57 | 14.2 | Serialization | Values to bytes, capability transfer | open |
-| 58 | 14.3 | Transparent Routing | send works across domains | open |
-| 59 | 14.4 | Cross-Domain Supervision | Link/monitor across domains | open |
-| 60 | 15.1 | Read-Only Code Mapping | Share bytecode/source pages | open |
-| 61 | 15.2 | Dispatch Table Cloning | Child inherits parent bindings | open |
-| 62 | 15.3 | Shared Memory Regions | create-shared-region, grant-capability | open |
-| 63 | 15.4 | Code Propagation | push-code, pull-code | open |
-| 64 | 16.1 | IRQ Handling | seL4 IRQ to process message | open |
-| 65 | 16.2 | MMIO Abstraction | Memory-mapped device access | open |
-| 66 | 16.3 | Driver Framework | Driver behaviors in Lonala | open |
-| 67 | 16.4 | VirtIO Drivers | virtio-net, virtio-blk | open |
-| 68 | 16.5 | TCP/IP Stack | IP, TCP, UDP in Lonala | open |
-| 69 | 16.6 | Telnet Server | Network REPL, per-user domains | open |
+| 22 | 6.1 | Qualified Symbols | Parse ns/name syntax, extend Symbol representation | open |
+| 23 | 6.2 | Namespace Declaration | ns special form, namespace registry, current namespace | open |
+| 24 | 6.3 | Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution | open |
+| 25 | 6.4 | Require/Use/Refer | Load namespaces, create aliases, selectively import | open |
+| 26 | 7.1 | Build Integration | build.rs embeds stdlib/*.lona files | open |
+| 27 | 7.2 | lona.core | map, filter, reduce, comp, partial, str | open |
+| 28 | 7.3 | Native Primitives | read-string, eval, uart-read, uart-write | open |
+| 29 | 7.4 | lona.repl | read-line, print-result, repl-loop | open |
+| 30 | 7.5 | Boot Sequence | Load core, load repl, call (lona.repl/main) | open |
+| 31 | 8.1 | Source Storage | Per-definition source, provenance tracking | open |
+| 32 | 8.2 | Introspection Primitives | source, doc, ns-publics, ns-map | open |
+| 33 | 8.3 | Hot Patching | Redefine updates dispatch table | open |
+| 34 | 9.1 | Process Data Structure | PID, status, heap, stack, mailbox | open |
+| 35 | 9.2 | Per-Process Heap | Independent allocator per process | open |
+| 36 | 9.3 | Cooperative Scheduler | Run queue, yield points, context switch | open |
+| 37 | 9.4 | Process Primitives | spawn, self, exit | open |
+| 38 | 10.1 | Mailbox | FIFO message queue per process | open |
+| 39 | 10.2 | send Primitive | Copy message to target mailbox | open |
+| 40 | 10.3 | receive Special Form | Pattern matching, selective receive | open |
+| 41 | 10.4 | Timeouts | after clause, timer management | open |
+| 42 | 10.5 | lona.process | call (sync), cast (async) helpers | open |
+| 43 | 11.1 | Root Discovery | Stack, dispatch table, mailbox roots | open |
+| 44 | 11.2 | Mark-Sweep Collector | Per-process GC on allocation pressure | open |
+| 45 | 11.3 | GC Primitives | gc, gc-stats functions | open |
+| 46 | 12.1 | Process Linking | link, unlink, spawn-link | open |
+| 47 | 12.2 | Process Monitoring | monitor, demonitor, DOWN messages | open |
+| 48 | 12.3 | Exit Signals | Normal/abnormal exits, propagation | open |
+| 49 | 12.4 | Preemptive Scheduling | Reduction counting, fair preemption | open |
+| 50 | 12.5 | lona.supervisor | Supervisor behavior, restart strategies | open |
+| 51 | 13.1 | Stack Introspection | current-stack-frames, frame-locals | open |
+| 52 | 13.2 | Breakpoints | break-on-entry, break-on-exit | open |
+| 53 | 13.3 | Tracing | trace-calls, trace-messages | open |
+| 54 | 13.4 | Condition/Restart System | signal, restart-case, handler-bind | open |
+| 55 | 13.5 | lona.debug | Debugger UI, inspector | open |
+| 56 | 14.1 | VSpace Manager | Address space creation, page mapping | open |
+| 57 | 14.2 | CSpace Manager | Capability space, slots, delegation | open |
+| 58 | 14.3 | Domain Creation | spawn with :domain, capabilities | open |
+| 59 | 14.4 | Domain Registry | Hierarchical naming, metadata | open |
+| 60 | 15.1 | seL4 IPC Integration | Endpoints, Call/Send/Recv | open |
+| 61 | 15.2 | Serialization | Values to bytes, capability transfer | open |
+| 62 | 15.3 | Transparent Routing | send works across domains | open |
+| 63 | 15.4 | Cross-Domain Supervision | Link/monitor across domains | open |
+| 64 | 16.1 | Read-Only Code Mapping | Share bytecode/source pages | open |
+| 65 | 16.2 | Dispatch Table Cloning | Child inherits parent bindings | open |
+| 66 | 16.3 | Shared Memory Regions | create-shared-region, grant-capability | open |
+| 67 | 16.4 | Code Propagation | push-code, pull-code | open |
+| 68 | 17.1 | IRQ Handling | seL4 IRQ to process message | open |
+| 69 | 17.2 | MMIO Abstraction | Memory-mapped device access | open |
+| 70 | 17.3 | Driver Framework | Driver behaviors in Lonala | open |
+| 71 | 17.4 | VirtIO Drivers | virtio-net, virtio-blk | open |
+| 72 | 17.5 | TCP/IP Stack | IP, TCP, UDP in Lonala | open |
+| 73 | 17.6 | Telnet Server | Network REPL, per-user domains | open |

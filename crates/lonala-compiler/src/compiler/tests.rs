@@ -973,3 +973,300 @@ fn compile_def_invalid_non_symbol_name() {
         panic!("expected InvalidSpecialForm error for def with non-symbol name");
     }
 }
+
+// =========================================================================
+// Special Form: let
+// =========================================================================
+
+#[test]
+fn compile_let_single_binding() {
+    let chunk = compile_source("(let [x 42] x)");
+    let code = chunk.code();
+
+    // Should have instructions for: load 42, move to binding, move from binding, return
+    assert!(code.len() >= 2);
+
+    // Should use Move opcode for local variable access
+    let mut has_move = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Move) {
+            has_move = true;
+            break;
+        }
+    }
+    assert!(has_move);
+}
+
+#[test]
+fn compile_let_multiple_bindings() {
+    let chunk = compile_source("(let [x 1 y 2] (+ x y))");
+    let code = chunk.code();
+
+    // Should have Add instruction
+    let mut has_add = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Add) {
+            has_add = true;
+            break;
+        }
+    }
+    assert!(has_add);
+}
+
+#[test]
+fn compile_let_forward_reference() {
+    let chunk = compile_source("(let [x 1 y (+ x 1)] y)");
+    let code = chunk.code();
+
+    // Should have Add instruction for (+ x 1)
+    let mut has_add = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Add) {
+            has_add = true;
+            break;
+        }
+    }
+    assert!(has_add);
+}
+
+#[test]
+fn compile_let_nested() {
+    let chunk = compile_source("(let [x 1] (let [y 2] (+ x y)))");
+    let code = chunk.code();
+
+    // Should have Add instruction
+    let mut has_add = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Add) {
+            has_add = true;
+            break;
+        }
+    }
+    assert!(has_add);
+}
+
+#[test]
+fn compile_let_empty_body() {
+    let chunk = compile_source("(let [x 1])");
+    let code = chunk.code();
+
+    // Empty body should produce LoadNil
+    let mut has_load_nil = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::LoadNil) {
+            has_load_nil = true;
+            break;
+        }
+    }
+    assert!(has_load_nil);
+}
+
+#[test]
+fn compile_let_invalid_no_args() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("(let)", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+        assert_eq!(form, "let");
+    } else {
+        panic!("expected InvalidSpecialForm error for let");
+    }
+}
+
+#[test]
+fn compile_let_invalid_non_vector_bindings() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("(let (x 1) x)", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+        assert_eq!(form, "let");
+        assert!(message.contains("vector"));
+    } else {
+        panic!("expected InvalidSpecialForm error for let with non-vector bindings");
+    }
+}
+
+#[test]
+fn compile_let_invalid_odd_bindings() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("(let [x 1 y] x)", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+        assert_eq!(form, "let");
+        assert!(message.contains("pairs"));
+    } else {
+        panic!("expected InvalidSpecialForm error for let with odd bindings");
+    }
+}
+
+#[test]
+fn compile_let_invalid_non_symbol_binding_name() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("(let [42 1] 0)", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+        assert_eq!(form, "let");
+        assert!(message.contains("symbol"));
+    } else {
+        panic!("expected InvalidSpecialForm error for let with non-symbol binding name");
+    }
+}
+
+// =========================================================================
+// Special Form: quote
+// =========================================================================
+
+#[test]
+fn compile_quote_symbol() {
+    let (chunk, interner) = compile_with_interner("(quote foo)");
+    let code = chunk.code();
+
+    // Should have LoadK instruction
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+
+    // Verify symbol constant
+    let const_idx = decode_bx(instr0);
+    if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(const_idx) {
+        assert_eq!(interner.resolve(*sym_id), "foo");
+    } else {
+        panic!("expected Symbol constant for quoted symbol");
+    }
+}
+
+#[test]
+fn compile_quote_integer() {
+    let chunk = compile_source("(quote 42)");
+    let code = chunk.code();
+
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+
+    let const_idx = decode_bx(instr0);
+    assert_eq!(chunk.get_constant(const_idx), Some(&Constant::Integer(42)));
+}
+
+#[test]
+fn compile_quote_list() {
+    let chunk = compile_source("(quote (1 2 3))");
+    let code = chunk.code();
+
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+
+    let const_idx = decode_bx(instr0);
+    if let Some(Constant::List(elements)) = chunk.get_constant(const_idx) {
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements.get(0), Some(&Constant::Integer(1)));
+        assert_eq!(elements.get(1), Some(&Constant::Integer(2)));
+        assert_eq!(elements.get(2), Some(&Constant::Integer(3)));
+    } else {
+        panic!("expected List constant for quoted list");
+    }
+}
+
+#[test]
+fn compile_quote_vector() {
+    let chunk = compile_source("(quote [1 2 3])");
+    let code = chunk.code();
+
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+
+    let const_idx = decode_bx(instr0);
+    if let Some(Constant::Vector(elements)) = chunk.get_constant(const_idx) {
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements.get(0), Some(&Constant::Integer(1)));
+        assert_eq!(elements.get(1), Some(&Constant::Integer(2)));
+        assert_eq!(elements.get(2), Some(&Constant::Integer(3)));
+    } else {
+        panic!("expected Vector constant for quoted vector");
+    }
+}
+
+#[test]
+fn compile_quote_nested_list() {
+    let chunk = compile_source("(quote (a (b c) d))");
+    let code = chunk.code();
+
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::LoadK));
+
+    let const_idx = decode_bx(instr0);
+    if let Some(Constant::List(elements)) = chunk.get_constant(const_idx) {
+        assert_eq!(elements.len(), 3);
+        // First element is symbol 'a'
+        assert!(matches!(elements.get(0), Some(Constant::Symbol(_))));
+        // Second element is list (b c)
+        if let Some(Constant::List(inner)) = elements.get(1) {
+            assert_eq!(inner.len(), 2);
+        } else {
+            panic!("expected nested list");
+        }
+        // Third element is symbol 'd'
+        assert!(matches!(elements.get(2), Some(Constant::Symbol(_))));
+    } else {
+        panic!("expected List constant for quoted nested list");
+    }
+}
+
+#[test]
+fn compile_quote_prevents_evaluation() {
+    let (chunk, interner) = compile_with_interner("(quote (+ 1 2))");
+    let code = chunk.code();
+
+    // Should NOT have Add instruction - quote prevents evaluation
+    let mut has_add = false;
+    for &instr in code {
+        if decode_op(instr) == Some(Opcode::Add) {
+            has_add = true;
+            break;
+        }
+    }
+    assert!(!has_add, "quote should prevent evaluation");
+
+    // Should have a List constant with symbol '+' and integers 1, 2
+    let instr0 = *code.get(0_usize).unwrap();
+    let const_idx = decode_bx(instr0);
+    if let Some(Constant::List(elements)) = chunk.get_constant(const_idx) {
+        assert_eq!(elements.len(), 3);
+        // First element should be symbol '+'
+        if let Some(Constant::Symbol(sym_id)) = elements.get(0) {
+            assert_eq!(interner.resolve(*sym_id), "+");
+        } else {
+            panic!("expected symbol '+' in quoted list");
+        }
+    } else {
+        panic!("expected List constant for quoted expression");
+    }
+}
+
+#[test]
+fn compile_quote_invalid_no_args() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("(quote)", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+        assert_eq!(form, "quote");
+    } else {
+        panic!("expected InvalidSpecialForm error for quote");
+    }
+}
+
+#[test]
+fn compile_quote_invalid_two_args() {
+    let mut interner = symbol::Interner::new();
+    let result = compile("(quote a b)", &mut interner);
+    assert!(result.is_err());
+
+    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+        assert_eq!(form, "quote");
+    } else {
+        panic!("expected InvalidSpecialForm error for quote with two args");
+    }
+}

@@ -668,6 +668,11 @@ impl<'interner> Vm<'interner> {
                 span: frame.current_span(),
             })?;
 
+        Self::convert_constant_to_value(constant)
+    }
+
+    /// Recursively converts a Constant to a Value.
+    fn convert_constant_to_value(constant: &Constant) -> Result<Value, Error> {
         Ok(match *constant {
             Constant::Bool(val) => Value::Bool(val),
             Constant::Integer(num) => Value::Integer(Integer::from_i64(num)),
@@ -675,6 +680,20 @@ impl<'interner> Vm<'interner> {
             Constant::Symbol(id) => Value::Symbol(id),
             Constant::String(ref text) => {
                 Value::String(lona_core::string::HeapStr::from(text.as_str()))
+            }
+            Constant::List(ref elements) => {
+                let values: Result<alloc::vec::Vec<Value>, Error> = elements
+                    .iter()
+                    .map(Self::convert_constant_to_value)
+                    .collect();
+                Value::List(lona_core::list::List::from_vec(values?))
+            }
+            Constant::Vector(ref elements) => {
+                let values: Result<alloc::vec::Vec<Value>, Error> = elements
+                    .iter()
+                    .map(Self::convert_constant_to_value)
+                    .collect();
+                Value::Vector(lona_core::vector::Vector::from_vec(values?))
             }
             // Handle Nil and future Constant variants (Constant is #[non_exhaustive])
             Constant::Nil | _ => Value::Nil,
@@ -701,6 +720,8 @@ impl<'interner> Vm<'interner> {
             | Constant::Integer(_)
             | Constant::Float(_)
             | Constant::String(_)
+            | Constant::List(_)
+            | Constant::Vector(_)
             | _ => Err(Error::TypeError {
                 expected: "symbol",
                 got: constant_type_name(constant),

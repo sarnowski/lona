@@ -21,6 +21,7 @@ use core::fmt::{self, Debug, Display};
 use core::hash::{Hash, Hasher};
 
 use crate::pvec::PersistentVec;
+use crate::symbol::Interner;
 use crate::value::Value;
 
 /// An immutable, persistent vector.
@@ -118,6 +119,44 @@ impl Vector {
         Iter {
             inner: self.0.iter(),
         }
+    }
+
+    /// Creates a wrapper for displaying this vector with symbol resolution.
+    #[inline]
+    #[must_use]
+    pub const fn display<'interner>(
+        &'interner self,
+        interner: &'interner Interner,
+    ) -> Displayable<'interner> {
+        Displayable {
+            vector: self,
+            interner,
+        }
+    }
+}
+
+/// A wrapper for displaying a [`Vector`] with symbol name resolution.
+///
+/// Created via [`Vector::display`].
+pub struct Displayable<'interner> {
+    vector: &'interner Vector,
+    interner: &'interner Interner,
+}
+
+impl Display for Displayable<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
+        let mut first = true;
+        for value in self.vector {
+            if first {
+                first = false;
+            } else {
+                write!(f, " ")?;
+            }
+            write!(f, "{}", value.display(self.interner))?;
+        }
+        write!(f, "]")
     }
 }
 

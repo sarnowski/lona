@@ -1218,3 +1218,172 @@ fn integration_do_returns_last() {
     let result = eval_with_state("(do 1 2 3)", &mut interner, &mut globals).unwrap();
     assert_eq!(result, Value::Integer(Integer::from_i64(3)));
 }
+
+// =============================================================================
+// Integration Tests for `let`
+// =============================================================================
+
+#[test]
+fn integration_let_single_binding() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(let [x 42] x)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(42)));
+}
+
+#[test]
+fn integration_let_multiple_bindings() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(let [x 1 y 2] (+ x y))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(3)));
+}
+
+#[test]
+fn integration_let_forward_reference() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(let [x 1 y (+ x 1)] y)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(2)));
+}
+
+#[test]
+fn integration_let_nested() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state(
+        "(let [x 1] (let [y 2] (+ x y)))",
+        &mut interner,
+        &mut globals,
+    )
+    .unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(3)));
+}
+
+#[test]
+fn integration_let_shadows_global() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // Define a global x = 100
+    let _result = eval_with_state("(def x 100)", &mut interner, &mut globals).unwrap();
+
+    // let should shadow the global
+    let result = eval_with_state("(let [x 1] x)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(1)));
+
+    // After let, global should still be accessible
+    let result2 = eval_with_state("x", &mut interner, &mut globals).unwrap();
+    assert_eq!(result2, Value::Integer(Integer::from_i64(100)));
+}
+
+#[test]
+fn integration_let_empty_body() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(let [x 1])", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Nil);
+}
+
+#[test]
+fn integration_let_multiple_body_exprs() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(let [x 1] x (+ x 1))", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(2)));
+}
+
+// =============================================================================
+// Integration Tests for `quote`
+// =============================================================================
+
+#[test]
+fn integration_quote_symbol() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(quote foo)", &mut interner, &mut globals).unwrap();
+    // Should return a symbol value
+    assert!(matches!(result, Value::Symbol(_)));
+}
+
+#[test]
+fn integration_quote_integer() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(quote 42)", &mut interner, &mut globals).unwrap();
+    assert_eq!(result, Value::Integer(Integer::from_i64(42)));
+}
+
+#[test]
+fn integration_quote_list() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(quote (1 2 3))", &mut interner, &mut globals).unwrap();
+    // Should return a list value
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        assert_eq!(list.first(), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_quote_vector() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(quote [1 2 3])", &mut interner, &mut globals).unwrap();
+    // Should return a vector value
+    if let Value::Vector(vector) = result {
+        assert_eq!(vector.len(), 3);
+        assert_eq!(vector.get(0), Some(&Value::Integer(Integer::from_i64(1))));
+    } else {
+        panic!("expected Vector value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_quote_prevents_evaluation() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    // (+ 1 2) would normally evaluate to 3, but quoted it should be a list
+    let result = eval_with_state("(quote (+ 1 2))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        // First element should be symbol '+'
+        assert!(matches!(list.first(), Some(Value::Symbol(_))));
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}
+
+#[test]
+fn integration_quote_nested_list() {
+    let mut interner = Interner::new();
+    let mut globals = super::Globals::new();
+
+    let result = eval_with_state("(quote (a (b c) d))", &mut interner, &mut globals).unwrap();
+    if let Value::List(list) = result {
+        assert_eq!(list.len(), 3);
+        // Second element should be a list
+        let rest = list.rest();
+        if let Some(Value::List(inner)) = rest.first() {
+            assert_eq!(inner.len(), 2);
+        } else {
+            panic!("expected nested List, got {:?}", rest.first());
+        }
+    } else {
+        panic!("expected List value, got {:?}", result);
+    }
+}

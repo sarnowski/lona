@@ -13,6 +13,7 @@ use core::fmt::{self, Debug, Display};
 use core::hash::{Hash, Hasher};
 use core::iter::FusedIterator;
 
+use crate::symbol::Interner;
 use crate::value::Value;
 
 /// A cons cell containing a head value and tail list.
@@ -124,6 +125,44 @@ impl List {
     #[must_use]
     pub const fn iter(&self) -> Iter<'_> {
         Iter { current: self }
+    }
+
+    /// Creates a wrapper for displaying this list with symbol resolution.
+    #[inline]
+    #[must_use]
+    pub const fn display<'interner>(
+        &'interner self,
+        interner: &'interner Interner,
+    ) -> Displayable<'interner> {
+        Displayable {
+            list: self,
+            interner,
+        }
+    }
+}
+
+/// A wrapper for displaying a [`List`] with symbol name resolution.
+///
+/// Created via [`List::display`].
+pub struct Displayable<'interner> {
+    list: &'interner List,
+    interner: &'interner Interner,
+}
+
+impl Display for Displayable<'_> {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "(")?;
+        let mut first = true;
+        for value in self.list {
+            if first {
+                first = false;
+            } else {
+                write!(f, " ")?;
+            }
+            write!(f, "{}", value.display(self.interner))?;
+        }
+        write!(f, ")")
     }
 }
 

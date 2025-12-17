@@ -37,6 +37,8 @@ pub const fn constant_type_name(constant: &Constant) -> &'static str {
         Constant::Float(_) => "float",
         Constant::String(_) => "string",
         Constant::Symbol(_) => "symbol",
+        Constant::List(_) => "list",
+        Constant::Vector(_) => "vector",
         // Constant is non-exhaustive, handle future variants
         _ => "unknown",
     }

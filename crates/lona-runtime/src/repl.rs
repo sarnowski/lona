@@ -397,13 +397,16 @@ mod interactive {
                     self.writeln("\"");
                 }
                 Value::List(ref list) => {
-                    self.io.write_fmt(format_args!("{list}\n"));
+                    let displayable = list.display(&self.repl.interner);
+                    self.io.write_fmt(format_args!("{displayable}\n"));
                 }
                 Value::Vector(ref vector) => {
-                    self.io.write_fmt(format_args!("{vector}\n"));
+                    let displayable = vector.display(&self.repl.interner);
+                    self.io.write_fmt(format_args!("{displayable}\n"));
                 }
                 Value::Map(ref map) => {
-                    self.io.write_fmt(format_args!("{map}\n"));
+                    let displayable = map.display(&self.repl.interner);
+                    self.io.write_fmt(format_args!("{displayable}\n"));
                 }
                 _ => {
                     self.io.write_fmt(format_args!("{value:?}\n"));

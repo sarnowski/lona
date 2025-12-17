@@ -6,6 +6,9 @@
 //! Transforms parsed [`Ast`] expressions into executable [`Chunk`] bytecode.
 //! This module implements the core compilation logic for the Lonala language.
 
+use alloc::collections::BTreeMap;
+use alloc::vec::Vec;
+
 use lona_core::symbol;
 use lonala_parser::{Ast, Span, Spanned};
 
@@ -17,6 +20,49 @@ use crate::opcode::{
 
 #[cfg(test)]
 mod tests;
+
+/// Tracks local variable bindings across nested scopes.
+///
+/// Used to implement `let` bindings and function parameters. Each scope
+/// maps symbol IDs to the register where that variable is stored.
+struct LocalEnv {
+    /// Stack of scopes, each mapping symbol ID to register.
+    scopes: Vec<BTreeMap<symbol::Id, u8>>,
+}
+
+impl LocalEnv {
+    /// Creates a new empty local environment.
+    const fn new() -> Self {
+        Self { scopes: Vec::new() }
+    }
+
+    /// Pushes a new scope (entering `let`, `fn`, etc.).
+    fn push_scope(&mut self) {
+        self.scopes.push(BTreeMap::new());
+    }
+
+    /// Pops the current scope (exiting `let`, `fn`, etc.).
+    fn pop_scope(&mut self) {
+        let _: Option<BTreeMap<symbol::Id, u8>> = self.scopes.pop();
+    }
+
+    /// Defines a local variable in the current scope.
+    fn define(&mut self, name: symbol::Id, register: u8) {
+        if let Some(scope) = self.scopes.last_mut() {
+            let _: Option<u8> = scope.insert(name, register);
+        }
+    }
+
+    /// Looks up a local variable, searching from innermost to outermost scope.
+    fn lookup(&self, name: symbol::Id) -> Option<u8> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(&reg) = scope.get(&name) {
+                return Some(reg);
+            }
+        }
+        None
+    }
+}
 
 /// Result of compiling an expression.
 ///
@@ -42,6 +88,8 @@ pub struct Compiler<'interner> {
     next_register: u8,
     /// Maximum register used so far (for tracking chunk metadata).
     max_register: u8,
+    /// Local variable bindings across nested scopes.
+    locals: LocalEnv,
 }
 
 impl<'interner> Compiler<'interner> {
@@ -54,6 +102,7 @@ impl<'interner> Compiler<'interner> {
             interner,
             next_register: 0,
             max_register: 0,
+            locals: LocalEnv::new(),
         }
     }
 
@@ -200,16 +249,26 @@ impl<'interner> Compiler<'interner> {
     // Symbol Compilation
     // =========================================================================
 
-    /// Compiles a symbol as a global variable lookup.
+    /// Compiles a symbol as a local or global variable lookup.
     ///
-    /// Note: This method always interns from string. The interner correctly
-    /// deduplicates, so repeated symbols within the same compilation share
-    /// the same `symbol::Id`. In future phases, if the parser pre-interns
-    /// symbols, this method could be refactored to accept `symbol::Id`
-    /// directly to avoid the lookup overhead.
+    /// First checks local scopes (for `let` bindings and function parameters),
+    /// falling back to global lookup if not found locally.
     fn compile_symbol(&mut self, name: &str, span: Span) -> Result<ExprResult, Error> {
-        let dest = self.alloc_register(span)?;
         let sym_id = self.interner.intern(name);
+
+        // First, check local variables
+        if let Some(local_reg) = self.locals.lookup(sym_id) {
+            // Local variable - copy from its register to dest if needed
+            let dest = self.alloc_register(span)?;
+            if local_reg != dest {
+                self.chunk
+                    .emit(encode_abc(Opcode::Move, dest, local_reg, 0), span);
+            }
+            return Ok(ExprResult { register: dest });
+        }
+
+        // Not a local, fall back to global lookup
+        let dest = self.alloc_register(span)?;
         let const_idx = self.chunk.add_constant_at(Constant::Symbol(sym_id), span)?;
         self.chunk
             .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
@@ -236,6 +295,8 @@ impl<'interner> Compiler<'interner> {
                 "do" => return self.compile_do(args, span),
                 "if" => return self.compile_if(args, span),
                 "def" => return self.compile_def(args, span),
+                "let" => return self.compile_let(args, span),
+                "quote" => return self.compile_quote(args, span),
                 _ => {}
             }
 
@@ -612,6 +673,193 @@ impl<'interner> Compiler<'interner> {
             .emit(encode_abx(Opcode::LoadK, dest, symbol_const), span);
 
         Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles a `let` special form.
+    ///
+    /// Syntax: `(let [name1 val1 name2 val2 ...] body...)`
+    ///
+    /// Bindings are evaluated left to right, and each binding can reference
+    /// previous bindings. Body expressions are evaluated with bindings in scope,
+    /// and the value of the last body expression is returned.
+    fn compile_let(&mut self, args: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
+        // Need at least bindings vector
+        if args.is_empty() {
+            return Err(Error::InvalidSpecialForm {
+                form: "let",
+                message: "expected (let [bindings...] body...)",
+                span,
+            });
+        }
+
+        // First arg must be a vector of bindings
+        let bindings_ast = args.first().ok_or(Error::EmptyCall { span })?;
+        let Ast::Vector(ref bindings) = bindings_ast.node else {
+            return Err(Error::InvalidSpecialForm {
+                form: "let",
+                message: "first argument must be a vector of bindings",
+                span: bindings_ast.span,
+            });
+        };
+
+        // Bindings must come in pairs
+        if bindings.len() % 2_usize != 0_usize {
+            return Err(Error::InvalidSpecialForm {
+                form: "let",
+                message: "bindings must be pairs of [name value ...]",
+                span: bindings_ast.span,
+            });
+        }
+
+        let body = args.get(1_usize..).unwrap_or(&[]);
+
+        // Save register state for cleanup
+        let checkpoint = self.next_register;
+
+        // Push new scope
+        self.locals.push_scope();
+
+        // Process bindings in pairs
+        let mut binding_idx: usize = 0;
+        while binding_idx < bindings.len() {
+            let name_ast = bindings.get(binding_idx).ok_or(Error::EmptyCall { span })?;
+            let value_ast = bindings
+                .get(binding_idx.saturating_add(1))
+                .ok_or(Error::EmptyCall { span })?;
+
+            // Name must be a symbol
+            let Ast::Symbol(ref name) = name_ast.node else {
+                return Err(Error::InvalidSpecialForm {
+                    form: "let",
+                    message: "binding name must be a symbol",
+                    span: name_ast.span,
+                });
+            };
+
+            // Allocate register for this binding
+            let reg = self.alloc_register(value_ast.span)?;
+
+            // Compile value into the register
+            let value_result = self.compile_expr(value_ast)?;
+            if value_result.register != reg {
+                self.chunk.emit(
+                    encode_abc(Opcode::Move, reg, value_result.register, 0),
+                    value_ast.span,
+                );
+            }
+
+            // Free any temps but keep the binding register
+            self.free_registers_to(reg.saturating_add(1));
+
+            // Register the binding
+            let symbol_id = self.interner.intern(name);
+            self.locals.define(symbol_id, reg);
+
+            binding_idx = binding_idx.saturating_add(2);
+        }
+
+        // Compile body (like do)
+        let result = if body.is_empty() {
+            // Empty body returns nil
+            let dest = self.alloc_register(span)?;
+            self.chunk
+                .emit(encode_abc(Opcode::LoadNil, dest, 0, 0), span);
+            ExprResult { register: dest }
+        } else {
+            // Compile all but last expression, discarding results
+            for expr in body.get(..body.len().saturating_sub(1)).unwrap_or(&[]) {
+                let temp_checkpoint = self.next_register;
+                let _temp_result = self.compile_expr(expr)?;
+                self.free_registers_to(temp_checkpoint);
+            }
+            // Compile last expression to return
+            let last = body.last().ok_or(Error::EmptyCall { span })?;
+            self.compile_expr(last)?
+        };
+
+        // Pop scope and restore registers
+        self.locals.pop_scope();
+        self.free_registers_to(checkpoint);
+
+        // Move result to checkpoint register if needed
+        let dest = self.alloc_register(span)?;
+        if result.register != dest {
+            self.chunk
+                .emit(encode_abc(Opcode::Move, dest, result.register, 0), span);
+        }
+
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles a `quote` special form.
+    ///
+    /// Syntax: `(quote datum)`
+    ///
+    /// Returns the datum as a value without evaluating it.
+    fn compile_quote(&mut self, args: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
+        if args.len() != 1_usize {
+            return Err(Error::InvalidSpecialForm {
+                form: "quote",
+                message: "expected (quote datum)",
+                span,
+            });
+        }
+
+        let datum = args.first().ok_or(Error::EmptyCall { span })?;
+        let constant = self.ast_to_constant(datum)?;
+        let const_idx = self.chunk.add_constant_at(constant, datum.span)?;
+        let dest = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Converts an AST node to a compile-time constant.
+    ///
+    /// Used by `quote` to convert the quoted datum to a constant value.
+    fn ast_to_constant(&mut self, ast: &Spanned<Ast>) -> Result<Constant, Error> {
+        match ast.node {
+            Ast::Nil => Ok(Constant::Nil),
+            Ast::Bool(bool_val) => Ok(Constant::Bool(bool_val)),
+            Ast::Integer(num) => Ok(Constant::Integer(num)),
+            Ast::Float(num) => Ok(Constant::Float(num)),
+            Ast::String(ref text) => {
+                Ok(Constant::String(alloc::string::String::from(text.as_str())))
+            }
+            Ast::Symbol(ref name) => {
+                let id = self.interner.intern(name);
+                Ok(Constant::Symbol(id))
+            }
+            Ast::Keyword(ref name) => {
+                // Keywords are stored as symbols with a : prefix
+                let keyword_name = alloc::format!(":{name}");
+                let id = self.interner.intern(&keyword_name);
+                Ok(Constant::Symbol(id))
+            }
+            Ast::List(ref elements) => {
+                let constants: Result<Vec<Constant>, Error> = elements
+                    .iter()
+                    .map(|elem| self.ast_to_constant(elem))
+                    .collect();
+                Ok(Constant::List(constants?))
+            }
+            Ast::Vector(ref elements) => {
+                let constants: Result<Vec<Constant>, Error> = elements
+                    .iter()
+                    .map(|elem| self.ast_to_constant(elem))
+                    .collect();
+                Ok(Constant::Vector(constants?))
+            }
+            Ast::Map(_) => Err(Error::NotImplemented {
+                feature: "quoted maps",
+                span: ast.span,
+            }),
+            // Ast is non-exhaustive, handle future variants
+            _ => Err(Error::NotImplemented {
+                feature: "unknown AST node in quote",
+                span: ast.span,
+            }),
+        }
     }
 
     // =========================================================================

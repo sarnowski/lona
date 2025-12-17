@@ -448,9 +448,9 @@ impl Display for Displayable<'_> {
             Value::Float(value) => format_float(value, f),
             Value::Ratio(ref value) => write!(f, "{value}"),
             Value::String(ref string) => write!(f, "{string}"),
-            Value::List(ref list) => write!(f, "{list}"),
-            Value::Vector(ref vector) => write!(f, "{vector}"),
-            Value::Map(ref map) => write!(f, "{map}"),
+            Value::List(ref list) => write!(f, "{}", list.display(self.interner)),
+            Value::Vector(ref vector) => write!(f, "{}", vector.display(self.interner)),
+            Value::Map(ref map) => write!(f, "{}", map.display(self.interner)),
         }
     }
 }
@@ -704,6 +704,48 @@ mod tests {
         assert_eq!(Value::Bool(true).display(&interner).to_string(), "true");
         assert_eq!(int(42).display(&interner).to_string(), "42");
         assert_eq!(Value::Float(3.14).display(&interner).to_string(), "3.14");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_list_with_symbols_resolves_names() {
+        use crate::list::List;
+
+        let mut interner = Interner::new();
+        let plus_id = interner.intern("+");
+        let x_id = interner.intern("x");
+        let y_id = interner.intern("y");
+
+        // Create list (+ x y)
+        let list = List::empty()
+            .cons(Value::Symbol(y_id))
+            .cons(Value::Symbol(x_id))
+            .cons(Value::Symbol(plus_id));
+
+        let value = Value::List(list);
+
+        // With interner, symbols should show their names
+        assert_eq!(value.display(&interner).to_string(), "(+ x y)");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_vector_with_symbols_resolves_names() {
+        use crate::vector::Vector;
+
+        let mut interner = Interner::new();
+        let a_id = interner.intern("a");
+        let b_id = interner.intern("b");
+
+        // Create vector [a b]
+        let vector = Vector::empty()
+            .push(Value::Symbol(a_id))
+            .push(Value::Symbol(b_id));
+
+        let value = Value::Vector(vector);
+
+        // With interner, symbols should show their names
+        assert_eq!(value.display(&interner).to_string(), "[a b]");
     }
 
     #[test]
