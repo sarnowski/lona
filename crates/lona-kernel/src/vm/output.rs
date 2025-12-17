@@ -104,6 +104,7 @@ impl Output for BufferOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lona_core::integer::Integer;
     use lona_core::symbol::Interner;
 
     #[test]
@@ -133,7 +134,7 @@ mod tests {
     fn buffer_output_write_value_integer() {
         let interner = Interner::new();
         let mut output = BufferOutput::new();
-        output.write_value(Value::Integer(42), &interner);
+        output.write_value(Value::Integer(Integer::from_i64(42)), &interner);
         assert_eq!(output.buffer, "42");
     }
 

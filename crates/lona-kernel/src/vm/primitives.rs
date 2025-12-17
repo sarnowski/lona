@@ -69,22 +69,26 @@ pub fn native_print(args: &[Value], interner: &Interner) -> Result<Value, Native
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lona_core::integer::Integer;
+    use lona_core::ratio::Ratio;
     use lona_core::symbol::Interner;
+
+    /// Helper to create an integer value.
+    fn int(value: i64) -> Value {
+        Value::Integer(Integer::from_i64(value))
+    }
 
     #[test]
     fn format_print_single_integer() {
         let interner = Interner::new();
-        let result = format_print_args(&[Value::Integer(42)], &interner);
+        let result = format_print_args(&[int(42)], &interner);
         assert_eq!(result, "42\n");
     }
 
     #[test]
     fn format_print_multiple_integers() {
         let interner = Interner::new();
-        let result = format_print_args(
-            &[Value::Integer(1), Value::Integer(2), Value::Integer(3)],
-            &interner,
-        );
+        let result = format_print_args(&[int(1), int(2), int(3)], &interner);
         assert_eq!(result, "1 2 3\n");
     }
 
@@ -136,7 +140,7 @@ mod tests {
 
         let result = format_print_args(
             &[
-                Value::Integer(1),
+                int(1),
                 Value::Float(2.5),
                 Value::Bool(true),
                 Value::Symbol(sym_id),
@@ -156,21 +160,38 @@ mod tests {
     #[test]
     fn native_print_returns_nil() {
         let interner = Interner::new();
-        let result = native_print(&[Value::Integer(42)], &interner).unwrap();
+        let result = native_print(&[int(42)], &interner).unwrap();
         assert_eq!(result, Value::Nil);
     }
 
     #[test]
     fn format_print_negative_integer() {
         let interner = Interner::new();
-        let result = format_print_args(&[Value::Integer(-5)], &interner);
+        let result = format_print_args(&[int(-5)], &interner);
         assert_eq!(result, "-5\n");
     }
 
     #[test]
     fn format_print_zero() {
         let interner = Interner::new();
-        let result = format_print_args(&[Value::Integer(0)], &interner);
+        let result = format_print_args(&[int(0)], &interner);
         assert_eq!(result, "0\n");
+    }
+
+    #[test]
+    fn format_print_ratio() {
+        let interner = Interner::new();
+        let ratio = Value::Ratio(Ratio::from_i64(1, 3));
+        let result = format_print_args(&[ratio], &interner);
+        assert_eq!(result, "1/3\n");
+    }
+
+    #[test]
+    fn format_print_ratio_whole() {
+        let interner = Interner::new();
+        // 4/2 should normalize to 2 and display as "2"
+        let ratio = Value::Ratio(Ratio::from_i64(4, 2));
+        let result = format_print_args(&[ratio], &interner);
+        assert_eq!(result, "2\n");
     }
 }

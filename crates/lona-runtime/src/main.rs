@@ -36,6 +36,8 @@ mod repl;
 use alloc::vec;
 
 use lona_core::allocator::Allocator;
+#[cfg(feature = "integration-test")]
+use lona_core::integer::Integer;
 use sel4_root_task::{Never, root_task};
 
 #[cfg(feature = "integration-test")]
@@ -252,7 +254,7 @@ fn test_arithmetic() -> Status {
     // Execute it
     let mut vm = Vm::new(&interner);
     match vm.execute(&chunk) {
-        Ok(Value::Integer(result)) if result == 3 => Status::Pass,
+        Ok(Value::Integer(result)) if result == Integer::from_i64(3) => Status::Pass,
         _ => Status::Fail,
     }
 }
@@ -269,7 +271,7 @@ fn test_subtraction() -> Status {
 
     let mut vm = Vm::new(&interner);
     match vm.execute(&chunk) {
-        Ok(Value::Integer(result)) if result == 7 => Status::Pass,
+        Ok(Value::Integer(result)) if result == Integer::from_i64(7) => Status::Pass,
         _ => Status::Fail,
     }
 }
@@ -286,7 +288,7 @@ fn test_multiplication() -> Status {
 
     let mut vm = Vm::new(&interner);
     match vm.execute(&chunk) {
-        Ok(Value::Integer(result)) if result == 42 => Status::Pass,
+        Ok(Value::Integer(result)) if result == Integer::from_i64(42) => Status::Pass,
         _ => Status::Fail,
     }
 }
@@ -337,7 +339,7 @@ fn test_nested_expression() -> Status {
 
     let mut vm = Vm::new(&interner);
     match vm.execute(&chunk) {
-        Ok(Value::Integer(result)) if result == 11 => Status::Pass,
+        Ok(Value::Integer(result)) if result == Integer::from_i64(11) => Status::Pass,
         _ => Status::Fail,
     }
 }

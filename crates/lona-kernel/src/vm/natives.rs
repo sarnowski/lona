@@ -140,6 +140,7 @@ impl Default for Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lona_core::integer::Integer;
     use lona_core::symbol::Interner;
 
     /// Simple native function for testing.
@@ -169,7 +170,7 @@ mod tests {
                 arg_index: 1,
             })?;
 
-        Ok(Value::Integer(a.saturating_add(b)))
+        Ok(Value::Integer(a + b))
     }
 
     /// Native function that returns nil.
@@ -206,16 +207,19 @@ mod tests {
         registry.register(add_sym, test_add);
 
         let native_fn = registry.get(add_sym).unwrap();
-        let args = [Value::Integer(1), Value::Integer(2)];
+        let args = [
+            Value::Integer(Integer::from_i64(1)),
+            Value::Integer(Integer::from_i64(2)),
+        ];
         let result = native_fn(&args, &interner).unwrap();
 
-        assert_eq!(result, Value::Integer(3));
+        assert_eq!(result, Value::Integer(Integer::from_i64(3)));
     }
 
     #[test]
     fn native_arity_error() {
         let interner = Interner::new();
-        let result = test_add(&[Value::Integer(1)], &interner);
+        let result = test_add(&[Value::Integer(Integer::from_i64(1))], &interner);
         assert!(matches!(
             result,
             Err(NativeError::ArityMismatch {
@@ -228,7 +232,10 @@ mod tests {
     #[test]
     fn native_type_error() {
         let interner = Interner::new();
-        let result = test_add(&[Value::Bool(true), Value::Integer(2)], &interner);
+        let result = test_add(
+            &[Value::Bool(true), Value::Integer(Integer::from_i64(2))],
+            &interner,
+        );
         assert!(matches!(
             result,
             Err(NativeError::TypeError {

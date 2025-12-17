@@ -10,6 +10,10 @@
 use core::fmt::{self, Display};
 
 #[cfg(feature = "alloc")]
+use crate::integer::Integer;
+#[cfg(feature = "alloc")]
+use crate::ratio::Ratio;
+#[cfg(feature = "alloc")]
 use crate::string::HeapStr;
 use crate::symbol;
 
@@ -19,8 +23,8 @@ use crate::symbol::Interner;
 /// Core value representation for Lonala.
 ///
 /// Values can be stack-allocated primitives or heap-allocated types.
-/// The heap types (String, and future List, Vector, Map) use `Rc` for
-/// reference counting, which is why `Value` is `Clone` but not `Copy`.
+/// The heap types (String, Integer, Ratio, and future List, Vector, Map) use
+/// reference counting or boxing, which is why `Value` is `Clone` but not `Copy`.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Value {
@@ -28,13 +32,17 @@ pub enum Value {
     Nil,
     /// Boolean truth value.
     Bool(bool),
-    /// Signed 64-bit integer.
-    ///
-    /// Will become a hybrid small/big integer in Phase 3.2.2 to support
-    /// arbitrary precision.
+    /// Arbitrary-precision integer (hybrid small/big representation).
+    #[cfg(feature = "alloc")]
+    Integer(Integer),
+    /// 64-bit signed integer (without `alloc` feature).
+    #[cfg(not(feature = "alloc"))]
     Integer(i64),
     /// 64-bit floating point number.
     Float(f64),
+    /// Exact rational number (requires `alloc` feature).
+    #[cfg(feature = "alloc")]
+    Ratio(Ratio),
     /// Interned symbol (identifier or keyword).
     Symbol(symbol::Id),
     /// Immutable string (requires `alloc` feature).
@@ -67,20 +75,42 @@ impl Value {
             Self::Bool(value) => Some(value),
             Self::Nil | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
             #[cfg(feature = "alloc")]
-            Self::String(_) => None,
+            Self::Ratio(_) | Self::String(_) => None,
+        }
+    }
+
+    /// Returns a reference to the contained integer if this is an `Integer` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_integer(&self) -> Option<&Integer> {
+        match *self {
+            Self::Integer(ref value) => Some(value),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Float(_)
+            | Self::Symbol(_)
+            | Self::Ratio(_)
+            | Self::String(_) => None,
         }
     }
 
     /// Returns the contained integer if this is an `Integer` variant.
+    #[cfg(not(feature = "alloc"))]
     #[inline]
     #[must_use]
     pub const fn as_integer(&self) -> Option<i64> {
         match *self {
             Self::Integer(value) => Some(value),
             Self::Nil | Self::Bool(_) | Self::Float(_) | Self::Symbol(_) => None,
-            #[cfg(feature = "alloc")]
-            Self::String(_) => None,
         }
+    }
+
+    /// Returns `true` if this value is an `Integer`.
+    #[inline]
+    #[must_use]
+    pub const fn is_integer(&self) -> bool {
+        matches!(self, Self::Integer(_))
     }
 
     /// Returns the contained float if this is a `Float` variant.
@@ -91,8 +121,32 @@ impl Value {
             Self::Float(value) => Some(value),
             Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Symbol(_) => None,
             #[cfg(feature = "alloc")]
-            Self::String(_) => None,
+            Self::Ratio(_) | Self::String(_) => None,
         }
+    }
+
+    /// Returns a reference to the contained ratio if this is a `Ratio` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_ratio(&self) -> Option<&Ratio> {
+        match *self {
+            Self::Ratio(ref value) => Some(value),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Symbol(_)
+            | Self::String(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `Ratio`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_ratio(&self) -> bool {
+        matches!(self, Self::Ratio(_))
     }
 
     /// Returns the contained symbol ID if this is a `Symbol` variant.
@@ -103,7 +157,7 @@ impl Value {
             Self::Symbol(id) => Some(id),
             Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) => None,
             #[cfg(feature = "alloc")]
-            Self::String(_) => None,
+            Self::Ratio(_) | Self::String(_) => None,
         }
     }
 
@@ -122,7 +176,12 @@ impl Value {
     pub const fn as_string(&self) -> Option<&HeapStr> {
         match *self {
             Self::String(ref string) => Some(string),
-            Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Symbol(_) => None,
         }
     }
 
@@ -149,6 +208,8 @@ impl PartialEq for Value {
             (&Self::Bool(ref left), &Self::Bool(ref right)) => left == right,
             (&Self::Integer(ref left), &Self::Integer(ref right)) => left == right,
             (&Self::Float(ref left), &Self::Float(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
+            (&Self::Ratio(ref left), &Self::Ratio(ref right)) => left == right,
             (&Self::Symbol(ref left), &Self::Symbol(ref right)) => left == right,
             #[cfg(feature = "alloc")]
             (&Self::String(ref left), &Self::String(ref right)) => left == right,
@@ -164,8 +225,10 @@ impl Display for Value {
             Self::Nil => write!(f, "nil"),
             Self::Bool(true) => write!(f, "true"),
             Self::Bool(false) => write!(f, "false"),
-            Self::Integer(value) => write!(f, "{value}"),
+            Self::Integer(ref value) => write!(f, "{value}"),
             Self::Float(value) => format_float(value, f),
+            #[cfg(feature = "alloc")]
+            Self::Ratio(ref value) => write!(f, "{value}"),
             Self::Symbol(id) => write!(f, "#<symbol:{}>", id.as_u32()),
             #[cfg(feature = "alloc")]
             Self::String(ref string) => write!(f, "\"{string}\""),
@@ -227,8 +290,9 @@ impl Display for Displayable<'_> {
             Value::Nil => write!(f, "nil"),
             Value::Bool(true) => write!(f, "true"),
             Value::Bool(false) => write!(f, "false"),
-            Value::Integer(value) => write!(f, "{value}"),
+            Value::Integer(ref value) => write!(f, "{value}"),
             Value::Float(value) => format_float(value, f),
+            Value::Ratio(ref value) => write!(f, "{value}"),
             Value::String(ref string) => write!(f, "{string}"),
         }
     }
@@ -243,6 +307,15 @@ impl From<bool> for Value {
     }
 }
 
+#[cfg(feature = "alloc")]
+impl From<i64> for Value {
+    #[inline]
+    fn from(value: i64) -> Self {
+        Self::Integer(Integer::from_i64(value))
+    }
+}
+
+#[cfg(not(feature = "alloc"))]
 impl From<i64> for Value {
     #[inline]
     fn from(value: i64) -> Self {
@@ -250,10 +323,35 @@ impl From<i64> for Value {
     }
 }
 
+#[cfg(feature = "alloc")]
+impl From<i32> for Value {
+    #[inline]
+    fn from(value: i32) -> Self {
+        Self::Integer(Integer::from(value))
+    }
+}
+
+#[cfg(not(feature = "alloc"))]
 impl From<i32> for Value {
     #[inline]
     fn from(value: i32) -> Self {
         Self::Integer(i64::from(value))
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<Integer> for Value {
+    #[inline]
+    fn from(value: Integer) -> Self {
+        Self::Integer(value)
+    }
+}
+
+#[cfg(feature = "alloc")]
+impl From<Ratio> for Value {
+    #[inline]
+    fn from(value: Ratio) -> Self {
+        Self::Ratio(value)
     }
 }
 
@@ -295,6 +393,18 @@ mod tests {
     #[cfg(feature = "alloc")]
     use alloc::string::ToString;
 
+    /// Helper to create an integer value.
+    #[cfg(feature = "alloc")]
+    fn int(value: i64) -> Value {
+        Value::Integer(Integer::from_i64(value))
+    }
+
+    /// Helper to create an integer value (non-alloc).
+    #[cfg(not(feature = "alloc"))]
+    fn int(value: i64) -> Value {
+        Value::Integer(value)
+    }
+
     #[test]
     fn nil_equality() {
         assert_eq!(Value::Nil, Value::Nil);
@@ -309,9 +419,9 @@ mod tests {
 
     #[test]
     fn integer_equality() {
-        assert_eq!(Value::Integer(42), Value::Integer(42));
-        assert_eq!(Value::Integer(-1), Value::Integer(-1));
-        assert_ne!(Value::Integer(1), Value::Integer(2));
+        assert_eq!(int(42), int(42));
+        assert_eq!(int(-1), int(-1));
+        assert_ne!(int(1), int(2));
     }
 
     #[test]
@@ -331,30 +441,34 @@ mod tests {
     #[test]
     fn different_types_not_equal() {
         assert_ne!(Value::Nil, Value::Bool(false));
-        assert_ne!(Value::Integer(0), Value::Float(0.0));
-        assert_ne!(Value::Bool(true), Value::Integer(1));
+        assert_ne!(int(0), Value::Float(0.0));
+        assert_ne!(Value::Bool(true), int(1));
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn display_nil() {
         assert_eq!(Value::Nil.to_string(), "nil");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn display_bool() {
         assert_eq!(Value::Bool(true).to_string(), "true");
         assert_eq!(Value::Bool(false).to_string(), "false");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn display_integer() {
-        assert_eq!(Value::Integer(42).to_string(), "42");
-        assert_eq!(Value::Integer(-17).to_string(), "-17");
-        assert_eq!(Value::Integer(0).to_string(), "0");
-        assert_eq!(Value::Integer(i64::MAX).to_string(), "9223372036854775807");
-        assert_eq!(Value::Integer(i64::MIN).to_string(), "-9223372036854775808");
+        assert_eq!(int(42).to_string(), "42");
+        assert_eq!(int(-17).to_string(), "-17");
+        assert_eq!(int(0).to_string(), "0");
+        assert_eq!(int(i64::MAX).to_string(), "9223372036854775807");
+        assert_eq!(int(i64::MIN).to_string(), "-9223372036854775808");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn display_float() {
         assert_eq!(Value::Float(3.14).to_string(), "3.14");
@@ -364,6 +478,7 @@ mod tests {
         assert_eq!(Value::Float(-42.0).to_string(), "-42.0");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn display_float_special_values() {
         assert_eq!(Value::Float(f64::NAN).to_string(), "##NaN");
@@ -371,6 +486,7 @@ mod tests {
         assert_eq!(Value::Float(f64::NEG_INFINITY).to_string(), "##-Inf");
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn display_float_scientific() {
         // Very large numbers use scientific notation
@@ -405,7 +521,7 @@ mod tests {
         // Non-symbol values pass through unchanged
         assert_eq!(Value::Nil.display(&interner).to_string(), "nil");
         assert_eq!(Value::Bool(true).display(&interner).to_string(), "true");
-        assert_eq!(Value::Integer(42).display(&interner).to_string(), "42");
+        assert_eq!(int(42).display(&interner).to_string(), "42");
         assert_eq!(Value::Float(3.14).display(&interner).to_string(), "3.14");
     }
 
@@ -413,7 +529,7 @@ mod tests {
     fn is_nil() {
         assert!(Value::Nil.is_nil());
         assert!(!Value::Bool(false).is_nil());
-        assert!(!Value::Integer(0).is_nil());
+        assert!(!int(0).is_nil());
     }
 
     #[test]
@@ -424,8 +540,8 @@ mod tests {
 
         // Everything else is truthy
         assert!(Value::Bool(true).is_truthy());
-        assert!(Value::Integer(0).is_truthy()); // 0 is truthy!
-        assert!(Value::Integer(42).is_truthy());
+        assert!(int(0).is_truthy()); // 0 is truthy!
+        assert!(int(42).is_truthy());
         assert!(Value::Float(0.0).is_truthy()); // 0.0 is truthy!
         assert!(Value::Float(3.14).is_truthy());
     }
@@ -435,13 +551,14 @@ mod tests {
         assert_eq!(Value::Bool(true).as_bool(), Some(true));
         assert_eq!(Value::Bool(false).as_bool(), Some(false));
         assert_eq!(Value::Nil.as_bool(), None);
-        assert_eq!(Value::Integer(1).as_bool(), None);
+        assert_eq!(int(1).as_bool(), None);
     }
 
+    #[cfg(feature = "alloc")]
     #[test]
     fn as_integer() {
-        assert_eq!(Value::Integer(42).as_integer(), Some(42));
-        assert_eq!(Value::Integer(-1).as_integer(), Some(-1));
+        assert_eq!(int(42).as_integer(), Some(&Integer::from_i64(42)));
+        assert_eq!(int(-1).as_integer(), Some(&Integer::from_i64(-1)));
         assert_eq!(Value::Nil.as_integer(), None);
         assert_eq!(Value::Float(42.0).as_integer(), None);
     }
@@ -450,7 +567,7 @@ mod tests {
     fn as_float() {
         assert_eq!(Value::Float(3.14).as_float(), Some(3.14));
         assert_eq!(Value::Nil.as_float(), None);
-        assert_eq!(Value::Integer(42).as_float(), None);
+        assert_eq!(int(42).as_float(), None);
     }
 
     #[cfg(feature = "alloc")]
@@ -470,13 +587,13 @@ mod tests {
 
     #[test]
     fn from_i64() {
-        assert_eq!(Value::from(42_i64), Value::Integer(42));
-        assert_eq!(Value::from(-1_i64), Value::Integer(-1));
+        assert_eq!(Value::from(42_i64), int(42));
+        assert_eq!(Value::from(-1_i64), int(-1));
     }
 
     #[test]
     fn from_i32() {
-        assert_eq!(Value::from(42_i32), Value::Integer(42));
+        assert_eq!(Value::from(42_i32), int(42));
     }
 
     #[test]
@@ -494,9 +611,98 @@ mod tests {
 
     #[test]
     fn value_is_clone() {
-        let v1 = Value::Integer(42);
+        let v1 = int(42);
         let v2 = v1.clone();
         assert_eq!(v1, v2);
+    }
+
+    // =========================================================================
+    // Ratio Tests
+    // =========================================================================
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn ratio_equality() {
+        let r1 = Value::Ratio(Ratio::from_i64(1, 2));
+        let r2 = Value::Ratio(Ratio::from_i64(1, 2));
+        let r3 = Value::Ratio(Ratio::from_i64(1, 3));
+
+        assert_eq!(r1, r2);
+        assert_ne!(r1, r3);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn ratio_equality_normalized() {
+        // 2/4 should equal 1/2 after normalization
+        let r1 = Value::Ratio(Ratio::from_i64(2, 4));
+        let r2 = Value::Ratio(Ratio::from_i64(1, 2));
+        assert_eq!(r1, r2);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_ratio() {
+        let ratio = Value::Ratio(Ratio::from_i64(1, 3));
+        assert_eq!(ratio.to_string(), "1/3");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_ratio_integer() {
+        // Ratio that equals an integer displays as integer
+        let ratio = Value::Ratio(Ratio::from_i64(4, 2));
+        assert_eq!(ratio.to_string(), "2");
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn is_ratio() {
+        assert!(Value::Ratio(Ratio::from_i64(1, 2)).is_ratio());
+        assert!(!Value::Nil.is_ratio());
+        assert!(!int(42).is_ratio());
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn as_ratio() {
+        let ratio = Ratio::from_i64(1, 2);
+        let value = Value::Ratio(ratio.clone());
+        assert_eq!(value.as_ratio(), Some(&ratio));
+        assert_eq!(Value::Nil.as_ratio(), None);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn from_ratio() {
+        let ratio = Ratio::from_i64(1, 2);
+        let value = Value::from(ratio.clone());
+        assert_eq!(value, Value::Ratio(ratio));
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn ratio_is_truthy() {
+        // All ratios are truthy, including zero
+        assert!(Value::Ratio(Ratio::from_i64(0, 1)).is_truthy());
+        assert!(Value::Ratio(Ratio::from_i64(1, 2)).is_truthy());
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn ratio_not_equal_to_integer() {
+        // Even though 2/1 = 2, they are different types
+        let ratio = Value::Ratio(Ratio::from_i64(2, 1));
+        let integer = int(2);
+        assert_ne!(ratio, integer);
+    }
+
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn display_ratio_with_interner() {
+        let interner = Interner::new();
+        let ratio = Value::Ratio(Ratio::from_i64(1, 3));
+        assert_eq!(ratio.display(&interner).to_string(), "1/3");
     }
 
     // =========================================================================
@@ -542,7 +748,7 @@ mod tests {
     fn is_string() {
         assert!(Value::String(HeapStr::new("test")).is_string());
         assert!(!Value::Nil.is_string());
-        assert!(!Value::Integer(42).is_string());
+        assert!(!Value::Integer(Integer::from_i64(42)).is_string());
     }
 
     #[cfg(feature = "alloc")]
@@ -581,7 +787,7 @@ mod tests {
     #[test]
     fn string_not_equal_to_other_types() {
         let string = Value::String(HeapStr::new("42"));
-        assert_ne!(string, Value::Integer(42));
+        assert_ne!(string, Value::Integer(Integer::from_i64(42)));
         assert_ne!(string, Value::Nil);
         assert_ne!(string, Value::Bool(true));
     }

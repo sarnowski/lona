@@ -270,9 +270,10 @@ impl Repl {
     fn print_value(&self, value: &Value) {
         match *value {
             Value::Nil => println!("nil"),
-            Value::Integer(int_val) => println!("{int_val}"),
+            Value::Integer(ref int_val) => println!("{int_val}"),
             Value::Float(float_val) => println!("{float_val}"),
             Value::Bool(bool_val) => println!("{bool_val}"),
+            Value::Ratio(ref ratio_val) => println!("{ratio_val}"),
             Value::Symbol(sym_id) => {
                 let name = self.interner.resolve(sym_id);
                 println!("{name}");

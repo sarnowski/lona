@@ -6,6 +6,8 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
+use lona_core::integer::Integer;
+use lona_core::ratio::Ratio;
 use lona_core::symbol::{self, Interner};
 use lona_core::value::Value;
 use lonala_compiler::opcode::{
@@ -13,6 +15,7 @@ use lonala_compiler::opcode::{
     rk_index, rk_is_constant,
 };
 use lonala_compiler::{Chunk, Constant};
+use num_traits::{ToPrimitive as _, Zero as _};
 
 use super::error::Error;
 use super::frame::Frame;
@@ -368,14 +371,19 @@ impl<'interner> Vm<'interner> {
     }
 
     /// `Neg`: `R[A] = -R[B]`
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "[approved] Integer/Ratio negation is safe with arbitrary precision"
+    )]
     fn op_neg(&mut self, instruction: u32, frame: &Frame<'_>) -> Result<(), Error> {
         let dest = decode_a(instruction);
         let src = decode_b(instruction);
 
         let operand = self.get_register(src, frame)?;
         let result = match operand {
-            Value::Integer(int_val) => Value::Integer(int_val.saturating_neg()),
+            Value::Integer(ref int_val) => Value::Integer(-int_val),
             Value::Float(float_val) => Value::Float(-float_val),
+            Value::Ratio(ref ratio_val) => Value::Ratio(-ratio_val),
             other @ (Value::Nil | Value::Bool(_) | Value::Symbol(_) | Value::String(_) | _) => {
                 return Err(Error::TypeError {
                     expected: "number",
@@ -413,8 +421,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result =
-            Self::numeric_compare(&left, &right, frame, |lv, rv| lv < rv, |lv, rv| lv < rv)?;
+        let result = Self::numeric_compare(&left, &right, frame, |lv, rv| lv < rv)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -427,8 +434,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result =
-            Self::numeric_compare(&left, &right, frame, |lv, rv| lv <= rv, |lv, rv| lv <= rv)?;
+        let result = Self::numeric_compare(&left, &right, frame, |lv, rv| lv <= rv)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -441,8 +447,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result =
-            Self::numeric_compare(&left, &right, frame, |lv, rv| lv > rv, |lv, rv| lv > rv)?;
+        let result = Self::numeric_compare(&left, &right, frame, |lv, rv| lv > rv)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -455,8 +460,7 @@ impl<'interner> Vm<'interner> {
 
         let left = self.get_rk(lhs_idx, frame)?;
         let right = self.get_rk(rhs_idx, frame)?;
-        let result =
-            Self::numeric_compare(&left, &right, frame, |lv, rv| lv >= rv, |lv, rv| lv >= rv)?;
+        let result = Self::numeric_compare(&left, &right, frame, |lv, rv| lv >= rv)?;
         self.set_register(dest, result, frame)?;
         Ok(())
     }
@@ -666,7 +670,7 @@ impl<'interner> Vm<'interner> {
 
         Ok(match *constant {
             Constant::Bool(val) => Value::Bool(val),
-            Constant::Integer(num) => Value::Integer(num),
+            Constant::Integer(num) => Value::Integer(Integer::from_i64(num)),
             Constant::Float(num) => Value::Float(num),
             Constant::Symbol(id) => Value::Symbol(id),
             Constant::String(ref text) => {
@@ -710,30 +714,59 @@ impl<'interner> Vm<'interner> {
     // =========================================================================
 
     /// Performs addition with type promotion.
+    ///
+    /// Promotion rules:
+    /// - Integer + Integer → Integer
+    /// - Integer + Float → Float
+    /// - Integer + Ratio → Ratio
+    /// - Ratio + Ratio → Ratio
+    /// - Ratio + Float → Float
+    /// - Float + Float → Float
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "[approved] Integer/Ratio arithmetic is safe with arbitrary precision"
+    )]
     fn numeric_add(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (&Value::Integer(lhs), &Value::Integer(rhs)) => {
-                Ok(Value::Integer(lhs.saturating_add(rhs)))
-            }
+            // Integer + Integer → Integer
+            (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => Ok(Value::Integer(lhs + rhs)),
+
+            // Float + Float → Float
             (&Value::Float(lhs), &Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
-            (&Value::Integer(lhs), &Value::Float(rhs)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers, but this is acceptable for numeric operations"
-                )]
-                let lhs_float = lhs as f64;
+
+            // Integer + Float → Float
+            (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+                let lhs_float = integer_to_f64(lhs);
                 Ok(Value::Float(lhs_float + rhs))
             }
-            (&Value::Float(lhs), &Value::Integer(rhs)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers, but this is acceptable for numeric operations"
-                )]
-                let rhs_float = rhs as f64;
+            (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+                let rhs_float = integer_to_f64(rhs);
                 Ok(Value::Float(lhs + rhs_float))
             }
+
+            // Ratio + Ratio → Ratio
+            (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => Ok(Value::Ratio(lhs + rhs)),
+
+            // Integer + Ratio → Ratio
+            (&Value::Integer(ref lhs), &Value::Ratio(ref rhs)) => {
+                let lhs_ratio = Ratio::from_integer(lhs.clone());
+                Ok(Value::Ratio(lhs_ratio + rhs.clone()))
+            }
+            (&Value::Ratio(ref lhs), &Value::Integer(ref rhs)) => {
+                let rhs_ratio = Ratio::from_integer(rhs.clone());
+                Ok(Value::Ratio(lhs.clone() + rhs_ratio))
+            }
+
+            // Ratio + Float → Float
+            (&Value::Ratio(ref lhs), &Value::Float(rhs)) => {
+                let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Float(lhs_float + rhs))
+            }
+            (&Value::Float(lhs), &Value::Ratio(ref rhs)) => {
+                let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Float(lhs + rhs_float))
+            }
+
             _ => Err(Error::TypeError {
                 expected: "number",
                 got: binary_type_description(left, right),
@@ -743,30 +776,51 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs subtraction with type promotion.
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "[approved] Integer/Ratio arithmetic is safe with arbitrary precision"
+    )]
     fn numeric_sub(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (&Value::Integer(lhs), &Value::Integer(rhs)) => {
-                Ok(Value::Integer(lhs.saturating_sub(rhs)))
-            }
+            // Integer - Integer → Integer
+            (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => Ok(Value::Integer(lhs - rhs)),
+
+            // Float - Float → Float
             (&Value::Float(lhs), &Value::Float(rhs)) => Ok(Value::Float(lhs - rhs)),
-            (&Value::Integer(lhs), &Value::Float(rhs)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let lhs_float = lhs as f64;
+
+            // Integer - Float → Float
+            (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+                let lhs_float = integer_to_f64(lhs);
                 Ok(Value::Float(lhs_float - rhs))
             }
-            (&Value::Float(lhs), &Value::Integer(rhs)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let rhs_float = rhs as f64;
+            (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+                let rhs_float = integer_to_f64(rhs);
                 Ok(Value::Float(lhs - rhs_float))
             }
+
+            // Ratio - Ratio → Ratio
+            (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => Ok(Value::Ratio(lhs - rhs)),
+
+            // Integer - Ratio → Ratio
+            (&Value::Integer(ref lhs), &Value::Ratio(ref rhs)) => {
+                let lhs_ratio = Ratio::from_integer(lhs.clone());
+                Ok(Value::Ratio(lhs_ratio - rhs.clone()))
+            }
+            (&Value::Ratio(ref lhs), &Value::Integer(ref rhs)) => {
+                let rhs_ratio = Ratio::from_integer(rhs.clone());
+                Ok(Value::Ratio(lhs.clone() - rhs_ratio))
+            }
+
+            // Ratio - Float → Float
+            (&Value::Ratio(ref lhs), &Value::Float(rhs)) => {
+                let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Float(lhs_float - rhs))
+            }
+            (&Value::Float(lhs), &Value::Ratio(ref rhs)) => {
+                let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Float(lhs - rhs_float))
+            }
+
             _ => Err(Error::TypeError {
                 expected: "number",
                 got: binary_type_description(left, right),
@@ -776,32 +830,51 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs multiplication with type promotion.
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "[approved] Integer/Ratio arithmetic is safe with arbitrary precision"
+    )]
     fn numeric_mul(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (&Value::Integer(left_int), &Value::Integer(right_int)) => {
-                Ok(Value::Integer(left_int.saturating_mul(right_int)))
+            // Integer * Integer → Integer
+            (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => Ok(Value::Integer(lhs * rhs)),
+
+            // Float * Float → Float
+            (&Value::Float(lhs), &Value::Float(rhs)) => Ok(Value::Float(lhs * rhs)),
+
+            // Integer * Float → Float
+            (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+                let lhs_float = integer_to_f64(lhs);
+                Ok(Value::Float(lhs_float * rhs))
             }
-            (&Value::Float(left_float), &Value::Float(right_float)) => {
-                Ok(Value::Float(left_float * right_float))
+            (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+                let rhs_float = integer_to_f64(rhs);
+                Ok(Value::Float(lhs * rhs_float))
             }
-            (&Value::Integer(left_int), &Value::Float(right_float)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let left_as_float = left_int as f64;
-                Ok(Value::Float(left_as_float * right_float))
+
+            // Ratio * Ratio → Ratio
+            (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => Ok(Value::Ratio(lhs * rhs)),
+
+            // Integer * Ratio → Ratio
+            (&Value::Integer(ref lhs), &Value::Ratio(ref rhs)) => {
+                let lhs_ratio = Ratio::from_integer(lhs.clone());
+                Ok(Value::Ratio(lhs_ratio * rhs.clone()))
             }
-            (&Value::Float(left_float), &Value::Integer(right_int)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let right_as_float = right_int as f64;
-                Ok(Value::Float(left_float * right_as_float))
+            (&Value::Ratio(ref lhs), &Value::Integer(ref rhs)) => {
+                let rhs_ratio = Ratio::from_integer(rhs.clone());
+                Ok(Value::Ratio(lhs.clone() * rhs_ratio))
             }
+
+            // Ratio * Float → Float
+            (&Value::Ratio(ref lhs), &Value::Float(rhs)) => {
+                let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Float(lhs_float * rhs))
+            }
+            (&Value::Float(lhs), &Value::Ratio(ref rhs)) => {
+                let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Float(lhs * rhs_float))
+            }
+
             _ => Err(Error::TypeError {
                 expected: "number",
                 got: binary_type_description(left, right),
@@ -811,56 +884,120 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs division with type promotion.
+    ///
+    /// Note: Integer / Integer creates a Ratio for exact division.
+    #[expect(
+        clippy::arithmetic_side_effects,
+        reason = "[approved] Integer/Ratio arithmetic is safe with arbitrary precision"
+    )]
     fn numeric_div(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (&Value::Integer(left_int), &Value::Integer(right_int)) => {
-                if right_int == 0 {
+            // Integer / Integer → Ratio (exact division)
+            (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => {
+                if rhs.is_zero() {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    Ok(Value::Integer(left_int.checked_div(right_int).unwrap_or(0)))
+                    // Create a ratio for exact division
+                    let ratio = Ratio::new(lhs, rhs);
+                    // If the ratio is an integer (denominator = 1), return as Integer
+                    ratio
+                        .to_integer()
+                        .map_or(Ok(Value::Ratio(ratio)), |int_val| {
+                            Ok(Value::Integer(int_val))
+                        })
                 }
             }
-            (&Value::Float(left_float), &Value::Float(right_float)) => {
-                if right_float == 0.0 {
+
+            // Float / Float → Float
+            (&Value::Float(lhs), &Value::Float(rhs)) => {
+                if rhs == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    Ok(Value::Float(left_float / right_float))
+                    Ok(Value::Float(lhs / rhs))
                 }
             }
-            (&Value::Integer(left_int), &Value::Float(right_float)) => {
-                if right_float == 0.0 {
+
+            // Integer / Float → Float
+            (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+                if rhs == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    #[expect(
-                        clippy::as_conversions,
-                        clippy::cast_precision_loss,
-                        reason = "i64 to f64 may lose precision for very large integers"
-                    )]
-                    let left_as_float = left_int as f64;
-                    Ok(Value::Float(left_as_float / right_float))
+                    let lhs_float = integer_to_f64(lhs);
+                    Ok(Value::Float(lhs_float / rhs))
                 }
             }
-            (&Value::Float(left_float), &Value::Integer(right_int)) => {
-                if right_int == 0 {
+            (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+                if rhs.is_zero() {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    #[expect(
-                        clippy::as_conversions,
-                        clippy::cast_precision_loss,
-                        reason = "i64 to f64 may lose precision for very large integers"
-                    )]
-                    let right_as_float = right_int as f64;
-                    Ok(Value::Float(left_float / right_as_float))
+                    let rhs_float = integer_to_f64(rhs);
+                    Ok(Value::Float(lhs / rhs_float))
                 }
             }
+
+            // Ratio / Ratio → Ratio
+            (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => {
+                if rhs.is_zero() {
+                    Err(Error::DivisionByZero {
+                        span: frame.current_span(),
+                    })
+                } else {
+                    Ok(Value::Ratio(lhs / rhs))
+                }
+            }
+
+            // Integer / Ratio → Ratio
+            (&Value::Integer(ref lhs), &Value::Ratio(ref rhs)) => {
+                if rhs.is_zero() {
+                    Err(Error::DivisionByZero {
+                        span: frame.current_span(),
+                    })
+                } else {
+                    let lhs_ratio = Ratio::from_integer(lhs.clone());
+                    Ok(Value::Ratio(lhs_ratio / rhs.clone()))
+                }
+            }
+            (&Value::Ratio(ref lhs), &Value::Integer(ref rhs)) => {
+                if rhs.is_zero() {
+                    Err(Error::DivisionByZero {
+                        span: frame.current_span(),
+                    })
+                } else {
+                    let rhs_ratio = Ratio::from_integer(rhs.clone());
+                    Ok(Value::Ratio(lhs.clone() / rhs_ratio))
+                }
+            }
+
+            // Ratio / Float → Float
+            (&Value::Ratio(ref lhs), &Value::Float(rhs)) => {
+                if rhs == 0.0 {
+                    Err(Error::DivisionByZero {
+                        span: frame.current_span(),
+                    })
+                } else {
+                    let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+                    Ok(Value::Float(lhs_float / rhs))
+                }
+            }
+            (&Value::Float(lhs), &Value::Ratio(ref rhs)) => {
+                if rhs.is_zero() {
+                    Err(Error::DivisionByZero {
+                        span: frame.current_span(),
+                    })
+                } else {
+                    let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+                    Ok(Value::Float(lhs / rhs_float))
+                }
+            }
+
             _ => Err(Error::TypeError {
                 expected: "number",
                 got: binary_type_description(left, right),
@@ -870,60 +1007,65 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs modulo with type promotion.
+    ///
+    /// Note: Modulo only works with Integer and Float types.
     #[expect(
         clippy::modulo_arithmetic,
         reason = "[approved] Standard IEEE 754 float modulo for language runtime"
     )]
     fn numeric_mod(left: &Value, right: &Value, frame: &Frame<'_>) -> Result<Value, Error> {
         match (left, right) {
-            (&Value::Integer(left_int), &Value::Integer(right_int)) => {
-                if right_int == 0 {
+            // Integer % Integer → Integer
+            (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => {
+                if rhs.is_zero() {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    Ok(Value::Integer(left_int.checked_rem(right_int).unwrap_or(0)))
+                    lhs.checked_rem(rhs).map_or_else(
+                        || {
+                            Err(Error::DivisionByZero {
+                                span: frame.current_span(),
+                            })
+                        },
+                        |result| Ok(Value::Integer(result)),
+                    )
                 }
             }
-            (&Value::Float(left_float), &Value::Float(right_float)) => {
-                if right_float == 0.0 {
+
+            // Float % Float → Float
+            (&Value::Float(lhs), &Value::Float(rhs)) => {
+                if rhs == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    Ok(Value::Float(left_float % right_float))
+                    Ok(Value::Float(lhs % rhs))
                 }
             }
-            (&Value::Integer(left_int), &Value::Float(right_float)) => {
-                if right_float == 0.0 {
+
+            // Integer % Float → Float
+            (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+                if rhs == 0.0 {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    #[expect(
-                        clippy::as_conversions,
-                        clippy::cast_precision_loss,
-                        reason = "i64 to f64 may lose precision for very large integers"
-                    )]
-                    let left_as_float = left_int as f64;
-                    Ok(Value::Float(left_as_float % right_float))
+                    let lhs_float = integer_to_f64(lhs);
+                    Ok(Value::Float(lhs_float % rhs))
                 }
             }
-            (&Value::Float(left_float), &Value::Integer(right_int)) => {
-                if right_int == 0 {
+            (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+                if rhs.is_zero() {
                     Err(Error::DivisionByZero {
                         span: frame.current_span(),
                     })
                 } else {
-                    #[expect(
-                        clippy::as_conversions,
-                        clippy::cast_precision_loss,
-                        reason = "i64 to f64 may lose precision for very large integers"
-                    )]
-                    let right_as_float = right_int as f64;
-                    Ok(Value::Float(left_float % right_as_float))
+                    let rhs_float = integer_to_f64(rhs);
+                    Ok(Value::Float(lhs % rhs_float))
                 }
             }
+
             _ => Err(Error::TypeError {
                 expected: "number",
                 got: binary_type_description(left, right),
@@ -933,42 +1075,63 @@ impl<'interner> Vm<'interner> {
     }
 
     /// Performs a numeric comparison operation.
-    fn numeric_compare<FI, FF>(
+    fn numeric_compare<FF>(
         left: &Value,
         right: &Value,
         frame: &Frame<'_>,
-        int_cmp: FI,
         float_cmp: FF,
     ) -> Result<Value, Error>
     where
-        FI: Fn(i64, i64) -> bool,
         FF: Fn(f64, f64) -> bool,
     {
         match (left, right) {
-            (&Value::Integer(left_int), &Value::Integer(right_int)) => {
-                Ok(Value::Bool(int_cmp(left_int, right_int)))
+            // Integer <=> Integer
+            (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => {
+                Ok(Value::Bool(integer_compare(lhs, rhs, &float_cmp)))
             }
-            (&Value::Float(left_float), &Value::Float(right_float)) => {
-                Ok(Value::Bool(float_cmp(left_float, right_float)))
+
+            // Float <=> Float
+            (&Value::Float(lhs), &Value::Float(rhs)) => Ok(Value::Bool(float_cmp(lhs, rhs))),
+
+            // Integer <=> Float
+            (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+                let lhs_float = integer_to_f64(lhs);
+                Ok(Value::Bool(float_cmp(lhs_float, rhs)))
             }
-            (&Value::Integer(left_int), &Value::Float(right_float)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let left_as_float = left_int as f64;
-                Ok(Value::Bool(float_cmp(left_as_float, right_float)))
+            (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+                let rhs_float = integer_to_f64(rhs);
+                Ok(Value::Bool(float_cmp(lhs, rhs_float)))
             }
-            (&Value::Float(left_float), &Value::Integer(right_int)) => {
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_precision_loss,
-                    reason = "i64 to f64 may lose precision for very large integers"
-                )]
-                let right_as_float = right_int as f64;
-                Ok(Value::Bool(float_cmp(left_float, right_as_float)))
+
+            // Ratio <=> Ratio
+            (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => {
+                let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+                let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Bool(float_cmp(lhs_float, rhs_float)))
             }
+
+            // Integer <=> Ratio
+            (&Value::Integer(ref lhs), &Value::Ratio(ref rhs)) => {
+                let lhs_float = integer_to_f64(lhs);
+                let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Bool(float_cmp(lhs_float, rhs_float)))
+            }
+            (&Value::Ratio(ref lhs), &Value::Integer(ref rhs)) => {
+                let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+                let rhs_float = integer_to_f64(rhs);
+                Ok(Value::Bool(float_cmp(lhs_float, rhs_float)))
+            }
+
+            // Float <=> Ratio
+            (&Value::Float(lhs), &Value::Ratio(ref rhs)) => {
+                let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Bool(float_cmp(lhs, rhs_float)))
+            }
+            (&Value::Ratio(ref lhs), &Value::Float(rhs)) => {
+                let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+                Ok(Value::Bool(float_cmp(lhs_float, rhs)))
+            }
+
             _ => Err(Error::TypeError {
                 expected: "number",
                 got: binary_type_description(left, right),
@@ -989,6 +1152,7 @@ const fn value_type_name(value: &Value) -> &'static str {
         Value::Bool(_) => "boolean",
         Value::Integer(_) => "integer",
         Value::Float(_) => "float",
+        Value::Ratio(_) => "ratio",
         Value::Symbol(_) => "symbol",
         Value::String(_) => "string",
         // Value is non-exhaustive, handle future variants
@@ -1021,6 +1185,27 @@ const fn binary_type_description(left: &Value, right: &Value) -> &'static str {
     }
 }
 
+/// Converts an Integer to f64 for mixed-type arithmetic.
+fn integer_to_f64(int_val: &Integer) -> f64 {
+    // Use BigInt's ToPrimitive implementation
+    int_val.to_bigint().to_f64().unwrap_or(f64::NAN)
+}
+
+/// Compares two integers using the given float comparison function.
+///
+/// For integers, we first try to compare using the Integer type's Ord implementation,
+/// then map the result to match the float comparison semantics.
+fn integer_compare<F>(lhs: &Integer, rhs: &Integer, float_cmp: &F) -> bool
+where
+    F: Fn(f64, f64) -> bool,
+{
+    // Convert to f64 and use float comparison
+    // This ensures consistent semantics with mixed-type comparisons
+    let lhs_float = integer_to_f64(lhs);
+    let rhs_float = integer_to_f64(rhs);
+    float_cmp(lhs_float, rhs_float)
+}
+
 /// Tests if two values are equal.
 #[expect(
     clippy::float_cmp,
@@ -1030,28 +1215,37 @@ fn values_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (&Value::Nil, &Value::Nil) => true,
         (&Value::Bool(left_bool), &Value::Bool(right_bool)) => left_bool == right_bool,
-        (&Value::Integer(left_int), &Value::Integer(right_int)) => left_int == right_int,
+        (&Value::Integer(ref left_int), &Value::Integer(ref right_int)) => left_int == right_int,
         (&Value::Float(left_float), &Value::Float(right_float)) => left_float == right_float,
+        (&Value::Ratio(ref left_ratio), &Value::Ratio(ref right_ratio)) => {
+            left_ratio == right_ratio
+        }
         (&Value::Symbol(left_sym), &Value::Symbol(right_sym)) => left_sym == right_sym,
         (&Value::String(ref left_str), &Value::String(ref right_str)) => left_str == right_str,
-        // Cross-type numeric comparison
-        (&Value::Integer(left_int), &Value::Float(right_float)) => {
-            #[expect(
-                clippy::as_conversions,
-                clippy::cast_precision_loss,
-                reason = "i64 to f64 for comparison"
-            )]
-            let left_as_float = left_int as f64;
+        // Cross-type numeric comparison: Integer <=> Float
+        (&Value::Integer(ref left_int), &Value::Float(right_float)) => {
+            let left_as_float = integer_to_f64(left_int);
             left_as_float == right_float
         }
-        (&Value::Float(left_float), &Value::Integer(right_int)) => {
-            #[expect(
-                clippy::as_conversions,
-                clippy::cast_precision_loss,
-                reason = "i64 to f64 for comparison"
-            )]
-            let right_as_float = right_int as f64;
+        (&Value::Float(left_float), &Value::Integer(ref right_int)) => {
+            let right_as_float = integer_to_f64(right_int);
             left_float == right_as_float
+        }
+        // Cross-type numeric comparison: Integer <=> Ratio
+        (&Value::Integer(ref left_int), &Value::Ratio(ref right_ratio)) => right_ratio
+            .to_integer()
+            .is_some_and(|right_int| left_int == &right_int),
+        (&Value::Ratio(ref left_ratio), &Value::Integer(ref right_int)) => left_ratio
+            .to_integer()
+            .is_some_and(|left_int| &left_int == right_int),
+        // Cross-type numeric comparison: Float <=> Ratio
+        (&Value::Float(left_float), &Value::Ratio(ref right_ratio)) => {
+            let right_float = right_ratio.to_f64().unwrap_or(f64::NAN);
+            left_float == right_float
+        }
+        (&Value::Ratio(ref left_ratio), &Value::Float(right_float)) => {
+            let left_float = left_ratio.to_f64().unwrap_or(f64::NAN);
+            left_float == right_float
         }
         _ => false,
     }
@@ -1151,7 +1345,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(42));
+        assert_eq!(result, Value::Integer(Integer::from_i64(42)));
     }
 
     #[test]
@@ -1209,7 +1403,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(3));
+        assert_eq!(result, Value::Integer(Integer::from_i64(3)));
     }
 
     #[test]
@@ -1237,7 +1431,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(30));
+        assert_eq!(result, Value::Integer(Integer::from_i64(30)));
     }
 
     #[test]
@@ -1312,7 +1506,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(7));
+        assert_eq!(result, Value::Integer(Integer::from_i64(7)));
     }
 
     #[test]
@@ -1337,7 +1531,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(42));
+        assert_eq!(result, Value::Integer(Integer::from_i64(42)));
     }
 
     #[test]
@@ -1346,8 +1540,9 @@ mod tests {
         let mut vm = make_vm(&interner);
 
         let mut chunk = make_chunk();
-        let k0 = chunk.add_constant(Constant::Integer(10)).unwrap();
-        let k1 = chunk.add_constant(Constant::Integer(3)).unwrap();
+        // Use 6 / 2 = 3 (divides evenly, returns Integer not Ratio)
+        let k0 = chunk.add_constant(Constant::Integer(6)).unwrap();
+        let k1 = chunk.add_constant(Constant::Integer(2)).unwrap();
 
         let rk0 = rk_constant(u8::try_from(k0).unwrap()).unwrap();
         let rk1 = rk_constant(u8::try_from(k1).unwrap()).unwrap();
@@ -1362,7 +1557,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(3));
+        assert_eq!(result, Value::Integer(Integer::from_i64(3)));
     }
 
     #[test]
@@ -1387,7 +1582,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(1));
+        assert_eq!(result, Value::Integer(Integer::from_i64(1)));
     }
 
     #[test]
@@ -1412,7 +1607,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(-42));
+        assert_eq!(result, Value::Integer(Integer::from_i64(-42)));
     }
 
     #[test]
@@ -1653,7 +1848,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(42));
+        assert_eq!(result, Value::Integer(Integer::from_i64(42)));
     }
 
     #[test]
@@ -1708,7 +1903,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(1));
+        assert_eq!(result, Value::Integer(Integer::from_i64(1)));
     }
 
     #[test]
@@ -1747,7 +1942,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(1));
+        assert_eq!(result, Value::Integer(Integer::from_i64(1)));
     }
 
     #[test]
@@ -1786,7 +1981,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(1));
+        assert_eq!(result, Value::Integer(Integer::from_i64(1)));
     }
 
     // =========================================================================
@@ -1862,7 +2057,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(42));
+        assert_eq!(result, Value::Integer(Integer::from_i64(42)));
     }
 
     // =========================================================================
@@ -1992,7 +2187,7 @@ mod tests {
                     got: "non-integer",
                     arg_index: 0,
                 })?;
-            Ok(Value::Integer(n.saturating_mul(2)))
+            Ok(Value::Integer(n * &Integer::from_i64(2)))
         }
 
         let mut interner = Interner::new();
@@ -2028,7 +2223,7 @@ mod tests {
         );
 
         let result = vm.execute(&chunk).unwrap();
-        assert_eq!(result, Value::Integer(42));
+        assert_eq!(result, Value::Integer(Integer::from_i64(42)));
     }
 
     #[test]

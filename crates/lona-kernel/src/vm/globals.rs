@@ -69,6 +69,7 @@ impl Globals {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lona_core::integer::Integer;
     use lona_core::symbol::Interner;
 
     #[test]
@@ -84,9 +85,12 @@ mod tests {
         let sym = interner.intern("x");
 
         let mut globals = Globals::new();
-        globals.set(sym, Value::Integer(42));
+        globals.set(sym, Value::Integer(Integer::from_i64(42)));
 
-        assert_eq!(globals.get(sym), Some(Value::Integer(42)));
+        assert_eq!(
+            globals.get(sym),
+            Some(Value::Integer(Integer::from_i64(42)))
+        );
         assert!(globals.contains(sym));
         assert_eq!(globals.len(), 1);
     }
@@ -107,10 +111,10 @@ mod tests {
         let sym = interner.intern("x");
 
         let mut globals = Globals::new();
-        globals.set(sym, Value::Integer(1));
-        globals.set(sym, Value::Integer(2));
+        globals.set(sym, Value::Integer(Integer::from_i64(1)));
+        globals.set(sym, Value::Integer(Integer::from_i64(2)));
 
-        assert_eq!(globals.get(sym), Some(Value::Integer(2)));
+        assert_eq!(globals.get(sym), Some(Value::Integer(Integer::from_i64(2))));
         assert_eq!(globals.len(), 1); // Still just one global
     }
 
@@ -122,13 +126,13 @@ mod tests {
         let z = interner.intern("z");
 
         let mut globals = Globals::new();
-        globals.set(x, Value::Integer(1));
-        globals.set(y, Value::Integer(2));
-        globals.set(z, Value::Integer(3));
+        globals.set(x, Value::Integer(Integer::from_i64(1)));
+        globals.set(y, Value::Integer(Integer::from_i64(2)));
+        globals.set(z, Value::Integer(Integer::from_i64(3)));
 
-        assert_eq!(globals.get(x), Some(Value::Integer(1)));
-        assert_eq!(globals.get(y), Some(Value::Integer(2)));
-        assert_eq!(globals.get(z), Some(Value::Integer(3)));
+        assert_eq!(globals.get(x), Some(Value::Integer(Integer::from_i64(1))));
+        assert_eq!(globals.get(y), Some(Value::Integer(Integer::from_i64(2))));
+        assert_eq!(globals.get(z), Some(Value::Integer(Integer::from_i64(3))));
         assert_eq!(globals.len(), 3);
     }
 
@@ -143,12 +147,12 @@ mod tests {
         let mut globals = Globals::new();
         globals.set(a, Value::Nil);
         globals.set(b, Value::Bool(true));
-        globals.set(c, Value::Integer(42));
+        globals.set(c, Value::Integer(Integer::from_i64(42)));
         globals.set(d, Value::Float(3.14));
 
         assert_eq!(globals.get(a), Some(Value::Nil));
         assert_eq!(globals.get(b), Some(Value::Bool(true)));
-        assert_eq!(globals.get(c), Some(Value::Integer(42)));
+        assert_eq!(globals.get(c), Some(Value::Integer(Integer::from_i64(42))));
         assert_eq!(globals.get(d), Some(Value::Float(3.14)));
     }
 
