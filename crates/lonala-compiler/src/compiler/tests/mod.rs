@@ -19,19 +19,23 @@ mod operator_tests;
 mod special_form_tests;
 
 use lona_core::chunk::Chunk;
+use lona_core::source;
 use lona_core::symbol;
 
 use crate::compiler::compile;
 
+/// Test source ID for all compiler tests.
+pub(super) const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
+
 /// Helper to compile source and return the chunk.
 pub(super) fn compile_source(source: &str) -> Chunk {
     let mut interner = symbol::Interner::new();
-    compile(source, &mut interner).expect("compilation should succeed")
+    compile(source, TEST_SOURCE_ID, &mut interner).expect("compilation should succeed")
 }
 
 /// Helper to compile and return chunk + interner for symbol checks.
 pub(super) fn compile_with_interner(source: &str) -> (Chunk, symbol::Interner) {
     let mut interner = symbol::Interner::new();
-    let chunk = compile(source, &mut interner).expect("compilation should succeed");
+    let chunk = compile(source, TEST_SOURCE_ID, &mut interner).expect("compilation should succeed");
     (chunk, interner)
 }

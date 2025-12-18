@@ -10,9 +10,9 @@ use lona_core::opcode::{Opcode, decode_a, decode_bx, decode_op};
 use lona_core::span::Span;
 use lona_core::symbol;
 
-use super::{compile_source, compile_with_interner};
+use super::{TEST_SOURCE_ID, compile_source, compile_with_interner};
 use crate::compiler::{CompileError, compile};
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 
 // =========================================================================
 // Literal Compilation Tests
@@ -172,10 +172,14 @@ fn compile_string_with_escapes() {
 #[test]
 fn compile_keyword_not_implemented() {
     let mut interner = symbol::Interner::new();
-    let result = compile(":keyword", &mut interner);
+    let result = compile(":keyword", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::NotImplemented { feature, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::NotImplemented { feature },
+        ..
+    })) = result
+    {
         assert_eq!(feature, "keyword literals");
     } else {
         panic!("expected NotImplemented error");
@@ -185,10 +189,14 @@ fn compile_keyword_not_implemented() {
 #[test]
 fn compile_vector_not_implemented() {
     let mut interner = symbol::Interner::new();
-    let result = compile("[1 2 3]", &mut interner);
+    let result = compile("[1 2 3]", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::NotImplemented { feature, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::NotImplemented { feature },
+        ..
+    })) = result
+    {
         assert_eq!(feature, "vector literals");
     } else {
         panic!("expected NotImplemented error");
@@ -265,9 +273,10 @@ fn compile_empty_program() {
 
 #[test]
 fn compile_error_display() {
-    let err = CompileError::Compile(Error::EmptyCall {
-        span: Span::new(0_usize, 2_usize),
-    });
+    let err = CompileError::Compile(Error::new(
+        ErrorKind::EmptyCall,
+        SourceLocation::new(TEST_SOURCE_ID, Span::new(0_usize, 2_usize)),
+    ));
     let msg = alloc::format!("{}", err);
     assert!(msg.contains("empty list"));
 }
@@ -275,6 +284,6 @@ fn compile_error_display() {
 #[test]
 fn compile_error_from_parse() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(unclosed", &mut interner);
+    let result = compile("(unclosed", TEST_SOURCE_ID, &mut interner);
     assert!(matches!(result, Err(CompileError::Parse(_))));
 }

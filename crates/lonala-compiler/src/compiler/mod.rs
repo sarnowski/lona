@@ -11,11 +11,12 @@ use alloc::vec::Vec;
 
 use lona_core::chunk::Chunk;
 use lona_core::opcode::{Opcode, encode_abc};
+use lona_core::source;
 use lona_core::span::Span;
 use lona_core::symbol;
 use lonala_parser::{Ast, Spanned};
 
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 
 // Submodules containing the actual compilation logic
 mod calls;
@@ -113,6 +114,8 @@ pub struct Compiler<'interner, 'registry, 'expander> {
     chunk: Chunk,
     /// Symbol interner for looking up and creating symbol IDs.
     interner: &'interner mut symbol::Interner,
+    /// Source identifier for error reporting.
+    source_id: source::Id,
     /// Next available register.
     next_register: u8,
     /// Maximum register used so far (for tracking chunk metadata).
@@ -139,10 +142,12 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
     pub fn new(
         interner: &'interner mut symbol::Interner,
         registry: &'registry mut MacroRegistry,
+        source_id: source::Id,
     ) -> Self {
         Self {
             chunk: Chunk::new(),
             interner,
+            source_id,
             next_register: 0,
             max_register: 0,
             locals: LocalEnv::new(),
@@ -161,11 +166,13 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
     pub fn with_expander(
         interner: &'interner mut symbol::Interner,
         registry: &'registry mut MacroRegistry,
+        source_id: source::Id,
         expander: &'expander mut dyn MacroExpander,
     ) -> Self {
         Self {
             chunk: Chunk::new(),
             interner,
+            source_id,
             next_register: 0,
             max_register: 0,
             locals: LocalEnv::new(),
@@ -173,6 +180,24 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
             expander: Some(expander),
             macro_expansion_depth: 0,
         }
+    }
+
+    /// Creates a source location from a span.
+    #[inline]
+    #[must_use]
+    const fn location(&self, span: Span) -> SourceLocation {
+        SourceLocation::new(self.source_id, span)
+    }
+
+    /// Adds a constant to the chunk, converting any error to have the correct source location.
+    fn add_constant(
+        &mut self,
+        constant: lona_core::chunk::Constant,
+        span: Span,
+    ) -> Result<u16, Error> {
+        self.chunk
+            .add_constant_at(constant, span)
+            .map_err(|_err| Error::new(ErrorKind::TooManyConstants, self.location(span)))
     }
 
     /// Returns `true` if the given symbol is defined as a macro.
@@ -288,24 +313,32 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
 
             // String literals
             Ast::String(ref string) => self.compile_string(string, expr.span),
-            Ast::Keyword(ref _kw) => Err(Error::NotImplemented {
-                feature: "keyword literals",
-                span: expr.span,
-            }),
-            Ast::Vector(ref _elements) => Err(Error::NotImplemented {
-                feature: "vector literals",
-                span: expr.span,
-            }),
-            Ast::Map(ref _elements) => Err(Error::NotImplemented {
-                feature: "map literals",
-                span: expr.span,
-            }),
+            Ast::Keyword(ref _kw) => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "keyword literals",
+                },
+                self.location(expr.span),
+            )),
+            Ast::Vector(ref _elements) => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "vector literals",
+                },
+                self.location(expr.span),
+            )),
+            Ast::Map(ref _elements) => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "map literals",
+                },
+                self.location(expr.span),
+            )),
 
             // Handle future Ast variants (Ast is #[non_exhaustive])
-            _ => Err(Error::NotImplemented {
-                feature: "unknown AST node",
-                span: expr.span,
-            }),
+            _ => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "unknown AST node",
+                },
+                self.location(expr.span),
+            )),
         }
     }
 
@@ -321,7 +354,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
     const fn alloc_register(&mut self, span: Span) -> Result<u8, Error> {
         let reg = self.next_register;
         if reg == u8::MAX {
-            return Err(Error::TooManyRegisters { span });
+            return Err(Error::new(ErrorKind::TooManyRegisters, self.location(span)));
         }
         self.next_register = reg.saturating_add(1);
         if reg > self.max_register {
@@ -356,8 +389,9 @@ impl core::fmt::Display for CompileError {
     #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match *self {
-            Self::Parse(ref err) => write!(f, "parse error: {err}"),
-            Self::Compile(ref err) => write!(f, "compile error: {err}"),
+            // Use err.kind since neither Error type implements Display directly
+            Self::Parse(ref err) => write!(f, "parse error: {}", err.kind),
+            Self::Compile(ref err) => write!(f, "compile error: {}", err.kind),
         }
     }
 }
@@ -380,6 +414,12 @@ impl From<Error> for CompileError {
 ///
 /// Convenience function that combines parsing and compilation.
 ///
+/// # Arguments
+///
+/// * `source` - The Lonala source code to compile.
+/// * `source_id` - Identifies the source for error reporting.
+/// * `interner` - Symbol interner for interning identifiers.
+///
 /// # Errors
 ///
 /// Returns `CompileError::Parse` if parsing fails, or
@@ -388,16 +428,22 @@ impl From<Error> for CompileError {
 /// # Example
 ///
 /// ```
+/// use lona_core::source;
 /// use lona_core::symbol::Interner;
 /// use lonala_compiler::compile;
 ///
 /// let mut interner = Interner::new();
-/// let chunk = compile("(+ 1 2)", &mut interner).unwrap();
+/// let source_id = source::Id::new(0);
+/// let chunk = compile("(+ 1 2)", source_id, &mut interner).unwrap();
 /// ```
 #[inline]
-pub fn compile(source: &str, interner: &mut symbol::Interner) -> Result<Chunk, CompileError> {
+pub fn compile(
+    source: &str,
+    source_id: source::Id,
+    interner: &mut symbol::Interner,
+) -> Result<Chunk, CompileError> {
     let mut registry = MacroRegistry::new();
-    compile_with_registry(source, interner, &mut registry)
+    compile_with_registry(source, source_id, interner, &mut registry)
 }
 
 /// Compiles Lonala source code to bytecode with a persistent macro registry.
@@ -406,6 +452,13 @@ pub fn compile(source: &str, interner: &mut symbol::Interner) -> Result<Chunk, C
 /// macro registry. Use this for REPL sessions where macros should persist
 /// across evaluations.
 ///
+/// # Arguments
+///
+/// * `source` - The Lonala source code to compile.
+/// * `source_id` - Identifies the source for error reporting.
+/// * `interner` - Symbol interner for interning identifiers.
+/// * `registry` - Macro registry for persistent macro definitions.
+///
 /// # Errors
 ///
 /// Returns `CompileError::Parse` if parsing fails, or
@@ -414,15 +467,18 @@ pub fn compile(source: &str, interner: &mut symbol::Interner) -> Result<Chunk, C
 /// # Example
 ///
 /// ```
+/// use lona_core::source;
 /// use lona_core::symbol::Interner;
 /// use lonala_compiler::{compile_with_registry, MacroRegistry};
 ///
 /// let mut interner = Interner::new();
 /// let mut registry = MacroRegistry::new();
+/// let source_id = source::Id::new(0);
 ///
 /// // Define a macro
 /// let chunk1 = compile_with_registry(
 ///     "(defmacro double [x] (list '+ x x))",
+///     source_id,
 ///     &mut interner,
 ///     &mut registry
 /// ).unwrap();
@@ -430,6 +486,7 @@ pub fn compile(source: &str, interner: &mut symbol::Interner) -> Result<Chunk, C
 /// // Use the macro (it persists in the registry)
 /// let chunk2 = compile_with_registry(
 ///     "(double 5)",
+///     source_id,
 ///     &mut interner,
 ///     &mut registry
 /// ).unwrap();
@@ -437,11 +494,12 @@ pub fn compile(source: &str, interner: &mut symbol::Interner) -> Result<Chunk, C
 #[inline]
 pub fn compile_with_registry(
     source: &str,
+    source_id: source::Id,
     interner: &mut symbol::Interner,
     registry: &mut MacroRegistry,
 ) -> Result<Chunk, CompileError> {
-    let exprs = lonala_parser::parse(source)?;
-    let mut compiler = Compiler::new(interner, registry);
+    let exprs = lonala_parser::parse(source, source_id)?;
+    let mut compiler = Compiler::new(interner, registry, source_id);
     let chunk = compiler.compile_program(&exprs)?;
     Ok(chunk)
 }
@@ -455,6 +513,14 @@ pub fn compile_with_registry(
 /// Use this for REPL sessions where you want macros to be expanded at
 /// compile time rather than called at runtime.
 ///
+/// # Arguments
+///
+/// * `source` - The Lonala source code to compile.
+/// * `source_id` - Identifies the source for error reporting.
+/// * `interner` - Symbol interner for interning identifiers.
+/// * `registry` - Macro registry for persistent macro definitions.
+/// * `expander` - Macro expander for compile-time expansion.
+///
 /// # Errors
 ///
 /// Returns `CompileError::Parse` if parsing fails, or
@@ -463,16 +529,19 @@ pub fn compile_with_registry(
 /// # Example
 ///
 /// ```ignore
+/// use lona_core::source;
 /// use lona_core::symbol::Interner;
 /// use lonala_compiler::{compile_with_expansion, MacroRegistry, MacroExpander};
 ///
 /// let mut interner = Interner::new();
 /// let mut registry = MacroRegistry::new();
 /// let mut expander = MyMacroExpander::new(); // Implements MacroExpander
+/// let source_id = source::Id::new(0);
 ///
 /// // Define a macro
 /// let chunk1 = compile_with_expansion(
 ///     "(defmacro double [x] `(+ ~x ~x))",
+///     source_id,
 ///     &mut interner,
 ///     &mut registry,
 ///     &mut expander
@@ -481,6 +550,7 @@ pub fn compile_with_registry(
 /// // Use the macro - it will be expanded at compile time
 /// let chunk2 = compile_with_expansion(
 ///     "(double 5)",
+///     source_id,
 ///     &mut interner,
 ///     &mut registry,
 ///     &mut expander
@@ -489,12 +559,13 @@ pub fn compile_with_registry(
 #[inline]
 pub fn compile_with_expansion(
     source: &str,
+    source_id: source::Id,
     interner: &mut symbol::Interner,
     registry: &mut MacroRegistry,
     expander: &mut dyn MacroExpander,
 ) -> Result<Chunk, CompileError> {
-    let exprs = lonala_parser::parse(source)?;
-    let mut compiler = Compiler::with_expander(interner, registry, expander);
+    let exprs = lonala_parser::parse(source, source_id)?;
+    let mut compiler = Compiler::with_expander(interner, registry, source_id, expander);
     let chunk = compiler.compile_program(&exprs)?;
     Ok(chunk)
 }

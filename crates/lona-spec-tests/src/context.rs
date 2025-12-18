@@ -11,10 +11,14 @@ use alloc::string::String;
 
 use lona_core::integer::Integer;
 use lona_core::ratio::Ratio;
+use lona_core::source;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
 use lona_kernel::vm::{Globals, MacroExpander, Vm};
 use lonala_compiler::MacroRegistry;
+
+/// Default source ID for spec tests.
+const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
 
 /// Test context maintaining state across multi-step evaluations.
 ///
@@ -46,6 +50,7 @@ impl SpecTestContext {
         // Compile with macro expansion
         let chunk = lonala_compiler::compile_with_expansion(
             source,
+            TEST_SOURCE_ID,
             &mut self.interner,
             &mut self.macros,
             &mut expander,

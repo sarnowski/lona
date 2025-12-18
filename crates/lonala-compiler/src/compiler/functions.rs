@@ -17,7 +17,7 @@ use lonala_parser::{Ast, Spanned};
 
 use super::macros::MacroDefinition;
 use super::{Compiler, ExprResult, FnArgsResult};
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind};
 
 impl Compiler<'_, '_, '_> {
     /// Compiles a `fn` special form.
@@ -36,16 +36,20 @@ impl Compiler<'_, '_, '_> {
         args: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
+        // Pre-compute location for error messages (before creating child compiler)
+        let location = self.location(span);
+
         // Parse: (fn [params] body...) or (fn name [params] body...)
-        let (name, params_ast, body) = Self::parse_fn_args(args, span)?;
+        let (name, params_ast, body) = self.parse_fn_args(args, span)?;
 
         // Extract parameter names
-        let params = Self::extract_params(params_ast)?;
-        let arity = u8::try_from(params.len()).map_err(|_err| Error::TooManyRegisters { span })?;
+        let params = self.extract_params(params_ast)?;
+        let arity = u8::try_from(params.len())
+            .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
 
         // Create a new compiler for the function body
         // Note: We share the registry so macros are available inside function bodies
-        let mut fn_compiler = Compiler::new(self.interner, self.registry);
+        let mut fn_compiler = Compiler::new(self.interner, self.registry, self.source_id);
         let fn_name_str = name
             .clone()
             .unwrap_or_else(|| alloc::string::String::from("lambda"));
@@ -56,7 +60,8 @@ impl Compiler<'_, '_, '_> {
         fn_compiler.locals.push_scope();
         for (i, param) in params.iter().enumerate() {
             let symbol_id = fn_compiler.interner.intern(param);
-            let reg = u8::try_from(i).map_err(|_err| Error::TooManyRegisters { span })?;
+            let reg = u8::try_from(i)
+                .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
             fn_compiler.locals.define(symbol_id, reg);
             fn_compiler.next_register = reg.saturating_add(1);
             if reg > fn_compiler.max_register {
@@ -80,7 +85,9 @@ impl Compiler<'_, '_, '_> {
                 fn_compiler.free_registers_to(checkpoint);
             }
             // Compile last expression to return
-            let last = body.last().ok_or(Error::EmptyCall { span })?;
+            let last = body
+                .last()
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
             let result = fn_compiler.compile_expr(last)?;
             result.register
         };
@@ -98,7 +105,7 @@ impl Compiler<'_, '_, '_> {
         let fn_chunk = fn_compiler.chunk;
 
         // Add function as constant in parent chunk
-        let const_idx = self.chunk.add_constant_at(
+        let const_idx = self.add_constant(
             Constant::Function {
                 chunk: alloc::boxed::Box::new(fn_chunk),
                 arity,
@@ -118,14 +125,20 @@ impl Compiler<'_, '_, '_> {
     /// Parses the arguments to a `fn` special form.
     ///
     /// Returns (name, `params_ast`, body) where name is optional.
-    pub(super) fn parse_fn_args(
-        args: &[Spanned<Ast>],
+    pub(super) fn parse_fn_args<'args>(
+        &self,
+        args: &'args [Spanned<Ast>],
         span: Span,
-    ) -> Result<FnArgsResult<'_>, Error> {
-        let first = args.first().ok_or(Error::InvalidSpecialForm {
-            form: "fn",
-            message: "expected (fn [params] body...) or (fn name [params] body...)",
-            span,
+    ) -> Result<FnArgsResult<'args>, Error> {
+        let location = self.location(span);
+        let first = args.first().ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "expected (fn [params] body...) or (fn name [params] body...)",
+                },
+                location,
+            )
         })?;
 
         // Check if first arg is a name (symbol) or params (vector)
@@ -137,10 +150,14 @@ impl Compiler<'_, '_, '_> {
             }
             Ast::Symbol(ref name) => {
                 // (fn name [params] body...)
-                let params_ast = args.get(1_usize).ok_or(Error::InvalidSpecialForm {
-                    form: "fn",
-                    message: "expected parameter vector after function name",
-                    span,
+                let params_ast = args.get(1_usize).ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "fn",
+                            message: "expected parameter vector after function name",
+                        },
+                        location,
+                    )
                 })?;
                 let body = args.get(2_usize..).unwrap_or(&[]);
                 Ok((Some(name.clone()), params_ast, body))
@@ -154,34 +171,41 @@ impl Compiler<'_, '_, '_> {
             | Ast::Keyword(_)
             | Ast::List(_)
             | Ast::Map(_)
-            | _ => Err(Error::InvalidSpecialForm {
-                form: "fn",
-                message: "expected [params] or name",
-                span: first.span,
-            }),
+            | _ => Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "expected [params] or name",
+                },
+                self.location(first.span),
+            )),
         }
     }
 
     /// Extracts parameter names from a parameter vector AST.
     pub(super) fn extract_params(
+        &self,
         params_ast: &Spanned<Ast>,
     ) -> Result<Vec<alloc::string::String>, Error> {
         let Ast::Vector(ref params_vec) = params_ast.node else {
-            return Err(Error::InvalidSpecialForm {
-                form: "fn",
-                message: "parameters must be a vector",
-                span: params_ast.span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "parameters must be a vector",
+                },
+                self.location(params_ast.span),
+            ));
         };
 
         let mut params = Vec::new();
         for param in params_vec {
             let Ast::Symbol(ref name) = param.node else {
-                return Err(Error::InvalidSpecialForm {
-                    form: "fn",
-                    message: "parameter must be a symbol",
-                    span: param.span,
-                });
+                return Err(Error::new(
+                    ErrorKind::InvalidSpecialForm {
+                        form: "fn",
+                        message: "parameter must be a symbol",
+                    },
+                    self.location(param.span),
+                ));
             };
             params.push(name.clone());
         }
@@ -202,44 +226,61 @@ impl Compiler<'_, '_, '_> {
         args: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
+        // Pre-compute location for error messages (before creating child compiler)
+        let location = self.location(span);
+
         // Need at least name and params
         if args.len() < 2_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "defmacro",
-                message: "expected (defmacro name [params...] body...)",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "defmacro",
+                    message: "expected (defmacro name [params...] body...)",
+                },
+                location,
+            ));
         }
 
         // Extract name (must be a symbol)
-        let name_ast = args.first().ok_or(Error::EmptyCall { span })?;
+        let name_ast = args
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
         let Ast::Symbol(ref name_ref) = name_ast.node else {
-            return Err(Error::InvalidSpecialForm {
-                form: "defmacro",
-                message: "macro name must be a symbol",
-                span: name_ast.span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "defmacro",
+                    message: "macro name must be a symbol",
+                },
+                self.location(name_ast.span),
+            ));
         };
         let name = name_ref.clone();
 
         // Extract params (must be a vector of symbols)
-        let params_ast = args.get(1_usize).ok_or(Error::EmptyCall { span })?;
-        let params =
-            Self::extract_params(params_ast).map_err(|_err| Error::InvalidSpecialForm {
-                form: "defmacro",
-                message: "parameters must be a vector of symbols",
-                span: params_ast.span,
-            })?;
-        let arity = u8::try_from(params.len()).map_err(|_err| Error::TooManyRegisters { span })?;
+        let params_ast = args
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
+        let params = self.extract_params(params_ast).map_err(|_err| {
+            Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "defmacro",
+                    message: "parameters must be a vector of symbols",
+                },
+                self.location(params_ast.span),
+            )
+        })?;
+        let arity = u8::try_from(params.len())
+            .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
 
         // Body is everything after params
         let body = args.get(2_usize..).unwrap_or(&[]);
         if body.is_empty() {
-            return Err(Error::InvalidSpecialForm {
-                form: "defmacro",
-                message: "macro body cannot be empty",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "defmacro",
+                    message: "macro body cannot be empty",
+                },
+                location,
+            ));
         }
 
         // Intern the macro name before creating the child compiler to avoid
@@ -248,7 +289,7 @@ impl Compiler<'_, '_, '_> {
 
         // Create a child compiler for the macro body.
         // Note: We share the registry so macros can be used inside macro bodies.
-        let mut macro_compiler = Compiler::new(self.interner, self.registry);
+        let mut macro_compiler = Compiler::new(self.interner, self.registry, self.source_id);
         macro_compiler.chunk = Chunk::with_name(alloc::format!("macro:{name}"));
         macro_compiler.chunk.set_arity(arity);
 
@@ -256,7 +297,8 @@ impl Compiler<'_, '_, '_> {
         macro_compiler.locals.push_scope();
         for (i, param) in params.iter().enumerate() {
             let symbol_id = macro_compiler.interner.intern(param);
-            let reg = u8::try_from(i).map_err(|_err| Error::TooManyRegisters { span })?;
+            let reg = u8::try_from(i)
+                .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
             macro_compiler.locals.define(symbol_id, reg);
             macro_compiler.next_register = reg.saturating_add(1);
             if reg > macro_compiler.max_register {
@@ -276,7 +318,9 @@ impl Compiler<'_, '_, '_> {
                 macro_compiler.free_registers_to(checkpoint);
             }
             // Compile last expression as return value
-            let last = body.last().ok_or(Error::EmptyCall { span })?;
+            let last = body
+                .last()
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
             let result = macro_compiler.compile_expr(last)?;
             result.register
         };
@@ -303,9 +347,7 @@ impl Compiler<'_, '_, '_> {
 
         // Return the macro's symbol name
         // This mimics `def` behavior - the expression evaluates to the defined name
-        let const_idx = self
-            .chunk
-            .add_constant_at(Constant::Symbol(name_id), span)?;
+        let const_idx = self.add_constant(Constant::Symbol(name_id), span)?;
         let dest = self.alloc_register(span)?;
         self.chunk
             .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);

@@ -22,7 +22,7 @@ impl Compiler<'_, '_, '_> {
     /// Compiles an integer literal.
     pub(super) fn compile_integer(&mut self, value: i64, span: Span) -> Result<ExprResult, Error> {
         let dest = self.alloc_register(span)?;
-        let const_idx = self.chunk.add_constant_at(Constant::Integer(value), span)?;
+        let const_idx = self.add_constant(Constant::Integer(value), span)?;
         self.chunk
             .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
         Ok(ExprResult { register: dest })
@@ -31,7 +31,7 @@ impl Compiler<'_, '_, '_> {
     /// Compiles a float literal.
     pub(super) fn compile_float(&mut self, value: f64, span: Span) -> Result<ExprResult, Error> {
         let dest = self.alloc_register(span)?;
-        let const_idx = self.chunk.add_constant_at(Constant::Float(value), span)?;
+        let const_idx = self.add_constant(Constant::Float(value), span)?;
         self.chunk
             .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
         Ok(ExprResult { register: dest })
@@ -60,9 +60,8 @@ impl Compiler<'_, '_, '_> {
     /// Compiles a string literal.
     pub(super) fn compile_string(&mut self, value: &str, span: Span) -> Result<ExprResult, Error> {
         let dest = self.alloc_register(span)?;
-        let const_idx = self
-            .chunk
-            .add_constant_at(Constant::String(alloc::string::String::from(value)), span)?;
+        let const_idx =
+            self.add_constant(Constant::String(alloc::string::String::from(value)), span)?;
         self.chunk
             .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
         Ok(ExprResult { register: dest })
@@ -92,7 +91,7 @@ impl Compiler<'_, '_, '_> {
 
         // Not a local, fall back to global lookup
         let dest = self.alloc_register(span)?;
-        let const_idx = self.chunk.add_constant_at(Constant::Symbol(sym_id), span)?;
+        let const_idx = self.add_constant(Constant::Symbol(sym_id), span)?;
         self.chunk
             .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
         Ok(ExprResult { register: dest })

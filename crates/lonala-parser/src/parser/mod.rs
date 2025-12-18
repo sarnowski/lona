@@ -13,7 +13,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use crate::ast::{Ast, Spanned};
-use crate::error::{Error, Kind as ErrorKind, Span};
+use crate::error::{Error, Kind as ErrorKind, SourceId, SourceLocation, Span};
 use crate::lexer::Lexer;
 use crate::token::Kind as TokenKind;
 
@@ -29,17 +29,43 @@ pub struct Parser<'src> {
     lexer: Lexer<'src>,
     /// The source string (for span extraction).
     source: &'src str,
+    /// Identifier for this source (for error reporting).
+    source_id: SourceId,
 }
 
 impl<'src> Parser<'src> {
     /// Creates a new parser for the given source code.
+    ///
+    /// The `source_id` identifies which source is being parsed for error reporting.
     #[inline]
     #[must_use]
-    pub const fn new(source: &'src str) -> Self {
+    pub const fn new(source: &'src str, source_id: SourceId) -> Self {
         Self {
-            lexer: Lexer::new(source),
+            lexer: Lexer::new(source, source_id),
             source,
+            source_id,
         }
+    }
+
+    /// Returns the source ID for this parser.
+    #[inline]
+    #[must_use]
+    pub const fn source_id(&self) -> SourceId {
+        self.source_id
+    }
+
+    /// Creates a source location from a span.
+    #[inline]
+    #[must_use]
+    const fn location(&self, span: Span) -> SourceLocation {
+        SourceLocation::new(self.source_id, span)
+    }
+
+    /// Creates a source location from start and end positions.
+    #[inline]
+    #[must_use]
+    const fn location_from(&self, start: usize, end: usize) -> SourceLocation {
+        self.location(Span::new(start, end))
     }
 
     /// Parses all expressions from the source.
@@ -66,7 +92,7 @@ impl<'src> Parser<'src> {
                 ErrorKind::UnexpectedEof {
                     expected: "expression",
                 },
-                Span::new(self.source.len(), self.source.len()),
+                self.location_from(self.source.len(), self.source.len()),
             ));
         }
         self.parse_expr()
@@ -82,7 +108,7 @@ impl<'src> Parser<'src> {
                     ErrorKind::UnexpectedEof {
                         expected: "expression",
                     },
-                    Span::new(self.source.len(), self.source.len()),
+                    self.location_from(self.source.len(), self.source.len()),
                 ));
             }
         };
@@ -116,7 +142,7 @@ impl<'src> Parser<'src> {
                         expected: "expression",
                         found: token.kind.description(),
                     },
-                    token.span,
+                    self.location(token.span),
                 ))
             }
         }
@@ -141,7 +167,7 @@ impl<'src> Parser<'src> {
 
         // Maps must have an even number of elements
         if !elements.len().is_multiple_of(2_usize) {
-            return Err(Error::new(ErrorKind::OddMapEntries, span));
+            return Err(Error::new(ErrorKind::OddMapEntries, self.location(span)));
         }
 
         Ok(Spanned::new(Ast::map(elements), span))
@@ -158,6 +184,7 @@ impl<'src> Parser<'src> {
         // Consume opening delimiter
         let open_token = self.expect_token(open_kind)?;
         let start = open_token.span.start;
+        let opener_location = self.location(open_token.span);
 
         let mut elements = Vec::new();
 
@@ -168,7 +195,7 @@ impl<'src> Parser<'src> {
                         ErrorKind::UnexpectedEof {
                             expected: close_kind.description(),
                         },
-                        Span::new(self.source.len(), self.source.len()),
+                        self.location_from(self.source.len(), self.source.len()),
                     ));
                 }
                 Some(&Err(ref err)) => return Err(err.clone()),
@@ -191,13 +218,16 @@ impl<'src> Parser<'src> {
                             // RightBrace is the only remaining option
                             TokenKind::RightBrace | _ => '}',
                         };
+                        // Copy span before calling self.location() to avoid borrow conflict
+                        let error_span = token.span;
                         return Err(Error::new(
                             ErrorKind::UnmatchedDelimiter {
                                 opener: open_char,
+                                opener_location,
                                 expected: close_char,
                                 found: found_char,
                             },
-                            token.span,
+                            self.location(error_span),
                         ));
                     }
 
@@ -221,7 +251,7 @@ impl<'src> Parser<'src> {
             None => {
                 return Err(Error::new(
                     ErrorKind::ReaderMacroMissingExpr,
-                    macro_token.span,
+                    self.location(macro_token.span),
                 ));
             }
             Some(&Err(ref err)) => return Err(err.clone()),
@@ -233,7 +263,7 @@ impl<'src> Parser<'src> {
                 ) {
                     return Err(Error::new(
                         ErrorKind::ReaderMacroMissingExpr,
-                        macro_token.span,
+                        self.location(macro_token.span),
                     ));
                 }
             }
@@ -257,18 +287,19 @@ impl<'src> Parser<'src> {
     /// Parses an atom (literal, symbol, or keyword).
     fn parse_atom(&mut self) -> Result<Spanned<Ast>, Error> {
         let token = self.advance()?;
+        let token_location = self.location(token.span);
 
         let ast = match token.kind {
             TokenKind::Integer => {
-                let value = Self::parse_integer(token.lexeme)?;
+                let value = Self::parse_integer(token.lexeme, token_location)?;
                 Ast::integer(value)
             }
             TokenKind::Float => {
-                let value = Self::parse_float(token.lexeme)?;
+                let value = Self::parse_float(token.lexeme, token_location)?;
                 Ast::float(value)
             }
             TokenKind::String => {
-                let value = Self::process_string(token.lexeme, token.span)?;
+                let value = self.process_string(token.lexeme, token.span)?;
                 Ast::string(value)
             }
             TokenKind::True => Ast::bool(true),
@@ -296,7 +327,7 @@ impl<'src> Parser<'src> {
                         expected: "atom",
                         found: token.kind.description(),
                     },
-                    token.span,
+                    token_location,
                 ));
             }
         };
@@ -305,8 +336,8 @@ impl<'src> Parser<'src> {
     }
 
     /// Parses an integer literal from its lexeme.
-    fn parse_integer(lexeme: &str) -> Result<i64, Error> {
-        let make_err = || Error::new(ErrorKind::InvalidNumber, Span::new(0_usize, lexeme.len()));
+    fn parse_integer(lexeme: &str, location: SourceLocation) -> Result<i64, Error> {
+        let make_err = || Error::new(ErrorKind::InvalidNumber, location);
 
         // Handle different bases
         if lexeme.len() >= 2_usize {
@@ -329,7 +360,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parses a float literal from its lexeme.
-    fn parse_float(lexeme: &str) -> Result<f64, Error> {
+    fn parse_float(lexeme: &str, location: SourceLocation) -> Result<f64, Error> {
         // Handle special float literals
         match lexeme {
             "##NaN" => return Ok(f64::NAN),
@@ -340,7 +371,7 @@ impl<'src> Parser<'src> {
 
         lexeme
             .parse::<f64>()
-            .map_err(|_err| Error::new(ErrorKind::InvalidNumber, Span::new(0_usize, lexeme.len())))
+            .map_err(|_err| Error::new(ErrorKind::InvalidNumber, location))
     }
 
     /// Processes escape sequences in a string literal.
@@ -348,7 +379,7 @@ impl<'src> Parser<'src> {
     /// The lexeme includes the surrounding quotes. This function returns
     /// the string content with escapes processed. The `token_span` is used
     /// to calculate accurate error positions within the source.
-    fn process_string(lexeme: &str, token_span: Span) -> Result<String, Error> {
+    fn process_string(&self, lexeme: &str, token_span: Span) -> Result<String, Error> {
         // Remove surrounding quotes
         let content = lexeme
             .get(1_usize..lexeme.len().saturating_sub(1_usize))
@@ -390,12 +421,12 @@ impl<'src> Parser<'src> {
                                     .saturating_add(digit.len_utf8());
                             }
                         }
-                        let error_span = Span::new(escape_start, hex_end);
+                        let error_location = self.location_from(escape_start, hex_end);
                         let code_point = u32::from_str_radix(&hex, 16_u32).map_err(|_err| {
-                            Error::new(ErrorKind::InvalidUnicodeEscape, error_span)
+                            Error::new(ErrorKind::InvalidUnicodeEscape, error_location)
                         })?;
                         let ch = char::from_u32(code_point).ok_or_else(|| {
-                            Error::new(ErrorKind::InvalidUnicodeEscape, error_span)
+                            Error::new(ErrorKind::InvalidUnicodeEscape, error_location)
                         })?;
                         result.push(ch);
                     }
@@ -408,14 +439,14 @@ impl<'src> Parser<'src> {
                             .saturating_add(other.len_utf8());
                         return Err(Error::new(
                             ErrorKind::InvalidEscapeSequence(other),
-                            Span::new(escape_start, escape_end),
+                            self.location_from(escape_start, escape_end),
                         ));
                     }
                     None => {
                         // This shouldn't happen if the lexer validated the string
                         return Err(Error::new(
                             ErrorKind::UnterminatedString,
-                            Span::new(escape_start, token_span.end),
+                            self.location_from(escape_start, token_span.end),
                         ));
                     }
                 }
@@ -434,7 +465,7 @@ impl<'src> Parser<'src> {
             Some(Err(err)) => Err(err),
             None => Err(Error::new(
                 ErrorKind::UnexpectedEof { expected: "token" },
-                Span::new(self.source.len(), self.source.len()),
+                self.location_from(self.source.len(), self.source.len()),
             )),
         }
     }
@@ -450,7 +481,7 @@ impl<'src> Parser<'src> {
                     expected: expected.description(),
                     found: token.kind.description(),
                 },
-                token.span,
+                self.location(token.span),
             ))
         }
     }
@@ -460,18 +491,22 @@ impl<'src> Parser<'src> {
 ///
 /// This is a convenience function that creates a parser and parses all
 /// top-level expressions.
+///
+/// The `source_id` identifies which source is being parsed for error reporting.
 #[inline]
 #[must_use = "parsing result should be used"]
-pub fn parse(source: &str) -> Result<Vec<Spanned<Ast>>, Error> {
-    Parser::new(source).parse()
+pub fn parse(source: &str, source_id: SourceId) -> Result<Vec<Spanned<Ast>>, Error> {
+    Parser::new(source, source_id).parse()
 }
 
 /// Parses a single expression from the source string.
 ///
 /// This is a convenience function that creates a parser and parses one
 /// expression. Returns an error if there are no expressions.
+///
+/// The `source_id` identifies which source is being parsed for error reporting.
 #[inline]
 #[must_use = "parsing result should be used"]
-pub fn parse_one(source: &str) -> Result<Spanned<Ast>, Error> {
-    Parser::new(source).parse_one()
+pub fn parse_one(source: &str, source_id: SourceId) -> Result<Spanned<Ast>, Error> {
+    Parser::new(source, source_id).parse_one()
 }

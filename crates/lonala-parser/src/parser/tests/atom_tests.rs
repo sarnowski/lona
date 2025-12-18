@@ -12,7 +12,7 @@ use crate::ast::Ast;
 use crate::error::{Kind as ErrorKind, Span};
 use crate::parser::parse_one;
 
-use super::{parse_ast, parse_asts};
+use super::{TEST_SOURCE_ID, parse_ast, parse_asts};
 
 // ==================== Atoms: Integers ====================
 
@@ -233,25 +233,25 @@ fn parse_whitespace_only() {
 
 #[test]
 fn span_single_token() {
-    let spanned = parse_one("foo").expect("parse should succeed");
+    let spanned = parse_one("foo", TEST_SOURCE_ID).expect("parse should succeed");
     assert_eq!(spanned.span, Span::new(0_usize, 3_usize));
 }
 
 #[test]
 fn span_collection() {
-    let spanned = parse_one("(+ 1 2)").expect("parse should succeed");
+    let spanned = parse_one("(+ 1 2)", TEST_SOURCE_ID).expect("parse should succeed");
     assert_eq!(spanned.span, Span::new(0_usize, 7_usize));
 }
 
 #[test]
 fn span_nested() {
-    let spanned = parse_one("((a))").expect("parse should succeed");
+    let spanned = parse_one("((a))", TEST_SOURCE_ID).expect("parse should succeed");
     assert_eq!(spanned.span, Span::new(0_usize, 5_usize));
 }
 
 #[test]
 fn span_reader_macro() {
-    let spanned = parse_one("'x").expect("parse should succeed");
+    let spanned = parse_one("'x", TEST_SOURCE_ID).expect("parse should succeed");
     // Spans from quote (0) to end of x (2)
     assert_eq!(spanned.span, Span::new(0_usize, 2_usize));
 }
@@ -260,7 +260,7 @@ fn span_reader_macro() {
 
 #[test]
 fn error_unexpected_eof_in_list() {
-    let result = parse_one("(+ 1");
+    let result = parse_one("(+ 1", TEST_SOURCE_ID);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(matches!(err.kind, ErrorKind::UnexpectedEof { .. }));
@@ -268,19 +268,19 @@ fn error_unexpected_eof_in_list() {
 
 #[test]
 fn error_unexpected_eof_in_vector() {
-    let result = parse_one("[1 2");
+    let result = parse_one("[1 2", TEST_SOURCE_ID);
     assert!(result.is_err());
 }
 
 #[test]
 fn error_unexpected_eof_in_map() {
-    let result = parse_one("{:a 1");
+    let result = parse_one("{:a 1", TEST_SOURCE_ID);
     assert!(result.is_err());
 }
 
 #[test]
 fn error_mismatched_delimiter() {
-    let result = parse_one("(]");
+    let result = parse_one("(]", TEST_SOURCE_ID);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(matches!(err.kind, ErrorKind::UnmatchedDelimiter { .. }));
@@ -288,7 +288,7 @@ fn error_mismatched_delimiter() {
 
 #[test]
 fn error_odd_map_entries() {
-    let result = parse_one("{:a 1 :b}");
+    let result = parse_one("{:a 1 :b}", TEST_SOURCE_ID);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::OddMapEntries);
@@ -296,7 +296,7 @@ fn error_odd_map_entries() {
 
 #[test]
 fn error_reader_macro_at_eof() {
-    let result = parse_one("'");
+    let result = parse_one("'", TEST_SOURCE_ID);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReaderMacroMissingExpr);
@@ -304,7 +304,7 @@ fn error_reader_macro_at_eof() {
 
 #[test]
 fn error_reader_macro_before_closer() {
-    let result = parse_one("(')");
+    let result = parse_one("(')", TEST_SOURCE_ID);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert_eq!(err.kind, ErrorKind::ReaderMacroMissingExpr);
@@ -312,7 +312,7 @@ fn error_reader_macro_before_closer() {
 
 #[test]
 fn error_unexpected_closing_delimiter() {
-    let result = parse_one(")");
+    let result = parse_one(")", TEST_SOURCE_ID);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(matches!(err.kind, ErrorKind::UnexpectedToken { .. }));
@@ -320,7 +320,7 @@ fn error_unexpected_closing_delimiter() {
 
 #[test]
 fn error_parse_one_empty() {
-    let result = parse_one("");
+    let result = parse_one("", TEST_SOURCE_ID);
     assert!(result.is_err());
     let err = result.unwrap_err();
     assert!(matches!(err.kind, ErrorKind::UnexpectedEof { .. }));

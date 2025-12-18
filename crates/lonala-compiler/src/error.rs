@@ -3,41 +3,44 @@
 
 //! Error types for bytecode compilation.
 //!
-//! This module defines errors that can occur during compilation of Lonala
-//! source code to bytecode.
+//! This module provides error types and location information for reporting
+//! issues encountered during compilation of Lonala source code to bytecode.
+//!
+//! # Design Principles
+//!
+//! - **Structured data, not strings**: Errors carry typed data; formatting happens in `lonala-human`
+//! - **Source locations always**: Every error includes `source::Location`
+//! - **No Display on Error**: Formatting is centralized in `lonala-human` crate
 
 extern crate alloc;
 
 use alloc::string::String;
 use core::fmt;
 
-use lona_core::chunk::ConstantPoolFullError;
-use lona_core::span::Span;
+// Re-export source types from lona-core for consistency.
+pub use lona_core::source::{self, Id as SourceId, Location as SourceLocation};
+pub use lona_core::span::Span;
 
-/// Errors that can occur during compilation.
+/// Kinds of errors that can occur during compilation.
 ///
-/// These errors represent limits exceeded during bytecode generation,
-/// semantic errors, or features not yet implemented.
+/// Each variant captures the specific nature of the error with all context
+/// needed for formatting. NO human-readable strings should be stored here
+/// except for dynamic messages from macro expansion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Error {
+pub enum Kind {
+    // ========== Resource limit errors ==========
     /// Too many constants in a single chunk (> 65535).
     ///
     /// The constant pool uses 16-bit indices, limiting each chunk
     /// to 65536 constants maximum.
-    TooManyConstants {
-        /// Source location where the error occurred.
-        span: Span,
-    },
+    TooManyConstants,
 
     /// Too many registers needed (> 255).
     ///
     /// Register indices use 8-bit fields, limiting each function
     /// to 256 registers maximum.
-    TooManyRegisters {
-        /// Source location where the error occurred.
-        span: Span,
-    },
+    TooManyRegisters,
 
     /// Jump offset too large to encode.
     ///
@@ -45,18 +48,13 @@ pub enum Error {
     /// -32768 to +32767 instructions. This error is effectively unreachable
     /// in practice since it would require a single branch body to generate
     /// over 32,000 bytecode instructions, which exceeds realistic program sizes.
-    JumpTooLarge {
-        /// Source location where the error occurred.
-        span: Span,
-    },
+    JumpTooLarge,
 
+    // ========== Semantic errors ==========
     /// Empty list cannot be compiled as a function call.
     ///
     /// A list like `()` has no function to call.
-    EmptyCall {
-        /// Source location of the empty list.
-        span: Span,
-    },
+    EmptyCall,
 
     /// Feature not yet implemented.
     ///
@@ -65,8 +63,6 @@ pub enum Error {
     NotImplemented {
         /// Description of the unimplemented feature.
         feature: &'static str,
-        /// Source location where the feature was used.
-        span: Span,
     },
 
     /// Invalid special form syntax.
@@ -78,10 +74,9 @@ pub enum Error {
         form: &'static str,
         /// Description of what went wrong.
         message: &'static str,
-        /// Source location where the error occurred.
-        span: Span,
     },
 
+    // ========== Macro expansion errors ==========
     /// Invalid macro expansion result.
     ///
     /// The macro returned a value that cannot be converted back to AST
@@ -89,8 +84,6 @@ pub enum Error {
     InvalidMacroResult {
         /// Description of why the result is invalid.
         message: String,
-        /// Source location of the macro call.
-        span: Span,
     },
 
     /// Macro expansion failed at runtime.
@@ -99,8 +92,6 @@ pub enum Error {
     MacroExpansionFailed {
         /// The error message from the macro.
         message: String,
-        /// Source location of the macro call.
-        span: Span,
     },
 
     /// Macro expansion exceeded maximum depth.
@@ -110,76 +101,104 @@ pub enum Error {
     MacroExpansionDepthExceeded {
         /// The depth at which expansion was stopped.
         depth: usize,
-        /// Source location of the macro call that exceeded the limit.
-        span: Span,
     },
 }
 
-impl Error {
-    /// Returns the source span where this error occurred.
+impl Kind {
+    /// Returns the variant name for error identification.
+    ///
+    /// Used as a stable error identifier in formatted output (e.g., `error[TooManyConstants]`).
     #[inline]
     #[must_use]
-    pub const fn span(&self) -> Span {
+    pub const fn variant_name(&self) -> &'static str {
         match *self {
-            Self::TooManyConstants { span }
-            | Self::TooManyRegisters { span }
-            | Self::JumpTooLarge { span }
-            | Self::EmptyCall { span }
-            | Self::NotImplemented { span, .. }
-            | Self::InvalidSpecialForm { span, .. }
-            | Self::InvalidMacroResult { span, .. }
-            | Self::MacroExpansionFailed { span, .. }
-            | Self::MacroExpansionDepthExceeded { span, .. } => span,
+            Self::TooManyConstants => "TooManyConstants",
+            Self::TooManyRegisters => "TooManyRegisters",
+            Self::JumpTooLarge => "JumpTooLarge",
+            Self::EmptyCall => "EmptyCall",
+            Self::NotImplemented { .. } => "NotImplemented",
+            Self::InvalidSpecialForm { .. } => "InvalidSpecialForm",
+            Self::InvalidMacroResult { .. } => "InvalidMacroResult",
+            Self::MacroExpansionFailed { .. } => "MacroExpansionFailed",
+            Self::MacroExpansionDepthExceeded { .. } => "MacroExpansionDepthExceeded",
         }
     }
 }
 
-impl From<ConstantPoolFullError> for Error {
-    #[inline]
-    fn from(err: ConstantPoolFullError) -> Self {
-        Self::TooManyConstants { span: err.span }
-    }
-}
-
-impl fmt::Display for Error {
+impl fmt::Display for Kind {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Self::TooManyConstants { span } => {
-                write!(f, "too many constants in chunk (maximum 65535) at {span}")
+            Self::TooManyConstants => {
+                write!(f, "too many constants in chunk (maximum 65535)")
             }
-            Self::TooManyRegisters { span } => {
-                write!(f, "too many registers needed (maximum 255) at {span}")
+            Self::TooManyRegisters => {
+                write!(f, "too many registers needed (maximum 255)")
             }
-            Self::JumpTooLarge { span } => {
-                write!(f, "jump offset too large (maximum +/- 32767) at {span}")
+            Self::JumpTooLarge => {
+                write!(f, "jump offset too large (maximum +/- 32767)")
             }
-            Self::EmptyCall { span } => {
-                write!(f, "empty list cannot be called as function at {span}")
+            Self::EmptyCall => {
+                write!(f, "empty list cannot be called as function")
             }
-            Self::NotImplemented { feature, span } => {
-                write!(f, "not implemented: {feature} at {span}")
+            Self::NotImplemented { feature } => {
+                write!(f, "not implemented: {feature}")
             }
-            Self::InvalidSpecialForm {
-                form,
-                message,
-                span,
-            } => {
-                write!(f, "invalid '{form}' form: {message} at {span}")
+            Self::InvalidSpecialForm { form, message } => {
+                write!(f, "invalid '{form}' form: {message}")
             }
-            Self::InvalidMacroResult { ref message, span } => {
-                write!(f, "invalid macro result: {message} at {span}")
+            Self::InvalidMacroResult { ref message } => {
+                write!(f, "invalid macro result: {message}")
             }
-            Self::MacroExpansionFailed { ref message, span } => {
-                write!(f, "macro expansion failed: {message} at {span}")
+            Self::MacroExpansionFailed { ref message } => {
+                write!(f, "macro expansion failed: {message}")
             }
-            Self::MacroExpansionDepthExceeded { depth, span } => {
-                write!(
-                    f,
-                    "macro expansion exceeded maximum depth ({depth}) at {span}"
-                )
+            Self::MacroExpansionDepthExceeded { depth } => {
+                write!(f, "macro expansion exceeded maximum depth ({depth})")
             }
         }
+    }
+}
+
+/// An error encountered during compilation.
+///
+/// Combines an error kind with its full source location, enabling helpful error
+/// messages that can point to the exact position in the correct source file.
+///
+/// # Note
+///
+/// This type does NOT implement `Display`. All formatting is centralized in
+/// the `lonala-human` crate to ensure consistent error presentation across
+/// REPL and future LSP implementations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Error {
+    /// The kind of error.
+    pub kind: Kind,
+    /// Full source location (source ID + byte span).
+    pub location: SourceLocation,
+}
+
+impl Error {
+    /// Creates a new error with the given kind and source location.
+    #[inline]
+    #[must_use]
+    pub const fn new(kind: Kind, location: SourceLocation) -> Self {
+        Self { kind, location }
+    }
+
+    /// Returns the span within the source where the error occurred.
+    #[inline]
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.location.span
+    }
+
+    /// Returns the source ID where the error occurred.
+    #[inline]
+    #[must_use]
+    pub const fn source_id(&self) -> SourceId {
+        self.location.source
     }
 }
 
@@ -191,151 +210,224 @@ mod tests {
 
     use super::*;
 
-    fn test_span() -> Span {
-        Span::new(10_usize, 20_usize)
+    /// Helper to create a test source location.
+    fn test_location(start: usize, end: usize) -> SourceLocation {
+        SourceLocation::new(SourceId::new(0_u32), Span::new(start, end))
+    }
+
+    // ==================== Kind Display Tests ====================
+
+    #[test]
+    fn kind_display_resource_errors() {
+        assert_eq!(
+            format!("{}", Kind::TooManyConstants),
+            "too many constants in chunk (maximum 65535)"
+        );
+        assert_eq!(
+            format!("{}", Kind::TooManyRegisters),
+            "too many registers needed (maximum 255)"
+        );
+        assert_eq!(
+            format!("{}", Kind::JumpTooLarge),
+            "jump offset too large (maximum +/- 32767)"
+        );
     }
 
     #[test]
-    fn error_display() {
+    fn kind_display_semantic_errors() {
         assert_eq!(
-            format!("{}", Error::TooManyConstants { span: test_span() }),
-            "too many constants in chunk (maximum 65535) at 10..20"
-        );
-        assert_eq!(
-            format!("{}", Error::TooManyRegisters { span: test_span() }),
-            "too many registers needed (maximum 255) at 10..20"
-        );
-        assert_eq!(
-            format!("{}", Error::JumpTooLarge { span: test_span() }),
-            "jump offset too large (maximum +/- 32767) at 10..20"
-        );
-        assert_eq!(
-            format!("{}", Error::EmptyCall { span: test_span() }),
-            "empty list cannot be called as function at 10..20"
+            format!("{}", Kind::EmptyCall),
+            "empty list cannot be called as function"
         );
         assert_eq!(
             format!(
                 "{}",
-                Error::NotImplemented {
-                    feature: "closures",
-                    span: test_span()
+                Kind::NotImplemented {
+                    feature: "closures"
                 }
             ),
-            "not implemented: closures at 10..20"
+            "not implemented: closures"
         );
         assert_eq!(
             format!(
                 "{}",
-                Error::InvalidSpecialForm {
+                Kind::InvalidSpecialForm {
                     form: "if",
-                    message: "expected (if test then) or (if test then else)",
-                    span: test_span()
+                    message: "expected (if test then) or (if test then else)"
                 }
             ),
-            "invalid 'if' form: expected (if test then) or (if test then else) at 10..20"
+            "invalid 'if' form: expected (if test then) or (if test then else)"
+        );
+    }
+
+    #[test]
+    fn kind_display_macro_errors() {
+        assert_eq!(
+            format!(
+                "{}",
+                Kind::InvalidMacroResult {
+                    message: String::from("function cannot be converted to AST")
+                }
+            ),
+            "invalid macro result: function cannot be converted to AST"
         );
         assert_eq!(
             format!(
                 "{}",
-                Error::InvalidMacroResult {
-                    message: String::from("function cannot be converted to AST"),
-                    span: test_span()
+                Kind::MacroExpansionFailed {
+                    message: String::from("division by zero")
                 }
             ),
-            "invalid macro result: function cannot be converted to AST at 10..20"
+            "macro expansion failed: division by zero"
         );
         assert_eq!(
-            format!(
-                "{}",
-                Error::MacroExpansionFailed {
-                    message: String::from("division by zero"),
-                    span: test_span()
-                }
-            ),
-            "macro expansion failed: division by zero at 10..20"
+            format!("{}", Kind::MacroExpansionDepthExceeded { depth: 256_usize }),
+            "macro expansion exceeded maximum depth (256)"
+        );
+    }
+
+    // ==================== Kind variant_name() Tests ====================
+
+    #[test]
+    fn kind_variant_name() {
+        assert_eq!(Kind::TooManyConstants.variant_name(), "TooManyConstants");
+        assert_eq!(Kind::TooManyRegisters.variant_name(), "TooManyRegisters");
+        assert_eq!(Kind::JumpTooLarge.variant_name(), "JumpTooLarge");
+        assert_eq!(Kind::EmptyCall.variant_name(), "EmptyCall");
+        assert_eq!(
+            Kind::NotImplemented { feature: "test" }.variant_name(),
+            "NotImplemented"
         );
         assert_eq!(
-            format!(
-                "{}",
-                Error::MacroExpansionDepthExceeded {
-                    depth: 256_usize,
-                    span: test_span()
-                }
-            ),
-            "macro expansion exceeded maximum depth (256) at 10..20"
+            Kind::InvalidSpecialForm {
+                form: "if",
+                message: "test"
+            }
+            .variant_name(),
+            "InvalidSpecialForm"
         );
+        assert_eq!(
+            Kind::InvalidMacroResult {
+                message: String::from("test")
+            }
+            .variant_name(),
+            "InvalidMacroResult"
+        );
+        assert_eq!(
+            Kind::MacroExpansionFailed {
+                message: String::from("test")
+            }
+            .variant_name(),
+            "MacroExpansionFailed"
+        );
+        assert_eq!(
+            Kind::MacroExpansionDepthExceeded { depth: 256_usize }.variant_name(),
+            "MacroExpansionDepthExceeded"
+        );
+    }
+
+    // ==================== Error Tests ====================
+
+    #[test]
+    fn error_new_and_accessors() {
+        let location = test_location(5_usize, 15_usize);
+        let error = Error::new(Kind::EmptyCall, location);
+        assert_eq!(error.kind, Kind::EmptyCall);
+        assert_eq!(error.span(), Span::new(5_usize, 15_usize));
+        assert_eq!(error.source_id(), SourceId::new(0_u32));
+    }
+
+    #[test]
+    fn error_location_field() {
+        let source_id = SourceId::new(42_u32);
+        let span = Span::new(10_usize, 20_usize);
+        let location = SourceLocation::new(source_id, span);
+        let error = Error::new(Kind::TooManyConstants, location);
+        assert_eq!(error.location.source, source_id);
+        assert_eq!(error.location.span, span);
     }
 
     #[test]
     fn error_span_accessor() {
-        let span = Span::new(5_usize, 15_usize);
-        assert_eq!(Error::TooManyConstants { span }.span(), span);
-        assert_eq!(Error::TooManyRegisters { span }.span(), span);
-        assert_eq!(Error::JumpTooLarge { span }.span(), span);
-        assert_eq!(Error::EmptyCall { span }.span(), span);
+        let location = test_location(5_usize, 15_usize);
         assert_eq!(
-            Error::NotImplemented {
-                feature: "test",
-                span
-            }
-            .span(),
-            span
+            Error::new(Kind::TooManyConstants, location).span(),
+            location.span
         );
         assert_eq!(
-            Error::InvalidSpecialForm {
-                form: "if",
-                message: "test",
-                span
-            }
-            .span(),
-            span
+            Error::new(Kind::TooManyRegisters, location).span(),
+            location.span
         );
         assert_eq!(
-            Error::InvalidMacroResult {
-                message: String::from("test"),
-                span
-            }
-            .span(),
-            span
+            Error::new(Kind::JumpTooLarge, location).span(),
+            location.span
+        );
+        assert_eq!(Error::new(Kind::EmptyCall, location).span(), location.span);
+        assert_eq!(
+            Error::new(Kind::NotImplemented { feature: "test" }, location).span(),
+            location.span
         );
         assert_eq!(
-            Error::MacroExpansionFailed {
-                message: String::from("test"),
-                span
-            }
+            Error::new(
+                Kind::InvalidSpecialForm {
+                    form: "if",
+                    message: "test"
+                },
+                location
+            )
             .span(),
-            span
+            location.span
         );
         assert_eq!(
-            Error::MacroExpansionDepthExceeded {
-                depth: 256_usize,
-                span
-            }
+            Error::new(
+                Kind::InvalidMacroResult {
+                    message: String::from("test")
+                },
+                location
+            )
             .span(),
-            span
+            location.span
+        );
+        assert_eq!(
+            Error::new(
+                Kind::MacroExpansionFailed {
+                    message: String::from("test")
+                },
+                location
+            )
+            .span(),
+            location.span
+        );
+        assert_eq!(
+            Error::new(
+                Kind::MacroExpansionDepthExceeded { depth: 256_usize },
+                location
+            )
+            .span(),
+            location.span
         );
     }
 
     #[test]
     fn error_equality() {
-        let span = test_span();
+        let location = test_location(10_usize, 20_usize);
         assert_eq!(
-            Error::TooManyConstants { span },
-            Error::TooManyConstants { span }
+            Error::new(Kind::TooManyConstants, location),
+            Error::new(Kind::TooManyConstants, location)
         );
         assert_ne!(
-            Error::TooManyConstants { span },
-            Error::TooManyRegisters { span }
+            Error::new(Kind::TooManyConstants, location),
+            Error::new(Kind::TooManyRegisters, location)
         );
         assert_ne!(
-            Error::TooManyRegisters { span },
-            Error::JumpTooLarge { span }
+            Error::new(Kind::TooManyRegisters, location),
+            Error::new(Kind::JumpTooLarge, location)
         );
     }
 
     #[test]
     fn error_clone() {
-        let error = Error::TooManyConstants { span: test_span() };
+        let error = Error::new(Kind::TooManyConstants, test_location(10_usize, 20_usize));
         let cloned = error.clone();
         assert_eq!(error, cloned);
     }

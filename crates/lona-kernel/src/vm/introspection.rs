@@ -13,6 +13,7 @@
 
 use alloc::vec::Vec;
 
+use lona_core::error_context::{ArityExpectation, TypeExpectation};
 use lona_core::symbol::{self, Interner};
 use lona_core::value::Value;
 use lonala_compiler::MacroRegistry;
@@ -47,21 +48,21 @@ const MAX_EXPANSION_DEPTH: usize = 256;
 pub fn native_is_macro(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     if args.len() != 1_usize {
         return Err(NativeError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
+            expected: ArityExpectation::Exact(1_u8),
+            got: u8::try_from(args.len()).unwrap_or(u8::MAX),
         });
     }
 
     let arg = args.first().ok_or(NativeError::ArityMismatch {
-        expected: 1,
-        got: 0,
+        expected: ArityExpectation::Exact(1_u8),
+        got: 0_u8,
     })?;
 
     let Value::Symbol(sym_id) = *arg else {
         return Err(NativeError::TypeError {
-            expected: "symbol",
-            got: value_type_name(arg),
-            arg_index: 0,
+            expected: TypeExpectation::Symbol,
+            got: arg.kind(),
+            arg_index: 0_u8,
         });
     };
 
@@ -95,14 +96,14 @@ pub fn native_is_macro(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value,
 pub fn native_expand_once(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     if args.len() != 1_usize {
         return Err(NativeError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
+            expected: ArityExpectation::Exact(1_u8),
+            got: u8::try_from(args.len()).unwrap_or(u8::MAX),
         });
     }
 
     let form = args.first().ok_or(NativeError::ArityMismatch {
-        expected: 1,
-        got: 0,
+        expected: ArityExpectation::Exact(1_u8),
+        got: 0_u8,
     })?;
 
     // If no macro registry, return form unchanged
@@ -187,16 +188,16 @@ fn expand_once_internal(
 pub fn native_expand_fully(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     if args.len() != 1_usize {
         return Err(NativeError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
+            expected: ArityExpectation::Exact(1_u8),
+            got: u8::try_from(args.len()).unwrap_or(u8::MAX),
         });
     }
 
     let mut form = args
         .first()
         .ok_or(NativeError::ArityMismatch {
-            expected: 1,
-            got: 0,
+            expected: ArityExpectation::Exact(1_u8),
+            got: 0_u8,
         })?
         .clone();
 
@@ -217,24 +218,6 @@ pub fn native_expand_fully(args: &[Value], ctx: &NativeContext<'_>) -> Result<Va
     }
 
     Err(NativeError::Error("macro expansion depth exceeded"))
-}
-
-/// Returns a type name for error messages.
-const fn value_type_name(value: &Value) -> &'static str {
-    match *value {
-        Value::Nil => "nil",
-        Value::Bool(_) => "boolean",
-        Value::Integer(_) => "integer",
-        Value::Float(_) => "float",
-        Value::Ratio(_) => "ratio",
-        Value::Symbol(_) => "symbol",
-        Value::String(_) => "string",
-        Value::List(_) => "list",
-        Value::Vector(_) => "vector",
-        Value::Map(_) => "map",
-        Value::Function(_) => "function",
-        _ => "unknown",
-    }
 }
 
 /// Checks if two values are equal.

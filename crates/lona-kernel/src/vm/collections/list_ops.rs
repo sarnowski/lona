@@ -12,11 +12,11 @@
 
 use alloc::vec::Vec;
 
+use lona_core::error_context::{ArityExpectation, TypeExpectation};
 use lona_core::list::List;
 use lona_core::value::Value;
 use lona_core::vector::Vector;
 
-use super::type_name;
 use crate::vm::natives::{NativeContext, NativeError};
 
 /// `(cons x coll)` - prepend x to collection, returns list.
@@ -28,14 +28,15 @@ use crate::vm::natives::{NativeContext, NativeError};
 ///
 /// - List: New list with x prepended
 /// - Vector: Convert vector to list, prepend x
+/// - Map: Convert map to list of `[key value]` vectors, prepend x
 /// - nil: Single-element list (x)
 /// - Other: `TypeError`
 #[inline]
 pub fn native_cons(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let &[ref element, ref collection] = args else {
         return Err(NativeError::ArityMismatch {
-            expected: 2,
-            got: args.len(),
+            expected: ArityExpectation::Exact(2_u8),
+            got: u8::try_from(args.len()).unwrap_or(u8::MAX),
         });
     };
 
@@ -52,6 +53,17 @@ pub fn native_cons(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
             }
             list.cons(element.clone())
         }
+        Value::Map(ref map) => {
+            // Convert map to list of [key value] vectors, then prepend
+            let mut list = List::empty();
+            let entries: Vec<_> = map.iter().collect();
+            // Build list in reverse order since cons prepends
+            for (key, value) in entries.into_iter().rev() {
+                let entry = Vector::from_vec(alloc::vec![key.value().clone(), value.clone()]);
+                list = list.cons(Value::Vector(entry));
+            }
+            list.cons(element.clone())
+        }
         Value::Nil => List::empty().cons(element.clone()),
         // All other types are errors (explicit list + wildcard for future variants)
         Value::Bool(_)
@@ -60,13 +72,12 @@ pub fn native_cons(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
         | Value::Ratio(_)
         | Value::Symbol(_)
         | Value::String(_)
-        | Value::Map(_)
         | Value::Function(_)
         | _ => {
             return Err(NativeError::TypeError {
-                expected: "list, vector, or nil",
-                got: type_name(collection),
-                arg_index: 1,
+                expected: TypeExpectation::Sequence,
+                got: collection.kind(),
+                arg_index: 1_u8,
             });
         }
     };
@@ -89,8 +100,8 @@ pub fn native_cons(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
 pub fn native_first(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let &[ref collection] = args else {
         return Err(NativeError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
+            expected: ArityExpectation::Exact(1_u8),
+            got: u8::try_from(args.len()).unwrap_or(u8::MAX),
         });
     };
 
@@ -117,9 +128,9 @@ pub fn native_first(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, N
         | Value::Function(_)
         | _ => {
             return Err(NativeError::TypeError {
-                expected: "list, vector, map, or nil",
-                got: type_name(collection),
-                arg_index: 0,
+                expected: TypeExpectation::Sequence,
+                got: collection.kind(),
+                arg_index: 0_u8,
             });
         }
     };
@@ -143,8 +154,8 @@ pub fn native_first(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, N
 pub fn native_rest(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let &[ref collection] = args else {
         return Err(NativeError::ArityMismatch {
-            expected: 1,
-            got: args.len(),
+            expected: ArityExpectation::Exact(1_u8),
+            got: u8::try_from(args.len()).unwrap_or(u8::MAX),
         });
     };
 
@@ -183,9 +194,9 @@ pub fn native_rest(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
         | Value::Function(_)
         | _ => {
             return Err(NativeError::TypeError {
-                expected: "list, vector, map, or nil",
-                got: type_name(collection),
-                arg_index: 0,
+                expected: TypeExpectation::Sequence,
+                got: collection.kind(),
+                arg_index: 0_u8,
             });
         }
     };
@@ -206,11 +217,12 @@ pub fn native_list(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
 /// `(concat & seqs)` - concatenate sequences into a list.
 ///
 /// Concatenates all arguments (which must be sequences) into a single list.
-/// Accepts lists, vectors, and nil (treated as empty sequence).
+/// Accepts lists, vectors, maps, and nil (treated as empty sequence).
+/// Maps are treated as sequences of `[key value]` vectors.
 ///
 /// # Errors
 ///
-/// Returns a type error if any argument is not a list, vector, or nil.
+/// Returns a type error if any argument is not a sequence type.
 #[inline]
 pub fn native_concat(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
     let mut result = Vec::new();
@@ -218,6 +230,13 @@ pub fn native_concat(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, 
         match *arg {
             Value::List(ref list) => result.extend(list.iter().cloned()),
             Value::Vector(ref vec) => result.extend(vec.iter().cloned()),
+            Value::Map(ref map) => {
+                // Maps are sequences of [key value] vectors
+                for (key, value) in map.iter() {
+                    let entry = Vector::from_vec(alloc::vec![key.value().clone(), value.clone()]);
+                    result.push(Value::Vector(entry));
+                }
+            }
             Value::Nil => {} // Empty sequence, skip
             // All other types are errors
             Value::Bool(_)
@@ -226,13 +245,12 @@ pub fn native_concat(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, 
             | Value::Ratio(_)
             | Value::Symbol(_)
             | Value::String(_)
-            | Value::Map(_)
             | Value::Function(_)
             | _ => {
                 return Err(NativeError::TypeError {
-                    expected: "list, vector, or nil",
-                    got: type_name(arg),
-                    arg_index: idx,
+                    expected: TypeExpectation::Sequence,
+                    got: arg.kind(),
+                    arg_index: u8::try_from(idx).unwrap_or(u8::MAX),
                 });
             }
         }

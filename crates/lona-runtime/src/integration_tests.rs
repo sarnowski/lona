@@ -8,6 +8,7 @@
 
 use crate::{print, println};
 use lona_core::integer::Integer;
+use lona_core::source;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
 use lona_kernel::vm::{Globals, Vm};
@@ -15,6 +16,9 @@ use lona_test::{Status, Test, run_tests};
 use lonala_compiler::compile;
 
 use crate::repl;
+
+/// Test source ID for integration tests.
+const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
 
 /// Runs integration tests and outputs results via UART.
 ///
@@ -53,6 +57,9 @@ pub fn run_integration_tests() {
         Test::new("macroexpand_1", test_macroexpand_1),
         Test::new("macroexpand_1_non_macro", test_macroexpand_1_non_macro),
         Test::new("macroexpand", test_macroexpand),
+        // Human-readable error formatting tests
+        Test::new("vm_error_format", test_vm_error_human_readable_format),
+        Test::new("vm_error_source_id", test_vm_error_shows_correct_source),
     ];
 
     let status = run_tests(&tests, |s| print!("{s}"));
@@ -94,7 +101,7 @@ fn test_arithmetic() -> Status {
     let mut interner = Interner::new();
 
     // Compile a simple arithmetic expression
-    let chunk = match compile("(+ 1 2)", &mut interner) {
+    let chunk = match compile("(+ 1 2)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -111,7 +118,7 @@ fn test_arithmetic() -> Status {
 fn test_subtraction() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(- 10 3)", &mut interner) {
+    let chunk = match compile("(- 10 3)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -127,7 +134,7 @@ fn test_subtraction() -> Status {
 fn test_multiplication() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(* 6 7)", &mut interner) {
+    let chunk = match compile("(* 6 7)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -143,7 +150,7 @@ fn test_multiplication() -> Status {
 fn test_comparison() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(< 1 2)", &mut interner) {
+    let chunk = match compile("(< 1 2)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -159,7 +166,7 @@ fn test_comparison() -> Status {
 fn test_boolean_not() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(not false)", &mut interner) {
+    let chunk = match compile("(not false)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -175,7 +182,7 @@ fn test_boolean_not() -> Status {
 fn test_nested_expression() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(+ (* 2 3) (- 10 5))", &mut interner) {
+    let chunk = match compile("(+ (* 2 3) (- 10 5))", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -191,7 +198,7 @@ fn test_nested_expression() -> Status {
 fn test_string_literal() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("\"hello\"", &mut interner) {
+    let chunk = match compile("\"hello\"", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -211,7 +218,7 @@ fn test_string_literal() -> Status {
 fn test_do_empty() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(do)", &mut interner) {
+    let chunk = match compile("(do)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -227,7 +234,7 @@ fn test_do_empty() -> Status {
 fn test_do_single() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(do 42)", &mut interner) {
+    let chunk = match compile("(do 42)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -243,7 +250,7 @@ fn test_do_single() -> Status {
 fn test_do_multiple() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(do 1 2 3)", &mut interner) {
+    let chunk = match compile("(do 1 2 3)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -259,7 +266,7 @@ fn test_do_multiple() -> Status {
 fn test_if_true() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(if true 1 2)", &mut interner) {
+    let chunk = match compile("(if true 1 2)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -275,7 +282,7 @@ fn test_if_true() -> Status {
 fn test_if_false() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(if false 1 2)", &mut interner) {
+    let chunk = match compile("(if false 1 2)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -291,7 +298,7 @@ fn test_if_false() -> Status {
 fn test_if_no_else() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(if false 1)", &mut interner) {
+    let chunk = match compile("(if false 1)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -307,7 +314,7 @@ fn test_if_no_else() -> Status {
 fn test_def_simple() -> Status {
     let mut interner = Interner::new();
 
-    let chunk = match compile("(do (def x 42) x)", &mut interner) {
+    let chunk = match compile("(do (def x 42) x)", TEST_SOURCE_ID, &mut interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -329,7 +336,7 @@ fn eval_with_state(
     interner: &mut Interner,
     globals: &mut Globals,
 ) -> Result<Value, ()> {
-    let chunk = compile(source, interner).map_err(|err| {
+    let chunk = compile(source, TEST_SOURCE_ID, interner).map_err(|err| {
         println!("Compile error: {err}");
     })?;
 
@@ -545,6 +552,99 @@ fn test_macroexpand() -> Status {
         Err(ref msg) => {
             println!("test_macroexpand: error: {msg}");
             Status::Fail
+        }
+    }
+}
+
+// =============================================================================
+// Human-Readable Error Formatting Tests
+// =============================================================================
+
+/// Tests that VM errors are formatted using `lonala_human`, not Debug format.
+///
+/// This test verifies the fix for the bug where REPL displayed raw Debug output
+/// like `Error { kind: UndefinedGlobal { ... } }` instead of human-readable
+/// error messages like `error[UndefinedGlobal]: undefined symbol 'foo'`.
+fn test_vm_error_human_readable_format() -> Status {
+    let mut repl_instance = repl::Repl::new();
+
+    // Try to evaluate an undefined symbol - this should produce a VM error
+    match repl_instance.eval("undefined_symbol") {
+        Ok(value) => {
+            println!("test_vm_error_format: expected error, got value: {value:?}");
+            Status::Fail
+        }
+        Err(ref error_msg) => {
+            // The error message should NOT contain Debug format artifacts
+            let has_debug_format = error_msg.contains("Error {")
+                || error_msg.contains("kind:")
+                || error_msg.contains("Id(")
+                || error_msg.contains("Span {");
+
+            if has_debug_format {
+                println!(
+                    "test_vm_error_format: error uses Debug format instead of human-readable:"
+                );
+                println!("  {error_msg}");
+                return Status::Fail;
+            }
+
+            // The error message SHOULD contain human-readable format markers
+            let has_human_format = error_msg.contains("error[")
+                || error_msg.contains("undefined symbol")
+                || error_msg.contains("-->");
+
+            if !has_human_format {
+                println!("test_vm_error_format: error does not use expected format:");
+                println!("  {error_msg}");
+                return Status::Fail;
+            }
+
+            Status::Pass
+        }
+    }
+}
+
+/// Tests that VM errors show the correct source content for each evaluation.
+///
+/// This test verifies that when multiple expressions are evaluated, each error
+/// shows the source content from its own evaluation, not from a previous one.
+fn test_vm_error_shows_correct_source() -> Status {
+    let mut repl_instance = repl::Repl::new();
+
+    // First evaluation - a valid expression
+    if repl_instance.eval("(+ 1 2)").is_err() {
+        println!("test_vm_error_source_id: first eval should succeed");
+        return Status::Fail;
+    }
+
+    // Second evaluation - an error with different source content
+    match repl_instance.eval("(/ 0 0)") {
+        Ok(value) => {
+            println!("test_vm_error_source_id: expected error, got value: {value:?}");
+            Status::Fail
+        }
+        Err(ref error_msg) => {
+            // The error message MUST contain the actual source content "(/ 0 0)"
+            // NOT content from a previous evaluation
+            if !error_msg.contains("(/ 0 0)") {
+                println!("test_vm_error_source_id: error does not show correct source content:");
+                println!("  Expected to find: (/ 0 0)");
+                println!("  Actual error message:");
+                println!("  {error_msg}");
+                return Status::Fail;
+            }
+
+            // The source name should be <repl:2> since this is the second evaluation
+            if !error_msg.contains("<repl:2>") {
+                println!("test_vm_error_source_id: error shows wrong source name:");
+                println!("  Expected: <repl:2>");
+                println!("  Actual error message:");
+                println!("  {error_msg}");
+                return Status::Fail;
+            }
+
+            Status::Pass
         }
     }
 }

@@ -7,18 +7,19 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lona_core::chunk::{Chunk, Constant};
+use lona_core::error_context::TypeExpectation;
 use lona_core::integer::Integer;
 use lona_core::opcode::{
     Opcode, decode_a, decode_b, decode_op, decode_opcode_byte, rk_index, rk_is_constant,
 };
+use lona_core::source;
 use lona_core::symbol::{self, Interner};
-use lona_core::value::{Function, Value};
+use lona_core::value::{self, Function, Value};
 use lonala_compiler::MacroRegistry;
 
-use super::error::Error;
+use super::error::{Error, Kind as ErrorKind};
 use super::frame::Frame;
 use super::globals::Globals;
-use super::helpers::constant_type_name;
 use super::natives::{NativeFn, Registry as NativeRegistry};
 use super::primitives::PrintCallback;
 
@@ -54,6 +55,8 @@ pub struct Vm<'interner> {
     macro_registry: Option<&'interner MacroRegistry>,
     /// Current call depth for stack overflow protection.
     call_depth: usize,
+    /// Current source ID for error reporting.
+    current_source: source::Id,
 }
 
 impl<'interner> Vm<'interner> {
@@ -73,6 +76,7 @@ impl<'interner> Vm<'interner> {
             print_symbol,
             macro_registry: None,
             call_depth: 0,
+            current_source: source::Id::new(0_u32),
         }
     }
 
@@ -141,6 +145,21 @@ impl<'interner> Vm<'interner> {
         &self.globals
     }
 
+    /// Returns the current source ID for error reporting.
+    #[inline]
+    #[must_use]
+    pub const fn current_source(&self) -> source::Id {
+        self.current_source
+    }
+
+    /// Sets the current source ID for error reporting.
+    ///
+    /// Call this before executing code from a specific source.
+    #[inline]
+    pub const fn set_source(&mut self, source: source::Id) {
+        self.current_source = source;
+    }
+
     /// Executes a chunk of bytecode and returns the result.
     ///
     /// # Errors
@@ -161,8 +180,25 @@ impl<'interner> Vm<'interner> {
         // Reset call depth
         self.call_depth = 0;
 
-        let mut frame = Frame::new(chunk, 0);
+        let mut frame = Frame::new(chunk, 0, self.current_source);
         self.run(&mut frame)
+    }
+
+    /// Executes a chunk of bytecode with a specific source ID.
+    ///
+    /// This is a convenience method that sets the source ID before execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if execution fails.
+    #[inline]
+    pub fn execute_with_source(
+        &mut self,
+        chunk: &Chunk,
+        source: source::Id,
+    ) -> Result<Value, Error> {
+        self.set_source(source);
+        self.execute(chunk)
     }
 
     /// Executes a chunk of bytecode with initial argument values.
@@ -196,7 +232,7 @@ impl<'interner> Vm<'interner> {
         // Reset call depth
         self.call_depth = 0;
 
-        let mut frame = Frame::new(chunk, 0);
+        let mut frame = Frame::new(chunk, 0, self.current_source);
         self.run(&mut frame)
     }
 
@@ -209,11 +245,13 @@ impl<'interner> Vm<'interner> {
             };
 
             let Some(opcode) = decode_op(instruction) else {
-                return Err(Error::InvalidOpcode {
-                    byte: decode_opcode_byte(instruction),
-                    pc: frame.pc().saturating_sub(1),
-                    span: frame.current_span(),
-                });
+                return Err(Error::new(
+                    ErrorKind::InvalidOpcode {
+                        byte: decode_opcode_byte(instruction),
+                        pc: frame.pc().saturating_sub(1),
+                    },
+                    frame.current_location(),
+                ));
             };
 
             match opcode {
@@ -266,11 +304,13 @@ impl<'interner> Vm<'interner> {
 
                 // Handle future Opcode variants (Opcode is #[non_exhaustive])
                 _ => {
-                    return Err(Error::InvalidOpcode {
-                        byte: decode_opcode_byte(instruction),
-                        pc: frame.pc().saturating_sub(1),
-                        span: frame.current_span(),
-                    });
+                    return Err(Error::new(
+                        ErrorKind::InvalidOpcode {
+                            byte: decode_opcode_byte(instruction),
+                            pc: frame.pc().saturating_sub(1),
+                        },
+                        frame.current_location(),
+                    ));
                 }
             }
         }
@@ -283,13 +323,12 @@ impl<'interner> Vm<'interner> {
     /// Gets a value from a register.
     pub(super) fn get_register(&self, index: u8, frame: &Frame<'_>) -> Result<Value, Error> {
         let absolute_index = frame.base().saturating_add(usize::from(index));
-        self.registers
-            .get(absolute_index)
-            .cloned()
-            .ok_or_else(|| Error::InvalidRegister {
-                index,
-                span: frame.current_span(),
-            })
+        self.registers.get(absolute_index).cloned().ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidRegister { index },
+                frame.current_location(),
+            )
+        })
     }
 
     /// Sets a value in a register.
@@ -300,13 +339,12 @@ impl<'interner> Vm<'interner> {
         frame: &Frame<'_>,
     ) -> Result<(), Error> {
         let absolute_index = frame.base().saturating_add(usize::from(index));
-        let reg = self
-            .registers
-            .get_mut(absolute_index)
-            .ok_or_else(|| Error::InvalidRegister {
-                index,
-                span: frame.current_span(),
-            })?;
+        let reg = self.registers.get_mut(absolute_index).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidRegister { index },
+                frame.current_location(),
+            )
+        })?;
         *reg = value;
         Ok(())
     }
@@ -333,12 +371,12 @@ impl<'interner> Vm<'interner> {
         index: u16,
         frame: &Frame<'_>,
     ) -> Result<Value, Error> {
-        let constant = chunk
-            .get_constant(index)
-            .ok_or_else(|| Error::InvalidConstant {
-                index,
-                span: frame.current_span(),
-            })?;
+        let constant = chunk.get_constant(index).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidConstant { index },
+                frame.current_location(),
+            )
+        })?;
 
         Self::convert_constant(constant)
     }
@@ -385,12 +423,12 @@ impl<'interner> Vm<'interner> {
         index: u16,
         frame: &Frame<'_>,
     ) -> Result<Value, Error> {
-        let constant = chunk
-            .get_constant(index)
-            .ok_or_else(|| Error::InvalidConstant {
-                index,
-                span: frame.current_span(),
-            })?;
+        let constant = chunk.get_constant(index).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidConstant { index },
+                frame.current_location(),
+            )
+        })?;
 
         Self::convert_simple_constant(constant)
     }
@@ -426,12 +464,12 @@ impl<'interner> Vm<'interner> {
         index: u16,
         frame: &Frame<'_>,
     ) -> Result<symbol::Id, Error> {
-        let constant = chunk
-            .get_constant(index)
-            .ok_or_else(|| Error::InvalidConstant {
-                index,
-                span: frame.current_span(),
-            })?;
+        let constant = chunk.get_constant(index).ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidConstant { index },
+                frame.current_location(),
+            )
+        })?;
 
         match *constant {
             Constant::Symbol(id) => Ok(id),
@@ -442,11 +480,30 @@ impl<'interner> Vm<'interner> {
             | Constant::String(_)
             | Constant::List(_)
             | Constant::Vector(_)
-            | _ => Err(Error::TypeError {
-                expected: "symbol",
-                got: constant_type_name(constant),
-                span: frame.current_span(),
-            }),
+            | _ => Err(Error::new(
+                ErrorKind::TypeError {
+                    operation: "symbol lookup",
+                    expected: TypeExpectation::Symbol,
+                    got: constant_type_name_to_kind(constant),
+                    operand: None,
+                },
+                frame.current_location(),
+            )),
         }
+    }
+}
+
+/// Converts a constant type name to a `value::Kind` for error reporting.
+const fn constant_type_name_to_kind(constant: &Constant) -> value::Kind {
+    match *constant {
+        Constant::Nil => value::Kind::Nil,
+        Constant::Bool(_) => value::Kind::Bool,
+        Constant::Integer(_) => value::Kind::Integer,
+        Constant::Float(_) => value::Kind::Float,
+        Constant::String(_) => value::Kind::String,
+        Constant::Symbol(_) => value::Kind::Symbol,
+        Constant::List(_) => value::Kind::List,
+        Constant::Vector(_) => value::Kind::Vector,
+        Constant::Function { .. } | _ => value::Kind::Function,
     }
 }

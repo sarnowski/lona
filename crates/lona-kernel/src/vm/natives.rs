@@ -6,13 +6,18 @@
 //! Provides infrastructure for registering and calling Rust functions
 //! from Lonala code. Native functions are used for primitives like
 //! `print`, arithmetic operations, and I/O.
+//!
+//! # Error Handling
+//!
+//! Native functions use [`NativeError`] for structured error reporting.
+//! These errors use typed context (like `value::Kind`) instead of strings,
+//! and formatting is centralized in `lonala-human`.
 
 use alloc::collections::BTreeMap;
 
-use core::fmt::{self, Display};
-
+use lona_core::error_context::{ArityExpectation, TypeExpectation};
 use lona_core::symbol::{self, Interner};
-use lona_core::value::Value;
+use lona_core::value::{self, Value};
 use lonala_compiler::MacroRegistry;
 
 /// Context passed to native functions during execution.
@@ -67,48 +72,42 @@ impl<'vm> NativeContext<'vm> {
 pub type NativeFn = fn(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError>;
 
 /// Errors that can occur in native functions.
+///
+/// Uses structured types instead of strings for consistent formatting
+/// via `lonala-human`. This type does NOT implement `Display`; all
+/// formatting is centralized.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NativeError {
     /// Wrong number of arguments.
     ArityMismatch {
         /// Expected number of arguments.
-        expected: usize,
+        expected: ArityExpectation,
         /// Actual number of arguments provided.
-        got: usize,
+        got: u8,
     },
     /// Type error in argument.
     TypeError {
-        /// Expected type name.
-        expected: &'static str,
-        /// Actual type name.
-        got: &'static str,
+        /// Expected type(s).
+        expected: TypeExpectation,
+        /// Actual type encountered.
+        got: value::Kind,
         /// Zero-based argument index.
-        arg_index: usize,
+        arg_index: u8,
     },
-    /// Generic error with message.
+    /// Generic error with message (for cases where structured data isn't available).
     Error(&'static str),
 }
 
-impl Display for NativeError {
+impl NativeError {
+    /// Returns the variant name for error identification.
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    #[must_use]
+    pub const fn variant_name(&self) -> &'static str {
         match *self {
-            Self::ArityMismatch { expected, got } => {
-                write!(f, "expected {expected} arguments, got {got}")
-            }
-            Self::TypeError {
-                expected,
-                got,
-                arg_index,
-            } => {
-                write!(
-                    f,
-                    "argument {}: expected {expected}, got {got}",
-                    arg_index.saturating_add(1)
-                )
-            }
-            Self::Error(msg) => write!(f, "{msg}"),
+            Self::ArityMismatch { .. } => "ArityMismatch",
+            Self::TypeError { .. } => "TypeError",
+            Self::Error(_) => "Error",
         }
     }
 }
@@ -183,30 +182,28 @@ mod tests {
     fn test_add(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
         if args.len() != 2_usize {
             return Err(NativeError::ArityMismatch {
-                expected: 2,
-                got: args.len(),
+                expected: ArityExpectation::Exact(2_u8),
+                got: u8::try_from(args.len()).unwrap_or(u8::MAX),
             });
         }
 
-        let a = args
-            .first()
-            .and_then(Value::as_integer)
-            .ok_or(NativeError::TypeError {
-                expected: "integer",
-                got: "non-integer",
-                arg_index: 0,
-            })?;
+        let a_val = args.first().ok_or(NativeError::Error("missing argument"))?;
+        let left = a_val.as_integer().ok_or(NativeError::TypeError {
+            expected: TypeExpectation::Single(value::Kind::Integer),
+            got: a_val.kind(),
+            arg_index: 0_u8,
+        })?;
 
-        let b = args
+        let b_val = args
             .get(1_usize)
-            .and_then(Value::as_integer)
-            .ok_or(NativeError::TypeError {
-                expected: "integer",
-                got: "non-integer",
-                arg_index: 1,
-            })?;
+            .ok_or(NativeError::Error("missing argument"))?;
+        let right = b_val.as_integer().ok_or(NativeError::TypeError {
+            expected: TypeExpectation::Single(value::Kind::Integer),
+            got: b_val.kind(),
+            arg_index: 1_u8,
+        })?;
 
-        Ok(Value::Integer(a + b))
+        Ok(Value::Integer(left + right))
     }
 
     /// Native function that returns nil.
@@ -261,8 +258,8 @@ mod tests {
         assert!(matches!(
             result,
             Err(NativeError::ArityMismatch {
-                expected: 2,
-                got: 1
+                expected: ArityExpectation::Exact(2_u8),
+                got: 1_u8
             })
         ));
     }
@@ -275,14 +272,18 @@ mod tests {
             &[Value::Bool(true), Value::Integer(Integer::from_i64(2))],
             &ctx,
         );
-        assert!(matches!(
-            result,
+        match result {
             Err(NativeError::TypeError {
-                expected: "integer",
-                arg_index: 0,
-                ..
-            })
-        ));
+                expected,
+                got,
+                arg_index,
+            }) => {
+                assert_eq!(expected, TypeExpectation::Single(value::Kind::Integer));
+                assert_eq!(got, value::Kind::Bool);
+                assert_eq!(arg_index, 0_u8);
+            }
+            _ => panic!("Expected TypeError"),
+        }
     }
 
     #[test]
@@ -320,27 +321,24 @@ mod tests {
     }
 
     #[test]
-    fn native_error_display() {
-        let err = NativeError::ArityMismatch {
-            expected: 2,
-            got: 3,
-        };
-        let msg = alloc::format!("{err}");
-        assert!(msg.contains("expected 2"));
-        assert!(msg.contains("got 3"));
-
-        let err = NativeError::TypeError {
-            expected: "integer",
-            got: "boolean",
-            arg_index: 0,
-        };
-        let msg = alloc::format!("{err}");
-        assert!(msg.contains("argument 1"));
-        assert!(msg.contains("integer"));
-        assert!(msg.contains("boolean"));
-
-        let err = NativeError::Error("custom error");
-        let msg = alloc::format!("{err}");
-        assert!(msg.contains("custom error"));
+    fn native_error_variant_name() {
+        assert_eq!(
+            NativeError::ArityMismatch {
+                expected: ArityExpectation::Exact(2_u8),
+                got: 3_u8
+            }
+            .variant_name(),
+            "ArityMismatch"
+        );
+        assert_eq!(
+            NativeError::TypeError {
+                expected: TypeExpectation::Numeric,
+                got: value::Kind::Bool,
+                arg_index: 0_u8
+            }
+            .variant_name(),
+            "TypeError"
+        );
+        assert_eq!(NativeError::Error("test").variant_name(), "Error");
     }
 }

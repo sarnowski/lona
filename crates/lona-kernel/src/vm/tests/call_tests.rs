@@ -4,15 +4,16 @@
 //! Tests for function calls.
 
 use lona_core::chunk::Constant;
+use lona_core::error_context::{ArityExpectation, TypeExpectation};
 use lona_core::integer::Integer;
 use lona_core::opcode::{Opcode, encode_abc, encode_abx};
 use lona_core::span::Span;
 use lona_core::symbol::Interner;
-use lona_core::value::Value;
+use lona_core::value::{self, Value};
 
 use super::{make_chunk, make_vm};
 use crate::vm::NativeError;
-use crate::vm::error::Error;
+use crate::vm::error::{Error, Kind as ErrorKind};
 use crate::vm::interpreter::Vm;
 use crate::vm::natives::NativeContext;
 
@@ -111,17 +112,17 @@ fn execute_native_function() {
     fn native_double(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
         if args.len() != 1_usize {
             return Err(NativeError::ArityMismatch {
-                expected: 1,
-                got: args.len(),
+                expected: ArityExpectation::Exact(1_u8),
+                got: u8::try_from(args.len()).unwrap_or(u8::MAX),
             });
         }
         let num = args
             .first()
             .and_then(Value::as_integer)
             .ok_or(NativeError::TypeError {
-                expected: "integer",
-                got: "non-integer",
-                arg_index: 0,
+                expected: TypeExpectation::Single(value::Kind::Integer),
+                got: args.first().map_or(value::Kind::Nil, Value::kind),
+                arg_index: 0_u8,
             })?;
         Ok(Value::Integer(num * &Integer::from_i64(2)))
     }
@@ -184,7 +185,13 @@ fn execute_undefined_function_error() {
     );
 
     let result = vm.execute(&chunk);
-    assert!(matches!(result, Err(Error::UndefinedFunction { .. })));
+    assert!(matches!(
+        result,
+        Err(Error {
+            kind: ErrorKind::UndefinedFunction { .. },
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -206,5 +213,11 @@ fn execute_call_non_symbol_error() {
     );
 
     let result = vm.execute(&chunk);
-    assert!(matches!(result, Err(Error::NotCallable { .. })));
+    assert!(matches!(
+        result,
+        Err(Error {
+            kind: ErrorKind::NotCallable { .. },
+            ..
+        })
+    ));
 }

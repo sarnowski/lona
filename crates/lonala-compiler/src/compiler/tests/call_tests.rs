@@ -9,9 +9,9 @@ use lona_core::chunk::Constant;
 use lona_core::opcode::{Opcode, decode_a, decode_b, decode_c, decode_op};
 use lona_core::symbol;
 
-use super::compile_with_interner;
+use super::{TEST_SOURCE_ID, compile_with_interner};
 use crate::compiler::{CompileError, compile};
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind};
 
 // =========================================================================
 // Function Call Tests
@@ -117,10 +117,14 @@ fn compile_print_string() {
 #[test]
 fn compile_empty_call_error() {
     let mut interner = symbol::Interner::new();
-    let result = compile("()", &mut interner);
+    let result = compile("()", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::EmptyCall { .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::EmptyCall,
+        ..
+    })) = result
+    {
         // Expected
     } else {
         panic!("expected EmptyCall error");

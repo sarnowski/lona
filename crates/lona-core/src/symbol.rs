@@ -18,6 +18,16 @@ use alloc::{collections::BTreeMap, string::String, vec::Vec};
 pub struct Id(u32);
 
 impl Id {
+    /// Creates a new symbol ID from a raw index.
+    ///
+    /// This is primarily for testing and internal use. Normal code should
+    /// use [`Interner::intern`] to create symbol IDs.
+    #[inline]
+    #[must_use]
+    pub const fn new(index: u32) -> Self {
+        Self(index)
+    }
+
     /// Returns the raw numeric identifier.
     #[inline]
     #[must_use]

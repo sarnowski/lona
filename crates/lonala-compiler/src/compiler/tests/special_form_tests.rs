@@ -7,9 +7,9 @@ use lona_core::chunk::Constant;
 use lona_core::opcode::{Opcode, decode_bx, decode_op};
 use lona_core::symbol;
 
-use super::{compile_source, compile_with_interner};
+use super::{TEST_SOURCE_ID, compile_source, compile_with_interner};
 use crate::compiler::{CompileError, compile};
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind};
 
 // =========================================================================
 // Special Form: do
@@ -181,10 +181,14 @@ fn compile_if_with_expressions() {
 #[test]
 fn compile_if_invalid_no_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(if)", &mut interner);
+    let result = compile("(if)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "if");
     } else {
         panic!("expected InvalidSpecialForm error for if");
@@ -194,10 +198,14 @@ fn compile_if_invalid_no_args() {
 #[test]
 fn compile_if_invalid_one_arg() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(if true)", &mut interner);
+    let result = compile("(if true)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "if");
     } else {
         panic!("expected InvalidSpecialForm error for if");
@@ -207,10 +215,14 @@ fn compile_if_invalid_one_arg() {
 #[test]
 fn compile_if_invalid_four_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(if true 1 2 3)", &mut interner);
+    let result = compile("(if true 1 2 3)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "if");
     } else {
         panic!("expected InvalidSpecialForm error for if");
@@ -326,10 +338,14 @@ fn compile_def_multiple() {
 #[test]
 fn compile_def_invalid_no_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(def)", &mut interner);
+    let result = compile("(def)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "def");
     } else {
         panic!("expected InvalidSpecialForm error for def");
@@ -339,10 +355,14 @@ fn compile_def_invalid_no_args() {
 #[test]
 fn compile_def_invalid_one_arg() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(def x)", &mut interner);
+    let result = compile("(def x)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "def");
     } else {
         panic!("expected InvalidSpecialForm error for def");
@@ -352,10 +372,14 @@ fn compile_def_invalid_one_arg() {
 #[test]
 fn compile_def_invalid_three_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(def x 1 2)", &mut interner);
+    let result = compile("(def x 1 2)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "def");
     } else {
         panic!("expected InvalidSpecialForm error for def");
@@ -365,10 +389,14 @@ fn compile_def_invalid_three_args() {
 #[test]
 fn compile_def_invalid_non_symbol_name() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(def 42 1)", &mut interner);
+    let result = compile("(def 42 1)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    })) = result
+    {
         assert_eq!(form, "def");
         assert!(message.contains("symbol"));
     } else {
@@ -466,10 +494,14 @@ fn compile_let_empty_body() {
 #[test]
 fn compile_let_invalid_no_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(let)", &mut interner);
+    let result = compile("(let)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "let");
     } else {
         panic!("expected InvalidSpecialForm error for let");
@@ -479,10 +511,14 @@ fn compile_let_invalid_no_args() {
 #[test]
 fn compile_let_invalid_non_vector_bindings() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(let (x 1) x)", &mut interner);
+    let result = compile("(let (x 1) x)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    })) = result
+    {
         assert_eq!(form, "let");
         assert!(message.contains("vector"));
     } else {
@@ -493,10 +529,14 @@ fn compile_let_invalid_non_vector_bindings() {
 #[test]
 fn compile_let_invalid_odd_bindings() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(let [x 1 y] x)", &mut interner);
+    let result = compile("(let [x 1 y] x)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    })) = result
+    {
         assert_eq!(form, "let");
         assert!(message.contains("pairs"));
     } else {
@@ -507,10 +547,14 @@ fn compile_let_invalid_odd_bindings() {
 #[test]
 fn compile_let_invalid_non_symbol_binding_name() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(let [42 1] 0)", &mut interner);
+    let result = compile("(let [42 1] 0)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    })) = result
+    {
         assert_eq!(form, "let");
         assert!(message.contains("symbol"));
     } else {
@@ -650,10 +694,14 @@ fn compile_quote_prevents_evaluation() {
 #[test]
 fn compile_quote_invalid_no_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(quote)", &mut interner);
+    let result = compile("(quote)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "quote");
     } else {
         panic!("expected InvalidSpecialForm error for quote");
@@ -663,10 +711,14 @@ fn compile_quote_invalid_no_args() {
 #[test]
 fn compile_quote_invalid_two_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(quote a b)", &mut interner);
+    let result = compile("(quote a b)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "quote");
     } else {
         panic!("expected InvalidSpecialForm error for quote with two args");
@@ -802,10 +854,14 @@ fn compile_syntax_quote_vector() {
 #[test]
 fn compile_unquote_outside_syntax_quote_error() {
     let mut interner = symbol::Interner::new();
-    let result = compile("~x", &mut interner);
+    let result = compile("~x", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    })) = result
+    {
         assert_eq!(form, "unquote");
         assert!(message.contains("not inside syntax-quote"));
     } else {
@@ -816,10 +872,14 @@ fn compile_unquote_outside_syntax_quote_error() {
 #[test]
 fn compile_unquote_splicing_outside_syntax_quote_error() {
     let mut interner = symbol::Interner::new();
-    let result = compile("~@x", &mut interner);
+    let result = compile("~@x", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, message, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    })) = result
+    {
         assert_eq!(form, "unquote-splicing");
         assert!(message.contains("not inside syntax-quote"));
     } else {
@@ -830,10 +890,14 @@ fn compile_unquote_splicing_outside_syntax_quote_error() {
 #[test]
 fn compile_syntax_quote_invalid_no_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(syntax-quote)", &mut interner);
+    let result = compile("(syntax-quote)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "syntax-quote");
     } else {
         panic!("expected InvalidSpecialForm error for syntax-quote");
@@ -843,10 +907,14 @@ fn compile_syntax_quote_invalid_no_args() {
 #[test]
 fn compile_syntax_quote_invalid_two_args() {
     let mut interner = symbol::Interner::new();
-    let result = compile("(syntax-quote a b)", &mut interner);
+    let result = compile("(syntax-quote a b)", TEST_SOURCE_ID, &mut interner);
     assert!(result.is_err());
 
-    if let Err(CompileError::Compile(Error::InvalidSpecialForm { form, .. })) = result {
+    if let Err(CompileError::Compile(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, .. },
+        ..
+    })) = result
+    {
         assert_eq!(form, "syntax-quote");
     } else {
         panic!("expected InvalidSpecialForm error for syntax-quote with two args");

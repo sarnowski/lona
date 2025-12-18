@@ -4,13 +4,15 @@
 //! Call frame for tracking execution state within a function.
 
 use lona_core::chunk::Chunk;
+use lona_core::source::{self, Location as SourceLocation};
 use lona_core::span::Span;
 
 /// A call frame representing execution state within a single function.
 ///
 /// Each function call creates a new frame on the call stack. The frame
-/// tracks the bytecode being executed, the program counter, and the
-/// base register for this function's local variables.
+/// tracks the bytecode being executed, the program counter, the base
+/// register for this function's local variables, and the source ID for
+/// error reporting.
 #[derive(Debug)]
 pub struct Frame<'chunk> {
     /// The bytecode chunk being executed.
@@ -19,6 +21,8 @@ pub struct Frame<'chunk> {
     pc: usize,
     /// Base register index: where this function's registers start.
     base: usize,
+    /// Source ID for error reporting.
+    source: source::Id,
 }
 
 impl<'chunk> Frame<'chunk> {
@@ -27,10 +31,16 @@ impl<'chunk> Frame<'chunk> {
     /// # Parameters
     /// - `chunk`: The bytecode to execute
     /// - `base`: The base register index for this frame's locals
+    /// - `source`: The source ID for error reporting
     #[inline]
     #[must_use]
-    pub const fn new(chunk: &'chunk Chunk, base: usize) -> Self {
-        Self { chunk, pc: 0, base }
+    pub const fn new(chunk: &'chunk Chunk, base: usize, source: source::Id) -> Self {
+        Self {
+            chunk,
+            pc: 0,
+            base,
+            source,
+        }
     }
 
     /// Returns the chunk being executed.
@@ -52,6 +62,13 @@ impl<'chunk> Frame<'chunk> {
     #[must_use]
     pub const fn base(&self) -> usize {
         self.base
+    }
+
+    /// Returns the source ID for this frame.
+    #[inline]
+    #[must_use]
+    pub const fn source(&self) -> source::Id {
+        self.source
     }
 
     /// Fetches the next instruction and advances the program counter.
@@ -104,6 +121,15 @@ impl<'chunk> Frame<'chunk> {
             .unwrap_or_else(|| Span::new(0_usize, 0_usize))
     }
 
+    /// Returns the full source location for the current instruction.
+    ///
+    /// Combines the source ID with the current span for complete error context.
+    #[inline]
+    #[must_use]
+    pub fn current_location(&self) -> SourceLocation {
+        SourceLocation::new(self.source, self.current_span())
+    }
+
     /// Returns the source span for the instruction at the given index.
     #[inline]
     #[must_use]
@@ -111,6 +137,13 @@ impl<'chunk> Frame<'chunk> {
         self.chunk
             .span_at(index)
             .unwrap_or_else(|| Span::new(0_usize, 0_usize))
+    }
+
+    /// Returns the full source location for the instruction at the given index.
+    #[inline]
+    #[must_use]
+    pub fn location_at(&self, index: usize) -> SourceLocation {
+        SourceLocation::new(self.source, self.span_at(index))
     }
 
     /// Returns `true` if execution has reached the end of the chunk.
@@ -136,15 +169,21 @@ mod tests {
         chunk
     }
 
+    /// Default test source ID.
+    fn test_source() -> source::Id {
+        source::Id::new(0_u32)
+    }
+
     #[test]
     fn new_frame_starts_at_pc_zero() {
         let chunk = make_chunk(&[(
             encode_abc(Opcode::Return, 0, 0, 0),
             Span::new(0_usize, 1_usize),
         )]);
-        let frame = Frame::new(&chunk, 0);
+        let frame = Frame::new(&chunk, 0, test_source());
         assert_eq!(frame.pc(), 0);
         assert_eq!(frame.base(), 0);
+        assert_eq!(frame.source(), test_source());
     }
 
     #[test]
@@ -155,7 +194,7 @@ mod tests {
             (instr1, Span::new(0_usize, 4_usize)),
             (instr2, Span::new(4_usize, 10_usize)),
         ]);
-        let mut frame = Frame::new(&chunk, 0);
+        let mut frame = Frame::new(&chunk, 0, test_source());
 
         assert_eq!(frame.fetch(), Some(instr1));
         assert_eq!(frame.pc(), 1);
@@ -170,22 +209,25 @@ mod tests {
     #[test]
     fn fetch_on_empty_chunk_returns_none() {
         let chunk = Chunk::new();
-        let mut frame = Frame::new(&chunk, 0);
+        let mut frame = Frame::new(&chunk, 0, test_source());
         assert_eq!(frame.fetch(), None);
     }
 
     #[test]
     fn jump_positive_offset() {
         let instructions: Vec<(u32, Span)> = (0_u8..10)
-            .map(|i| {
+            .map(|iter_idx| {
                 (
-                    encode_abc(Opcode::LoadNil, i, 0, 0),
-                    Span::new(usize::from(i), usize::from(i).saturating_add(1)),
+                    encode_abc(Opcode::LoadNil, iter_idx, 0, 0),
+                    Span::new(
+                        usize::from(iter_idx),
+                        usize::from(iter_idx).saturating_add(1),
+                    ),
                 )
             })
             .collect();
         let chunk = make_chunk(&instructions);
-        let mut frame = Frame::new(&chunk, 0);
+        let mut frame = Frame::new(&chunk, 0, test_source());
 
         frame.jump(5);
         assert_eq!(frame.pc(), 5);
@@ -194,15 +236,18 @@ mod tests {
     #[test]
     fn jump_negative_offset() {
         let instructions: Vec<(u32, Span)> = (0_u8..10)
-            .map(|i| {
+            .map(|iter_idx| {
                 (
-                    encode_abc(Opcode::LoadNil, i, 0, 0),
-                    Span::new(usize::from(i), usize::from(i).saturating_add(1)),
+                    encode_abc(Opcode::LoadNil, iter_idx, 0, 0),
+                    Span::new(
+                        usize::from(iter_idx),
+                        usize::from(iter_idx).saturating_add(1),
+                    ),
                 )
             })
             .collect();
         let chunk = make_chunk(&instructions);
-        let mut frame = Frame::new(&chunk, 0);
+        let mut frame = Frame::new(&chunk, 0, test_source());
 
         // Move to position 7
         frame.jump(7);
@@ -219,7 +264,7 @@ mod tests {
             encode_abc(Opcode::Return, 0, 0, 0),
             Span::new(0_usize, 1_usize),
         )]);
-        let mut frame = Frame::new(&chunk, 0);
+        let mut frame = Frame::new(&chunk, 0, test_source());
 
         // Try to jump before start - should saturate at 0
         frame.jump(-100);
@@ -234,7 +279,7 @@ mod tests {
             (encode_abc(Opcode::LoadTrue, 0, 0, 0), span1),
             (encode_abc(Opcode::Return, 0, 1, 0), span2),
         ]);
-        let mut frame = Frame::new(&chunk, 0);
+        let mut frame = Frame::new(&chunk, 0, test_source());
 
         let _instr = frame.fetch();
         assert_eq!(frame.current_span(), span1);
@@ -244,12 +289,26 @@ mod tests {
     }
 
     #[test]
+    fn current_location_combines_source_and_span() {
+        let span = Span::new(5_usize, 15_usize);
+        let source_id = source::Id::new(42_u32);
+        let chunk = make_chunk(&[(encode_abc(Opcode::LoadTrue, 0, 0, 0), span)]);
+        let mut frame = Frame::new(&chunk, 0, source_id);
+
+        let _instr = frame.fetch();
+        let location = frame.current_location();
+
+        assert_eq!(location.source, source_id);
+        assert_eq!(location.span, span);
+    }
+
+    #[test]
     fn is_at_end() {
         let chunk = make_chunk(&[(
             encode_abc(Opcode::Return, 0, 0, 0),
             Span::new(0_usize, 1_usize),
         )]);
-        let mut frame = Frame::new(&chunk, 0);
+        let mut frame = Frame::new(&chunk, 0, test_source());
 
         assert!(!frame.is_at_end());
         let _instr = frame.fetch();
@@ -262,7 +321,27 @@ mod tests {
             encode_abc(Opcode::Return, 0, 0, 0),
             Span::new(0_usize, 1_usize),
         )]);
-        let frame = Frame::new(&chunk, 10);
+        let frame = Frame::new(&chunk, 10, test_source());
         assert_eq!(frame.base(), 10);
+    }
+
+    #[test]
+    fn location_at_specific_index() {
+        let span1 = Span::new(0_usize, 5_usize);
+        let span2 = Span::new(5_usize, 10_usize);
+        let source_id = source::Id::new(7_u32);
+        let chunk = make_chunk(&[
+            (encode_abc(Opcode::LoadNil, 0, 0, 0), span1),
+            (encode_abc(Opcode::Return, 0, 0, 0), span2),
+        ]);
+        let frame = Frame::new(&chunk, 0, source_id);
+
+        let loc0 = frame.location_at(0);
+        assert_eq!(loc0.source, source_id);
+        assert_eq!(loc0.span, span1);
+
+        let loc1 = frame.location_at(1);
+        assert_eq!(loc1.source, source_id);
+        assert_eq!(loc1.span, span2);
     }
 }

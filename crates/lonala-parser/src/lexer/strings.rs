@@ -20,7 +20,7 @@ impl<'src> Lexer<'src> {
                 None => {
                     return Err(Error::new(
                         ErrorKind::UnterminatedString,
-                        Span::new(start, self.position),
+                        self.location_from(start, self.position),
                     ));
                 }
                 Some('"') => {
@@ -33,7 +33,7 @@ impl<'src> Lexer<'src> {
                         None => {
                             return Err(Error::new(
                                 ErrorKind::UnterminatedString,
-                                Span::new(start, self.position),
+                                self.location_from(start, self.position),
                             ));
                         }
                         Some('\\' | '"' | 'n' | 't' | 'r' | '0') => {
@@ -50,7 +50,7 @@ impl<'src> Lexer<'src> {
                                     _ => {
                                         return Err(Error::new(
                                             ErrorKind::InvalidUnicodeEscape,
-                                            Span::new(start, self.position),
+                                            self.location_from(start, self.position),
                                         ));
                                     }
                                 }
@@ -59,7 +59,7 @@ impl<'src> Lexer<'src> {
                         Some(ch) => {
                             return Err(Error::new(
                                 ErrorKind::InvalidEscapeSequence(ch),
-                                Span::new(start, self.position),
+                                self.location_from(start, self.position),
                             ));
                         }
                     }
@@ -87,7 +87,7 @@ impl<'src> Lexer<'src> {
             // Bare colon is an error
             return Err(Error::new(
                 ErrorKind::UnexpectedCharacter(':'),
-                Span::new(start, self.position),
+                self.location_from(start, self.position),
             ));
         }
 

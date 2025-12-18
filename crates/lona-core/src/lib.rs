@@ -11,10 +11,12 @@
 //! # Modules
 //!
 //! - [`allocator`] - Memory allocation primitives including a bump allocator
+//! - [`error_context`] - Shared types for structured error messages
 //! - [`integer`] - Hybrid arbitrary-precision integers (requires `alloc` feature)
 //! - [`list`] - Cons-cell linked lists (requires `alloc` feature)
 //! - [`map`] - Immutable maps using HAMT (requires `alloc` feature)
 //! - [`ratio`] - Exact rational numbers (requires `alloc` feature)
+//! - [`source`] - Source tracking for error reporting (requires `alloc` feature)
 //! - [`string`] - Immutable reference-counted strings (requires `alloc` feature)
 //! - [`symbol`] - Symbol interning for efficient identifier handling
 //! - [`value`] - Core value types for the Lonala language
@@ -28,6 +30,7 @@ extern crate alloc;
 pub mod allocator;
 #[cfg(feature = "alloc")]
 pub mod chunk;
+pub mod error_context;
 #[cfg(feature = "alloc")]
 mod fnv;
 #[cfg(feature = "alloc")]
@@ -43,6 +46,8 @@ pub mod opcode;
 mod pvec;
 #[cfg(feature = "alloc")]
 pub mod ratio;
+#[cfg(feature = "alloc")]
+pub mod source;
 pub mod span;
 #[cfg(feature = "alloc")]
 pub mod string;

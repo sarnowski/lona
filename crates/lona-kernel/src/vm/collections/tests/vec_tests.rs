@@ -5,12 +5,14 @@
 
 use alloc::vec::Vec;
 
+use lona_core::error_context::{ArityExpectation, TypeExpectation};
 use lona_core::list::List;
+use lona_core::map::Map;
 use lona_core::symbol::Interner;
-use lona_core::value::Value;
+use lona_core::value::{self, Value};
 use lona_core::vector::Vector;
 
-use super::{ctx, int};
+use super::{ctx, int, string};
 use crate::vm::collections::native_vec;
 use crate::vm::natives::NativeError;
 
@@ -63,6 +65,28 @@ fn vec_from_vector() {
 }
 
 #[test]
+fn vec_from_map() {
+    let interner = Interner::new();
+    let map = Map::from_pairs(alloc::vec![(string("a"), int(1)), (string("b"), int(2))]);
+    let args = alloc::vec![Value::Map(map)];
+
+    let result = native_vec(&args, &ctx(&interner)).unwrap();
+
+    if let Value::Vector(vec) = result {
+        // Map entries become [key value] vectors
+        assert_eq!(vec.len(), 2);
+        // Each element should be a vector
+        if let Some(Value::Vector(entry)) = vec.get(0_usize) {
+            assert_eq!(entry.len(), 2);
+        } else {
+            panic!("Expected Vector entry");
+        }
+    } else {
+        panic!("Expected Vector");
+    }
+}
+
+#[test]
 fn vec_type_error() {
     let interner = Interner::new();
     let args = alloc::vec![int(42)];
@@ -72,9 +96,9 @@ fn vec_type_error() {
     assert!(matches!(
         result,
         Err(NativeError::TypeError {
-            expected: "list, vector, or nil",
-            got: "integer",
-            arg_index: 0
+            expected: TypeExpectation::Sequence,
+            got: value::Kind::Integer,
+            arg_index: 0_u8
         })
     ));
 }
@@ -89,8 +113,8 @@ fn vec_arity_error_too_few() {
     assert!(matches!(
         result,
         Err(NativeError::ArityMismatch {
-            expected: 1,
-            got: 0
+            expected: ArityExpectation::Exact(1_u8),
+            got: 0_u8
         })
     ));
 }
@@ -105,8 +129,8 @@ fn vec_arity_error_too_many() {
     assert!(matches!(
         result,
         Err(NativeError::ArityMismatch {
-            expected: 1,
-            got: 2
+            expected: ArityExpectation::Exact(1_u8),
+            got: 2_u8
         })
     ));
 }

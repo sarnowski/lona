@@ -9,8 +9,9 @@ use lona_core::chunk::Constant;
 use lona_core::opcode::{Opcode, decode_bx, decode_op};
 use lona_core::symbol;
 
+use super::TEST_SOURCE_ID;
 use crate::compiler::{MacroRegistry, compile};
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind};
 
 // =========================================================================
 // Special Form: defmacro
@@ -20,8 +21,8 @@ use crate::error::Error;
 fn defmacro_basic_definition() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
-    let exprs = lonala_parser::parse("(defmacro identity [x] x)").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse("(defmacro identity [x] x)", TEST_SOURCE_ID).unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let result = compiler.compile_program(&exprs);
     assert!(result.is_ok());
 }
@@ -30,8 +31,8 @@ fn defmacro_basic_definition() {
 fn defmacro_stores_in_registry() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
-    let exprs = lonala_parser::parse("(defmacro my-macro [x] x)").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse("(defmacro my-macro [x] x)", TEST_SOURCE_ID).unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let _chunk = compiler.compile_program(&exprs).unwrap();
 
     assert!(compiler.is_macro_by_name("my-macro"));
@@ -46,12 +47,16 @@ fn defmacro_requires_name() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
     // (defmacro [x] x) - first arg is vector, not symbol
-    let exprs = lonala_parser::parse("(defmacro [x] x)").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse("(defmacro [x] x)", TEST_SOURCE_ID).unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let result = compiler.compile_program(&exprs);
     assert!(result.is_err());
 
-    if let Err(Error::InvalidSpecialForm { form, message, .. }) = result {
+    if let Err(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    }) = result
+    {
         assert_eq!(form, "defmacro");
         assert!(message.contains("symbol"));
     } else {
@@ -64,12 +69,16 @@ fn defmacro_requires_params_vector() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
     // (defmacro foo x x) - params is symbol, not vector
-    let exprs = lonala_parser::parse("(defmacro foo x x)").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse("(defmacro foo x x)", TEST_SOURCE_ID).unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let result = compiler.compile_program(&exprs);
     assert!(result.is_err());
 
-    if let Err(Error::InvalidSpecialForm { form, message, .. }) = result {
+    if let Err(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    }) = result
+    {
         assert_eq!(form, "defmacro");
         assert!(message.contains("vector"));
     } else {
@@ -81,12 +90,16 @@ fn defmacro_requires_params_vector() {
 fn defmacro_requires_body() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
-    let exprs = lonala_parser::parse("(defmacro foo [x])").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse("(defmacro foo [x])", TEST_SOURCE_ID).unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let result = compiler.compile_program(&exprs);
     assert!(result.is_err());
 
-    if let Err(Error::InvalidSpecialForm { form, message, .. }) = result {
+    if let Err(Error {
+        kind: ErrorKind::InvalidSpecialForm { form, message },
+        ..
+    }) = result
+    {
         assert_eq!(form, "defmacro");
         assert!(message.contains("empty"));
     } else {
@@ -98,8 +111,8 @@ fn defmacro_requires_body() {
 fn defmacro_multiple_params() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
-    let exprs = lonala_parser::parse("(defmacro swap [a b] b)").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse("(defmacro swap [a b] b)", TEST_SOURCE_ID).unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let _chunk = compiler.compile_program(&exprs).unwrap();
 
     let macro_def = compiler.get_macro_by_name("swap").unwrap();
@@ -110,8 +123,8 @@ fn defmacro_multiple_params() {
 fn defmacro_zero_params() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
-    let exprs = lonala_parser::parse("(defmacro always-nil [] nil)").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse("(defmacro always-nil [] nil)", TEST_SOURCE_ID).unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let _chunk = compiler.compile_program(&exprs).unwrap();
 
     let macro_def = compiler.get_macro_by_name("always-nil").unwrap();
@@ -123,9 +136,12 @@ fn defmacro_with_quasiquote() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
     // unless macro that uses quasiquote
-    let exprs =
-        lonala_parser::parse("(defmacro unless [test body] `(if (not ~test) ~body nil))").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse(
+        "(defmacro unless [test body] `(if (not ~test) ~body nil))",
+        TEST_SOURCE_ID,
+    )
+    .unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let result = compiler.compile_program(&exprs);
     assert!(result.is_ok());
 
@@ -137,9 +153,12 @@ fn defmacro_multiple_body_expressions() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
     // Macro with multiple body expressions (last is return value)
-    let exprs =
-        lonala_parser::parse("(defmacro with-logging [expr] (print \"expanding\") expr)").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse(
+        "(defmacro with-logging [expr] (print \"expanding\") expr)",
+        TEST_SOURCE_ID,
+    )
+    .unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let result = compiler.compile_program(&exprs);
     assert!(result.is_ok());
 }
@@ -147,7 +166,7 @@ fn defmacro_multiple_body_expressions() {
 #[test]
 fn defmacro_returns_symbol() {
     let mut interner = symbol::Interner::new();
-    let chunk = compile("(defmacro foo [x] x)", &mut interner).unwrap();
+    let chunk = compile("(defmacro foo [x] x)", TEST_SOURCE_ID, &mut interner).unwrap();
     let code = chunk.code();
 
     // The defmacro expression should return the symbol 'foo.
@@ -172,8 +191,12 @@ fn defmacro_returns_symbol() {
 fn defmacro_multiple_definitions() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
-    let exprs = lonala_parser::parse("(do (defmacro foo [x] x) (defmacro bar [y] y))").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse(
+        "(do (defmacro foo [x] x) (defmacro bar [y] y))",
+        TEST_SOURCE_ID,
+    )
+    .unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let _chunk = compiler.compile_program(&exprs).unwrap();
 
     assert!(compiler.is_macro_by_name("foo"));
@@ -184,8 +207,12 @@ fn defmacro_multiple_definitions() {
 fn defmacro_redefine() {
     let mut interner = symbol::Interner::new();
     let mut registry = MacroRegistry::new();
-    let exprs = lonala_parser::parse("(do (defmacro foo [x] x) (defmacro foo [x y] y))").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs = lonala_parser::parse(
+        "(do (defmacro foo [x] x) (defmacro foo [x y] y))",
+        TEST_SOURCE_ID,
+    )
+    .unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let _chunk = compiler.compile_program(&exprs).unwrap();
 
     let macro_def = compiler.get_macro_by_name("foo").unwrap();
@@ -205,8 +232,8 @@ fn macro_call_without_expander_compiles_as_function_call() {
     let mut registry = MacroRegistry::new();
 
     // First, define a macro
-    let def_exprs = lonala_parser::parse("(defmacro my-macro [x] x)").unwrap();
-    let mut compiler = crate::Compiler::new(&mut interner, &mut registry);
+    let def_exprs = lonala_parser::parse("(defmacro my-macro [x] x)", TEST_SOURCE_ID).unwrap();
+    let mut compiler = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let _chunk = compiler.compile_program(&def_exprs).unwrap();
 
     // Verify macro is stored
@@ -214,8 +241,8 @@ fn macro_call_without_expander_compiles_as_function_call() {
 
     // Now compile code that calls the macro (without expander)
     // This should compile as a regular function call to "my-macro"
-    let call_exprs = lonala_parser::parse("(my-macro 42)").unwrap();
-    let mut compiler2 = crate::Compiler::new(&mut interner, &mut registry);
+    let call_exprs = lonala_parser::parse("(my-macro 42)", TEST_SOURCE_ID).unwrap();
+    let mut compiler2 = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let result = compiler2.compile_program(&call_exprs);
 
     // Should compile successfully (as a function call)
@@ -244,8 +271,12 @@ fn macro_registry_persists_across_compilations() {
     let mut registry = MacroRegistry::new();
 
     // First compilation: define macros
-    let exprs1 = lonala_parser::parse("(do (defmacro m1 [x] x) (defmacro m2 [x y] y))").unwrap();
-    let mut compiler1 = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs1 = lonala_parser::parse(
+        "(do (defmacro m1 [x] x) (defmacro m2 [x y] y))",
+        TEST_SOURCE_ID,
+    )
+    .unwrap();
+    let mut compiler1 = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let _chunk1 = compiler1.compile_program(&exprs1).unwrap();
 
     // Verify macros are in registry
@@ -254,8 +285,8 @@ fn macro_registry_persists_across_compilations() {
     assert!(registry.contains(interner.intern("m2")));
 
     // Second compilation: registry should still have the macros
-    let exprs2 = lonala_parser::parse("(+ 1 2)").unwrap();
-    let mut compiler2 = crate::Compiler::new(&mut interner, &mut registry);
+    let exprs2 = lonala_parser::parse("(+ 1 2)", TEST_SOURCE_ID).unwrap();
+    let mut compiler2 = crate::Compiler::new(&mut interner, &mut registry, TEST_SOURCE_ID);
     let _chunk2 = compiler2.compile_program(&exprs2).unwrap();
 
     // Macros should persist
@@ -271,9 +302,13 @@ fn compile_with_registry_stores_macros() {
     let mut registry = MacroRegistry::new();
 
     // Compile code that defines a macro
-    let _chunk =
-        crate::compile_with_registry("(defmacro test-macro [x] x)", &mut interner, &mut registry)
-            .unwrap();
+    let _chunk = crate::compile_with_registry(
+        "(defmacro test-macro [x] x)",
+        TEST_SOURCE_ID,
+        &mut interner,
+        &mut registry,
+    )
+    .unwrap();
 
     // Macro should be in registry
     assert!(registry.contains(interner.intern("test-macro")));
@@ -314,6 +349,7 @@ fn macro_expansion_with_mock_expander() {
     // First define the macro
     let _def_chunk = crate::compile_with_expansion(
         "(defmacro id [x] x)",
+        TEST_SOURCE_ID,
         &mut interner,
         &mut registry,
         &mut expander,
@@ -325,9 +361,14 @@ fn macro_expansion_with_mock_expander() {
 
     // Now compile code that uses the macro
     // (id 42) should expand to 42 (via mock expander)
-    let chunk =
-        crate::compile_with_expansion("(id 42)", &mut interner, &mut registry, &mut expander)
-            .unwrap();
+    let chunk = crate::compile_with_expansion(
+        "(id 42)",
+        TEST_SOURCE_ID,
+        &mut interner,
+        &mut registry,
+        &mut expander,
+    )
+    .unwrap();
 
     // The expanded code should just load 42 and return it
     let code = chunk.code();
@@ -368,6 +409,7 @@ fn macro_expansion_tracks_expansion_count() {
     // Define a macro
     let _def_chunk = crate::compile_with_expansion(
         "(defmacro test-macro [x] x)",
+        TEST_SOURCE_ID,
         &mut interner,
         &mut registry,
         &mut expander,
@@ -377,6 +419,7 @@ fn macro_expansion_tracks_expansion_count() {
     // Call the macro - expander returns 42, which terminates expansion
     let chunk = crate::compile_with_expansion(
         "(test-macro 1)",
+        TEST_SOURCE_ID,
         &mut interner,
         &mut registry,
         &mut expander,

@@ -74,7 +74,7 @@ impl<'src> Lexer<'src> {
         {
             return Err(Error::new(
                 ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
+                self.location_from(start, self.position),
             ));
         }
 
@@ -104,7 +104,7 @@ impl<'src> Lexer<'src> {
         {
             return Err(Error::new(
                 ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
+                self.location_from(start, self.position),
             ));
         }
 
@@ -134,7 +134,7 @@ impl<'src> Lexer<'src> {
         {
             return Err(Error::new(
                 ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
+                self.location_from(start, self.position),
             ));
         }
 
@@ -164,7 +164,7 @@ impl<'src> Lexer<'src> {
         {
             return Err(Error::new(
                 ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
+                self.location_from(start, self.position),
             ));
         }
 
@@ -210,7 +210,7 @@ impl<'src> Lexer<'src> {
         {
             return Err(Error::new(
                 ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
+                self.location_from(start, self.position),
             ));
         }
 

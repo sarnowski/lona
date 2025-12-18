@@ -20,9 +20,11 @@
 //! - Value-to-string output formatting
 //! - The main loop waiting for user input
 
+use alloc::format;
 use alloc::string::String;
 #[cfg(not(feature = "integration-test"))]
 use alloc::string::ToString;
+use lona_core::source;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
 use lona_kernel::vm::collections::{
@@ -35,6 +37,7 @@ use lona_kernel::vm::introspection::{
 };
 use lona_kernel::vm::{Globals, MacroExpander, Vm};
 use lonala_compiler::{MacroRegistry, compile_with_expansion};
+use lonala_human::{Config as FormatConfig, render as render_error};
 
 // =============================================================================
 // Core REPL (Always Available - Used by Both Tests and Production)
@@ -46,6 +49,7 @@ use lonala_compiler::{MacroRegistry, compile_with_expansion};
 /// - Symbol interner for sharing symbols between compiler and VM
 /// - Global variables defined with `def`
 /// - Macro definitions that persist across sessions
+/// - Source registry for error reporting with context
 ///
 /// # Macro Support
 ///
@@ -71,19 +75,26 @@ pub struct Repl {
     globals: Globals,
     /// Macro definitions that persist between evaluations.
     macros: MacroRegistry,
+    /// Source registry for error reporting with context.
+    sources: source::Registry,
+    /// Counter for naming REPL inputs (incremented per evaluation).
+    input_counter: u32,
 }
 
 impl Repl {
     /// Creates a new REPL instance with empty state.
     ///
     /// The REPL starts with an empty symbol interner, no global variables,
-    /// and no macro definitions. State defined via `def` and `defmacro`
-    /// during evaluation will persist across subsequent calls to [`eval`].
+    /// no macro definitions, and an empty source registry. State defined
+    /// via `def` and `defmacro` during evaluation will persist across
+    /// subsequent calls to [`eval`].
     pub const fn new() -> Self {
         Self {
             interner: Interner::new(),
             globals: Globals::new(),
             macros: MacroRegistry::new(),
+            sources: source::Registry::new(),
+            input_counter: 0_u32,
         }
     }
 
@@ -94,6 +105,10 @@ impl Repl {
     /// persistent state for globals defined with `def` and macros defined
     /// with `defmacro`.
     ///
+    /// Each evaluation registers its source in the source registry with a
+    /// unique name like `<repl:1>`, `<repl:2>`, etc. This enables error
+    /// messages to include source context.
+    ///
     /// # Macro Expansion
     ///
     /// Macros are expanded at compile time using the VM-based macro expander.
@@ -103,14 +118,27 @@ impl Repl {
     /// # Errors
     ///
     /// Returns an error string if compilation or execution fails.
-    pub fn eval(&mut self, source: &str) -> Result<Value, String> {
+    pub fn eval(&mut self, source_text: &str) -> Result<Value, String> {
+        // Increment input counter and register the source
+        self.input_counter = self.input_counter.saturating_add(1_u32);
+        let source_name = format!("<repl:{}>", self.input_counter);
+        let source_id = self
+            .sources
+            .add(source_name, String::from(source_text))
+            .ok_or_else(|| String::from("source registry full"))?;
+
         // Create a macro expander
         let mut expander = MacroExpander::new();
 
         // Compile the source with macro expansion
-        let chunk =
-            compile_with_expansion(source, &mut self.interner, &mut self.macros, &mut expander)
-                .map_err(|err| alloc::format!("Compile error: {err}"))?;
+        let chunk = compile_with_expansion(
+            source_text,
+            source_id,
+            &mut self.interner,
+            &mut self.macros,
+            &mut expander,
+        )
+        .map_err(|err| format!("Compile error: {err}"))?;
 
         // Pre-intern primitive symbols before creating VM
         let collection_symbols = intern_collection_primitives(&mut self.interner);
@@ -118,6 +146,9 @@ impl Repl {
 
         // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
+
+        // Set the source ID for error reporting
+        vm.set_source(source_id);
 
         // Restore persistent globals into the VM
         *vm.globals_mut() = self.globals.clone();
@@ -136,9 +167,11 @@ impl Repl {
         register_introspection_primitives(&mut vm, &introspection_symbols);
 
         // Execute
-        let result = vm
-            .execute(&chunk)
-            .map_err(|err| alloc::format!("Runtime error: {err:?}"))?;
+        let result = vm.execute(&chunk).map_err(|err| {
+            // Format the VM error using lonala-human for Rust-style error messages
+            let config = FormatConfig::new();
+            render_error(&err, &self.sources, &self.interner, &config)
+        })?;
 
         // Save globals back to persistent storage
         self.globals = vm.globals().clone();
@@ -163,10 +196,12 @@ impl Repl {
 
 #[cfg(not(feature = "integration-test"))]
 mod interactive {
-    use super::{MacroExpander, Repl, String, ToString, Value, compile_with_expansion};
+    use super::{MacroExpander, Repl, String, ToString, Value, compile_with_expansion, format};
     use alloc::vec::Vec;
     use core::fmt::Write;
+    use lona_core::source;
     use lonala_compiler::CompileError;
+    use lonala_human::{Config as FormatConfig, render as render_error};
     use lonala_parser::error::Kind as ParseErrorKind;
 
     /// Control character for backspace (DEL key).
@@ -363,10 +398,15 @@ mod interactive {
                 return;
             }
 
+            // Use a temporary source ID (0) for the completeness check.
+            // The actual source will be registered when eval() is called.
+            let temp_source_id = source::Id::new(0_u32);
+
             // First, try to compile to check if input is complete
             let mut expander = MacroExpander::new();
             match compile_with_expansion(
                 &self.accumulated,
+                temp_source_id,
                 &mut self.repl.interner,
                 &mut self.repl.macros,
                 &mut expander,
@@ -374,19 +414,21 @@ mod interactive {
                 Ok(_chunk) => {
                     // Input is complete - evaluate using the core eval() function
                     // This ensures the same code path is used as in tests
-                    let source = core::mem::take(&mut self.accumulated);
-                    self.execute_and_print(&source);
+                    let source_text = core::mem::take(&mut self.accumulated);
+                    self.execute_and_print(&source_text);
                 }
                 Err(CompileError::Parse(ref parse_err)) => {
                     if needs_more_input(&parse_err.kind) {
                         return;
                     }
-                    let source = core::mem::take(&mut self.accumulated);
-                    self.display_error(&source, parse_err.span.start, &parse_err.kind.to_string());
+                    // Register source for error formatting
+                    let source_text = core::mem::take(&mut self.accumulated);
+                    self.display_parse_error(&source_text, parse_err);
                 }
                 Err(CompileError::Compile(ref compile_err)) => {
-                    let source = core::mem::take(&mut self.accumulated);
-                    self.display_error(&source, compile_err.span().start, &compile_err.to_string());
+                    // Register source for error formatting
+                    let source_text = core::mem::take(&mut self.accumulated);
+                    self.display_compile_error(&source_text, compile_err);
                 }
                 Err(ref err) => {
                     self.accumulated.clear();
@@ -417,41 +459,57 @@ mod interactive {
             self.io.write_fmt(format_args!("{displayable}\n"));
         }
 
-        fn display_error(&mut self, source: &str, position: usize, message: &str) {
-            self.io.write_fmt(format_args!("Error: {message}\n"));
-
-            let mut line_start = 0_usize;
-            let mut line_num = 1_usize;
-
-            for (idx, ch) in source.char_indices() {
-                if idx >= position {
-                    break;
-                }
-                if ch == '\n' {
-                    line_start = idx.saturating_add(1);
-                    line_num = line_num.saturating_add(1);
-                }
+        /// Formats and displays a parse error using `lonala_human`.
+        fn display_parse_error(&mut self, source_text: &str, error: &lonala_parser::Error) {
+            // Register source for error formatting
+            let source_name = format!("<repl:{}>", self.repl.input_counter.saturating_add(1_u32));
+            let mut temp_registry = source::Registry::new();
+            if let Some(source_id) = temp_registry.add(source_name, String::from(source_text)) {
+                // Update the error's source ID to match our temporary registry
+                let error_with_correct_source = lonala_parser::Error::new(
+                    error.kind.clone(),
+                    source::Location::new(source_id, error.location.span),
+                );
+                let config = FormatConfig::new();
+                let formatted = render_error(
+                    &error_with_correct_source,
+                    &temp_registry,
+                    &self.repl.interner,
+                    &config,
+                );
+                self.io.write_str(&formatted);
+            } else {
+                // Fallback if registry is full
+                self.io.write_fmt(format_args!("Error: {}\n", error.kind));
             }
+        }
 
-            let line_end = source
-                .get(line_start..)
-                .and_then(|rest| rest.find('\n'))
-                .map_or(source.len(), |offset| line_start.saturating_add(offset));
-
-            if let Some(line) = source.get(line_start..line_end) {
-                self.io.write_fmt(format_args!("  {line_num} | {line}\n"));
-
-                let col = position.saturating_sub(line_start);
-                let prefix_width = format_line_prefix_width(line_num);
-                self.write("  ");
-                for _ in 0..prefix_width {
-                    self.write(" ");
-                }
-                self.write(" | ");
-                for _ in 0..col {
-                    self.write(" ");
-                }
-                self.writeln("^");
+        /// Formats and displays a compile error using `lonala_human`.
+        fn display_compile_error(
+            &mut self,
+            source_text: &str,
+            error: &lonala_compiler::error::Error,
+        ) {
+            // Register source for error formatting
+            let source_name = format!("<repl:{}>", self.repl.input_counter.saturating_add(1_u32));
+            let mut temp_registry = source::Registry::new();
+            if let Some(source_id) = temp_registry.add(source_name, String::from(source_text)) {
+                // Update the error's source ID to match our temporary registry
+                let error_with_correct_source = lonala_compiler::error::Error::new(
+                    error.kind.clone(),
+                    source::Location::new(source_id, error.location.span),
+                );
+                let config = FormatConfig::new();
+                let formatted = render_error(
+                    &error_with_correct_source,
+                    &temp_registry,
+                    &self.repl.interner,
+                    &config,
+                );
+                self.io.write_str(&formatted);
+            } else {
+                // Fallback if registry is full
+                self.io.write_fmt(format_args!("Error: {}\n", error.kind));
             }
         }
     }
@@ -465,20 +523,6 @@ mod interactive {
             *kind,
             ParseErrorKind::UnexpectedEof { .. } | ParseErrorKind::UnterminatedString
         )
-    }
-
-    const fn format_line_prefix_width(line_num: usize) -> usize {
-        if line_num == 0 {
-            1
-        } else {
-            let mut n = line_num;
-            let mut width = 0_usize;
-            while n > 0 {
-                width = width.saturating_add(1);
-                n /= 10;
-            }
-            width
-        }
     }
 }
 

@@ -18,7 +18,7 @@ mod strings;
 #[cfg(test)]
 mod tests;
 
-use crate::error::{Error, Kind as ErrorKind, Span};
+use crate::error::{Error, Kind as ErrorKind, SourceId, SourceLocation, Span};
 use crate::token::{Kind as TokenKind, Token};
 
 /// Lexical analyzer for Lonala source code.
@@ -31,6 +31,8 @@ use crate::token::{Kind as TokenKind, Token};
 pub struct Lexer<'src> {
     /// The source code being lexed.
     source: &'src str,
+    /// Identifier for this source (for error reporting).
+    source_id: SourceId,
     /// Current byte position in source.
     position: usize,
     /// Cached next token for peek support.
@@ -48,14 +50,39 @@ pub struct Lexer<'src> {
 
 impl<'src> Lexer<'src> {
     /// Creates a new lexer for the given source code.
+    ///
+    /// The `source_id` identifies which source this lexer is processing,
+    /// and will be included in all error locations for precise error reporting.
     #[inline]
     #[must_use]
-    pub const fn new(source: &'src str) -> Self {
+    pub const fn new(source: &'src str, source_id: SourceId) -> Self {
         Self {
             source,
+            source_id,
             position: 0_usize,
             peeked: None,
         }
+    }
+
+    /// Returns the source ID for this lexer.
+    #[inline]
+    #[must_use]
+    pub const fn source_id(&self) -> SourceId {
+        self.source_id
+    }
+
+    /// Creates a source location from a span within this source.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn location(&self, span: Span) -> SourceLocation {
+        SourceLocation::new(self.source_id, span)
+    }
+
+    /// Creates a source location from start and end positions.
+    #[inline]
+    #[must_use]
+    pub(crate) const fn location_from(&self, start: usize, end: usize) -> SourceLocation {
+        self.location(Span::new(start, end))
     }
 
     /// Peeks at the next token without consuming it.
@@ -161,7 +188,7 @@ impl<'src> Lexer<'src> {
                 self.advance();
                 Err(Error::new(
                     ErrorKind::UnexpectedCharacter(ch),
-                    Span::new(start, self.position),
+                    self.location_from(start, self.position),
                 ))
             }
         };
@@ -235,7 +262,7 @@ impl<'src> Lexer<'src> {
         self.advance();
         Err(Error::new(
             ErrorKind::UnexpectedCharacter('#'),
-            Span::new(start, self.position),
+            self.location_from(start, self.position),
         ))
     }
 
@@ -336,8 +363,10 @@ const fn is_symbol_continue(ch: char) -> bool {
 ///
 /// This is a convenience function that collects all tokens from the lexer.
 /// Returns an error if any token fails to parse.
+///
+/// The `source_id` identifies which source is being tokenized for error reporting.
 #[cfg(feature = "alloc")]
 #[inline]
-pub fn tokenize(source: &str) -> Result<Vec<Token<'_>>, Error> {
-    Lexer::new(source).collect()
+pub fn tokenize(source: &str, source_id: SourceId) -> Result<Vec<Token<'_>>, Error> {
+    Lexer::new(source, source_id).collect()
 }

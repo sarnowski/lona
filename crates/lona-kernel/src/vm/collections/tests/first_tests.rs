@@ -3,10 +3,11 @@
 
 //! Tests for the `first` primitive.
 
+use lona_core::error_context::{ArityExpectation, TypeExpectation};
 use lona_core::list::List;
 use lona_core::map::Map;
 use lona_core::symbol::Interner;
-use lona_core::value::Value;
+use lona_core::value::{self, Value};
 use lona_core::vector::Vector;
 
 use super::{ctx, int, string};
@@ -98,9 +99,9 @@ fn first_type_error() {
     assert!(matches!(
         result,
         Err(NativeError::TypeError {
-            expected: "list, vector, map, or nil",
-            got: "integer",
-            arg_index: 0
+            expected: TypeExpectation::Sequence,
+            got: value::Kind::Integer,
+            arg_index: 0_u8
         })
     ));
 }
@@ -115,8 +116,8 @@ fn first_arity_error() {
     assert!(matches!(
         result,
         Err(NativeError::ArityMismatch {
-            expected: 1,
-            got: 0
+            expected: ArityExpectation::Exact(1_u8),
+            got: 0_u8
         })
     ));
 }

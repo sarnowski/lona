@@ -5,12 +5,14 @@
 
 use alloc::vec::Vec;
 
+use lona_core::error_context::TypeExpectation;
 use lona_core::list::List;
+use lona_core::map::Map;
 use lona_core::symbol::Interner;
-use lona_core::value::Value;
+use lona_core::value::{self, Value};
 use lona_core::vector::Vector;
 
-use super::{ctx, int};
+use super::{ctx, int, string};
 use crate::vm::collections::native_concat;
 use crate::vm::natives::NativeError;
 
@@ -110,6 +112,46 @@ fn concat_with_nil() {
 }
 
 #[test]
+fn concat_with_map() {
+    let interner = Interner::new();
+    let map = Map::from_pairs(alloc::vec![(string("a"), int(1)), (string("b"), int(2))]);
+    let args = alloc::vec![Value::Map(map)];
+
+    let result = native_concat(&args, &ctx(&interner)).unwrap();
+
+    if let Value::List(list) = result {
+        // Map entries become [key value] vectors
+        assert_eq!(list.len(), 2);
+        // Each element should be a vector
+        if let Some(Value::Vector(entry)) = list.first() {
+            assert_eq!(entry.len(), 2);
+        } else {
+            panic!("Expected Vector entry");
+        }
+    } else {
+        panic!("Expected List");
+    }
+}
+
+#[test]
+fn concat_map_with_list() {
+    let interner = Interner::new();
+    let list = List::from_vec(alloc::vec![int(1), int(2)]);
+    let map = Map::from_pairs(alloc::vec![(string("a"), int(3))]);
+    let args = alloc::vec![Value::List(list), Value::Map(map)];
+
+    let result = native_concat(&args, &ctx(&interner)).unwrap();
+
+    if let Value::List(result_list) = result {
+        // (1 2 ["a" 3])
+        assert_eq!(result_list.len(), 3);
+        assert_eq!(result_list.first(), Some(&int(1)));
+    } else {
+        panic!("Expected List");
+    }
+}
+
+#[test]
 fn concat_type_error() {
     let interner = Interner::new();
     let args = alloc::vec![int(42)];
@@ -119,9 +161,9 @@ fn concat_type_error() {
     assert!(matches!(
         result,
         Err(NativeError::TypeError {
-            expected: "list, vector, or nil",
-            got: "integer",
-            arg_index: 0
+            expected: TypeExpectation::Sequence,
+            got: value::Kind::Integer,
+            arg_index: 0_u8
         })
     ));
 }
@@ -137,9 +179,9 @@ fn concat_type_error_second_arg() {
     assert!(matches!(
         result,
         Err(NativeError::TypeError {
-            expected: "list, vector, or nil",
-            got: "integer",
-            arg_index: 1
+            expected: TypeExpectation::Sequence,
+            got: value::Kind::Integer,
+            arg_index: 1_u8
         })
     ));
 }

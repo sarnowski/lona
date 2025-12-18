@@ -5,12 +5,13 @@
 
 use alloc::vec::Vec;
 
+use lona_core::error_context::ArityExpectation;
 use lona_core::opcode::{decode_a, decode_b, decode_c, decode_sbx};
 use lona_core::symbol;
 use lona_core::value::{Function, Value};
 
 use super::{MAX_CALL_DEPTH, Vm};
-use crate::vm::error::Error;
+use crate::vm::error::{Error, Kind as ErrorKind};
 use crate::vm::frame::Frame;
 use crate::vm::natives::NativeContext;
 use crate::vm::primitives::format_print_args;
@@ -89,9 +90,12 @@ impl Vm<'_> {
             | Value::List(_)
             | Value::Vector(_)
             | Value::Map(_)
-            | _ => Err(Error::NotCallable {
-                span: frame.current_span(),
-            }),
+            | _ => Err(Error::new(
+                ErrorKind::NotCallable {
+                    got: func_value.kind(),
+                },
+                frame.current_location(),
+            )),
         }
     }
 
@@ -105,19 +109,27 @@ impl Vm<'_> {
     ) -> Result<(), Error> {
         // Check for stack overflow
         if self.call_depth >= MAX_CALL_DEPTH {
-            return Err(Error::StackOverflow {
-                max_depth: MAX_CALL_DEPTH,
-                span: frame.current_span(),
-            });
+            return Err(Error::new(
+                ErrorKind::StackOverflow {
+                    max_depth: MAX_CALL_DEPTH,
+                },
+                frame.current_location(),
+            ));
         }
 
         // Verify arity
         if argc != func.arity() {
-            return Err(Error::ArityMismatch {
-                expected: func.arity(),
-                got: argc,
-                span: frame.current_span(),
-            });
+            return Err(Error::new(
+                ErrorKind::ArityMismatch {
+                    // Note: func.name() returns Option<&str>, but we need Option<symbol::Id>.
+                    // For user-defined functions we don't have the symbol ID readily available.
+                    // The error location points to the call site which is sufficient.
+                    callable: None,
+                    expected: ArityExpectation::Exact(func.arity()),
+                    got: argc,
+                },
+                frame.current_location(),
+            ));
         }
 
         // Get the function's chunk directly from the Function value
@@ -148,7 +160,9 @@ impl Vm<'_> {
         }
 
         // Create new frame and execute
-        let mut fn_frame = Frame::new(fn_chunk, new_base);
+        // Use the same source ID as the current frame for now
+        // (TODO: functions could have their own source ID in the future)
+        let mut fn_frame = Frame::new(fn_chunk, new_base, frame.source());
         self.call_depth = self.call_depth.saturating_add(1);
         let result = self.run(&mut fn_frame);
         self.call_depth = self.call_depth.saturating_sub(1);
@@ -174,13 +188,15 @@ impl Vm<'_> {
         }
 
         // Look up native function
-        let native_fn = self
-            .natives
-            .get(symbol)
-            .ok_or_else(|| Error::UndefinedFunction {
-                symbol,
-                span: frame.current_span(),
-            })?;
+        let native_fn = self.natives.get(symbol).ok_or_else(|| {
+            Error::new(
+                ErrorKind::UndefinedFunction {
+                    symbol,
+                    suggestion: None, // TODO: implement suggestion lookup
+                },
+                frame.current_location(),
+            )
+        })?;
 
         // Collect arguments from R[base+1] .. R[base+argc]
         let arguments = self.collect_args(base, argc, frame)?;
@@ -189,10 +205,8 @@ impl Vm<'_> {
         let ctx = NativeContext::new(self.interner, self.macro_registry);
 
         // Call native function
-        let result = native_fn(&arguments, &ctx).map_err(|error| Error::Native {
-            error,
-            span: frame.current_span(),
-        })?;
+        let result = native_fn(&arguments, &ctx)
+            .map_err(|error| Error::new(ErrorKind::Native { error }, frame.current_location()))?;
 
         // Store result in R[base]
         self.set_register(base, result, frame)?;
@@ -230,9 +244,11 @@ impl Vm<'_> {
             let reg_idx = base
                 .checked_add(1)
                 .and_then(|base_plus_one| base_plus_one.checked_add(offset));
-            let reg = reg_idx.ok_or_else(|| Error::InvalidRegister {
-                index: base,
-                span: frame.current_span(),
+            let reg = reg_idx.ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidRegister { index: base },
+                    frame.current_location(),
+                )
             })?;
             arguments.push(self.get_register(reg, frame)?);
         }

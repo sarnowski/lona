@@ -3,10 +3,11 @@
 
 //! Tests for the `cons` primitive.
 
+use lona_core::error_context::{ArityExpectation, TypeExpectation};
 use lona_core::list::List;
 use lona_core::map::Map;
 use lona_core::symbol::Interner;
-use lona_core::value::Value;
+use lona_core::value::{self, Value};
 use lona_core::vector::Vector;
 
 use super::{ctx, int, string};
@@ -73,30 +74,36 @@ fn cons_type_error() {
     assert!(matches!(
         result,
         Err(NativeError::TypeError {
-            expected: "list, vector, or nil",
-            got: "integer",
-            arg_index: 1
+            expected: TypeExpectation::Sequence,
+            got: value::Kind::Integer,
+            arg_index: 1_u8
         })
     ));
 }
 
 #[test]
-fn cons_type_error_map() {
+fn cons_to_map() {
     let interner = Interner::new();
-    // cons with a map should produce type error (unlike first/rest which support maps)
+    // cons with a map treats the map as a sequence of [key value] vectors
     let map = Map::from_pairs(alloc::vec![(string("a"), int(1))]);
-    let args = alloc::vec![int(1), Value::Map(map)];
+    let args = alloc::vec![int(42), Value::Map(map)];
 
-    let result = native_cons(&args, &ctx(&interner));
+    let result = native_cons(&args, &ctx(&interner)).unwrap();
 
-    assert!(matches!(
-        result,
-        Err(NativeError::TypeError {
-            expected: "list, vector, or nil",
-            got: "map",
-            arg_index: 1
-        })
-    ));
+    if let Value::List(list) = result {
+        // Result should be (42 ["a" 1])
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.first(), Some(&int(42)));
+        // Second element should be a [key value] vector
+        let rest = list.rest();
+        if let Some(Value::Vector(entry)) = rest.first() {
+            assert_eq!(entry.len(), 2);
+        } else {
+            panic!("Expected Vector entry");
+        }
+    } else {
+        panic!("Expected List");
+    }
 }
 
 #[test]
@@ -109,8 +116,8 @@ fn cons_arity_error() {
     assert!(matches!(
         result,
         Err(NativeError::ArityMismatch {
-            expected: 2,
-            got: 1
+            expected: ArityExpectation::Exact(2_u8),
+            got: 1_u8
         })
     ));
 }

@@ -5,20 +5,27 @@
 //!
 //! This module provides error types and location information for reporting
 //! issues encountered during tokenization and parsing of Lonala source code.
+//!
+//! # Design Principles
+//!
+//! - **Structured data, not strings**: Errors carry typed data; formatting happens in `lonala-human`
+//! - **Source locations always**: Every error includes `source::Location`
+//! - **No Display on Error**: Formatting is centralized in `lonala-human` crate
 
 use core::fmt;
 
-// Re-export Span from lona-core for consistency across the compiler pipeline.
+// Re-export Span and source types from lona-core for consistency.
+pub use lona_core::source::{self, Id as SourceId, Location as SourceLocation};
 pub use lona_core::span::Span;
 
 /// Kinds of errors that can occur during lexing and parsing.
 ///
-/// Each variant captures the specific nature of the error,
-/// enabling precise error messages and potential recovery strategies.
+/// Each variant captures the specific nature of the error with all context
+/// needed for formatting. NO human-readable strings should be stored here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Kind {
-    // Lexer errors
+    // ========== Lexer errors ==========
     /// Encountered a character that cannot start any token.
     UnexpectedCharacter(char),
     /// String literal reached end of input without closing quote.
@@ -30,7 +37,7 @@ pub enum Kind {
     /// Invalid unicode escape sequence (`\uXXXX`).
     InvalidUnicodeEscape,
 
-    // Parser errors
+    // ========== Parser errors ==========
     /// Unexpected token encountered during parsing.
     UnexpectedToken {
         /// Description of what was expected.
@@ -42,6 +49,8 @@ pub enum Kind {
     UnmatchedDelimiter {
         /// The opening delimiter character.
         opener: char,
+        /// Location of the opening delimiter (for "to match X at line Y").
+        opener_location: SourceLocation,
         /// The expected closing delimiter.
         expected: char,
         /// The actual closing delimiter found.
@@ -56,6 +65,28 @@ pub enum Kind {
     OddMapEntries,
     /// Reader macro not followed by an expression.
     ReaderMacroMissingExpr,
+}
+
+impl Kind {
+    /// Returns the variant name for error identification.
+    ///
+    /// Used as a stable error identifier in formatted output (e.g., `error[UnmatchedDelimiter]`).
+    #[inline]
+    #[must_use]
+    pub const fn variant_name(&self) -> &'static str {
+        match *self {
+            Self::UnexpectedCharacter(_) => "UnexpectedCharacter",
+            Self::UnterminatedString => "UnterminatedString",
+            Self::InvalidEscapeSequence(_) => "InvalidEscapeSequence",
+            Self::InvalidNumber => "InvalidNumber",
+            Self::InvalidUnicodeEscape => "InvalidUnicodeEscape",
+            Self::UnexpectedToken { .. } => "UnexpectedToken",
+            Self::UnmatchedDelimiter { .. } => "UnmatchedDelimiter",
+            Self::UnexpectedEof { .. } => "UnexpectedEof",
+            Self::OddMapEntries => "OddMapEntries",
+            Self::ReaderMacroMissingExpr => "ReaderMacroMissingExpr",
+        }
+    }
 }
 
 impl fmt::Display for Kind {
@@ -78,6 +109,7 @@ impl fmt::Display for Kind {
                 opener,
                 expected,
                 found,
+                ..
             } => {
                 write!(
                     f,
@@ -99,31 +131,43 @@ impl fmt::Display for Kind {
 
 /// An error encountered during lexical analysis or parsing.
 ///
-/// Combines an error kind with its location in the source, enabling
-/// helpful error messages that point to the exact position of the problem.
+/// Combines an error kind with its full source location, enabling helpful error
+/// messages that can point to the exact position in the correct source file.
+///
+/// # Note
+///
+/// This type does NOT implement `Display`. All formatting is centralized in
+/// the `lonala-human` crate to ensure consistent error presentation across
+/// REPL and future LSP implementations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Error {
     /// The kind of error.
     pub kind: Kind,
-    /// Location in source where the error occurred.
-    pub span: Span,
+    /// Full source location (source ID + byte span).
+    pub location: SourceLocation,
 }
 
 impl Error {
-    /// Creates a new lexer error.
+    /// Creates a new error with the given kind and source location.
     #[inline]
     #[must_use]
-    pub const fn new(kind: Kind, span: Span) -> Self {
-        Self { kind, span }
+    pub const fn new(kind: Kind, location: SourceLocation) -> Self {
+        Self { kind, location }
     }
-}
 
-impl fmt::Display for Error {
+    /// Returns the span within the source where the error occurred.
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { ref kind, span } = *self;
-        write!(f, "{kind} at {span}")
+    #[must_use]
+    pub const fn span(&self) -> Span {
+        self.location.span
+    }
+
+    /// Returns the source ID where the error occurred.
+    #[inline]
+    #[must_use]
+    pub const fn source_id(&self) -> SourceId {
+        self.location.source
     }
 }
 
@@ -134,6 +178,13 @@ mod tests {
     use alloc::format;
 
     use super::*;
+
+    /// Helper to create a test source location.
+    fn test_location(start: usize, end: usize) -> SourceLocation {
+        SourceLocation::new(SourceId::new(0_u32), Span::new(start, end))
+    }
+
+    // ==================== Span Tests ====================
 
     #[test]
     fn span_new_and_accessors() {
@@ -156,6 +207,8 @@ mod tests {
         let span = Span::new(10_usize, 20_usize);
         assert_eq!(format!("{span}"), "10..20");
     }
+
+    // ==================== Kind Display Tests ====================
 
     #[test]
     fn error_kind_display_lexer_errors() {
@@ -193,11 +246,14 @@ mod tests {
             ),
             "unexpected right parenthesis, expected expression"
         );
+        // Create a location for the opener in UnmatchedDelimiter
+        let opener_loc = test_location(0_usize, 1_usize);
         assert_eq!(
             format!(
                 "{}",
                 Kind::UnmatchedDelimiter {
                     opener: '(',
+                    opener_location: opener_loc,
                     expected: ')',
                     found: ']'
                 }
@@ -223,9 +279,74 @@ mod tests {
         );
     }
 
+    // ==================== Kind variant_name() Tests ====================
+
     #[test]
-    fn error_display() {
-        let error = Error::new(Kind::UnexpectedCharacter('@'), Span::new(5_usize, 6_usize));
-        assert_eq!(format!("{error}"), "unexpected character '@' at 5..6");
+    fn kind_variant_name() {
+        assert_eq!(
+            Kind::UnexpectedCharacter('@').variant_name(),
+            "UnexpectedCharacter"
+        );
+        assert_eq!(
+            Kind::UnterminatedString.variant_name(),
+            "UnterminatedString"
+        );
+        assert_eq!(
+            Kind::InvalidEscapeSequence('q').variant_name(),
+            "InvalidEscapeSequence"
+        );
+        assert_eq!(Kind::InvalidNumber.variant_name(), "InvalidNumber");
+        assert_eq!(
+            Kind::InvalidUnicodeEscape.variant_name(),
+            "InvalidUnicodeEscape"
+        );
+        assert_eq!(
+            Kind::UnexpectedToken {
+                expected: "x",
+                found: "y"
+            }
+            .variant_name(),
+            "UnexpectedToken"
+        );
+        assert_eq!(
+            Kind::UnmatchedDelimiter {
+                opener: '(',
+                opener_location: test_location(0_usize, 1_usize),
+                expected: ')',
+                found: ']'
+            }
+            .variant_name(),
+            "UnmatchedDelimiter"
+        );
+        assert_eq!(
+            Kind::UnexpectedEof { expected: "x" }.variant_name(),
+            "UnexpectedEof"
+        );
+        assert_eq!(Kind::OddMapEntries.variant_name(), "OddMapEntries");
+        assert_eq!(
+            Kind::ReaderMacroMissingExpr.variant_name(),
+            "ReaderMacroMissingExpr"
+        );
+    }
+
+    // ==================== Error Tests ====================
+
+    #[test]
+    fn error_new_and_accessors() {
+        let location = test_location(5_usize, 6_usize);
+        let error = Error::new(Kind::UnexpectedCharacter('@'), location);
+        assert_eq!(error.kind, Kind::UnexpectedCharacter('@'));
+        assert_eq!(error.span(), Span::new(5_usize, 6_usize));
+        assert_eq!(error.source_id(), SourceId::new(0_u32));
+    }
+
+    #[test]
+    fn error_location_field() {
+        let source_id = SourceId::new(42_u32);
+        let span = Span::new(10_usize, 20_usize);
+        let location = SourceLocation::new(source_id, span);
+        let error = Error::new(Kind::InvalidNumber, location);
+        assert_eq!(error.location.source, source_id);
+        assert_eq!(error.location.span, span);
     }
 }

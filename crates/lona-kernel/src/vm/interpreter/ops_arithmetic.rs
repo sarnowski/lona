@@ -3,13 +3,14 @@
 
 //! Arithmetic and comparison operations.
 
+use lona_core::error_context::TypeExpectation;
 use lona_core::opcode::{decode_a, decode_b, decode_c};
 use lona_core::value::Value;
 
 use super::Vm;
-use crate::vm::error::Error;
+use crate::vm::error::{Error, Kind as ErrorKind};
 use crate::vm::frame::Frame;
-use crate::vm::helpers::{value_type_name, values_equal};
+use crate::vm::helpers::values_equal;
 use crate::vm::numeric;
 
 impl Vm<'_> {
@@ -96,12 +97,25 @@ impl Vm<'_> {
             Value::Integer(ref int_val) => Value::Integer(-int_val),
             Value::Float(float_val) => Value::Float(-float_val),
             Value::Ratio(ref ratio_val) => Value::Ratio(-ratio_val),
-            other @ (Value::Nil | Value::Bool(_) | Value::Symbol(_) | Value::String(_) | _) => {
-                return Err(Error::TypeError {
-                    expected: "number",
-                    got: value_type_name(&other),
-                    span: frame.current_span(),
-                });
+            // Non-numeric types are errors
+            Value::Nil
+            | Value::Bool(_)
+            | Value::Symbol(_)
+            | Value::String(_)
+            | Value::List(_)
+            | Value::Vector(_)
+            | Value::Map(_)
+            | Value::Function(_)
+            | _ => {
+                return Err(Error::new(
+                    ErrorKind::TypeError {
+                        operation: "-",
+                        expected: TypeExpectation::Numeric,
+                        got: operand.kind(),
+                        operand: None,
+                    },
+                    frame.current_location(),
+                ));
             }
         };
         self.set_register(dest, result, frame)?;

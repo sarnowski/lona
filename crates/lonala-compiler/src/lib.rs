@@ -23,11 +23,13 @@
 //! # Example
 //!
 //! ```
+//! use lona_core::source;
 //! use lona_core::symbol::Interner;
 //! use lonala_compiler::compile;
 //!
 //! let mut interner = Interner::new();
-//! let chunk = compile("(+ 1 2)", &mut interner).unwrap();
+//! let source_id = source::Id::new(0);
+//! let chunk = compile("(+ 1 2)", source_id, &mut interner).unwrap();
 //!
 //! // The chunk can now be executed by the VM (Phase 2.5)
 //! println!("{}", chunk.disassemble());

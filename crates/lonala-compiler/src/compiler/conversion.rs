@@ -19,6 +19,7 @@ use alloc::vec::Vec;
 use lona_core::integer::Integer;
 use lona_core::list::List;
 use lona_core::map::Map;
+use lona_core::source;
 use lona_core::span::Span;
 use lona_core::string::HeapStr;
 use lona_core::symbol;
@@ -26,7 +27,7 @@ use lona_core::value::Value;
 use lona_core::vector::Vector;
 use lonala_parser::{Ast, Spanned};
 
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 
 /// Converts an AST node to a runtime Value.
 ///
@@ -108,8 +109,10 @@ pub fn ast_to_value(ast: &Spanned<Ast>, interner: &mut symbol::Interner) -> Valu
 pub fn value_to_ast(
     value: &Value,
     interner: &symbol::Interner,
+    source_id: source::Id,
     span: Span,
 ) -> Result<Spanned<Ast>, Error> {
+    let location = SourceLocation::new(source_id, span);
     let ast = match *value {
         Value::Nil => Ast::Nil,
         Value::Bool(bool_val) => Ast::Bool(bool_val),
@@ -117,9 +120,13 @@ pub fn value_to_ast(
             // Convert arbitrary-precision integer to i64
             // If it doesn't fit, we have a problem - but for now most macros
             // work with small integers
-            let i64_val = int_val.to_i64().ok_or_else(|| Error::InvalidMacroResult {
-                message: String::from("integer too large for AST representation"),
-                span,
+            let i64_val = int_val.to_i64().ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidMacroResult {
+                        message: String::from("integer too large for AST representation"),
+                    },
+                    location,
+                )
             })?;
             Ast::Integer(i64_val)
         }
@@ -127,10 +134,12 @@ pub fn value_to_ast(
         Value::Ratio(ref _ratio) => {
             // Ratios don't have direct AST representation
             // Convert to a list form: (/ numerator denominator)
-            return Err(Error::InvalidMacroResult {
-                message: String::from("ratio values cannot be converted to AST"),
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidMacroResult {
+                    message: String::from("ratio values cannot be converted to AST"),
+                },
+                location,
+            ));
         }
         Value::Symbol(id) => {
             let name = interner.resolve(id);
@@ -144,14 +153,14 @@ pub fn value_to_ast(
         Value::List(ref list) => {
             let elements: Result<Vec<Spanned<Ast>>, Error> = list
                 .iter()
-                .map(|elem| value_to_ast(elem, interner, span))
+                .map(|elem| value_to_ast(elem, interner, source_id, span))
                 .collect();
             Ast::List(elements?)
         }
         Value::Vector(ref vector) => {
             let elements: Result<Vec<Spanned<Ast>>, Error> = vector
                 .iter()
-                .map(|elem| value_to_ast(elem, interner, span))
+                .map(|elem| value_to_ast(elem, interner, source_id, span))
                 .collect();
             Ast::Vector(elements?)
         }
@@ -159,23 +168,27 @@ pub fn value_to_ast(
             // Convert map back to flat list [k1 v1 k2 v2 ...]
             let mut elements = Vec::new();
             for (key, value) in map.iter() {
-                elements.push(value_to_ast(key.value(), interner, span)?);
-                elements.push(value_to_ast(value, interner, span)?);
+                elements.push(value_to_ast(key.value(), interner, source_id, span)?);
+                elements.push(value_to_ast(value, interner, source_id, span)?);
             }
             Ast::Map(elements)
         }
         Value::Function(ref _func) => {
-            return Err(Error::InvalidMacroResult {
-                message: String::from("function values cannot be converted to AST"),
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidMacroResult {
+                    message: String::from("function values cannot be converted to AST"),
+                },
+                location,
+            ));
         }
         // Handle future Value variants
         _ => {
-            return Err(Error::InvalidMacroResult {
-                message: String::from("unknown value type cannot be converted to AST"),
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidMacroResult {
+                    message: String::from("unknown value type cannot be converted to AST"),
+                },
+                location,
+            ));
         }
     };
 

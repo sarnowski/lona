@@ -18,7 +18,7 @@ use lona_core::span::Span;
 use lonala_parser::{Ast, Spanned};
 
 use super::{Compiler, ExprResult};
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind};
 
 impl Compiler<'_, '_, '_> {
     /// Compiles a `do` special form.
@@ -51,7 +51,9 @@ impl Compiler<'_, '_, '_> {
         }
 
         // Compile last expression and return its result
-        let last_expr = args.last().ok_or(Error::EmptyCall { span })?;
+        let last_expr = args
+            .last()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         self.compile_expr(last_expr)
     }
 
@@ -68,15 +70,21 @@ impl Compiler<'_, '_, '_> {
     ) -> Result<ExprResult, Error> {
         // Validate: need 2 or 3 args (test, then, [else])
         if args.len() < 2_usize || args.len() > 3_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "if",
-                message: "expected (if test then) or (if test then else)",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "if",
+                    message: "expected (if test then) or (if test then else)",
+                },
+                self.location(span),
+            ));
         }
 
-        let test_expr = args.first().ok_or(Error::EmptyCall { span })?;
-        let then_expr = args.get(1_usize).ok_or(Error::EmptyCall { span })?;
+        let test_expr = args
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        let then_expr = args
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let else_expr = args.get(2_usize);
 
         // Compile test expression
@@ -115,8 +123,8 @@ impl Compiler<'_, '_, '_> {
             .len()
             .saturating_sub(jump_to_else_idx)
             .saturating_sub(1);
-        let else_offset_i16 =
-            i16::try_from(else_offset).map_err(|_err| Error::JumpTooLarge { span })?;
+        let else_offset_i16 = i16::try_from(else_offset)
+            .map_err(|_err| Error::new(ErrorKind::JumpTooLarge, self.location(span)))?;
         self.chunk.patch(
             jump_to_else_idx,
             encode_asbx(Opcode::JumpIfNot, test_result.register, else_offset_i16),
@@ -144,8 +152,8 @@ impl Compiler<'_, '_, '_> {
             .len()
             .saturating_sub(jump_to_end_idx)
             .saturating_sub(1);
-        let end_offset_i16 =
-            i16::try_from(end_offset).map_err(|_err| Error::JumpTooLarge { span })?;
+        let end_offset_i16 = i16::try_from(end_offset)
+            .map_err(|_err| Error::new(ErrorKind::JumpTooLarge, self.location(span)))?;
         self.chunk.patch(
             jump_to_end_idx,
             encode_asbx(Opcode::Jump, 0, end_offset_i16),
@@ -167,24 +175,32 @@ impl Compiler<'_, '_, '_> {
     ) -> Result<ExprResult, Error> {
         // Validate: need exactly 2 args (name, value)
         if args.len() != 2_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "def",
-                message: "expected (def name value)",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "def",
+                    message: "expected (def name value)",
+                },
+                self.location(span),
+            ));
         }
 
         // First arg must be a symbol
-        let name_expr = args.first().ok_or(Error::EmptyCall { span })?;
+        let name_expr = args
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let Ast::Symbol(ref name) = name_expr.node else {
-            return Err(Error::InvalidSpecialForm {
-                form: "def",
-                message: "first argument must be a symbol",
-                span: name_expr.span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "def",
+                    message: "first argument must be a symbol",
+                },
+                self.location(name_expr.span),
+            ));
         };
 
-        let value_expr = args.get(1_usize).ok_or(Error::EmptyCall { span })?;
+        let value_expr = args
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
         // Compile value expression
         let checkpoint = self.next_register;
@@ -192,9 +208,7 @@ impl Compiler<'_, '_, '_> {
 
         // Intern the symbol and add to constants
         let symbol_id = self.interner.intern(name);
-        let symbol_const = self
-            .chunk
-            .add_constant_at(Constant::Symbol(symbol_id), span)?;
+        let symbol_const = self.add_constant(Constant::Symbol(symbol_id), span)?;
 
         // Emit SetGlobal
         self.chunk.emit(
@@ -227,30 +241,38 @@ impl Compiler<'_, '_, '_> {
     ) -> Result<ExprResult, Error> {
         // Need at least bindings vector
         if args.is_empty() {
-            return Err(Error::InvalidSpecialForm {
-                form: "let",
-                message: "expected (let [bindings...] body...)",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "let",
+                    message: "expected (let [bindings...] body...)",
+                },
+                self.location(span),
+            ));
         }
 
         // First arg must be a vector of bindings
-        let bindings_ast = args.first().ok_or(Error::EmptyCall { span })?;
+        let bindings_ast = args
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let Ast::Vector(ref bindings) = bindings_ast.node else {
-            return Err(Error::InvalidSpecialForm {
-                form: "let",
-                message: "first argument must be a vector of bindings",
-                span: bindings_ast.span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "let",
+                    message: "first argument must be a vector of bindings",
+                },
+                self.location(bindings_ast.span),
+            ));
         };
 
         // Bindings must come in pairs
         if bindings.len() % 2_usize != 0_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "let",
-                message: "bindings must be pairs of [name value ...]",
-                span: bindings_ast.span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "let",
+                    message: "bindings must be pairs of [name value ...]",
+                },
+                self.location(bindings_ast.span),
+            ));
         }
 
         let body = args.get(1_usize..).unwrap_or(&[]);
@@ -264,18 +286,22 @@ impl Compiler<'_, '_, '_> {
         // Process bindings in pairs
         let mut binding_idx: usize = 0;
         while binding_idx < bindings.len() {
-            let name_ast = bindings.get(binding_idx).ok_or(Error::EmptyCall { span })?;
+            let name_ast = bindings
+                .get(binding_idx)
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
             let value_ast = bindings
                 .get(binding_idx.saturating_add(1))
-                .ok_or(Error::EmptyCall { span })?;
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
             // Name must be a symbol
             let Ast::Symbol(ref name) = name_ast.node else {
-                return Err(Error::InvalidSpecialForm {
-                    form: "let",
-                    message: "binding name must be a symbol",
-                    span: name_ast.span,
-                });
+                return Err(Error::new(
+                    ErrorKind::InvalidSpecialForm {
+                        form: "let",
+                        message: "binding name must be a symbol",
+                    },
+                    self.location(name_ast.span),
+                ));
             };
 
             // Allocate register for this binding
@@ -315,7 +341,9 @@ impl Compiler<'_, '_, '_> {
                 self.free_registers_to(temp_checkpoint);
             }
             // Compile last expression to return
-            let last = body.last().ok_or(Error::EmptyCall { span })?;
+            let last = body
+                .last()
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
             self.compile_expr(last)?
         };
 
@@ -344,16 +372,20 @@ impl Compiler<'_, '_, '_> {
         span: Span,
     ) -> Result<ExprResult, Error> {
         if args.len() != 1_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "quote",
-                message: "expected (quote datum)",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "quote",
+                    message: "expected (quote datum)",
+                },
+                self.location(span),
+            ));
         }
 
-        let datum = args.first().ok_or(Error::EmptyCall { span })?;
+        let datum = args
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let constant = self.ast_to_constant(datum)?;
-        let const_idx = self.chunk.add_constant_at(constant, datum.span)?;
+        let const_idx = self.add_constant(constant, datum.span)?;
         let dest = self.alloc_register(span)?;
         self.chunk
             .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
@@ -396,15 +428,19 @@ impl Compiler<'_, '_, '_> {
                     .collect();
                 Ok(Constant::Vector(constants?))
             }
-            Ast::Map(_) => Err(Error::NotImplemented {
-                feature: "quoted maps",
-                span: ast.span,
-            }),
+            Ast::Map(_) => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "quoted maps",
+                },
+                self.location(ast.span),
+            )),
             // Ast is non-exhaustive, handle future variants
-            _ => Err(Error::NotImplemented {
-                feature: "unknown AST node in quote",
-                span: ast.span,
-            }),
+            _ => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "unknown AST node in quote",
+                },
+                self.location(ast.span),
+            )),
         }
     }
 }

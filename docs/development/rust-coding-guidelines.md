@@ -241,6 +241,8 @@ Only use manual `Send`/`Sync` when absolutely necessary. Prefer designs that don
 
 ## Error Handling
 
+This section covers both general error handling patterns and the standardized error structure used for user-facing errors in the compiler pipeline (parser, compiler, VM).
+
 ### Error Types in `no_std`
 
 The `Error` trait is in `core` as of Rust 1.81. For earlier versions or maximum compatibility, define error enums:
@@ -346,6 +348,258 @@ if send_message(msg).is_err() {
     // Intentionally ignoring error
 }
 ```
+
+---
+
+## Standardized User-Facing Errors
+
+The compiler pipeline (parser, compiler, VM) uses a standardized error structure that enables high-quality, Rust-style error messages. This section defines the patterns and requirements for these errors.
+
+**Reference**: See `docs/development/PLAN.md` for the full implementation plan.
+
+### Design Principles
+
+1. **Structured data, not strings**: Errors carry typed data; formatting happens in `lonala-human`
+2. **Symbol IDs, not names**: Store `symbol::Id`, resolve to names during formatting
+3. **Typed context, not static strings**: Use enums like `ValueType` instead of `&'static str`
+4. **Variant names as identifiers**: The variant name (e.g., `UndefinedSymbol`) serves as the error identifier
+5. **Source locations always**: Every error includes `SourceLocation` (source ID + byte span)
+
+### Error Structure Pattern
+
+User-facing errors follow a `Kind` + `Error` pattern:
+
+```rust
+/// Error kinds for [component].
+///
+/// Each variant captures the specific nature of the error with all
+/// context needed for formatting. NO human-readable strings here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Kind {
+    /// Document what this error means.
+    VariantName {
+        /// Document each field's purpose.
+        field: Type,
+    },
+}
+
+impl Kind {
+    /// Returns the variant name for error identification.
+    pub const fn variant_name(&self) -> &'static str {
+        match self {
+            Self::VariantName { .. } => "VariantName",
+            // ... other variants
+        }
+    }
+}
+
+/// An error with its source location.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Error {
+    pub kind: Kind,
+    pub location: SourceLocation,
+}
+
+impl Error {
+    pub const fn new(kind: Kind, location: SourceLocation) -> Self {
+        Self { kind, location }
+    }
+}
+
+// NOTE: Do NOT implement Display on Error - formatting is done by lonala-human
+```
+
+### No Display Implementation
+
+**CRITICAL**: User-facing error types (parser, compiler, VM) do NOT implement `Display`. All human-readable formatting is centralized in `lonala-human`. This ensures:
+
+- Consistent formatting across REPL and future LSP
+- Single point of maintenance for message quality
+- Ability to resolve symbol IDs to names via the Interner
+- Access to source registry for context lines
+
+```rust
+// Bad: formatting in error type
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "undefined symbol '{}'", self.name)  // NO!
+    }
+}
+
+// Good: formatting happens in lonala-human
+// Error type has no Display impl
+// REPL calls: lonala_human::format_error(&error, &registry, &interner, &config)
+```
+
+### Structured Context Requirements
+
+#### Use Symbol IDs, Not Names
+
+```rust
+// Bad: stores string name
+UndefinedSymbol { name: String }
+
+// Good: stores symbol ID, resolved during formatting
+UndefinedSymbol {
+    symbol: symbol::Id,
+    suggestion: Option<symbol::Id>,
+}
+```
+
+#### Use Type Enums, Not Strings
+
+```rust
+// Bad: type as string
+TypeError { expected: "integer", got: "string" }
+
+// Good: typed enums
+TypeError {
+    expected: TypeExpectation::Numeric,
+    got: ValueType::String,
+}
+```
+
+#### Capture Related Locations
+
+```rust
+// Bad: only error location
+UnmatchedDelimiter { expected: char, found: char }
+
+// Good: includes opener location for "to match ( at line 5"
+UnmatchedDelimiter {
+    opener: char,
+    opener_location: SourceLocation,
+    expected: char,
+    found: char,
+}
+```
+
+#### Include Suggestions Where Possible
+
+```rust
+// Good: typo correction
+UndefinedSymbol {
+    symbol: symbol::Id,
+    suggestion: Option<symbol::Id>,  // For "did you mean 'foo'?"
+}
+
+// Good: arity information
+ArityMismatch {
+    callable: symbol::Id,
+    expected: ArityExpectation,  // Exact(2), AtLeast(1), Range { min: 1, max: 3 }
+    got: usize,
+}
+```
+
+### Adding New Error Variants
+
+When adding a new error variant, follow this checklist:
+
+- [ ] **Specific variant name**: Use descriptive names (`UndefinedSymbol`, not `NotFound`)
+- [ ] **All context captured**: Include everything needed for a helpful message
+- [ ] **Symbol IDs not strings**: Store `symbol::Id` for any symbol references
+- [ ] **Typed values**: Use `ValueType`, `TypeExpectation`, etc. instead of strings
+- [ ] **Related locations**: Include secondary locations (opener, definition site)
+- [ ] **Suggestion field**: Add `Option<...>` for "did you mean" hints where applicable
+- [ ] **Document each field**: Explain what the field contains and why
+- [ ] **Update variant_name()**: Add the new variant to the match
+- [ ] **Implement Diagnostic**: Add formatting in `lonala-human`
+- [ ] **Add tests**: Verify the formatted output is helpful
+
+### Example: Good Error Definition
+
+```rust
+/// Error kinds for the bytecode compiler.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Kind {
+    /// Reference to an undefined symbol.
+    UndefinedSymbol {
+        /// The symbol that was not found.
+        symbol: symbol::Id,
+        /// A similar symbol that might be what was intended.
+        suggestion: Option<symbol::Id>,
+    },
+
+    /// Type mismatch in an operation.
+    TypeError {
+        /// The operation being performed ("+", "if", etc.).
+        operation: &'static str,
+        /// The type(s) that were expected.
+        expected: TypeExpectation,
+        /// The type that was actually found.
+        got: ValueType,
+        /// Which operand had the wrong type (for multi-argument ops).
+        operand: Option<usize>,
+    },
+
+    /// Special form used with invalid syntax.
+    InvalidSpecialForm {
+        /// The special form name ("if", "let", "fn", etc.).
+        form: &'static str,
+        /// Which syntax rule was violated.
+        violation: SpecialFormViolation,
+    },
+}
+
+/// What went wrong with a special form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecialFormViolation {
+    /// Missing required clause (e.g., no 'then' in 'if').
+    MissingClause { clause: &'static str },
+    /// Wrong number of clauses.
+    WrongClauseCount { expected: ArityExpectation, got: usize },
+    /// Invalid binding form (e.g., non-symbol in let binding).
+    InvalidBinding,
+}
+```
+
+### Example: Bad Error Definition
+
+```rust
+// Bad: vague, string-based, missing context
+#[derive(Debug)]
+pub enum Error {
+    // Too vague - what wasn't found?
+    NotFound(String),
+
+    // String message - should be structured
+    InvalidSyntax { message: String },
+
+    // Missing location context
+    TypeError { expected: &'static str, got: &'static str },
+
+    // Catch-all - provides no useful information
+    Failed,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Bad: formatting in error type
+        match self {
+            Self::NotFound(name) => write!(f, "not found: {name}"),
+            // ...
+        }
+    }
+}
+```
+
+### Error Quality Checklist
+
+Before committing an error type, verify:
+
+| Requirement | Check |
+|-------------|-------|
+| Specific variant name | Does the name clearly describe what went wrong? |
+| Structured data | Are all values typed (no bare strings for types/symbols)? |
+| Source location | Does every error path include `SourceLocation`? |
+| Related locations | Are secondary locations captured (opener, definition)? |
+| Suggestions | Is there a field for "did you mean" hints? |
+| No Display impl | Is formatting done exclusively in `lonala-human`? |
+| Documented | Are all fields documented? |
+| Tested | Is there a test verifying the formatted output? |
 
 ---
 

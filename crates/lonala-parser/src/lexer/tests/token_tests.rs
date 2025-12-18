@@ -11,7 +11,7 @@ use crate::error::Span;
 use crate::lexer::Lexer;
 use crate::token::Kind as TokenKind;
 
-use super::{kinds, lex};
+use super::{TEST_SOURCE_ID, kinds, lex};
 
 // ==================== Empty and Whitespace ====================
 
@@ -426,7 +426,7 @@ fn span_with_unicode() {
 
 #[test]
 fn peek_does_not_consume() {
-    let mut lexer = Lexer::new("foo bar");
+    let mut lexer = Lexer::new("foo bar", TEST_SOURCE_ID);
     let peeked = lexer.peek().cloned();
     let next = lexer.next();
     assert_eq!(
@@ -444,6 +444,6 @@ fn peek_does_not_consume() {
 
 #[test]
 fn peek_at_end_returns_none() {
-    let mut lexer = Lexer::new("");
+    let mut lexer = Lexer::new("", TEST_SOURCE_ID);
     assert!(lexer.peek().is_none());
 }

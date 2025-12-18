@@ -10,12 +10,16 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
+use crate::error::SourceId;
 use crate::lexer::tokenize;
 use crate::token::{Kind as TokenKind, Token};
 
+/// Test source ID for all lexer tests.
+const TEST_SOURCE_ID: SourceId = SourceId::new(0_u32);
+
 /// Helper to tokenize and unwrap.
 pub fn lex(source: &str) -> Vec<Token<'_>> {
-    tokenize(source).expect("lexing should succeed")
+    tokenize(source, TEST_SOURCE_ID).expect("lexing should succeed")
 }
 
 /// Helper to get token kinds.

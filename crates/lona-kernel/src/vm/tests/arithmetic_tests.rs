@@ -11,7 +11,7 @@ use lona_core::symbol::Interner;
 use lona_core::value::Value;
 
 use super::{make_chunk, make_vm};
-use crate::vm::error::Error;
+use crate::vm::error::{Error, Kind as ErrorKind};
 
 #[test]
 fn execute_add_integers() {
@@ -294,7 +294,13 @@ fn execute_div_by_zero_integer() {
     );
 
     let result = vm.execute(&chunk);
-    assert!(matches!(result, Err(Error::DivisionByZero { .. })));
+    assert!(matches!(
+        result,
+        Err(Error {
+            kind: ErrorKind::DivisionByZero,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -315,7 +321,13 @@ fn execute_mod_by_zero() {
     );
 
     let result = vm.execute(&chunk);
-    assert!(matches!(result, Err(Error::DivisionByZero { .. })));
+    assert!(matches!(
+        result,
+        Err(Error {
+            kind: ErrorKind::DivisionByZero,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -336,7 +348,13 @@ fn execute_add_type_error() {
     );
 
     let result = vm.execute(&chunk);
-    assert!(matches!(result, Err(Error::TypeError { .. })));
+    assert!(matches!(
+        result,
+        Err(Error {
+            kind: ErrorKind::TypeError { .. },
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -355,5 +373,11 @@ fn execute_neg_type_error() {
     );
 
     let result = vm.execute(&chunk);
-    assert!(matches!(result, Err(Error::TypeError { .. })));
+    assert!(matches!(
+        result,
+        Err(Error {
+            kind: ErrorKind::TypeError { .. },
+            ..
+        })
+    ));
 }

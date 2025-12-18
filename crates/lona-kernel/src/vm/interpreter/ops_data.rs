@@ -7,7 +7,7 @@ use lona_core::opcode::{decode_a, decode_b, decode_bx};
 use lona_core::value::Value;
 
 use super::Vm;
-use crate::vm::error::Error;
+use crate::vm::error::{Error, Kind as ErrorKind};
 use crate::vm::frame::Frame;
 
 impl Vm<'_> {
@@ -87,13 +87,15 @@ impl Vm<'_> {
         let const_idx = decode_bx(instruction);
 
         let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
-        let value = self
-            .globals
-            .get(symbol)
-            .ok_or_else(|| Error::UndefinedGlobal {
-                symbol,
-                span: frame.current_span(),
-            })?;
+        let value = self.globals.get(symbol).ok_or_else(|| {
+            Error::new(
+                ErrorKind::UndefinedGlobal {
+                    symbol,
+                    suggestion: None, // TODO: implement suggestion lookup
+                },
+                frame.current_location(),
+            )
+        })?;
         self.set_register(dest, value, frame)?;
         Ok(())
     }

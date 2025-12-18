@@ -11,7 +11,7 @@ use lona_core::symbol::Interner;
 use lona_core::value::Value;
 
 use super::{make_chunk, make_vm};
-use crate::vm::error::Error;
+use crate::vm::error::{Error, Kind as ErrorKind};
 
 #[test]
 fn execute_set_and_get_global() {
@@ -71,7 +71,13 @@ fn execute_undefined_global_error() {
     );
 
     let result = vm.execute(&chunk);
-    assert!(matches!(result, Err(Error::UndefinedGlobal { .. })));
+    assert!(matches!(
+        result,
+        Err(Error {
+            kind: ErrorKind::UndefinedGlobal { .. },
+            ..
+        })
+    ));
 }
 
 #[test]

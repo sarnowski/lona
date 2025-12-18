@@ -12,7 +12,7 @@ use lona_core::span::Span;
 use lonala_parser::{Ast, Spanned};
 
 use super::{Compiler, ExprResult};
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind};
 
 /// Represents a part of a quasiquote expansion - either a single value or
 /// a sequence to be spliced.
@@ -37,14 +37,18 @@ impl Compiler<'_, '_, '_> {
         span: Span,
     ) -> Result<ExprResult, Error> {
         if args.len() != 1_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "syntax-quote",
-                message: "expected exactly 1 argument",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "syntax-quote",
+                    message: "expected exactly 1 argument",
+                },
+                self.location(span),
+            ));
         }
 
-        let datum = args.first().ok_or(Error::EmptyCall { span })?;
+        let datum = args
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
         // Expand the quasiquote template at depth 1
         let expanded = self.expand_quasiquote(datum, 1_u32)?;
@@ -77,11 +81,13 @@ impl Compiler<'_, '_, '_> {
             // it here directly, it's an error (can't splice into non-sequence)
             Ast::List(ref elements) if Self::is_unquote_splicing(elements) => {
                 if depth == 1 {
-                    Err(Error::InvalidSpecialForm {
-                        form: "unquote-splicing",
-                        message: "~@ not in list or vector context",
-                        span: ast.span,
-                    })
+                    Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "unquote-splicing",
+                            message: "~@ not in list or vector context",
+                        },
+                        self.location(ast.span),
+                    ))
                 } else {
                     // At deeper depth, treat as a regular list
                     self.expand_nested_unquote_splicing(elements, ast.span, depth)
@@ -100,10 +106,12 @@ impl Compiler<'_, '_, '_> {
             Ast::Vector(ref elements) => self.expand_quasiquote_vector(elements, ast.span, depth),
 
             // Handle maps (basic support)
-            Ast::Map(ref _elements) => Err(Error::NotImplemented {
-                feature: "quasiquoted maps",
-                span: ast.span,
-            }),
+            Ast::Map(ref _elements) => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "quasiquoted maps",
+                },
+                self.location(ast.span),
+            )),
 
             // Atoms: wrap in (quote ...)
             Ast::Integer(_)
@@ -115,10 +123,12 @@ impl Compiler<'_, '_, '_> {
             | Ast::Keyword(_) => Ok(Self::quote_atom(ast)),
 
             // Handle future AST variants
-            _ => Err(Error::NotImplemented {
-                feature: "unknown AST node in quasiquote",
-                span: ast.span,
-            }),
+            _ => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "unknown AST node in quasiquote",
+                },
+                self.location(ast.span),
+            )),
         }
     }
 
@@ -154,14 +164,18 @@ impl Compiler<'_, '_, '_> {
         depth: u32,
     ) -> Result<Spanned<Ast>, Error> {
         if elements.len() != 2_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "unquote",
-                message: "expected exactly 1 argument",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "unquote",
+                    message: "expected exactly 1 argument",
+                },
+                self.location(span),
+            ));
         }
 
-        let inner = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
+        let inner = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
         if depth == 1 {
             // At depth 1: return the expression to be evaluated
@@ -193,14 +207,18 @@ impl Compiler<'_, '_, '_> {
         depth: u32,
     ) -> Result<Spanned<Ast>, Error> {
         if elements.len() != 2_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "unquote-splicing",
-                message: "expected exactly 1 argument",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "unquote-splicing",
+                    message: "expected exactly 1 argument",
+                },
+                self.location(span),
+            ));
         }
 
-        let inner = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
+        let inner = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let expanded_inner = self.expand_quasiquote(inner, depth.saturating_sub(1))?;
 
         // (list 'unquote-splicing expanded_inner)
@@ -222,14 +240,18 @@ impl Compiler<'_, '_, '_> {
         depth: u32,
     ) -> Result<Spanned<Ast>, Error> {
         if elements.len() != 2_usize {
-            return Err(Error::InvalidSpecialForm {
-                form: "syntax-quote",
-                message: "expected exactly 1 argument",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "syntax-quote",
+                    message: "expected exactly 1 argument",
+                },
+                self.location(span),
+            ));
         }
 
-        let inner = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
+        let inner = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         // Increase depth for nested syntax-quote
         let expanded_inner = self.expand_quasiquote(inner, depth.saturating_add(1))?;
 
@@ -268,7 +290,7 @@ impl Compiler<'_, '_, '_> {
         for elem in elements {
             if Self::is_unquote_splicing_form(elem) && depth == 1 {
                 // This element should be spliced
-                let inner = Self::get_unquote_splicing_arg(elem, span)?;
+                let inner = self.get_unquote_splicing_arg(elem, span)?;
                 expanded_parts.push(ExpandedPart::Splice(inner.clone()));
             } else {
                 // Regular element
@@ -291,22 +313,33 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Gets the argument from an `(unquote-splicing x)` form.
-    fn get_unquote_splicing_arg(ast: &Spanned<Ast>, span: Span) -> Result<&Spanned<Ast>, Error> {
+    fn get_unquote_splicing_arg<'ast>(
+        &self,
+        ast: &'ast Spanned<Ast>,
+        span: Span,
+    ) -> Result<&'ast Spanned<Ast>, Error> {
+        let location = self.location(span);
         if let Ast::List(ref elements) = ast.node {
             if elements.len() != 2_usize {
-                return Err(Error::InvalidSpecialForm {
-                    form: "unquote-splicing",
-                    message: "expected exactly 1 argument",
-                    span,
-                });
+                return Err(Error::new(
+                    ErrorKind::InvalidSpecialForm {
+                        form: "unquote-splicing",
+                        message: "expected exactly 1 argument",
+                    },
+                    location,
+                ));
             }
-            elements.get(1_usize).ok_or(Error::EmptyCall { span })
+            elements
+                .get(1_usize)
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))
         } else {
-            Err(Error::InvalidSpecialForm {
-                form: "unquote-splicing",
-                message: "internal error: not a list",
-                span,
-            })
+            Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "unquote-splicing",
+                    message: "internal error: not a list",
+                },
+                location,
+            ))
         }
     }
 
@@ -396,7 +429,7 @@ impl Compiler<'_, '_, '_> {
 
         for elem in elements {
             if Self::is_unquote_splicing_form(elem) && depth == 1 {
-                let inner = Self::get_unquote_splicing_arg(elem, span)?;
+                let inner = self.get_unquote_splicing_arg(elem, span)?;
                 expanded_parts.push(ExpandedPart::Splice(inner.clone()));
             } else {
                 let expanded = self.expand_quasiquote(elem, depth)?;

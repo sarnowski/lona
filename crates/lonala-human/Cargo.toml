@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Cargo.toml - Human-readable error formatting for Lonala
+
+[package]
+name = "lonala-human"
+description = "Human-readable error formatting for the Lonala language"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = ["alloc"]
+alloc = ["lona-core/alloc", "lonala-parser/alloc", "lonala-compiler/alloc", "lona-kernel/alloc"]
+
+[dependencies]
+# Use lona-core for shared types (Span, SourceId, etc.)
+lona-core = { path = "../lona-core", default-features = false }
+# Parser errors
+lonala-parser = { path = "../lonala-parser", default-features = false }
+# Compiler errors
+lonala-compiler = { path = "../lonala-compiler", default-features = false }
+# VM errors
+lona-kernel = { path = "../lona-kernel", default-features = false }
+
+[lints]
+workspace = true

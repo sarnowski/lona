@@ -3,62 +3,11 @@
 
 //! Helper functions for the VM interpreter.
 //!
-//! Provides type name utilities and value comparison functions.
+//! Provides value comparison functions.
 
-use lona_core::chunk::Constant;
 use lona_core::value::Value;
 
 use super::numeric::integer_to_f64;
-
-/// Returns the type name of a value.
-pub const fn value_type_name(value: &Value) -> &'static str {
-    match *value {
-        Value::Nil => "nil",
-        Value::Bool(_) => "boolean",
-        Value::Integer(_) => "integer",
-        Value::Float(_) => "float",
-        Value::Ratio(_) => "ratio",
-        Value::Symbol(_) => "symbol",
-        Value::String(_) => "string",
-        Value::List(_) => "list",
-        Value::Vector(_) => "vector",
-        Value::Map(_) => "map",
-        Value::Function(_) => "function",
-        // Value is non-exhaustive, handle future variants
-        _ => "unknown",
-    }
-}
-
-/// Returns the type name of a constant.
-pub const fn constant_type_name(constant: &Constant) -> &'static str {
-    match *constant {
-        Constant::Nil => "nil",
-        Constant::Bool(_) => "boolean",
-        Constant::Integer(_) => "integer",
-        Constant::Float(_) => "float",
-        Constant::String(_) => "string",
-        Constant::Symbol(_) => "symbol",
-        Constant::List(_) => "list",
-        Constant::Vector(_) => "vector",
-        Constant::Function { .. } => "function",
-        // Constant is non-exhaustive, handle future variants
-        _ => "unknown",
-    }
-}
-
-/// Returns a description of the types in a binary operation.
-pub const fn binary_type_description(left: &Value, right: &Value) -> &'static str {
-    match (left, right) {
-        (&Value::Nil, _) | (_, &Value::Nil) => "nil",
-        (&Value::Bool(_), _) | (_, &Value::Bool(_)) => "boolean",
-        (&Value::Symbol(_), _) | (_, &Value::Symbol(_)) => "symbol",
-        (&Value::String(_), _) | (_, &Value::String(_)) => "string",
-        (&Value::List(_), _) | (_, &Value::List(_)) => "list",
-        (&Value::Vector(_), _) | (_, &Value::Vector(_)) => "vector",
-        (&Value::Map(_), _) | (_, &Value::Map(_)) => "map",
-        _ => "non-number",
-    }
-}
 
 /// Tests if two values are equal.
 #[expect(

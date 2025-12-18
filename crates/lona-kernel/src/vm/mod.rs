@@ -42,7 +42,7 @@ pub mod primitives;
 #[cfg(test)]
 mod tests;
 
-pub use error::Error;
+pub use error::{Error, Kind as ErrorKind};
 pub use frame::Frame;
 pub use globals::Globals;
 pub use interpreter::Vm;

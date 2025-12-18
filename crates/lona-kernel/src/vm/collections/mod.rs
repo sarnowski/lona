@@ -40,25 +40,6 @@ pub use vector_ops::{native_vec, native_vector};
 #[cfg(test)]
 mod tests;
 
-/// Returns a type name for error messages.
-pub(crate) const fn type_name(value: &Value) -> &'static str {
-    match *value {
-        Value::Nil => "nil",
-        Value::Bool(_) => "boolean",
-        Value::Integer(_) => "integer",
-        Value::Float(_) => "float",
-        Value::Ratio(_) => "ratio",
-        Value::Symbol(_) => "symbol",
-        Value::String(_) => "string",
-        Value::List(_) => "list",
-        Value::Vector(_) => "vector",
-        Value::Map(_) => "map",
-        Value::Function(_) => "function",
-        // Value is non-exhaustive - handle future variants
-        _ => "unknown",
-    }
-}
-
 /// The names of all collection primitives.
 pub const PRIMITIVE_NAMES: &[&str] = &[
     "cons", "first", "rest", "vector", "hash-map", "list", "concat", "vec",

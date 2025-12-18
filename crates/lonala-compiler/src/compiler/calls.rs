@@ -18,7 +18,7 @@ use lonala_parser::{Ast, Spanned};
 
 use super::conversion;
 use super::{Compiler, ExprResult, MAX_MACRO_EXPANSION_DEPTH};
-use crate::error::Error;
+use crate::error::{Error, Kind as ErrorKind};
 
 impl Compiler<'_, '_, '_> {
     /// Compiles a list as a function call, special form, or arithmetic operation.
@@ -28,7 +28,7 @@ impl Compiler<'_, '_, '_> {
         span: Span,
     ) -> Result<ExprResult, Error> {
         if elements.is_empty() {
-            return Err(Error::EmptyCall { span });
+            return Err(Error::new(ErrorKind::EmptyCall, self.location(span)));
         }
 
         // Check if the first element is a symbol (could be special form or operator)
@@ -45,18 +45,22 @@ impl Compiler<'_, '_, '_> {
                 "quote" => return self.compile_quote(args, span),
                 "syntax-quote" => return self.compile_syntax_quote(args, span),
                 "unquote" => {
-                    return Err(Error::InvalidSpecialForm {
-                        form: "unquote",
-                        message: "unquote (~) not inside syntax-quote (`)",
-                        span,
-                    });
+                    return Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "unquote",
+                            message: "unquote (~) not inside syntax-quote (`)",
+                        },
+                        self.location(span),
+                    ));
                 }
                 "unquote-splicing" => {
-                    return Err(Error::InvalidSpecialForm {
-                        form: "unquote-splicing",
-                        message: "unquote-splicing (~@) not inside syntax-quote (`)",
-                        span,
-                    });
+                    return Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "unquote-splicing",
+                            message: "unquote-splicing (~@) not inside syntax-quote (`)",
+                        },
+                        self.location(span),
+                    ));
                 }
                 "fn" => return self.compile_fn(args, span),
                 "defmacro" => return self.compile_defmacro(args, span),
@@ -107,31 +111,39 @@ impl Compiler<'_, '_, '_> {
     ) -> Result<ExprResult, Error> {
         // Check expansion depth before proceeding
         if self.macro_expansion_depth >= MAX_MACRO_EXPANSION_DEPTH {
-            return Err(Error::MacroExpansionDepthExceeded {
-                depth: self.macro_expansion_depth,
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::MacroExpansionDepthExceeded {
+                    depth: self.macro_expansion_depth,
+                },
+                self.location(span),
+            ));
         }
 
         // Get the macro definition
         let macro_def = self
             .registry
             .get(macro_name)
-            .ok_or(Error::InvalidSpecialForm {
-                form: "macro",
-                message: "macro not found in registry",
-                span,
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidSpecialForm {
+                        form: "macro",
+                        message: "macro not found in registry",
+                    },
+                    self.location(span),
+                )
             })?
             .clone();
 
         // Get the expander (we know it exists because compile_list checked)
         let Some(ref mut expander) = self.expander else {
             // This should not happen - compile_list only calls us with an expander
-            return Err(Error::InvalidSpecialForm {
-                form: "macro",
-                message: "internal error: macro expansion without expander",
-                span,
-            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "macro",
+                    message: "internal error: macro expansion without expander",
+                },
+                self.location(span),
+            ));
         };
 
         // Convert AST arguments to Values
@@ -143,13 +155,18 @@ impl Compiler<'_, '_, '_> {
         // Run the macro transformer
         let expanded_value = expander
             .expand(&macro_def, value_args, self.interner)
-            .map_err(|err| Error::MacroExpansionFailed {
-                message: err.message,
-                span,
+            .map_err(|err| {
+                Error::new(
+                    ErrorKind::MacroExpansionFailed {
+                        message: err.message,
+                    },
+                    self.location(span),
+                )
             })?;
 
         // Convert result back to AST
-        let expanded_ast = conversion::value_to_ast(&expanded_value, self.interner, span)?;
+        let expanded_ast =
+            conversion::value_to_ast(&expanded_value, self.interner, self.source_id, span)?;
 
         // Increment depth before recursive compilation
         self.macro_expansion_depth = self.macro_expansion_depth.saturating_add(1);
@@ -197,7 +214,9 @@ impl Compiler<'_, '_, '_> {
         match elements.len() {
             // Unary: (- x) → Neg
             2_usize if opcode == Opcode::Sub => {
-                let arg = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
+                let arg = elements
+                    .get(1_usize)
+                    .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
                 let checkpoint = self.next_register;
                 let result = self.compile_expr(arg)?;
 
@@ -209,8 +228,12 @@ impl Compiler<'_, '_, '_> {
             }
             // Binary: (op x y)
             3_usize => {
-                let arg1 = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
-                let arg2 = elements.get(2_usize).ok_or(Error::EmptyCall { span })?;
+                let arg1 = elements
+                    .get(1_usize)
+                    .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+                let arg2 = elements
+                    .get(2_usize)
+                    .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
                 // Save register checkpoint
                 let checkpoint = self.next_register;
@@ -226,10 +249,12 @@ impl Compiler<'_, '_, '_> {
                 self.chunk.emit(encode_abc(opcode, dest, rk_b, rk_c), span);
                 Ok(ExprResult { register: dest })
             }
-            _ => Err(Error::NotImplemented {
-                feature: "n-ary arithmetic",
-                span,
-            }),
+            _ => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "n-ary arithmetic",
+                },
+                self.location(span),
+            )),
         }
     }
 
@@ -239,7 +264,9 @@ impl Compiler<'_, '_, '_> {
         elements: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
-        let arg = elements.get(1_usize).ok_or(Error::EmptyCall { span })?;
+        let arg = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
         let checkpoint = self.next_register;
         let result = self.compile_expr(arg)?;
@@ -262,7 +289,8 @@ impl Compiler<'_, '_, '_> {
 
         // Otherwise compile to a register
         let result = self.compile_expr(expr)?;
-        rk_register(result.register).ok_or(Error::TooManyRegisters { span: expr.span })
+        rk_register(result.register)
+            .ok_or_else(|| Error::new(ErrorKind::TooManyRegisters, self.location(expr.span)))
     }
 
     /// Tries to encode an expression as a constant in an RK field.
@@ -295,7 +323,7 @@ impl Compiler<'_, '_, '_> {
         }
 
         // Add constant - index is guaranteed to fit in RK range
-        let idx = self.chunk.add_constant_at(constant, expr.span)?;
+        let idx = self.add_constant(constant, expr.span)?;
         // The index must fit since we checked above
         let idx_u8 = u8::try_from(idx).ok();
         match idx_u8 {
@@ -310,7 +338,9 @@ impl Compiler<'_, '_, '_> {
         elements: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
-        let func_expr = elements.first().ok_or(Error::EmptyCall { span })?;
+        let func_expr = elements
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let args = elements.get(1_usize..).unwrap_or(&[]);
 
         // Allocate contiguous registers: R_base = func, R_base+1..N = args
@@ -334,8 +364,8 @@ impl Compiler<'_, '_, '_> {
         }
 
         // Emit call instruction
-        let arg_count =
-            u8::try_from(args.len()).map_err(|_err| Error::TooManyRegisters { span })?;
+        let arg_count = u8::try_from(args.len())
+            .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, self.location(span)))?;
 
         self.chunk
             .emit(encode_abc(Opcode::Call, base, arg_count, 1), span);

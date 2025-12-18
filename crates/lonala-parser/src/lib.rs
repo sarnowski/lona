@@ -18,14 +18,17 @@
 //! # Example
 //!
 //! ```
-//! use lonala_parser::{parse, parse_one, Ast};
+//! use lonala_parser::{parse, parse_one, Ast, SourceId};
+//!
+//! // Create a source ID for error reporting
+//! let source_id = SourceId::new(0);
 //!
 //! // Parse multiple expressions
-//! let exprs = parse("(+ 1 2) (- 3 4)").unwrap();
+//! let exprs = parse("(+ 1 2) (- 3 4)", source_id).unwrap();
 //! assert_eq!(exprs.len(), 2);
 //!
 //! // Parse single expression
-//! let expr = parse_one("'(1 2 3)").unwrap();
+//! let expr = parse_one("'(1 2 3)", source_id).unwrap();
 //! // expr.node is Ast::List([Symbol("quote"), List([Integer(1), ...])])
 //!
 //! // Access span information
@@ -46,7 +49,7 @@ pub mod parser;
 pub mod token;
 
 // Re-exports for convenience
-pub use error::{Error, Kind as ErrorKind, Span};
+pub use error::{Error, Kind as ErrorKind, SourceId, SourceLocation, Span};
 pub use lexer::Lexer;
 pub use token::{Kind as TokenKind, Token};
 
