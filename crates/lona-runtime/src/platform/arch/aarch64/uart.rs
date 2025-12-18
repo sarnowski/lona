@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 
-//! PL011 UART driver for ARM platforms.
+//! PL011 UART driver for ARM64 platforms.
 //!
 //! Provides serial I/O for debugging and console output. Uses MMIO to
 //! communicate with the PL011 UART hardware found on QEMU virt and
@@ -10,9 +10,6 @@
 use core::cell::UnsafeCell;
 use core::fmt::{self, Write};
 use core::ptr::{read_volatile, write_volatile};
-
-use super::fdt::UartInfo;
-use crate::memory::Sel4PageProvider;
 
 // PL011 UART register offsets
 /// Data register - write to transmit, read to receive.
@@ -30,8 +27,8 @@ const UARTFR_RXFE: u32 = 1 << 4;
 /// PL011 UART driver for serial I/O.
 ///
 /// Provides blocking read/write operations. The driver must be initialized
-/// before use by calling `init` with device information from FDT.
-pub struct Pl011 {
+/// before use by calling `init` with the MMIO base address.
+struct Pl011 {
     /// Virtual address of the UART MMIO region.
     base: *mut u32,
 }
@@ -51,7 +48,7 @@ impl Pl011 {
     /// Writes a single byte to the UART.
     ///
     /// Blocks until the transmit FIFO has space, then writes the byte.
-    pub fn write_byte(&self, byte: u8) {
+    fn write_byte(&self, byte: u8) {
         // SAFETY: UART base is valid and properly aligned for u32 access
         unsafe {
             self.wait_tx_ready();
@@ -94,7 +91,7 @@ impl Pl011 {
     ///
     /// Blocks until a byte is available in the receive FIFO.
     #[cfg(not(feature = "integration-test"))]
-    pub fn read_byte(&self) -> u8 {
+    fn read_byte(&self) -> u8 {
         // SAFETY: UART base is valid
         unsafe {
             self.wait_rx_ready();
@@ -147,39 +144,32 @@ struct Driver {
     inner: UnsafeCell<Option<Pl011>>,
 }
 
-// SAFETY: Single-threaded access in seL4 root task
+// SAFETY: Single-threaded access in seL4 root task - no concurrent access.
+// Only Sync is needed for static variables (shared access), not Send (transfer).
 unsafe impl Sync for Driver {}
 
 static UART_DRIVER: Driver = Driver {
     inner: UnsafeCell::new(None),
 };
 
-/// Initializes the global UART driver.
+/// Initializes the global UART driver with a mapped MMIO base address.
 ///
-/// Maps the UART device memory and initializes the driver for use.
 /// Must be called once during startup before using print!/println! macros.
 ///
 /// # Safety
 ///
-/// - Must be called after `PAGE_PROVIDER` is initialized
+/// - `base` must point to valid, mapped PL011 UART MMIO memory
 /// - Must be called in single-threaded context
 /// - Should only be called once
-pub unsafe fn init(uart_info: UartInfo, page_provider: &Sel4PageProvider) -> bool {
-    // Map the UART device memory
-    // SAFETY: page_provider is initialized, single-threaded context
-    let Some(base) = (unsafe { page_provider.map_device_frame(uart_info.paddr) }) else {
-        return false;
-    };
-
-    // PL011 UART registers are 32-bit aligned, but map_device_frame returns *mut u8.
-    // The QEMU virt platform UART base (0x09000000) is 4-byte aligned.
+pub unsafe fn init(base: *mut u8) -> bool {
+    // PL011 UART registers are 32-bit aligned
     #[expect(
         clippy::cast_ptr_alignment,
-        reason = "UART base address is 4-byte aligned"
+        reason = "[approved] UART base address is 4-byte aligned"
     )]
     let base_u32 = base.cast::<u32>();
 
-    // SAFETY: base is valid MMIO pointer from map_device_frame
+    // SAFETY: base is valid MMIO pointer, caller guarantees alignment
     let uart = unsafe { Pl011::new(base_u32) };
 
     // SAFETY: Single-threaded initialization
@@ -231,23 +221,4 @@ pub fn print_fmt(args: fmt::Arguments) {
     if Writer.write_fmt(args).is_err() {
         // Nothing to do - UART errors are silent
     }
-}
-
-/// Prints to the UART without a newline.
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => {
-        $crate::platform::uart::print_fmt(format_args!($($arg)*))
-    };
-}
-
-/// Prints to the UART with a newline.
-#[macro_export]
-macro_rules! println {
-    () => {
-        $crate::print!("\n")
-    };
-    ($($arg:tt)*) => {
-        $crate::print!("{}\n", format_args!($($arg)*))
-    };
 }

@@ -84,7 +84,7 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     sel4::debug_println!("Memory allocator initialized");
 
     // Initialize UART for real serial output
-    init_uart(bootinfo);
+    platform::arch::init_uart(bootinfo, &PAGE_PROVIDER);
 
     // Test heap allocation to verify the allocator works
     test_allocation();
@@ -104,38 +104,6 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     {
         let mut interactive = repl::InteractiveRepl::new(repl::UartConsole);
         interactive.run()
-    }
-}
-
-/// Initializes the UART driver for serial output.
-///
-/// Discovers UART address from FDT and maps device memory.
-fn init_uart(bootinfo: &sel4::BootInfoPtr) {
-    // Discover UART from FDT in bootinfo
-    let uart_info = match platform::fdt::discover_uart(bootinfo) {
-        Ok(info) => {
-            sel4::debug_println!(
-                "Found UART at paddr 0x{:x}, size 0x{:x}",
-                info.paddr,
-                info.size
-            );
-            info
-        }
-        Err(err) => {
-            sel4::debug_println!("Warning: UART discovery failed: {:?}", err);
-            return;
-        }
-    };
-
-    // Initialize the UART driver
-    // SAFETY: PAGE_PROVIDER is initialized, single-threaded context
-    let success = unsafe { platform::uart::init(uart_info, &PAGE_PROVIDER) };
-
-    if success {
-        // First message via UART!
-        println!("UART initialized successfully");
-    } else {
-        sel4::debug_println!("Warning: UART initialization failed");
     }
 }
 

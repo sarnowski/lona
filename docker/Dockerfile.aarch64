@@ -1,0 +1,172 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Dockerfile.aarch64 - Build environment for AArch64 platforms
+#
+# Provides:
+# - ARM64 cross-compilation toolchain
+# - seL4 for qemu-arm-virt (development) and bcm2711/RPi4 (release)
+# - sel4-kernel-loader for both platforms
+# - U-Boot for Raspberry Pi 4B
+# - Raspberry Pi firmware files
+# - QEMU for ARM64 emulation
+
+ARG BASE_IMAGE=lona-base:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+ARG SEL4_VERSION=14.0.0
+
+# Install ARM64 cross-compiler and QEMU
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc-aarch64-linux-gnu \
+    g++-aarch64-linux-gnu \
+    qemu-system-arm \
+    qemu-efi-aarch64 \
+    ipxe-qemu \
+    bison \
+    flex \
+    libssl-dev \
+    bc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add ARM64 Rust target
+RUN rustup target add aarch64-unknown-none
+
+# Clone seL4 kernel source
+WORKDIR /opt/seL4-src
+RUN git clone --depth 1 --branch ${SEL4_VERSION} https://github.com/seL4/seL4.git seL4
+
+# ============================================================================
+# Build seL4 for qemu-arm-virt (Development - Debug Build)
+# ============================================================================
+WORKDIR /opt/seL4-src/seL4
+RUN mkdir -p build-qemu-debug && cd build-qemu-debug && \
+    cmake -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/opt/seL4/qemu-arm-virt-debug \
+        -DCMAKE_TOOLCHAIN_FILE=../gcc.cmake \
+        -DCROSS_COMPILER_PREFIX=aarch64-linux-gnu- \
+        -DKernelPlatform=qemu-arm-virt \
+        -DKernelSel4Arch=aarch64 \
+        -DKernelArmHypervisorSupport=ON \
+        -DKernelVerificationBuild=OFF \
+        -DKernelDebugBuild=ON \
+        -DKernelPrinting=ON \
+        -DARM_CPU=cortex-a57 \
+        .. && \
+    ninja all && ninja install
+
+# ============================================================================
+# Build seL4 for Raspberry Pi 4 (bcm2711 SoC, 8GB variant)
+# ============================================================================
+RUN mkdir -p build-rpi4-8gb && cd build-rpi4-8gb && \
+    cmake -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/opt/seL4/rpi4-8gb \
+        -DCMAKE_TOOLCHAIN_FILE=../gcc.cmake \
+        -DCROSS_COMPILER_PREFIX=aarch64-linux-gnu- \
+        -DKernelPlatform=bcm2711 \
+        -DKernelSel4Arch=aarch64 \
+        -DKernelMaxNumNodes=4 \
+        -DKernelVerificationBuild=OFF \
+        -DKernelDebugBuild=OFF \
+        .. && \
+    ninja all && ninja install
+
+# Build seL4 for Raspberry Pi 4 (4GB variant)
+RUN mkdir -p build-rpi4-4gb && cd build-rpi4-4gb && \
+    cmake -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/opt/seL4/rpi4-4gb \
+        -DCMAKE_TOOLCHAIN_FILE=../gcc.cmake \
+        -DCROSS_COMPILER_PREFIX=aarch64-linux-gnu- \
+        -DKernelPlatform=bcm2711 \
+        -DKernelSel4Arch=aarch64 \
+        -DKernelMaxNumNodes=4 \
+        -DKernelVerificationBuild=OFF \
+        -DKernelDebugBuild=OFF \
+        .. && \
+    ninja all && ninja install
+
+# ============================================================================
+# Clone rust-sel4 repository for kernel loader and tools
+# ============================================================================
+WORKDIR /opt
+RUN git clone --depth 1 https://github.com/seL4/rust-sel4.git rust-sel4
+
+# Build sel4-kernel-loader for qemu-arm-virt (Debug)
+WORKDIR /opt/rust-sel4
+RUN CC=aarch64-linux-gnu-gcc \
+    AS=aarch64-linux-gnu-as \
+    AR=aarch64-linux-gnu-ar \
+    SEL4_PREFIX=/opt/seL4/qemu-arm-virt-debug cargo build \
+    --release \
+    -Z build-std=core,alloc,compiler_builtins \
+    -Z build-std-features=compiler-builtins-mem \
+    --target support/targets/aarch64-sel4.json \
+    --package sel4-kernel-loader && \
+    mkdir -p /opt/seL4/qemu-arm-virt-debug/bin && \
+    cp target/aarch64-sel4/release/sel4-kernel-loader.elf \
+       /opt/seL4/qemu-arm-virt-debug/bin/sel4-kernel-loader
+
+# Build sel4-kernel-loader for RPi4 8GB
+RUN cargo clean && \
+    CC=aarch64-linux-gnu-gcc \
+    AS=aarch64-linux-gnu-as \
+    AR=aarch64-linux-gnu-ar \
+    SEL4_PREFIX=/opt/seL4/rpi4-8gb cargo build \
+    --release \
+    -Z build-std=core,alloc,compiler_builtins \
+    -Z build-std-features=compiler-builtins-mem \
+    --target support/targets/aarch64-sel4.json \
+    --package sel4-kernel-loader && \
+    mkdir -p /opt/seL4/rpi4-8gb/bin && \
+    cp target/aarch64-sel4/release/sel4-kernel-loader.elf \
+       /opt/seL4/rpi4-8gb/bin/sel4-kernel-loader
+
+# Build sel4-kernel-loader for RPi4 4GB
+RUN cargo clean && \
+    CC=aarch64-linux-gnu-gcc \
+    AS=aarch64-linux-gnu-as \
+    AR=aarch64-linux-gnu-ar \
+    SEL4_PREFIX=/opt/seL4/rpi4-4gb cargo build \
+    --release \
+    -Z build-std=core,alloc,compiler_builtins \
+    -Z build-std-features=compiler-builtins-mem \
+    --target support/targets/aarch64-sel4.json \
+    --package sel4-kernel-loader && \
+    mkdir -p /opt/seL4/rpi4-4gb/bin && \
+    cp target/aarch64-sel4/release/sel4-kernel-loader.elf \
+       /opt/seL4/rpi4-4gb/bin/sel4-kernel-loader
+
+# Install sel4-kernel-loader-add-payload (host CLI tool)
+RUN cargo install --locked --path crates/sel4-kernel-loader/add-payload
+
+# ============================================================================
+# Build U-Boot for Raspberry Pi 4
+# ============================================================================
+WORKDIR /opt
+RUN git clone --depth 1 --branch v2024.01 https://github.com/u-boot/u-boot.git u-boot
+
+WORKDIR /opt/u-boot
+RUN make CROSS_COMPILE=aarch64-linux-gnu- rpi_4_defconfig && \
+    make CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) && \
+    mkdir -p /opt/seL4/rpi4-8gb /opt/seL4/rpi4-4gb && \
+    cp u-boot.bin /opt/seL4/rpi4-8gb/ && \
+    cp u-boot.bin /opt/seL4/rpi4-4gb/
+
+# ============================================================================
+# Download Raspberry Pi firmware
+# ============================================================================
+WORKDIR /opt
+RUN git clone --depth 1 --branch stable https://github.com/raspberrypi/firmware.git rpi-firmware
+
+# Set default environment for development builds (qemu-arm-virt)
+ENV SEL4_PREFIX=/opt/seL4/qemu-arm-virt-debug
+ENV SEL4_INSTALL_DIR=/opt/seL4/qemu-arm-virt-debug
+ENV CROSS_COMPILE=aarch64-linux-gnu-
+
+# Disable automatic toolchain sync - everything is pre-installed in this image
+ENV RUSTUP_AUTO_INSTALL=0
+
+USER builder
+WORKDIR /work

@@ -10,8 +10,13 @@
 //! - Untyped memory tracking and retyping into frames
 //! - `VSpace` mapping of frames into the address space
 
+pub mod arch;
 mod provider;
 mod slots;
 mod untyped;
 
 pub use provider::Sel4PageProvider;
+
+// MMIO-related exports for ARM64 platform layer
+#[cfg(target_arch = "aarch64")]
+pub use untyped::FRAME_SIZE;

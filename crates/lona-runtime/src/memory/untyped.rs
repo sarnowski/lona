@@ -98,32 +98,3 @@ pub struct UntypedAllocation {
     /// Index into the bootinfo untyped list.
     pub untyped_index: usize,
 }
-
-/// Finds a device untyped capability containing the given physical address.
-///
-/// Device untypeds represent MMIO regions (UART, network controllers, etc).
-/// This function searches bootinfo for a device untyped that contains the
-/// specified physical address.
-///
-/// Returns the index into bootinfo's untyped list, or `None` if not found.
-pub fn find_device_untyped_containing(bootinfo: &BootInfo, paddr: usize) -> Option<usize> {
-    let untyped_list = bootinfo.untyped_list();
-
-    for (index, desc) in untyped_list.iter().enumerate() {
-        // Only consider device memory
-        if !desc.is_device() {
-            continue;
-        }
-
-        let base = desc.paddr();
-        let size = 1usize << desc.size_bits();
-        let end = base.saturating_add(size);
-
-        // Check if paddr falls within this region
-        if paddr >= base && paddr < end {
-            return Some(index);
-        }
-    }
-
-    None
-}

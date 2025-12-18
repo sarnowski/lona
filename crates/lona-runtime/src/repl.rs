@@ -286,7 +286,7 @@ mod interactive {
 
     impl ConsoleIo for UartConsole {
         fn read_byte(&mut self) -> Option<u8> {
-            crate::platform::uart::read_byte()
+            crate::platform::arch::read_byte()
         }
 
         fn write_str(&mut self, text: &str) {

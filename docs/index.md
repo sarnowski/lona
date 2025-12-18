@@ -138,6 +138,8 @@ Whether you're building fault-tolerant distributed systems, security-critical em
 
 ## Getting Started
 
+See the [Installation Guide](installation.md) to get Lona running on your development machine.
+
 Check out the [Goals Document](goals.md) for detailed technical information about Lona's design and architecture.
 
 ## License

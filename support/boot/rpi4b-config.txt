@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Lona OS - Raspberry Pi 4B Boot Configuration
+#
+# This file configures the GPU firmware bootloader.
+
+# Enable 64-bit mode
+arm_64bit=1
+
+# Load U-Boot as the kernel (it will then load Lona)
+kernel=u-boot.bin
+
+# Enable UART for serial console
+enable_uart=1
+
+# Disable Bluetooth to free UART0 for serial console
+dtoverlay=disable-bt
+
+# Minimal GPU memory (we don't use GPU)
+gpu_mem=16

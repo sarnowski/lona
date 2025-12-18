@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Dockerfile.x86_64 - Build environment for x86_64 platform
+#
+# This Dockerfile builds on the base image to provide:
+# - seL4 for x86_64 pc99 platform
+# - GRUB EFI tools for creating UEFI-bootable images
+# - QEMU x86_64 and OVMF for testing
+
+ARG BASE_IMAGE=lona-base:latest
+FROM ${BASE_IMAGE}
+
+USER root
+
+ARG SEL4_VERSION=14.0.0
+
+# Install x86_64 build tools (native, no cross-compile needed)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    grub-efi-amd64-bin \
+    grub-common \
+    mtools \
+    dosfstools \
+    qemu-system-x86 \
+    ovmf \
+    && rm -rf /var/lib/apt/lists/*
+
+# Clone seL4 kernel source
+WORKDIR /opt/seL4-src
+RUN git clone --depth 1 --branch ${SEL4_VERSION} https://github.com/seL4/seL4.git seL4
+
+# Build seL4 for x86_64 pc99 (Release - Optimized for Hardware)
+WORKDIR /opt/seL4-src/seL4
+RUN mkdir -p build-release && cd build-release && \
+    cmake -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/opt/seL4/x86_64-pc99 \
+        -DKernelPlatform=pc99 \
+        -DKernelSel4Arch=x86_64 \
+        -DKernelMaxNumNodes=64 \
+        -DKernelVerificationBuild=OFF \
+        -DKernelDebugBuild=OFF \
+        -DKernelPrinting=ON \
+        -DKernelSupportPCID=ON \
+        .. && \
+    ninja all && ninja install
+
+# Build seL4 for x86_64 pc99 (Debug - Optimized for QEMU/Dev)
+# - KernelDebugBuild=ON: Enable assertions and debug symbols
+# - KernelSupportPCID=OFF: Disable PCID for QEMU TCG compatibility
+WORKDIR /opt/seL4-src/seL4
+RUN mkdir -p build-debug && cd build-debug && \
+    cmake -G Ninja \
+        -DCMAKE_INSTALL_PREFIX=/opt/seL4/x86_64-pc99-debug \
+        -DKernelPlatform=pc99 \
+        -DKernelSel4Arch=x86_64 \
+        -DKernelMaxNumNodes=64 \
+        -DKernelVerificationBuild=OFF \
+        -DKernelDebugBuild=ON \
+        -DKernelPrinting=ON \
+        -DKernelSupportPCID=OFF \
+        .. && \
+    ninja all && ninja install
+
+# Verify kernels were built successfully
+RUN test -f /opt/seL4/x86_64-pc99/bin/kernel.elf || \
+    (echo "ERROR: Release kernel.elf not found" && exit 1) && \
+    test -f /opt/seL4/x86_64-pc99-debug/bin/kernel.elf || \
+    (echo "ERROR: Debug kernel.elf not found" && exit 1)
+
+# Clone rust-sel4 for target specs (needed for reference)
+WORKDIR /opt
+RUN git clone --depth 1 https://github.com/seL4/rust-sel4.git rust-sel4
+
+# Copy x86_64 target spec to both seL4 installs
+RUN cp /opt/rust-sel4/support/targets/x86_64-sel4.json /opt/seL4/x86_64-pc99/ && \
+    cp /opt/rust-sel4/support/targets/x86_64-sel4.json /opt/seL4/x86_64-pc99-debug/
+
+# Set environment for x86_64 builds (Default to debug for shell/dev work)
+ENV SEL4_PREFIX=/opt/seL4/x86_64-pc99-debug
+ENV SEL4_INSTALL_DIR=/opt/seL4/x86_64-pc99-debug
+
+# Disable automatic toolchain sync - everything is pre-installed in this image
+ENV RUSTUP_AUTO_INSTALL=0
+
+USER builder
+WORKDIR /work

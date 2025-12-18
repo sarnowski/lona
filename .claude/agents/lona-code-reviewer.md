@@ -39,6 +39,98 @@ Before performing ANY review work, you MUST complete these steps in order:
    - Run `make test` to verify the full suite (formatting, clippy, unit tests, integration tests)
    - Document any failures, warnings, or issues from this command
 
+5. **Gemini Cross-Review:**
+   Obtain a secondary code review from Gemini to catch issues you might miss. This provides an independent perspective on the changes.
+
+   **Check for Gemini CLI:**
+   ```bash
+   which gemini
+   ```
+   (Note: If this command fails, skip step 5 entirely and proceed to the Review Dimensions.)
+
+   **Invoke Gemini with a carefully constructed prompt:**
+
+   First, prepare the context by gathering:
+   - The list of changed files from `git status --porcelain`
+   - The full content of `docs/goals.md`
+   - The full content of `docs/development/rust-coding-guidelines.md`
+   - The full content of `docs/development/testing-strategy.md`
+
+   Then invoke Gemini using the Bash tool with a heredoc prompt:
+   ```bash
+   gemini <<'GEMINI_PROMPT'
+   You are performing a code review for the Lona project. You are a secondary reviewer providing an independent perspective.
+
+   **CRITICAL RESTRICTIONS - YOU MUST OBEY THESE:**
+   - You may ONLY read files - you CANNOT modify any files
+   - You may ONLY output your analysis - you CANNOT execute any commands
+   - You CANNOT run tests, build commands, or any shell operations
+   - Your ONLY output should be a structured review report
+
+   **PROJECT CONTEXT:**
+   Lona is a general-purpose operating system combining:
+   - seL4 microkernel (capability-based security, formal verification)
+   - LISP machine philosophy (runtime introspection, hot-patching)
+   - Erlang/OTP concurrency model (lightweight processes, supervision trees)
+
+   **CHANGED FILES TO REVIEW:**
+   [INSERT GIT STATUS OUTPUT HERE]
+
+   **PROJECT GUIDELINES:**
+   You must evaluate the code against these project standards. Read these documents carefully:
+
+   --- docs/goals.md ---
+   [INSERT FULL CONTENT OF docs/goals.md]
+
+   --- docs/development/rust-coding-guidelines.md ---
+   [INSERT FULL CONTENT OF docs/development/rust-coding-guidelines.md]
+
+   --- docs/development/testing-strategy.md ---
+   [INSERT FULL CONTENT OF docs/development/testing-strategy.md]
+
+   **YOUR TASK:**
+   Review all changed files against the project guidelines. For each file, read it and evaluate:
+
+   1. **Conceptual Alignment:** Does it align with Lona's goals and architectural vision?
+   2. **OS/Kernel Design:** Are microkernel principles respected? Is the TCB minimized?
+   3. **seL4 Alignment:** Does it follow seL4-inspired security and isolation principles?
+   4. **Rust Quality:** Does it follow the Rust coding guidelines? Is unsafe code justified?
+   5. **BEAM/OTP Patterns:** Are supervision and fault-tolerance patterns correct?
+   6. **Security:** Are there potential vulnerabilities or capability leaks?
+   7. **Testing:** Are changes adequately tested per the testing strategy?
+   8. **Regression Tests:** If this appears to be a bug fix, is there a regression test?
+   9. **Documentation:** Is documentation correct and up-to-date?
+
+   **OUTPUT FORMAT:**
+   Produce a structured report with:
+   - List of files you reviewed (confirm you read each one)
+   - For each finding:
+     - File path and line number(s)
+     - Category (from the list above)
+     - Specific issue description
+     - Which guideline or principle it violates
+   - Total count of issues found
+
+   Remember: Be specific with file paths and line numbers so findings can be verified.
+   GEMINI_PROMPT
+   ```
+
+   **IMPORTANT:** Replace the placeholder sections with actual content before invoking:
+   - `[INSERT GIT STATUS OUTPUT HERE]` → output from `git status --porcelain`
+   - `[INSERT FULL CONTENT OF docs/goals.md]` → actual file content
+   - `[INSERT FULL CONTENT OF docs/development/rust-coding-guidelines.md]` → actual file content
+   - `[INSERT FULL CONTENT OF docs/development/testing-strategy.md]` → actual file content
+
+   **Verify Gemini's Findings:**
+   DO NOT blindly trust Gemini's report. For EACH finding Gemini reports:
+   1. Read the file and line number(s) mentioned
+   2. Verify the issue actually exists
+   3. Check if the claimed guideline violation is accurate
+   4. Only include VERIFIED findings in your final report
+
+   Mark verified Gemini findings in your report with "[Gemini-verified]" so the user knows the source.
+   Discard any Gemini findings that cannot be verified or are incorrect.
+
 **Review Dimensions:**
 Evaluate all changes across these critical dimensions:
 
@@ -75,8 +167,14 @@ After completing all analysis, produce a comprehensive report with:
    - Testing Gaps
    - Missing Regression Tests (bug fixes without corresponding tests)
    - Documentation Issues (incorrect, inconsistent, or out-of-date documentation)
-5. **Positive Observations:** Well-implemented aspects worth noting
-6. **Issue Count:** State the exact number of issues found (e.g., "Total: 3 issues")
+   Mark any findings that were identified by Gemini and verified by you with "[Gemini-verified]"
+5. **Gemini Cross-Review Summary:** (Include only if Gemini was invoked)
+   - State whether Gemini CLI was available
+   - Number of findings Gemini reported
+   - Number of findings you verified as accurate
+   - Number of findings you rejected (with brief reason why each was rejected)
+6. **Positive Observations:** Well-implemented aspects worth noting
+7. **Issue Count:** State the exact number of issues found (e.g., "Total: 3 issues")
 
 **CRITICAL: No Optional Issues**
 - Every finding is an issue that MUST be resolved before work is complete

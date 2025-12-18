@@ -64,6 +64,7 @@ std_instead_of_alloc = "allow"    # We use alloc, this would flag dependencies
 # Conflicts with other lints or style choices
 blanket_clippy_restriction_lints = "allow"  # We intentionally enable restriction group
 implicit_return = "allow"         # Conflicts with Rust idioms, explicit return is noise
+inline_asm_x86_intel_syntax = "allow"  # Conflicts with inline_asm_x86_att_syntax - Intel is more readable
 needless_borrowed_reference = "allow"  # Conflicts with pattern_type_mismatch - we prefer explicit &Ok(ref x)
 question_mark_used = "allow"      # ? operator is idiomatic Rust
 semicolon_outside_block = "allow" # Conflicts with rustfmt - defer to formatter

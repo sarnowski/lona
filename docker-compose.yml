@@ -4,17 +4,28 @@
 # docker-compose.yml - Container orchestration for Lona OS build environment
 
 services:
-  # Main build container - builds seL4 and Rust root task
-  builder:
+  # Base image with shared tooling (Rust, Python, CMake)
+  base:
     build:
       context: ./docker
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.base
       args:
         UID: ${UID:-1000}
         GID: ${GID:-1000}
         RUST_CHANNEL: nightly-2025-10-20
+    image: lona-base:latest
+
+  # AArch64 builder (qemu-arm-virt for development, rpi4 for release)
+  builder:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.aarch64
+      args:
+        BASE_IMAGE: lona-base:latest
         SEL4_VERSION: "14.0.0"
-    image: lona-builder:latest
+    image: lona-builder-aarch64:latest
+    depends_on:
+      - base
     volumes:
       - .:/work:rw
       - cargo-cache:/opt/cargo/registry
@@ -23,20 +34,40 @@ services:
     stdin_open: true
     tty: true
     environment:
-      - SEL4_PREFIX=/opt/seL4
-      - SEL4_INSTALL_DIR=/opt/seL4
+      - SEL4_PREFIX=/opt/seL4/qemu-arm-virt
+      - SEL4_INSTALL_DIR=/opt/seL4/qemu-arm-virt
       - CARGO_HOME=/opt/cargo
       - RUSTUP_HOME=/opt/rustup
 
-  # QEMU runner - runs the built Lona image
-  runner:
+  # x86_64 builder (pc99 for release)
+  builder-x86_64:
     build:
       context: ./docker
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.x86_64
       args:
-        UID: ${UID:-1000}
-        GID: ${GID:-1000}
-    image: lona-builder:latest
+        BASE_IMAGE: lona-base:latest
+        SEL4_VERSION: "14.0.0"
+    image: lona-builder-x86_64:latest
+    depends_on:
+      - base
+    volumes:
+      - .:/work:rw
+      - cargo-cache:/opt/cargo/registry
+      - cargo-git:/opt/cargo/git
+    working_dir: /work
+    stdin_open: true
+    tty: true
+    environment:
+      - SEL4_PREFIX=/opt/seL4/x86_64-pc99-debug
+      - SEL4_INSTALL_DIR=/opt/seL4/x86_64-pc99-debug
+      - CARGO_HOME=/opt/cargo
+      - RUSTUP_HOME=/opt/rustup
+
+  # QEMU ARM64 runner - runs the built Lona image (development)
+  runner-arm64:
+    image: lona-builder-aarch64:latest
+    depends_on:
+      - builder
     volumes:
       - .:/work:ro
     working_dir: /work
@@ -49,22 +80,49 @@ services:
         -m 1G
         -nographic
         -serial mon:stdio
-        -kernel build/lona.elf
+        -kernel build/lona-arm64.elf
 
-  # Test runner - runs integration tests in QEMU
-  tester:
-    build:
-      context: ./docker
-      dockerfile: Dockerfile
-      args:
-        UID: ${UID:-1000}
-        GID: ${GID:-1000}
-    image: lona-builder:latest
+  # QEMU x86_64 runner - runs the built Lona image (development)
+  runner-x86_64:
+    image: lona-builder-x86_64:latest
+    depends_on:
+      - builder-x86_64
+    volumes:
+      - .:/work:ro
+    working_dir: /work
+    stdin_open: true
+    tty: true
+    command: >
+      qemu-system-x86_64
+        -machine q35
+        -cpu Cascadelake-Server
+        -m 512M
+        -bios /usr/share/OVMF/OVMF_CODE.fd
+        -drive format=raw,file=fat:rw:build/qemu-x86_64
+        -nographic
+        -serial mon:stdio
+
+  # Test runner - runs integration tests in QEMU (ARM64)
+  tester-arm64:
+    image: lona-builder-aarch64:latest
+    depends_on:
+      - builder
     volumes:
       - .:/work:ro
     working_dir: /work
     tty: true
-    command: make _test
+    command: make _test-arm64
+
+  # Test runner - runs integration tests in QEMU (x86_64)
+  tester-x86_64:
+    image: lona-builder-x86_64:latest
+    depends_on:
+      - builder-x86_64
+    volumes:
+      - .:/work:ro
+    working_dir: /work
+    tty: true
+    command: make _test-x86_64
 
 volumes:
   cargo-cache:

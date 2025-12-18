@@ -80,10 +80,16 @@ pub fn run_integration_tests() {
 /// Used after integration tests complete. The loop never exits.
 pub fn halt_loop() -> ! {
     loop {
-        // SAFETY: WFI (Wait For Interrupt) is safe to execute - it simply
-        // puts the CPU into a low-power state until an interrupt occurs.
+        // SAFETY: These instructions are safe to execute - they simply
+        // put the CPU into a low-power state until an interrupt occurs.
+        // WFI = Wait For Interrupt (ARM64), HLT = Halt (x86_64)
+        #[cfg(target_arch = "aarch64")]
         unsafe {
             core::arch::asm!("wfi", options(nomem, nostack, preserves_flags));
+        }
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            core::arch::asm!("hlt", options(nomem, nostack, preserves_flags));
         }
     }
 }
