@@ -1,0 +1,179 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+
+//! Tests for collection parsing: lists, vectors, maps.
+
+extern crate alloc;
+
+use alloc::string::ToString;
+use alloc::vec;
+
+use crate::ast::Ast;
+
+use super::parse_ast;
+
+// ==================== Collections: Lists ====================
+
+#[test]
+fn parse_empty_list() {
+    assert_eq!(parse_ast("()"), Ast::List(vec![]));
+}
+
+#[test]
+fn parse_list_with_elements() {
+    let ast = parse_ast("(+ 1 2)");
+    match ast {
+        Ast::List(elements) => {
+            assert_eq!(elements.len(), 3_usize);
+            assert_eq!(
+                elements.first().map(|spanned| &spanned.node),
+                Some(&Ast::Symbol("+".to_string()))
+            );
+            assert_eq!(
+                elements.get(1_usize).map(|spanned| &spanned.node),
+                Some(&Ast::Integer(1_i64))
+            );
+            assert_eq!(
+                elements.get(2_usize).map(|spanned| &spanned.node),
+                Some(&Ast::Integer(2_i64))
+            );
+        }
+        _ => panic!("expected List"),
+    }
+}
+
+#[test]
+fn parse_nested_lists() {
+    let ast = parse_ast("((a) (b))");
+    match ast {
+        Ast::List(outer) => {
+            assert_eq!(outer.len(), 2_usize);
+            match &outer.first().map(|spanned| &spanned.node) {
+                Some(Ast::List(inner)) => {
+                    assert_eq!(inner.len(), 1_usize);
+                }
+                _ => panic!("expected inner List"),
+            }
+        }
+        _ => panic!("expected List"),
+    }
+}
+
+// ==================== Collections: Vectors ====================
+
+#[test]
+fn parse_empty_vector() {
+    assert_eq!(parse_ast("[]"), Ast::Vector(vec![]));
+}
+
+#[test]
+fn parse_vector_with_elements() {
+    let ast = parse_ast("[1 2 3]");
+    match ast {
+        Ast::Vector(elements) => {
+            assert_eq!(elements.len(), 3_usize);
+            assert_eq!(
+                elements.first().map(|spanned| &spanned.node),
+                Some(&Ast::Integer(1_i64))
+            );
+            assert_eq!(
+                elements.get(1_usize).map(|spanned| &spanned.node),
+                Some(&Ast::Integer(2_i64))
+            );
+            assert_eq!(
+                elements.get(2_usize).map(|spanned| &spanned.node),
+                Some(&Ast::Integer(3_i64))
+            );
+        }
+        _ => panic!("expected Vector"),
+    }
+}
+
+// ==================== Collections: Maps ====================
+
+#[test]
+fn parse_empty_map() {
+    assert_eq!(parse_ast("{}"), Ast::Map(vec![]));
+}
+
+#[test]
+fn parse_map_with_entries() {
+    let ast = parse_ast("{:a 1 :b 2}");
+    match ast {
+        Ast::Map(elements) => {
+            assert_eq!(elements.len(), 4_usize);
+            assert_eq!(
+                elements.first().map(|spanned| &spanned.node),
+                Some(&Ast::Keyword("a".to_string()))
+            );
+            assert_eq!(
+                elements.get(1_usize).map(|spanned| &spanned.node),
+                Some(&Ast::Integer(1_i64))
+            );
+            assert_eq!(
+                elements.get(2_usize).map(|spanned| &spanned.node),
+                Some(&Ast::Keyword("b".to_string()))
+            );
+            assert_eq!(
+                elements.get(3_usize).map(|spanned| &spanned.node),
+                Some(&Ast::Integer(2_i64))
+            );
+        }
+        _ => panic!("expected Map"),
+    }
+}
+
+#[test]
+fn parse_nested_collections() {
+    let ast = parse_ast("{:list (1 2) :vec [3 4]}");
+    match ast {
+        Ast::Map(elements) => {
+            assert_eq!(elements.len(), 4_usize);
+            assert!(matches!(
+                elements.get(1_usize).map(|spanned| &spanned.node),
+                Some(Ast::List(_))
+            ));
+            assert!(matches!(
+                elements.get(3_usize).map(|spanned| &spanned.node),
+                Some(Ast::Vector(_))
+            ));
+        }
+        _ => panic!("expected Map"),
+    }
+}
+
+// ==================== Complex Expressions ====================
+
+#[test]
+fn parse_function_definition() {
+    let ast = parse_ast("(defn foo [x] x)");
+    match ast {
+        Ast::List(elements) => {
+            assert_eq!(elements.len(), 4_usize);
+            assert_eq!(
+                elements.first().map(|spanned| &spanned.node),
+                Some(&Ast::Symbol("defn".to_string()))
+            );
+            assert_eq!(
+                elements.get(1_usize).map(|spanned| &spanned.node),
+                Some(&Ast::Symbol("foo".to_string()))
+            );
+            assert!(matches!(
+                elements.get(2_usize).map(|spanned| &spanned.node),
+                Some(Ast::Vector(_))
+            ));
+        }
+        _ => panic!("expected List"),
+    }
+}
+
+#[test]
+fn parse_let_binding() {
+    let ast = parse_ast("(let [x 1] x)");
+    match ast {
+        Ast::List(elements) => {
+            assert_eq!(elements.len(), 3_usize);
+        }
+        _ => panic!("expected List"),
+    }
+}

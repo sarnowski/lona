@@ -13,11 +13,13 @@ extern crate alloc;
 #[cfg(feature = "alloc")]
 use alloc::vec::Vec;
 
-use crate::error::{Error, Kind as ErrorKind, Span};
-use crate::token::{Kind as TokenKind, Token};
-
+mod numbers;
+mod strings;
 #[cfg(test)]
 mod tests;
+
+use crate::error::{Error, Kind as ErrorKind, Span};
+use crate::token::{Kind as TokenKind, Token};
 
 /// Lexical analyzer for Lonala source code.
 ///
@@ -133,16 +135,16 @@ impl<'src> Lexer<'src> {
             '`' => Ok(self.single_char_token(TokenKind::SyntaxQuote, start)),
             '~' => Ok(self.tilde_token(start)),
 
-            // String literal
+            // String literal (delegated to strings module)
             '"' => self.string_token(start),
 
-            // Keyword
+            // Keyword (delegated to strings module)
             ':' => self.keyword_token(start),
 
             // Special floats (##NaN, ##Inf, ##-Inf)
             '#' => self.hash_token(start),
 
-            // Number or symbol starting with digit
+            // Number or symbol starting with digit (delegated to numbers module)
             '0'..='9' => self.number_token(start),
 
             // Negative number or symbol starting with -
@@ -192,99 +194,6 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Parses a string literal.
-    fn string_token(&mut self, start: usize) -> Result<Token<'src>, Error> {
-        self.advance(); // consume opening "
-
-        loop {
-            match self.current_char() {
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::UnterminatedString,
-                        Span::new(start, self.position),
-                    ));
-                }
-                Some('"') => {
-                    self.advance(); // consume closing "
-                    break;
-                }
-                Some('\\') => {
-                    self.advance(); // consume backslash
-                    match self.current_char() {
-                        None => {
-                            return Err(Error::new(
-                                ErrorKind::UnterminatedString,
-                                Span::new(start, self.position),
-                            ));
-                        }
-                        Some('\\' | '"' | 'n' | 't' | 'r' | '0') => {
-                            self.advance();
-                        }
-                        Some('u') => {
-                            self.advance(); // consume 'u'
-                            // Expect exactly 4 hex digits
-                            for _ in 0_u8..4_u8 {
-                                match self.current_char() {
-                                    Some(char) if char.is_ascii_hexdigit() => {
-                                        self.advance();
-                                    }
-                                    _ => {
-                                        return Err(Error::new(
-                                            ErrorKind::InvalidUnicodeEscape,
-                                            Span::new(start, self.position),
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        Some(ch) => {
-                            return Err(Error::new(
-                                ErrorKind::InvalidEscapeSequence(ch),
-                                Span::new(start, self.position),
-                            ));
-                        }
-                    }
-                }
-                Some(_) => {
-                    self.advance();
-                }
-            }
-        }
-
-        let lexeme = self.source.get(start..self.position).unwrap_or("");
-        Ok(Token::new(
-            TokenKind::String,
-            lexeme,
-            Span::new(start, self.position),
-        ))
-    }
-
-    /// Parses a keyword (`:foo`, `:ns/name`).
-    fn keyword_token(&mut self, start: usize) -> Result<Token<'src>, Error> {
-        self.advance(); // consume :
-
-        // Keywords must have at least one character after the colon
-        if !self.current_char().is_some_and(is_symbol_start) {
-            // Bare colon is an error
-            return Err(Error::new(
-                ErrorKind::UnexpectedCharacter(':'),
-                Span::new(start, self.position),
-            ));
-        }
-
-        // Consume the rest of the keyword (symbol characters)
-        while self.current_char().is_some_and(is_symbol_continue) {
-            self.advance();
-        }
-
-        let lexeme = self.source.get(start..self.position).unwrap_or("");
-        Ok(Token::new(
-            TokenKind::Keyword,
-            lexeme,
-            Span::new(start, self.position),
-        ))
-    }
-
     /// Handles `#` which starts special float literals.
     fn hash_token(&mut self, start: usize) -> Result<Token<'src>, Error> {
         let remaining = self.remaining();
@@ -326,221 +235,6 @@ impl<'src> Lexer<'src> {
         self.advance();
         Err(Error::new(
             ErrorKind::UnexpectedCharacter('#'),
-            Span::new(start, self.position),
-        ))
-    }
-
-    /// Parses a number starting with a digit.
-    fn number_token(&mut self, start: usize) -> Result<Token<'src>, Error> {
-        // Check for base prefixes (0x, 0b, 0o)
-        if self.current_char() == Some('0') {
-            self.advance();
-            match self.current_char() {
-                Some('x' | 'X') => return self.hex_number(start),
-                Some('b' | 'B') => return self.binary_number(start),
-                Some('o' | 'O') => return self.octal_number(start),
-                Some('.') => return self.float_after_integer(start),
-                Some('e' | 'E') => return self.float_exponent(start),
-                Some(char) if char.is_ascii_digit() => {
-                    // Continue parsing as decimal
-                }
-                _ => {
-                    // Just '0'
-                    let lexeme = self.source.get(start..self.position).unwrap_or("");
-                    return Ok(Token::new(
-                        TokenKind::Integer,
-                        lexeme,
-                        Span::new(start, self.position),
-                    ));
-                }
-            }
-        }
-
-        // Consume decimal digits
-        while self
-            .current_char()
-            .is_some_and(|char| char.is_ascii_digit())
-        {
-            self.advance();
-        }
-
-        // Check for float
-        match self.current_char() {
-            Some('.') => self.float_after_integer(start),
-            Some('e' | 'E') => self.float_exponent(start),
-            _ => {
-                let lexeme = self.source.get(start..self.position).unwrap_or("");
-                Ok(Token::new(
-                    TokenKind::Integer,
-                    lexeme,
-                    Span::new(start, self.position),
-                ))
-            }
-        }
-    }
-
-    /// Parses a hexadecimal number after seeing `0x` or `0X`.
-    fn hex_number(&mut self, start: usize) -> Result<Token<'src>, Error> {
-        self.advance(); // consume x/X
-
-        // Must have at least one hex digit
-        if !self
-            .current_char()
-            .is_some_and(|char| char.is_ascii_hexdigit())
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
-            ));
-        }
-
-        while self
-            .current_char()
-            .is_some_and(|char| char.is_ascii_hexdigit())
-        {
-            self.advance();
-        }
-
-        let lexeme = self.source.get(start..self.position).unwrap_or("");
-        Ok(Token::new(
-            TokenKind::Integer,
-            lexeme,
-            Span::new(start, self.position),
-        ))
-    }
-
-    /// Parses a binary number after seeing `0b` or `0B`.
-    fn binary_number(&mut self, start: usize) -> Result<Token<'src>, Error> {
-        self.advance(); // consume b/B
-
-        // Must have at least one binary digit
-        if !self
-            .current_char()
-            .is_some_and(|char| char == '0' || char == '1')
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
-            ));
-        }
-
-        while self
-            .current_char()
-            .is_some_and(|char| char == '0' || char == '1')
-        {
-            self.advance();
-        }
-
-        let lexeme = self.source.get(start..self.position).unwrap_or("");
-        Ok(Token::new(
-            TokenKind::Integer,
-            lexeme,
-            Span::new(start, self.position),
-        ))
-    }
-
-    /// Parses an octal number after seeing `0o` or `0O`.
-    fn octal_number(&mut self, start: usize) -> Result<Token<'src>, Error> {
-        self.advance(); // consume o/O
-
-        // Must have at least one octal digit
-        if !self
-            .current_char()
-            .is_some_and(|char| ('0'..='7').contains(&char))
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
-            ));
-        }
-
-        while self
-            .current_char()
-            .is_some_and(|char| ('0'..='7').contains(&char))
-        {
-            self.advance();
-        }
-
-        let lexeme = self.source.get(start..self.position).unwrap_or("");
-        Ok(Token::new(
-            TokenKind::Integer,
-            lexeme,
-            Span::new(start, self.position),
-        ))
-    }
-
-    /// Parses the fractional part of a float after seeing `.`.
-    fn float_after_integer(&mut self, start: usize) -> Result<Token<'src>, Error> {
-        self.advance(); // consume .
-
-        // Must have at least one digit after the dot
-        if !self
-            .current_char()
-            .is_some_and(|char| char.is_ascii_digit())
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
-            ));
-        }
-
-        while self
-            .current_char()
-            .is_some_and(|char| char.is_ascii_digit())
-        {
-            self.advance();
-        }
-
-        // Check for exponent
-        if self
-            .current_char()
-            .is_some_and(|char| char == 'e' || char == 'E')
-        {
-            return self.float_exponent(start);
-        }
-
-        let lexeme = self.source.get(start..self.position).unwrap_or("");
-        Ok(Token::new(
-            TokenKind::Float,
-            lexeme,
-            Span::new(start, self.position),
-        ))
-    }
-
-    /// Parses the exponent part of a float after seeing `e` or `E`.
-    fn float_exponent(&mut self, start: usize) -> Result<Token<'src>, Error> {
-        self.advance(); // consume e/E
-
-        // Optional sign
-        if self
-            .current_char()
-            .is_some_and(|char| char == '+' || char == '-')
-        {
-            self.advance();
-        }
-
-        // Must have at least one digit
-        if !self
-            .current_char()
-            .is_some_and(|char| char.is_ascii_digit())
-        {
-            return Err(Error::new(
-                ErrorKind::InvalidNumber,
-                Span::new(start, self.position),
-            ));
-        }
-
-        while self
-            .current_char()
-            .is_some_and(|char| char.is_ascii_digit())
-        {
-            self.advance();
-        }
-
-        let lexeme = self.source.get(start..self.position).unwrap_or("");
-        Ok(Token::new(
-            TokenKind::Float,
-            lexeme,
             Span::new(start, self.position),
         ))
     }
