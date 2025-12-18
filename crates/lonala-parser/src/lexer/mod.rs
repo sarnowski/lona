@@ -46,6 +46,11 @@ pub struct Lexer<'src> {
         reason = "[approved] Intentional: distinguishes 'not peeked' from 'peeked EOF'"
     )]
     peeked: Option<Option<Result<Token<'src>, Error>>>,
+    /// Position before the most recent trivia skip.
+    ///
+    /// Used by the parser to calculate `full_span` including leading
+    /// comments and whitespace.
+    trivia_start: usize,
 }
 
 impl<'src> Lexer<'src> {
@@ -61,6 +66,7 @@ impl<'src> Lexer<'src> {
             source_id,
             position: 0_usize,
             peeked: None,
+            trivia_start: 0_usize,
         }
     }
 
@@ -69,6 +75,16 @@ impl<'src> Lexer<'src> {
     #[must_use]
     pub const fn source_id(&self) -> SourceId {
         self.source_id
+    }
+
+    /// Returns the byte position before the most recent trivia skip.
+    ///
+    /// Used by the parser to calculate `full_span` including leading
+    /// comments and whitespace.
+    #[inline]
+    #[must_use]
+    pub const fn trivia_start(&self) -> usize {
+        self.trivia_start
     }
 
     /// Creates a source location from a span within this source.
@@ -120,7 +136,12 @@ impl<'src> Lexer<'src> {
     }
 
     /// Skips whitespace and comments.
+    ///
+    /// Records the position before skipping in `trivia_start` for use by
+    /// the parser when calculating `full_span`.
     fn skip_whitespace_and_comments(&mut self) {
+        self.trivia_start = self.position;
+
         loop {
             match self.current_char() {
                 // Whitespace (including comma, which is whitespace in Clojure)

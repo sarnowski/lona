@@ -68,6 +68,16 @@ impl<'src> Parser<'src> {
         self.location(Span::new(start, end))
     }
 
+    /// Creates a `Spanned` with `full_span` starting at `trivia_start`.
+    ///
+    /// The `full_span` runs from `trivia_start` (before any leading
+    /// whitespace/comments) to `span.end`.
+    #[inline]
+    const fn spanned_with_trivia<T>(node: T, span: Span, trivia_start: usize) -> Spanned<T> {
+        let full_span = Span::new(trivia_start, span.end);
+        Spanned::with_full_span(node, span, full_span)
+    }
+
     /// Parses all expressions from the source.
     ///
     /// Returns a vector of spanned AST nodes, one for each top-level expression.
@@ -100,6 +110,7 @@ impl<'src> Parser<'src> {
 
     /// Parses a single expression.
     fn parse_expr(&mut self) -> Result<Spanned<Ast>, Error> {
+        // Peek triggers trivia skip, so capture trivia_start after peek
         let token = match self.lexer.peek() {
             Some(&Ok(ref token)) => token.clone(),
             Some(&Err(ref err)) => return Err(err.clone()),
@@ -113,17 +124,20 @@ impl<'src> Parser<'src> {
             }
         };
 
+        // Capture trivia_start after peek (peek triggers trivia skip)
+        let trivia_start = self.lexer.trivia_start();
+
         match token.kind {
             // Delimiters - start collections
-            TokenKind::LeftParen => self.parse_list(),
-            TokenKind::LeftBracket => self.parse_vector(),
-            TokenKind::LeftBrace => self.parse_map(),
+            TokenKind::LeftParen => self.parse_list(trivia_start),
+            TokenKind::LeftBracket => self.parse_vector(trivia_start),
+            TokenKind::LeftBrace => self.parse_map(trivia_start),
 
             // Reader macros
-            TokenKind::Quote => self.parse_reader_macro("quote"),
-            TokenKind::SyntaxQuote => self.parse_reader_macro("syntax-quote"),
-            TokenKind::Unquote => self.parse_reader_macro("unquote"),
-            TokenKind::UnquoteSplice => self.parse_reader_macro("unquote-splicing"),
+            TokenKind::Quote => self.parse_reader_macro("quote", trivia_start),
+            TokenKind::SyntaxQuote => self.parse_reader_macro("syntax-quote", trivia_start),
+            TokenKind::Unquote => self.parse_reader_macro("unquote", trivia_start),
+            TokenKind::UnquoteSplice => self.parse_reader_macro("unquote-splicing", trivia_start),
 
             // Atoms
             TokenKind::Integer
@@ -133,7 +147,7 @@ impl<'src> Parser<'src> {
             | TokenKind::False
             | TokenKind::Nil
             | TokenKind::Symbol
-            | TokenKind::Keyword => self.parse_atom(),
+            | TokenKind::Keyword => self.parse_atom(trivia_start),
 
             // Unexpected closing delimiters
             TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
@@ -149,19 +163,29 @@ impl<'src> Parser<'src> {
     }
 
     /// Parses a list `(...)`.
-    fn parse_list(&mut self) -> Result<Spanned<Ast>, Error> {
-        self.parse_collection(TokenKind::LeftParen, TokenKind::RightParen, '(', ')')
-            .map(|(elements, span)| Spanned::new(Ast::list(elements), span))
+    fn parse_list(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
+        let (elements, span) =
+            self.parse_collection(TokenKind::LeftParen, TokenKind::RightParen, '(', ')')?;
+        Ok(Self::spanned_with_trivia(
+            Ast::list(elements),
+            span,
+            trivia_start,
+        ))
     }
 
     /// Parses a vector `[...]`.
-    fn parse_vector(&mut self) -> Result<Spanned<Ast>, Error> {
-        self.parse_collection(TokenKind::LeftBracket, TokenKind::RightBracket, '[', ']')
-            .map(|(elements, span)| Spanned::new(Ast::vector(elements), span))
+    fn parse_vector(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
+        let (elements, span) =
+            self.parse_collection(TokenKind::LeftBracket, TokenKind::RightBracket, '[', ']')?;
+        Ok(Self::spanned_with_trivia(
+            Ast::vector(elements),
+            span,
+            trivia_start,
+        ))
     }
 
     /// Parses a map `{...}`.
-    fn parse_map(&mut self) -> Result<Spanned<Ast>, Error> {
+    fn parse_map(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
         let (elements, span) =
             self.parse_collection(TokenKind::LeftBrace, TokenKind::RightBrace, '{', '}')?;
 
@@ -170,7 +194,11 @@ impl<'src> Parser<'src> {
             return Err(Error::new(ErrorKind::OddMapEntries, self.location(span)));
         }
 
-        Ok(Spanned::new(Ast::map(elements), span))
+        Ok(Self::spanned_with_trivia(
+            Ast::map(elements),
+            span,
+            trivia_start,
+        ))
     }
 
     /// Helper to parse a collection with the given delimiters.
@@ -241,7 +269,11 @@ impl<'src> Parser<'src> {
     /// Parses a reader macro and expands it to its canonical form.
     ///
     /// For example, `'x` becomes `(quote x)`.
-    fn parse_reader_macro(&mut self, symbol_name: &str) -> Result<Spanned<Ast>, Error> {
+    fn parse_reader_macro(
+        &mut self,
+        symbol_name: &str,
+        trivia_start: usize,
+    ) -> Result<Spanned<Ast>, Error> {
         // Consume the reader macro token
         let macro_token = self.advance()?;
         let start = macro_token.span.start;
@@ -269,7 +301,7 @@ impl<'src> Parser<'src> {
             }
         }
 
-        // Parse the inner expression
+        // Parse the inner expression (gets its own trivia tracking via parse_expr)
         let inner = self.parse_expr()?;
         let end = inner.span.end;
 
@@ -281,11 +313,16 @@ impl<'src> Parser<'src> {
         let elements = alloc::vec![symbol, inner];
         let span = Span::new(start, end);
 
-        Ok(Spanned::new(Ast::list(elements), span))
+        // Use trivia_start from before the reader macro character
+        Ok(Self::spanned_with_trivia(
+            Ast::list(elements),
+            span,
+            trivia_start,
+        ))
     }
 
     /// Parses an atom (literal, symbol, or keyword).
-    fn parse_atom(&mut self) -> Result<Spanned<Ast>, Error> {
+    fn parse_atom(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
         let token = self.advance()?;
         let token_location = self.location(token.span);
 
@@ -332,7 +369,7 @@ impl<'src> Parser<'src> {
             }
         };
 
-        Ok(Spanned::new(ast, token.span))
+        Ok(Self::spanned_with_trivia(ast, token.span, trivia_start))
     }
 
     /// Parses an integer literal from its lexeme.

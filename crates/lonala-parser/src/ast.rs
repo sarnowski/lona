@@ -201,30 +201,57 @@ impl fmt::Display for Ast {
 ///
 /// Wraps any AST node with its source span, enabling precise error messages
 /// that can point to the exact location in source code.
+///
+/// The `full_span` field includes leading comments and whitespace, useful
+/// for source lookup and documentation display.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Spanned<T> {
     /// The AST node.
     pub node: T,
-    /// Source location.
+    /// Source location of just the expression.
     pub span: Span,
+    /// Source location including leading comments/whitespace.
+    pub full_span: Span,
 }
 
 impl<T> Spanned<T> {
-    /// Creates a new spanned node.
+    /// Creates a new spanned node where `full_span` equals `span`.
+    ///
+    /// Use [`with_full_span`](Self::with_full_span) when leading trivia
+    /// should be included in the full span.
     #[inline]
     #[must_use]
     pub const fn new(node: T, span: Span) -> Self {
-        Self { node, span }
+        Self {
+            node,
+            span,
+            full_span: span,
+        }
     }
 
-    /// Maps the inner node using a function, preserving the span.
+    /// Creates a new spanned node with an explicit full span.
+    ///
+    /// The `full_span` should start at leading comments/whitespace and
+    /// end at the same position as `span`.
+    #[inline]
+    #[must_use]
+    pub const fn with_full_span(node: T, span: Span, full_span: Span) -> Self {
+        Self {
+            node,
+            span,
+            full_span,
+        }
+    }
+
+    /// Maps the inner node using a function, preserving both spans.
     #[inline]
     #[must_use]
     pub fn map<U, F: FnOnce(T) -> U>(self, func: F) -> Spanned<U> {
         Spanned {
             node: func(self.node),
             span: self.span,
+            full_span: self.full_span,
         }
     }
 }
@@ -441,11 +468,42 @@ mod tests {
     }
 
     #[test]
+    fn spanned_new_defaults_full_span_to_span() {
+        let spanned = Spanned::new(Ast::integer(42_i64), Span::new(5_usize, 7_usize));
+        assert_eq!(spanned.span, Span::new(5_usize, 7_usize));
+        assert_eq!(spanned.full_span, Span::new(5_usize, 7_usize));
+    }
+
+    #[test]
+    fn spanned_with_full_span_sets_both() {
+        let spanned = Spanned::with_full_span(
+            Ast::integer(42_i64),
+            Span::new(10_usize, 12_usize),
+            Span::new(0_usize, 12_usize),
+        );
+        assert_eq!(spanned.span, Span::new(10_usize, 12_usize));
+        assert_eq!(spanned.full_span, Span::new(0_usize, 12_usize));
+    }
+
+    #[test]
     fn spanned_map() {
         let spanned = Spanned::new(42_i64, Span::new(0_usize, 2_usize));
         let mapped = spanned.map(|n| n.saturating_mul(2_i64));
         assert_eq!(mapped.node, 84_i64);
         assert_eq!(mapped.span, Span::new(0_usize, 2_usize));
+    }
+
+    #[test]
+    fn spanned_map_preserves_full_span() {
+        let spanned = Spanned::with_full_span(
+            42_i64,
+            Span::new(10_usize, 12_usize),
+            Span::new(0_usize, 12_usize),
+        );
+        let mapped = spanned.map(|n| n.saturating_mul(2_i64));
+        assert_eq!(mapped.node, 84_i64);
+        assert_eq!(mapped.span, Span::new(10_usize, 12_usize));
+        assert_eq!(mapped.full_span, Span::new(0_usize, 12_usize));
     }
 
     #[test]
@@ -470,5 +528,26 @@ mod tests {
         let c = Spanned::new(Ast::integer(42_i64), Span::new(1_usize, 3_usize));
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn spanned_equality_includes_full_span() {
+        let a = Spanned::with_full_span(
+            Ast::integer(42_i64),
+            Span::new(10_usize, 12_usize),
+            Span::new(0_usize, 12_usize),
+        );
+        let b = Spanned::with_full_span(
+            Ast::integer(42_i64),
+            Span::new(10_usize, 12_usize),
+            Span::new(0_usize, 12_usize),
+        );
+        let c = Spanned::with_full_span(
+            Ast::integer(42_i64),
+            Span::new(10_usize, 12_usize),
+            Span::new(5_usize, 12_usize),
+        );
+        assert_eq!(a, b);
+        assert_ne!(a, c); // Different full_span
     }
 }
