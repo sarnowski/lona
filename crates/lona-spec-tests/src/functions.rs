@@ -19,9 +19,16 @@ use crate::{SpecTestContext, spec_ref};
 #[test]
 fn test_8_1_anonymous_function() {
     let mut ctx = SpecTestContext::new();
+    // Verify it's a function and that it works when called
     ctx.assert_function(
         "(fn [x] (* x x))",
-        &spec_ref("8.1", "Defining", "anonymous function"),
+        &spec_ref("8.1", "Defining", "anonymous function is callable"),
+    );
+    // Also test that the function works correctly
+    ctx.assert_int(
+        "((fn [x] (* x x)) 5)",
+        25,
+        &spec_ref("8.1", "Defining", "anonymous function computes 5*5=25"),
     );
 }
 
@@ -29,9 +36,16 @@ fn test_8_1_anonymous_function() {
 #[test]
 fn test_8_1_named_function() {
     let mut ctx = SpecTestContext::new();
+    // Verify it's a function and that it works when called
     ctx.assert_function(
         "(fn square [x] (* x x))",
-        &spec_ref("8.1", "Defining", "named function"),
+        &spec_ref("8.1", "Defining", "named function is callable"),
+    );
+    // Also test that the function works correctly
+    ctx.assert_int(
+        "((fn square [x] (* x x)) 4)",
+        16,
+        &spec_ref("8.1", "Defining", "named function computes 4*4=16"),
     );
 }
 

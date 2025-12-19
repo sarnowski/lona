@@ -18,9 +18,10 @@ use crate::{SpecTestContext, spec_ref};
 #[test]
 fn test_11_1_defmacro_returns_symbol() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_symbol(
+    ctx.assert_symbol_eq(
         "(defmacro identity [x] x)",
-        &spec_ref("11.1", "defmacro", "returns the macro name"),
+        "identity",
+        &spec_ref("11.1", "defmacro", "returns symbol 'identity'"),
     );
 }
 
@@ -126,10 +127,18 @@ fn test_11_2_macroexpand_1() {
     let _res = ctx
         .eval("(defmacro unless [test body] `(if (not ~test) ~body nil))")
         .unwrap();
-    // macroexpand-1 should return the expanded form as a list
-    ctx.assert_list(
+    // macroexpand-1 should return the expanded form: (if (not false) 42 nil)
+    // First element should be 'if'
+    ctx.assert_symbol_eq(
+        "(first (macroexpand-1 '(unless false 42)))",
+        "if",
+        &spec_ref("11.2", "macroexpand-1", "expands to if-form"),
+    );
+    // Should have 4 elements: if, (not false), 42, nil
+    ctx.assert_list_len(
         "(macroexpand-1 '(unless false 42))",
-        &spec_ref("11.2", "macroexpand-1", "returns expanded form"),
+        4,
+        &spec_ref("11.2", "macroexpand-1", "expanded form has 4 elements"),
     );
 }
 
@@ -137,10 +146,15 @@ fn test_11_2_macroexpand_1() {
 #[test]
 fn test_11_2_macroexpand_1_non_macro() {
     let mut ctx = SpecTestContext::new();
-    // Expanding a non-macro call should return the form unchanged
-    ctx.assert_list(
+    // Expanding a non-macro call should return the form unchanged: (+ 1 2)
+    ctx.assert_list_eq(
         "(macroexpand-1 '(+ 1 2))",
-        &spec_ref("11.2", "macroexpand-1", "non-macro returns unchanged"),
+        "'(+ 1 2)",
+        &spec_ref(
+            "11.2",
+            "macroexpand-1",
+            "non-macro returns (+ 1 2) unchanged",
+        ),
     );
 }
 
@@ -156,9 +170,11 @@ fn test_11_2_macroexpand_full() {
         .eval("(defmacro unless [test body] `(when (not ~test) ~body))")
         .unwrap();
     // macroexpand should fully expand: unless -> when -> if
-    ctx.assert_list(
-        "(macroexpand '(unless false 42))",
-        &spec_ref("11.2", "macroexpand", "fully expands nested macros"),
+    // Final form should start with 'if'
+    ctx.assert_symbol_eq(
+        "(first (macroexpand '(unless false 42)))",
+        "if",
+        &spec_ref("11.2", "macroexpand", "fully expands to if-form"),
     );
 }
 
@@ -166,9 +182,10 @@ fn test_11_2_macroexpand_full() {
 #[test]
 fn test_11_2_macroexpand_non_macro() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "(macroexpand '(+ 1 2))",
-        &spec_ref("11.2", "macroexpand", "non-macro returns unchanged"),
+        "'(+ 1 2)",
+        &spec_ref("11.2", "macroexpand", "non-macro returns (+ 1 2) unchanged"),
     );
 }
 
@@ -220,13 +237,15 @@ fn test_11_3_fn_rest_args() {
     // Define a function with rest args
     let _res = ctx.eval("(def sum-list (fn [& args] args))").unwrap();
     // Test with various numbers of arguments
-    ctx.assert_list(
+    ctx.assert_list_len(
         "(sum-list)",
-        &spec_ref("11.3", "fn rest", "empty rest args"),
+        0,
+        &spec_ref("11.3", "fn rest", "empty rest args yields ()"),
     );
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "(sum-list 1 2 3)",
-        &spec_ref("11.3", "fn rest", "multiple rest args"),
+        "'(1 2 3)",
+        &spec_ref("11.3", "fn rest", "multiple rest args yields (1 2 3)"),
     );
 }
 
@@ -244,8 +263,9 @@ fn test_11_3_fn_fixed_and_rest_args() {
     );
     // Define a function that returns the rest
     let _res = ctx.eval("(def get-rest (fn [x & rest] rest))").unwrap();
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "(get-rest 1 2 3)",
-        &spec_ref("11.3", "fn rest", "rest args returned"),
+        "'(2 3)",
+        &spec_ref("11.3", "fn rest", "rest args yields (2 3)"),
     );
 }

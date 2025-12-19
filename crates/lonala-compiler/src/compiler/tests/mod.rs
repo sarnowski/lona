@@ -7,15 +7,19 @@
 //! - `literal_tests` - literal and symbol compilation
 //! - `operator_tests` - arithmetic, comparison, and unary operators
 //! - `call_tests` - function calls and error handling
-//! - `special_form_tests` - do, if, def, let, quote, syntax-quote
+//! - `special_form_tests` - control flow forms (do, if)
+//! - `binding_form_tests` - binding forms (def, let)
+//! - `quote_form_tests` - quoting forms (quote, syntax-quote)
 //! - `macro_tests` - defmacro and macro expansion
 
 extern crate alloc;
 
+mod binding_form_tests;
 mod call_tests;
 mod literal_tests;
 mod macro_tests;
 mod operator_tests;
+mod quote_form_tests;
 mod special_form_tests;
 
 use lona_core::chunk::Chunk;

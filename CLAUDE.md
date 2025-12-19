@@ -16,10 +16,64 @@ The runtime is written in Rust (`no_std`) and runs as seL4's root task. Userspac
 **Read when planning new features or tasks:**
 - `docs/goals.md` - The complete vision and design philosophy. Consult when making architectural decisions.
 - `docs/development/implementation-plan.md` - The phased roadmap, component dependencies, and current status.
+- `docs/development/minimal-rust.md` - The Lonala-first principle. Consult before adding any native function.
 
 ## Required Principle
 
 Always aim for the correct solution. Never take a shortcut, workaround, hack or defer a solution. We always favor the correct solution, even if it is more effort.
+
+## Lonala-First Principle
+
+**Everything achievable in Lonala MUST be implemented in Lonala, not Rust.**
+
+The Rust runtime exists solely to provide the minimal foundation that Lonala cannot provide for itself. This follows the LISP tradition where the entire language is built from a handful of primitives.
+
+### What MUST Be Native (Rust)
+
+Only these categories require Rust implementation:
+
+| Category | Primitives | Why Native |
+|----------|-----------|------------|
+| **Cons cell operations** | `cons`, `first`, `rest` | Fundamental data structure |
+| **Type predicates** | `nil?`, `symbol?`, `list?`, `fn?`, etc. | Inspect runtime type tags |
+| **Equality** | `eq?`, `=` | Pointer/value comparison |
+| **Memory access** | `peek`, `poke`, `address-of` | Direct hardware access for drivers |
+| **Arithmetic** | `+`, `-`, `*`, `/`, `mod` on integers | Efficiency, bootstrap |
+| **Comparison** | `<`, `>`, `<=`, `>=` | Efficiency |
+| **Symbol interning** | `symbol`, `gensym` | Interner access |
+
+Note: The Rust runtime has its own UART access for panic handlers and early boot diagnostics, but this is NOT exposed to Lonala. Lonala implements device drivers (including UART) using `peek`/`poke` on memory-mapped I/O registers.
+
+Special forms (`quote`, `if`, `fn`, `def`, `do`, `defmacro`) are handled by the compiler, not native functions.
+
+### What MUST Be Lonala
+
+Everything else, including:
+
+- **All macros**: `defn`, `when`, `unless`, `let`, `cond`, `and`, `or`
+- **Collection constructors**: `list`, `vector`, `hash-map` (build from `cons`)
+- **Sequence operations**: `map`, `filter`, `reduce`, `concat`, `nth`, `count`
+- **Higher-order functions**: `apply`, `comp`, `partial`, `identity`
+- **The REPL itself**: Read-eval-print loop in Lonala
+- **String operations**: All string manipulation beyond raw bytes
+- **ALL device drivers**: Including UART, via `peek`/`poke` on memory-mapped I/O
+- **Process management**: Supervision trees, spawn, message passing
+- **The evaluator**: `eval` written in Lonala (self-hosting)
+
+### Current Interim Code
+
+The current Rust implementations of REPL, collections, and introspection are **interim scaffolding** that will be replaced by Lonala implementations. When extending these, remember they are temporary.
+
+### Review Checklist
+
+Before adding ANY native function, ask:
+
+1. Can this be implemented using existing primitives? → **Implement in Lonala**
+2. Does this require hardware access? → Native is acceptable
+3. Does this require inspecting runtime type tags? → Native is acceptable
+4. Is this purely for efficiency? → **Implement in Lonala first**, optimize later only if profiling proves necessary
+
+**When in doubt: Lonala.**
 
 ## Directory Structure
 
@@ -107,6 +161,7 @@ lona/
 │   │   └── register-based-vm.md  # VM architecture documentation
 │   └── development/
 │       ├── implementation-plan.md      # Phased roadmap and task checklist
+│       ├── minimal-rust.md             # Lonala-first principle (minimal Rust runtime)
 │       ├── testing-strategy.md         # Three-tier testing pyramid
 │       ├── rust-coding-guidelines.md   # Rust coding standards
 │       └── lonala-coding-guidelines.md # Lonala coding standards

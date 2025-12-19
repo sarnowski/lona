@@ -19,21 +19,34 @@ use crate::{SpecTestContext, spec_ref};
 fn test_10_1_quote_expands_to_quote() {
     let mut ctx = SpecTestContext::new();
     // 'foo should be equivalent to (quote foo)
-    ctx.assert_symbol("'foo", &spec_ref("10.1", "Quote", "quote symbol"));
+    ctx.assert_symbol_eq(
+        "'foo",
+        "foo",
+        &spec_ref("10.1", "Quote", "quote symbol 'foo'"),
+    );
 }
 
 /// Spec 10.1: Quote list
 #[test]
 fn test_10_1_quote_list() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_list("'(1 2 3)", &spec_ref("10.1", "Quote", "quote list"));
+    ctx.assert_list_eq(
+        "'(1 2 3)",
+        "'(1 2 3)",
+        &spec_ref("10.1", "Quote", "quote list yields (1 2 3)"),
+    );
 }
 
 /// Spec 10.1: Quote vector
 #[test]
 fn test_10_1_quote_vector() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_vector("'[a b c]", &spec_ref("10.1", "Quote", "quote vector"));
+    // Verify the quoted vector has 3 symbol elements
+    ctx.assert_vector_len(
+        "'[a b c]",
+        3,
+        &spec_ref("10.1", "Quote", "quoted vector has 3 elements"),
+    );
 }
 
 // ============================================================================
@@ -45,8 +58,16 @@ fn test_10_1_quote_vector() {
 #[test]
 fn test_10_2_syntax_quote_basic() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_symbol("`foo", &spec_ref("10.2", "Syntax-Quote", "quoted symbol"));
-    ctx.assert_list("`(1 2 3)", &spec_ref("10.2", "Syntax-Quote", "quoted list"));
+    ctx.assert_symbol_eq(
+        "`foo",
+        "foo",
+        &spec_ref("10.2", "Syntax-Quote", "quoted symbol 'foo'"),
+    );
+    ctx.assert_list_eq(
+        "`(1 2 3)",
+        "'(1 2 3)",
+        &spec_ref("10.2", "Syntax-Quote", "quoted list yields (1 2 3)"),
+    );
 }
 
 /// Spec 10.2: Syntax-quote preserves type
@@ -76,9 +97,10 @@ fn test_10_3_unquote_evaluates() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def x 10)").unwrap();
     // Result should be a list containing (1 10 3)
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "`(1 ~x 3)",
-        &spec_ref("10.3", "Unquote", "unquote evaluates x"),
+        "'(1 10 3)",
+        &spec_ref("10.3", "Unquote", "unquote evaluates x to produce (1 10 3)"),
     );
 }
 
@@ -89,9 +111,10 @@ fn test_10_3_unquote_expression() {
     let _res = ctx.eval("(def x 1)").unwrap();
     let _res = ctx.eval("(def y 2)").unwrap();
     // `(~x ~y ~(+ x y)) should produce (1 2 3)
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "`(~x ~y ~(+ x y))",
-        &spec_ref("10.3", "Unquote", "unquote evaluates expression"),
+        "'(1 2 3)",
+        &spec_ref("10.3", "Unquote", "unquote expression yields (1 2 3)"),
     );
 }
 
@@ -101,9 +124,15 @@ fn test_10_3_unquote_operator() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def op '+)").unwrap();
     // `(~op 1 2) should produce (+ 1 2)
-    ctx.assert_list(
+    ctx.assert_list_len(
         "`(~op 1 2)",
-        &spec_ref("10.3", "Unquote", "unquote in operator position"),
+        3,
+        &spec_ref("10.3", "Unquote", "operator position list has 3 elements"),
+    );
+    ctx.assert_symbol_eq(
+        "(first `(~op 1 2))",
+        "+",
+        &spec_ref("10.3", "Unquote", "first element is symbol '+'"),
     );
 }
 
@@ -118,9 +147,10 @@ fn test_10_4_unquote_splice_basic() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def nums (list 2 3 4))").unwrap();
     // `(1 ~@nums 5) should produce (1 2 3 4 5)
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "`(1 ~@nums 5)",
-        &spec_ref("10.4", "Unquote-Splicing", "splice list elements"),
+        "'(1 2 3 4 5)",
+        &spec_ref("10.4", "Unquote-Splicing", "splice yields (1 2 3 4 5)"),
     );
 }
 
@@ -130,9 +160,10 @@ fn test_10_4_unquote_splice_empty() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def empty (list))").unwrap();
     // `(1 ~@empty 2) should produce (1 2)
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "`(1 ~@empty 2)",
-        &spec_ref("10.4", "Unquote-Splicing", "empty list splices to nothing"),
+        "'(1 2)",
+        &spec_ref("10.4", "Unquote-Splicing", "empty splice yields (1 2)"),
     );
 }
 
@@ -141,19 +172,21 @@ fn test_10_4_unquote_splice_empty() {
 fn test_10_4_unquote_vs_splice() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def xs (list 1 2 3))").unwrap();
-    // ~xs inserts the list as one element
-    ctx.assert_list(
+    // ~xs inserts the list as one element: (a (1 2 3) b)
+    ctx.assert_list_len(
         "`(a ~xs b)",
-        &spec_ref("10.4", "Unquote-Splicing", "unquote inserts as one element"),
-    );
-    // ~@xs splices the elements
-    ctx.assert_list(
-        "`(a ~@xs b)",
+        3,
         &spec_ref(
             "10.4",
             "Unquote-Splicing",
-            "splice inserts elements separately",
+            "unquote produces 3-element list",
         ),
+    );
+    // ~@xs splices the elements: (a 1 2 3 b)
+    ctx.assert_list_eq(
+        "`(a ~@xs b)",
+        "'(a 1 2 3 b)",
+        &spec_ref("10.4", "Unquote-Splicing", "splice yields (a 1 2 3 b)"),
     );
 }
 
@@ -163,13 +196,19 @@ fn test_10_4_splice_function_call() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def args (list 1 2 3))").unwrap();
     // `(+ ~@args) should produce (+ 1 2 3)
-    ctx.assert_list(
+    ctx.assert_list_len(
         "`(+ ~@args)",
+        4,
         &spec_ref(
             "10.4",
             "Unquote-Splicing",
-            "build function call with splice",
+            "function call list has 4 elements",
         ),
+    );
+    ctx.assert_symbol_eq(
+        "(first `(+ ~@args))",
+        "+",
+        &spec_ref("10.4", "Unquote-Splicing", "first element is '+'"),
     );
 }
 

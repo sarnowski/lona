@@ -142,6 +142,13 @@ See the [Installation Guide](installation.md) to get Lona running on your develo
 
 Check out the [Goals Document](goals.md) for detailed technical information about Lona's design and architecture.
 
+## Development
+
+- [Minimal Rust Runtime](development/minimal-rust.md) — Why the Rust runtime must be minimal, with everything possible in Lonala
+- [Testing Strategy](development/testing-strategy.md) — The three-tier testing pyramid
+- [Rust Coding Guidelines](development/rust-coding-guidelines.md) — Standards for Rust code
+- [Lonala Coding Guidelines](development/lonala-coding-guidelines.md) — Standards for Lonala code
+
 ## License
 
 Copyright (C) 2025 Tobias Sarnowski

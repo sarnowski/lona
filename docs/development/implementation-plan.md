@@ -4,6 +4,40 @@ This document provides a comprehensive overview of all components required to im
 
 ---
 
+## Key Principle: Lonala-First
+
+**Everything achievable in Lonala MUST be implemented in Lonala, not Rust.**
+
+See [Minimal Rust Runtime](minimal-rust.md) for the complete primitive specification. The Rust runtime provides only:
+- Core data structure operations (cons, first, rest, nth, assoc, etc.)
+- Type predicates (nil?, list?, etc.)
+- Arithmetic and bitwise operations
+- Hardware access (MMIO, DMA, IRQ)
+- Process primitives (spawn, send)
+- seL4 domain operations
+
+**Everything else** — including the UART driver, REPL, TCP/IP stack, and supervision trees — is Lonala code.
+
+### Critical Execution Dependencies
+
+```
+Phase 5.5 (Binary, Type Predicates, Bitwise)
+    │
+    ├──► Phase 7 (lona.core with map, filter, reduce)
+    │
+Phase 9 (Process Model)
+    │
+    └──► Phase 9.5 (MMIO, DMA, IRQ primitives)
+              │
+              └──► Phase 9.5.5 (Lonala UART Driver)
+                        │
+                        └──► Phase 7.4 (Lonala REPL using UART driver)
+```
+
+**Note**: The Lonala REPL (Phase 7.4) requires the Lonala UART driver (Phase 9.5.5), which requires MMIO/IRQ primitives (Phase 9.5), which requires the process model (Phase 9). This means Phase 7.4 cannot complete until Phase 9.5 is done.
+
+---
+
 ## Component Overview
 
 The Lona runtime must provide a complete execution environment for Lonala code on top of seL4. The following subsystems are required:
@@ -322,6 +356,88 @@ lona> (factorial 10)
 
 ---
 
+### Phase 5.5: Core Data Extensions
+
+**Goal**: Low-level types and operations required for systems programming and drivers
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 5.5.1 Binary Type | Add `Value::Binary` (raw byte buffer) to lona-core | Pending |
+| 5.5.2 Type Predicates | `nil?`, `symbol?`, `list?`, `vector?`, `map?`, `fn?`, `integer?`, `string?`, `keyword?`, `binary?` | Pending |
+| 5.5.3 Bitwise Operations | `bit-and`, `bit-or`, `bit-xor`, `bit-not`, `bit-shift-left`, `bit-shift-right` | Pending |
+| 5.5.4 Binary Constructors | `make-binary`, `binary-len` | Pending |
+| 5.5.5 Binary Mutators | `binary-get`, `binary-set`, `binary-slice`, `binary-copy!` | Pending |
+
+**Why This Phase Exists**: These primitives are prerequisites for:
+- Lonala UART driver (needs bitwise ops for register manipulation)
+- Network drivers (needs binary buffers for packets)
+- Any protocol parsing (needs bitwise ops)
+
+**Deliverable**:
+```clojure
+lona> (def buf (make-binary 4))
+lona> (binary-set buf 0 0xFF)
+lona> (binary-get buf 0)
+255
+lona> (bit-and 0xFF 0x0F)
+15
+```
+
+---
+
+### Phase 5.6: Metadata System
+
+**Goal**: Attach metadata to values and vars for documentation, introspection, and macro support
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 5.6.1 | Value metadata storage | Add optional metadata map to List, Vector, Map, Symbol | Pending |
+| 5.6.2 | Var metadata | Vars carry metadata separate from their value | Pending |
+| 5.6.3 | Native primitives | `meta`, `with-meta`, `vary-meta` | Pending |
+| 5.6.4 | Reader syntax | Parser support for `^{...}` and `^:keyword` | Pending |
+| 5.6.5 | Compiler source tracking | Auto-attach `:file`, `:line`, `:column` to defs | Pending |
+| 5.6.6 | Update `def` | Handle docstrings → `:doc`, merge symbol metadata | Pending |
+| 5.6.7 | Update `defmacro` | Set `:macro true` on var metadata | Pending |
+| 5.6.8 | Update `defn` macro | Generate `:doc` and `:arglists` metadata | Pending |
+| 5.6.9 | Refactor `macro?` | Use metadata instead of separate MacroRegistry | Pending |
+
+**Why This Phase Exists**: Metadata is the foundation for:
+- Documentation system (`doc`, `:doc` metadata)
+- Macro detection via `:macro` metadata (unifies macros and functions)
+- Source-level debugging (`:file`, `:line`, `:column`)
+- Introspection (Phase 8 depends on this)
+- Private vars (`:private` metadata for namespace access control)
+- Hot-patching provenance tracking
+
+**Key Design Decisions**:
+- Metadata does NOT affect equality or hash codes
+- `defmacro` remains a special form but contributes `:macro true` to metadata
+- Types that support metadata: Symbol, List, Vector, Map, Var
+- Types that do NOT support metadata: nil, bool, numbers, strings, binaries
+
+**Deliverable**:
+```clojure
+lona> (defn greet "Greets a person" [name]
+        (str "Hello, " name))
+lona> (meta #'greet)
+{:doc "Greets a person"
+ :arglists ([name])
+ :name greet
+ :file "user.lona"
+ :line 1}
+
+lona> (meta #'when)
+{:macro true
+ :arglists ([test & body])
+ :doc "Evaluates body if test is truthy"}
+
+lona> (def v ^:private (with-meta [1 2 3] {:source "test"}))
+lona> (meta v)
+{:source "test"}
+```
+
+---
+
 ### Phase 6: Namespace System
 
 **Goal**: Organize code into namespaces, avoid name collisions
@@ -348,15 +464,17 @@ lona> (join ", " ["a" "b" "c"])
 
 ### Phase 7: Embedded Standard Library
 
-**Goal**: Load Lonala code at boot, self-hosting REPL
+**Goal**: Load Lonala code at boot, Lonala UART driver, Lonala REPL
 
 | Task | Description |
 |------|-------------|
 | 7.1 Build System Integration | `build.rs` embeds `lona/*.lona`, compile at boot |
-| 7.2 `lona/core.lona` | `map`, `filter`, `reduce`, `comp`, `partial`, `str` |
-| 7.3 Native Primitives | `native/read-string`, `native/eval`, `native/uart-*` |
-| 7.4 `lona/repl.lona` | `read-line`, `print-result`, `repl-loop` |
+| 7.2 `lona/core.lona` | `map`, `filter`, `reduce`, `comp`, `partial`, `str`, `list`, `vector`, `hash-map` constructors |
+| 7.3 Native Primitives | `read-string` (parser access) — **Note**: No uart-* or eval; UART is Lonala, eval is Lonala |
+| 7.4 `lona/repl.lona` | `read-line`, `print-result`, `repl-loop` (uses UART driver) |
 | 7.5 Boot Sequence | Load core, load repl, call `(lona.repl/main)` |
+
+**Important**: The UART driver and REPL are implemented in Lonala, not Rust. This requires Phase 9.5 (MMIO/IRQ primitives) to be complete first. See dependency note below.
 
 **Deliverable**: REPL is Lonala code: `(source lona.repl/main)` works
 
@@ -400,6 +518,47 @@ lona> (greet "Alice")
 lona> (spawn (fn [] (println "Hello from process!")))
 #<pid:2>
 Hello from process!
+```
+
+---
+
+### Phase 9.5: Hardware Primitives
+
+**Goal**: Enable device drivers in Lonala with MMIO, DMA, and IRQ support
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 9.5.1 MMIO Primitives | `peek-u8/16/32/64`, `poke-u8/16/32/64` | Pending |
+| 9.5.2 DMA Primitives | `dma-alloc`, `phys-addr`, `memory-barrier` | Pending |
+| 9.5.3 IRQ Primitives | `irq-wait` (blocks process until interrupt) | Pending |
+| 9.5.4 Time Primitives | `now-ms`, `send-after` | Pending |
+| 9.5.5 Lonala UART Driver | `lona/driver/uart.lona` using MMIO primitives | Pending |
+
+**Dependencies**: Requires Phase 9 (process model for irq-wait blocking)
+
+**Why This Phase Exists**: These primitives unblock:
+- Lonala UART driver (Phase 7 REPL depends on this)
+- Network card drivers
+- Any device driver written in Lonala
+
+**Deliverable**:
+```clojure
+;; UART driver in Lonala
+(ns lona.driver.uart)
+
+(def uart-base 0x09000000)
+
+(defn write-byte [b]
+  (poke-u8 uart-base b))
+
+(defn read-byte []
+  (peek-u8 uart-base))
+
+(defn driver-loop []
+  (loop []
+    (irq-wait uart-irq-cap)
+    (handle-data)
+    (recur)))
 ```
 
 ---
@@ -748,55 +907,74 @@ All implementation tasks with status tracking.
 | 19 | 5.2 | Closures | Lexical capture, upvalue handling | open |
 | 20 | 5.3 | Tail Call Optimization | Tail position detection, frame reuse, recur | open |
 | 21 | 5.4 | Dispatch Table | Symbol-to-function mapping, late binding | open |
-| 22 | 6.1 | Qualified Symbols | Parse ns/name syntax, extend Symbol representation | open |
-| 23 | 6.2 | Namespace Declaration | ns special form, namespace registry, current namespace | open |
-| 24 | 6.3 | Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution | open |
-| 25 | 6.4 | Require/Use/Refer | Load namespaces, create aliases, selectively import | open |
-| 26 | 7.1 | Build Integration | build.rs embeds lona/*.lona files | open |
-| 27 | 7.2 | lona.core | map, filter, reduce, comp, partial, str | open |
-| 28 | 7.3 | Native Primitives | read-string, eval, uart-read, uart-write | open |
-| 29 | 7.4 | lona.repl | read-line, print-result, repl-loop | open |
-| 30 | 7.5 | Boot Sequence | Load core, load repl, call (lona.repl/main) | open |
-| 31 | 8.1 | Source Storage | Per-definition source, provenance tracking | open |
-| 32 | 8.2 | Introspection Primitives | source, doc, ns-publics, ns-map | open |
-| 33 | 8.3 | Hot Patching | Redefine updates dispatch table | open |
-| 34 | 9.1 | Process Data Structure | PID, status, heap, stack, mailbox | open |
-| 35 | 9.2 | Per-Process Heap | Independent allocator per process | open |
-| 36 | 9.3 | Cooperative Scheduler | Run queue, yield points, context switch | open |
-| 37 | 9.4 | Process Primitives | spawn, self, exit | open |
-| 38 | 10.1 | Mailbox | FIFO message queue per process | open |
-| 39 | 10.2 | send Primitive | Copy message to target mailbox | open |
-| 40 | 10.3 | receive Special Form | Pattern matching, selective receive | open |
-| 41 | 10.4 | Timeouts | after clause, timer management | open |
-| 42 | 10.5 | lona.process | call (sync), cast (async) helpers | open |
-| 43 | 11.1 | Root Discovery | Stack, dispatch table, mailbox roots | open |
-| 44 | 11.2 | Mark-Sweep Collector | Per-process GC on allocation pressure | open |
-| 45 | 11.3 | GC Primitives | gc, gc-stats functions | open |
-| 46 | 12.1 | Process Linking | link, unlink, spawn-link | open |
-| 47 | 12.2 | Process Monitoring | monitor, demonitor, DOWN messages | open |
-| 48 | 12.3 | Exit Signals | Normal/abnormal exits, propagation | open |
-| 49 | 12.4 | Preemptive Scheduling | Reduction counting, fair preemption | open |
-| 50 | 12.5 | lona.supervisor | Supervisor behavior, restart strategies | open |
-| 51 | 13.1 | Stack Introspection | current-stack-frames, frame-locals | open |
-| 52 | 13.2 | Breakpoints | break-on-entry, break-on-exit | open |
-| 53 | 13.3 | Tracing | trace-calls, trace-messages | open |
-| 54 | 13.4 | Condition/Restart System | signal, restart-case, handler-bind | open |
-| 55 | 13.5 | lona.debug | Debugger UI, inspector | open |
-| 56 | 14.1 | VSpace Manager | Address space creation, page mapping | open |
-| 57 | 14.2 | CSpace Manager | Capability space, slots, delegation | open |
-| 58 | 14.3 | Domain Creation | spawn with :domain, capabilities | open |
-| 59 | 14.4 | Domain Registry | Hierarchical naming, metadata | open |
-| 60 | 15.1 | seL4 IPC Integration | Endpoints, Call/Send/Recv | open |
-| 61 | 15.2 | Serialization | Values to bytes, capability transfer | open |
-| 62 | 15.3 | Transparent Routing | send works across domains | open |
-| 63 | 15.4 | Cross-Domain Supervision | Link/monitor across domains | open |
-| 64 | 16.1 | Read-Only Code Mapping | Share bytecode/source pages | open |
-| 65 | 16.2 | Dispatch Table Cloning | Child inherits parent bindings | open |
-| 66 | 16.3 | Shared Memory Regions | create-shared-region, grant-capability | open |
-| 67 | 16.4 | Code Propagation | push-code, pull-code | open |
-| 68 | 17.1 | IRQ Handling | seL4 IRQ to process message | open |
-| 69 | 17.2 | MMIO Abstraction | Memory-mapped device access | open |
-| 70 | 17.3 | Driver Framework | Driver behaviors in Lonala | open |
-| 71 | 17.4 | VirtIO Drivers | virtio-net, virtio-blk | open |
-| 72 | 17.5 | TCP/IP Stack | IP, TCP, UDP in Lonala | open |
-| 73 | 17.6 | Telnet Server | Network REPL, per-user domains | open |
+| 22 | 5.5.1 | Binary Type | Add Value::Binary (raw byte buffer) to lona-core | open |
+| 23 | 5.5.2 | Type Predicates | nil?, symbol?, list?, vector?, map?, fn?, integer?, string?, keyword?, binary? | open |
+| 24 | 5.5.3 | Bitwise Operations | bit-and, bit-or, bit-xor, bit-not, bit-shift-left, bit-shift-right | open |
+| 25 | 5.5.4 | Binary Constructors | make-binary, binary-len | open |
+| 26 | 5.5.5 | Binary Mutators | binary-get, binary-set, binary-slice, binary-copy! | open |
+| 27 | 5.6.1 | Value Metadata Storage | Add optional metadata map to List, Vector, Map, Symbol | open |
+| 28 | 5.6.2 | Var Metadata | Vars carry metadata separate from their value | open |
+| 29 | 5.6.3 | Metadata Primitives | meta, with-meta, vary-meta | open |
+| 30 | 5.6.4 | Metadata Reader Syntax | Parser support for ^{...} and ^:keyword | open |
+| 31 | 5.6.5 | Compiler Source Tracking | Auto-attach :file, :line, :column to defs | open |
+| 32 | 5.6.6 | Update def | Handle docstrings → :doc, merge symbol metadata | open |
+| 33 | 5.6.7 | Update defmacro | Set :macro true on var metadata | open |
+| 34 | 5.6.8 | Update defn Macro | Generate :doc and :arglists metadata | open |
+| 35 | 5.6.9 | Refactor macro? | Use metadata instead of MacroRegistry | open |
+| 36 | 6.1 | Qualified Symbols | Parse ns/name syntax, extend Symbol representation | open |
+| 37 | 6.2 | Namespace Declaration | ns special form, namespace registry, current namespace | open |
+| 38 | 6.3 | Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution | open |
+| 39 | 6.4 | Require/Use/Refer | Load namespaces, create aliases, selectively import | open |
+| 40 | 7.1 | Build Integration | build.rs embeds lona/*.lona files | open |
+| 41 | 7.2 | lona.core | map, filter, reduce, comp, partial, str, list, vector, hash-map | open |
+| 42 | 7.3 | Native Primitives | read-string (parser access only) | open |
+| 43 | 7.4 | lona.repl | read-line, print-result, repl-loop (uses UART driver) | open |
+| 44 | 7.5 | Boot Sequence | Load core, load repl, call (lona.repl/main) | open |
+| 45 | 8.1 | Source Storage | Per-definition source via :source metadata | open |
+| 46 | 8.2 | Introspection Primitives | source, doc, ns-publics, ns-map (use metadata) | open |
+| 47 | 8.3 | Hot Patching | Redefine updates dispatch table | open |
+| 48 | 9.1 | Process Data Structure | PID, status, heap, stack, mailbox | open |
+| 49 | 9.2 | Per-Process Heap | Independent allocator per process | open |
+| 50 | 9.3 | Cooperative Scheduler | Run queue, yield points, context switch | open |
+| 51 | 9.4 | Process Primitives | spawn, self, exit | open |
+| 52 | 9.5.1 | MMIO Primitives | peek-u8/16/32/64, poke-u8/16/32/64 | open |
+| 53 | 9.5.2 | DMA Primitives | dma-alloc, phys-addr, memory-barrier | open |
+| 54 | 9.5.3 | IRQ Primitives | irq-wait (blocks process until interrupt) | open |
+| 55 | 9.5.4 | Time Primitives | now-ms, send-after | open |
+| 56 | 9.5.5 | Lonala UART Driver | lona/driver/uart.lona using MMIO primitives | open |
+| 57 | 10.1 | Mailbox | FIFO message queue per process | open |
+| 58 | 10.2 | send Primitive | Copy message to target mailbox | open |
+| 59 | 10.3 | receive Special Form | Pattern matching, selective receive | open |
+| 60 | 10.4 | Timeouts | after clause, timer management | open |
+| 61 | 10.5 | lona.process | call (sync), cast (async) helpers | open |
+| 62 | 11.1 | Root Discovery | Stack, dispatch table, mailbox roots | open |
+| 63 | 11.2 | Mark-Sweep Collector | Per-process GC on allocation pressure | open |
+| 64 | 11.3 | GC Primitives | gc, gc-stats functions | open |
+| 65 | 12.1 | Process Linking | link, unlink, spawn-link | open |
+| 66 | 12.2 | Process Monitoring | monitor, demonitor, DOWN messages | open |
+| 67 | 12.3 | Exit Signals | Normal/abnormal exits, propagation | open |
+| 68 | 12.4 | Preemptive Scheduling | Reduction counting, fair preemption | open |
+| 69 | 12.5 | lona.supervisor | Supervisor behavior, restart strategies | open |
+| 70 | 13.1 | Stack Introspection | current-stack-frames, frame-locals | open |
+| 71 | 13.2 | Breakpoints | break-on-entry, break-on-exit | open |
+| 72 | 13.3 | Tracing | trace-calls, trace-messages | open |
+| 73 | 13.4 | Condition/Restart System | signal, restart-case, handler-bind | open |
+| 74 | 13.5 | lona.debug | Debugger UI, inspector | open |
+| 75 | 14.1 | VSpace Manager | Address space creation, page mapping | open |
+| 76 | 14.2 | CSpace Manager | Capability space, slots, delegation | open |
+| 77 | 14.3 | Domain Creation | spawn with :domain, capabilities | open |
+| 78 | 14.4 | Domain Registry | Hierarchical naming, metadata | open |
+| 79 | 15.1 | seL4 IPC Integration | Endpoints, Call/Send/Recv | open |
+| 80 | 15.2 | Serialization | Values to bytes, capability transfer | open |
+| 81 | 15.3 | Transparent Routing | send works across domains | open |
+| 82 | 15.4 | Cross-Domain Supervision | Link/monitor across domains | open |
+| 83 | 16.1 | Read-Only Code Mapping | Share bytecode/source pages | open |
+| 84 | 16.2 | Dispatch Table Cloning | Child inherits parent bindings | open |
+| 85 | 16.3 | Shared Memory Regions | create-shared-region, grant-capability | open |
+| 86 | 16.4 | Code Propagation | push-code, pull-code | open |
+| 87 | 17.1 | IRQ Handling | seL4 IRQ to process message (see also 9.5.3) | open |
+| 88 | 17.2 | MMIO Abstraction | Memory-mapped device access (see also 9.5.1) | open |
+| 89 | 17.3 | Driver Framework | Driver behaviors in Lonala | open |
+| 90 | 17.4 | VirtIO Drivers | virtio-net, virtio-blk | open |
+| 91 | 17.5 | TCP/IP Stack | IP, TCP, UDP in Lonala | open |
+| 92 | 17.6 | Telnet Server | Network REPL, per-user domains | open |

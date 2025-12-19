@@ -111,22 +111,23 @@ Before performing ANY review work, you MUST complete these steps in order:
    Review all changed files against the project guidelines. For each file, read it and evaluate:
 
    1. **Conceptual Alignment:** Does it align with Lona's goals and architectural vision?
-   2. **OS/Kernel Design:** Are microkernel principles respected? Is the TCB minimized?
-   3. **seL4 Alignment:** Does it follow seL4-inspired security and isolation principles?
-   4. **Code Quality (Rust):** Does Rust code follow the Rust coding guidelines? Is unsafe code justified?
-   5. **Code Quality (Lonala):** Does Lonala code follow the Lonala coding guidelines? Proper indentation, naming, comments?
-   6. **BEAM/OTP Patterns:** Are supervision and fault-tolerance patterns correct?
-   7. **Security:** Are there potential vulnerabilities or capability leaks?
-   8. **Testing:** Are changes adequately tested per the testing strategy?
-   9. **Regression Tests:** If this appears to be a bug fix, is there a regression test?
-   10. **Documentation:** Is documentation correct and up-to-date?
+   2. **Lonala-First Principle:** Is any new functionality in Rust that could be in Lonala? Only these are allowed in Rust: cons/first/rest, type predicates, equality, memory access (peek/poke), basic arithmetic/comparison, symbol interning. Note: Rust may have internal UART for panics, but NO I/O primitives are exposed to Lonala. Everything else (macros, collection constructors, sequence ops, higher-order functions, REPL, ALL device drivers including UART) MUST be Lonala.
+   3. **OS/Kernel Design:** Are microkernel principles respected? Is the TCB minimized?
+   4. **seL4 Alignment:** Does it follow seL4-inspired security and isolation principles?
+   5. **Code Quality (Rust):** Does Rust code follow the Rust coding guidelines? Is unsafe code justified?
+   6. **Code Quality (Lonala):** Does Lonala code follow the Lonala coding guidelines? Proper indentation, naming, comments?
+   7. **BEAM/OTP Patterns:** Are supervision and fault-tolerance patterns correct?
+   8. **Security:** Are there potential vulnerabilities or capability leaks?
+   9. **Testing:** Are changes adequately tested per the testing strategy?
+   10. **Regression Tests:** If this appears to be a bug fix, is there a regression test?
+   11. **Documentation:** Is documentation correct and up-to-date?
 
    **OUTPUT FORMAT:**
    Produce a structured report with:
    - List of files you reviewed (confirm you read each one)
    - For each finding:
      - File path and line number(s)
-     - Category (from the list above)
+     - Category (from the list above, especially flag Lonala-First violations)
      - Specific issue description
      - Which guideline or principle it violates
    - Total count of issues found
@@ -156,6 +157,10 @@ Before performing ANY review work, you MUST complete these steps in order:
 Evaluate all changes across these critical dimensions:
 
 - **Conceptual Alignment:** Do changes align with Lona's stated goals and architectural vision?
+- **Lonala-First Principle:** Is any new functionality implemented in Rust that could be implemented in Lonala? This is a CRITICAL check. The Rust runtime must remain minimal—only primitives that truly cannot be implemented in Lonala are permitted:
+  - **Allowed in Rust:** cons cell operations (`cons`, `first`, `rest`), type predicates (`nil?`, `symbol?`, etc.), equality (`eq?`, `=`), memory access (`peek`, `poke`), basic arithmetic/comparison, symbol interning. Note: Rust may have internal UART for panics/early boot, but this is NOT exposed to Lonala.
+  - **Must be Lonala:** macros, collection constructors (`list`, `vector`, `hash-map`), sequence operations (`map`, `filter`, `reduce`), higher-order functions, string operations, the REPL, ALL device drivers (including UART—via peek/poke), process management, `eval`
+  - **Flag as violation:** Any new native function that can be built from existing primitives
 - **OS/Kernel Design:** Are microkernel principles respected? Is the TCB minimized? Are capability patterns correct?
 - **seL4 Alignment:** Do changes follow seL4-inspired security and isolation principles?
 - **Rust Quality:** (If Rust files changed) Does code follow the project's Rust guidelines? Is unsafe code justified and minimal? Are idioms correct?
@@ -184,6 +189,7 @@ After completing all analysis, produce a comprehensive report with:
 5. **Verification Results:** Output and analysis of make test
 6. **Detailed Findings:** List ALL issues found, organized by category:
    - Conceptual/Architectural Issues
+   - Lonala-First Principle Violations (functionality in Rust that should be in Lonala)
    - OS/Kernel Design Issues
    - Rust Code Quality Issues (if applicable)
    - Lonala Code Quality Issues (if applicable)

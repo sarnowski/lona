@@ -285,140 +285,334 @@ fn test_3_6_empty_string() {
 }
 
 // ============================================================================
-// Section 3.7: List
-// Reference: docs/lonala.md#37-list
+// Section 3.7: Binary
+// Reference: docs/lonala.md#37-binary
 // ============================================================================
 
-/// Spec 3.7: Quoted list is data, not code
+/// [IGNORED] Spec 3.7: make-binary allocates zeroed buffer
+/// Tracking: Binary type not yet implemented
 #[test]
-fn test_3_7_quoted_list() {
+#[ignore]
+fn test_3_7_make_binary() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_list(
-        "'(1 2 3)",
-        &spec_ref("3.7", "List", "quoted list is a list"),
+    ctx.assert_binary(
+        "(make-binary 4)",
+        &spec_ref("3.7", "Binary", "allocate 4-byte buffer"),
     );
 }
 
-/// Spec 3.7: Empty list
+/// [IGNORED] Spec 3.7: binary-get retrieves byte at index
+/// Tracking: Binary type not yet implemented
 #[test]
-fn test_3_7_empty_list() {
+#[ignore]
+fn test_3_7_binary_get() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_list("'()", &spec_ref("3.7", "List", "empty quoted list"));
+    // Buffer is zeroed by default
+    ctx.assert_int(
+        "(binary-get (make-binary 4) 0)",
+        0,
+        &spec_ref("3.7", "Binary", "get byte at index 0"),
+    );
+}
+
+/// [IGNORED] Spec 3.7: binary-set modifies byte at index
+/// Tracking: Binary type not yet implemented
+#[test]
+#[ignore]
+fn test_3_7_binary_set() {
+    let mut ctx = SpecTestContext::new();
+    // Set byte and read it back
+    let _res = ctx.eval("(def buf (make-binary 4))").unwrap();
+    let _res = ctx.eval("(binary-set buf 0 0xFF)").unwrap();
+    ctx.assert_int(
+        "(binary-get buf 0)",
+        255,
+        &spec_ref("3.7", "Binary", "set byte returns 255"),
+    );
+}
+
+/// [IGNORED] Spec 3.7: binary-len returns buffer length
+/// Tracking: Binary type not yet implemented
+#[test]
+#[ignore]
+fn test_3_7_binary_len() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(binary-len (make-binary 1024))",
+        1024,
+        &spec_ref("3.7", "Binary", "buffer length"),
+    );
+}
+
+/// [IGNORED] Spec 3.7: binary-slice creates zero-copy view
+/// Tracking: Binary type not yet implemented
+#[test]
+#[ignore]
+fn test_3_7_binary_slice() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def buf (make-binary 20))").unwrap();
+    ctx.assert_int(
+        "(binary-len (binary-slice buf 10 20))",
+        10,
+        &spec_ref("3.7", "Binary", "slice length"),
+    );
+}
+
+/// [IGNORED] Spec 3.7: Binary is mutable (unlike other Lonala types)
+/// Tracking: Binary type not yet implemented
+#[test]
+#[ignore]
+fn test_3_7_binary_mutable() {
+    let mut ctx = SpecTestContext::new();
+    // Create buffer, modify, check modification persists
+    let _res = ctx.eval("(def buf (make-binary 4))").unwrap();
+    let _res = ctx.eval("(binary-set buf 1 42)").unwrap();
+    ctx.assert_int(
+        "(binary-get buf 1)",
+        42,
+        &spec_ref("3.7", "Binary", "mutations persist"),
+    );
 }
 
 // ============================================================================
-// Section 3.8: Vector
-// Reference: docs/lonala.md#38-vector
+// Section 3.8: List
+// Reference: docs/lonala.md#38-list
 // ============================================================================
 
-/// [IGNORED] Spec 3.8: Vector literals
+/// Spec 3.8: Quoted list is data, not code
+#[test]
+fn test_3_8_quoted_list() {
+    let mut ctx = SpecTestContext::new();
+    // Verify quoted list produces exactly (1 2 3)
+    ctx.assert_list_len(
+        "'(1 2 3)",
+        3,
+        &spec_ref("3.8", "List", "quoted list has 3 elements"),
+    );
+    ctx.assert_int(
+        "(first '(1 2 3))",
+        1,
+        &spec_ref("3.8", "List", "first element is 1"),
+    );
+    ctx.assert_int(
+        "(first (rest '(1 2 3)))",
+        2,
+        &spec_ref("3.8", "List", "second element is 2"),
+    );
+    ctx.assert_int(
+        "(first (rest (rest '(1 2 3))))",
+        3,
+        &spec_ref("3.8", "List", "third element is 3"),
+    );
+}
+
+/// Spec 3.8: Empty list
+#[test]
+fn test_3_8_empty_list() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_list_len(
+        "'()",
+        0,
+        &spec_ref("3.8", "List", "empty quoted list has 0 elements"),
+    );
+}
+
+// ============================================================================
+// Section 3.9: Vector
+// Reference: docs/lonala.md#39-vector
+// ============================================================================
+
+/// [IGNORED] Spec 3.9: Vector literals
 /// Tracking: Vector literal compilation planned
 #[test]
 #[ignore]
-fn test_3_8_vector_literal() {
+fn test_3_9_vector_literal() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_vector("[1 2 3]", &spec_ref("3.8", "Vector", "vector literal"));
+    ctx.assert_vector_eq(
+        "[1 2 3]",
+        "[1 2 3]",
+        &spec_ref("3.9", "Vector", "vector literal yields [1 2 3]"),
+    );
+    ctx.assert_vector_eq(
+        "[]",
+        "[]",
+        &spec_ref("3.9", "Vector", "empty vector literal yields []"),
+    );
 }
 
 // ============================================================================
-// Section 3.9: Map
-// Reference: docs/lonala.md#39-map
+// Section 3.10: Map
+// Reference: docs/lonala.md#310-map
 // ============================================================================
 
-/// [IGNORED] Spec 3.9: Map literals
+/// [IGNORED] Spec 3.10: Map literals
 /// Tracking: Map literal compilation planned
 #[test]
 #[ignore]
-fn test_3_9_map_literal() {
+fn test_3_10_map_literal() {
     let mut _ctx = SpecTestContext::new();
     // Map literal tests when implemented
 }
 
 // ============================================================================
-// Section 3.10: Function
-// Reference: docs/lonala.md#310-function
+// Section 3.11: Function
+// Reference: docs/lonala.md#311-function
 // ============================================================================
 
-/// Spec 3.10: Functions are first-class values
+/// Spec 3.11: Functions are first-class values
 #[test]
-fn test_3_10_function_first_class() {
+fn test_3_11_function_first_class() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_function(
         "(fn [x] x)",
-        &spec_ref("3.10", "Function", "fn creates a function value"),
+        &spec_ref("3.11", "Function", "fn creates a function value"),
     );
 }
 
 // ============================================================================
-// Section 3.11: Truthiness
-// Reference: docs/lonala.md#311-truthiness
+// Section 3.12: Truthiness
+// Reference: docs/lonala.md#312-truthiness
 // ============================================================================
 
-/// Spec 3.11: "nil is falsy, false is falsy, everything else is truthy"
+/// Spec 3.12: "nil is falsy, false is falsy, everything else is truthy"
 #[test]
-fn test_3_11_truthiness_nil_false() {
+fn test_3_12_truthiness_nil_false() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
         "(if nil 1 2)",
         2,
-        &spec_ref("3.11", "Truthiness", "nil is falsy"),
+        &spec_ref("3.12", "Truthiness", "nil is falsy"),
     );
     ctx.assert_int(
         "(if false 1 2)",
         2,
-        &spec_ref("3.11", "Truthiness", "false is falsy"),
+        &spec_ref("3.12", "Truthiness", "false is falsy"),
     );
 }
 
-/// Spec 3.11: "0 is truthy, empty string is truthy, empty collections are truthy"
+/// Spec 3.12: "0 is truthy, empty string is truthy, empty collections are truthy"
 #[test]
-fn test_3_11_truthiness_zero_and_empty() {
+fn test_3_12_truthiness_zero_and_empty() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
         "(if 0 1 2)",
         1,
-        &spec_ref("3.11", "Truthiness", "0 is truthy"),
+        &spec_ref("3.12", "Truthiness", "0 is truthy"),
     );
     ctx.assert_int(
         "(if \"\" 1 2)",
         1,
-        &spec_ref("3.11", "Truthiness", "empty string is truthy"),
+        &spec_ref("3.12", "Truthiness", "empty string is truthy"),
     );
     ctx.assert_int(
         "(if '() 1 2)",
         1,
-        &spec_ref("3.11", "Truthiness", "empty list is truthy"),
+        &spec_ref("3.12", "Truthiness", "empty list is truthy"),
     );
 }
 
 // ============================================================================
-// Section 3.12: Equality
-// Reference: docs/lonala.md#312-equality
+// Section 3.13: Equality
+// Reference: docs/lonala.md#313-equality
 // ============================================================================
 
-/// Spec 3.12: Structural equality for most types
+/// Spec 3.13: Structural equality for most types
 #[test]
-fn test_3_12_structural_equality() {
+fn test_3_13_structural_equality() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
         "(= 1 1)",
         true,
-        &spec_ref("3.12", "Equality", "integer equality"),
+        &spec_ref("3.13", "Equality", "integer equality"),
     );
     ctx.assert_bool(
         "(= \"abc\" \"abc\")",
         true,
-        &spec_ref("3.12", "Equality", "string equality"),
+        &spec_ref("3.13", "Equality", "string equality"),
     );
 }
 
-/// Spec 3.12: "Numbers of different types can be equal if they represent the same value"
+/// Spec 3.13: "Numbers of different types can be equal if they represent the same value"
 #[test]
-fn test_3_12_cross_type_numeric_equality() {
+fn test_3_13_cross_type_numeric_equality() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
         "(= 1 1.0)",
         true,
-        &spec_ref("3.12", "Equality", "integer equals float when same value"),
+        &spec_ref("3.13", "Equality", "integer equals float when same value"),
+    );
+}
+
+// ============================================================================
+// Section 3.14: Metadata
+// Reference: docs/lonala.md#314-metadata
+// ============================================================================
+
+/// [IGNORED] Spec 3.14: meta returns nil for values without metadata
+/// Tracking: Metadata not yet implemented
+#[test]
+#[ignore]
+fn test_3_14_meta_returns_nil() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_nil(
+        "(meta [1 2 3])",
+        &spec_ref("3.14", "Metadata", "meta returns nil when no metadata"),
+    );
+}
+
+/// [IGNORED] Spec 3.14: with-meta attaches metadata
+/// Tracking: Metadata not yet implemented
+#[test]
+#[ignore]
+fn test_3_14_with_meta() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx
+        .eval("(def v (with-meta [1 2 3] {:source \"test\"}))")
+        .unwrap();
+    ctx.assert_map(
+        "(meta v)",
+        &spec_ref("3.14", "Metadata", "with-meta attaches map"),
+    );
+}
+
+/// [IGNORED] Spec 3.14: Metadata does NOT affect equality
+/// Tracking: Metadata not yet implemented
+#[test]
+#[ignore]
+fn test_3_14_metadata_equality() {
+    let mut ctx = SpecTestContext::new();
+    // Two values that differ only in metadata should be equal
+    ctx.assert_bool(
+        "(= [1 2 3] (with-meta [1 2 3] {:foo :bar}))",
+        true,
+        &spec_ref("3.14", "Metadata", "metadata does not affect equality"),
+    );
+}
+
+/// [IGNORED] Spec 3.14: vary-meta transforms metadata
+/// Tracking: Metadata not yet implemented
+#[test]
+#[ignore]
+fn test_3_14_vary_meta() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def v (with-meta [1 2 3] {:a 1}))").unwrap();
+    let _res = ctx.eval("(def v2 (vary-meta v assoc :b 2))").unwrap();
+    // v2's metadata should have both :a and :b
+    ctx.assert_map(
+        "(meta v2)",
+        &spec_ref("3.14", "Metadata", "vary-meta transforms metadata"),
+    );
+}
+
+/// [IGNORED] Spec 3.14: Primitives do not support metadata
+/// Tracking: Metadata not yet implemented
+#[test]
+#[ignore]
+fn test_3_14_primitives_no_metadata() {
+    let mut ctx = SpecTestContext::new();
+    // Numbers, strings, nil, booleans cannot have metadata
+    ctx.assert_error(
+        "(with-meta 42 {:foo :bar})",
+        &spec_ref("3.14", "Metadata", "integers cannot have metadata"),
     );
 }

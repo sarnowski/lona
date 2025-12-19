@@ -171,7 +171,9 @@ impl SpecTestContext {
         }
     }
 
-    /// Asserts that an expression evaluates to a symbol.
+    /// Asserts that an expression evaluates to a symbol (type check only).
+    ///
+    /// Prefer `assert_symbol_eq` when you know the expected symbol name.
     pub fn assert_symbol(&mut self, source: &str, spec_ref: &str) {
         match self.eval(source) {
             Ok(Value::Symbol(_sym)) => {
@@ -186,7 +188,28 @@ impl SpecTestContext {
         }
     }
 
-    /// Asserts that an expression evaluates to a list.
+    /// Asserts that an expression evaluates to a symbol with the expected name.
+    pub fn assert_symbol_eq(&mut self, source: &str, expected_name: &str, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::Symbol(sym_id)) => {
+                let actual_name = self.interner.resolve(sym_id);
+                assert_eq!(
+                    actual_name, expected_name,
+                    "{spec_ref}: symbol name mismatch"
+                );
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected symbol, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a list (type check only).
+    ///
+    /// Prefer `assert_list_eq` when you know the expected list contents.
     pub fn assert_list(&mut self, source: &str, spec_ref: &str) {
         match self.eval(source) {
             Ok(Value::List(_list)) => {
@@ -201,11 +224,108 @@ impl SpecTestContext {
         }
     }
 
-    /// Asserts that an expression evaluates to a vector.
+    /// Asserts that an expression evaluates to a list with the expected contents.
+    ///
+    /// The `expected_source` is evaluated to produce the expected list value.
+    pub fn assert_list_eq(&mut self, source: &str, expected_source: &str, spec_ref: &str) {
+        let expected = match self.eval(expected_source) {
+            Ok(Value::List(list)) => list,
+            Ok(other) => {
+                panic!("{spec_ref}: expected_source must produce a list, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: expected_source evaluation failed: {err}");
+            }
+        };
+
+        match self.eval(source) {
+            Ok(Value::List(actual)) => {
+                assert_eq!(
+                    actual, expected,
+                    "{spec_ref}: list contents mismatch.\nActual: {actual:?}\nExpected: {expected:?}"
+                );
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected list, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a list with the expected length.
+    pub fn assert_list_len(&mut self, source: &str, expected_len: usize, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::List(list)) => {
+                let actual_len = list.len();
+                assert_eq!(actual_len, expected_len, "{spec_ref}: list length mismatch");
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected list, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a vector (type check only).
+    ///
+    /// Prefer `assert_vector_eq` when you know the expected vector contents.
     pub fn assert_vector(&mut self, source: &str, spec_ref: &str) {
         match self.eval(source) {
             Ok(Value::Vector(_vec)) => {
                 // Expected - got a vector
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected vector, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a vector with the expected contents.
+    ///
+    /// The `expected_source` is evaluated to produce the expected vector value.
+    pub fn assert_vector_eq(&mut self, source: &str, expected_source: &str, spec_ref: &str) {
+        let expected = match self.eval(expected_source) {
+            Ok(Value::Vector(vec)) => vec,
+            Ok(other) => {
+                panic!("{spec_ref}: expected_source must produce a vector, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: expected_source evaluation failed: {err}");
+            }
+        };
+
+        match self.eval(source) {
+            Ok(Value::Vector(actual)) => {
+                assert_eq!(
+                    actual, expected,
+                    "{spec_ref}: vector contents mismatch.\nActual: {actual:?}\nExpected: {expected:?}"
+                );
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected vector, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a vector with the expected length.
+    pub fn assert_vector_len(&mut self, source: &str, expected_len: usize, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::Vector(vec)) => {
+                let actual_len = vec.len();
+                assert_eq!(
+                    actual_len, expected_len,
+                    "{spec_ref}: vector length mismatch"
+                );
             }
             Ok(other) => {
                 panic!("{spec_ref}: expected vector, got {other:?}");
@@ -224,6 +344,84 @@ impl SpecTestContext {
             }
             Ok(other) => {
                 panic!("{spec_ref}: expected function, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a map (type check only).
+    ///
+    /// Prefer `assert_map_eq` when you know the expected map contents.
+    pub fn assert_map(&mut self, source: &str, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::Map(_map)) => {
+                // Expected - got a map
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected map, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a map with the expected contents.
+    ///
+    /// The `expected_source` is evaluated to produce the expected map value.
+    pub fn assert_map_eq(&mut self, source: &str, expected_source: &str, spec_ref: &str) {
+        let expected = match self.eval(expected_source) {
+            Ok(Value::Map(map)) => map,
+            Ok(other) => {
+                panic!("{spec_ref}: expected_source must produce a map, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: expected_source evaluation failed: {err}");
+            }
+        };
+
+        match self.eval(source) {
+            Ok(Value::Map(actual)) => {
+                assert_eq!(
+                    actual, expected,
+                    "{spec_ref}: map contents mismatch.\nActual: {actual:?}\nExpected: {expected:?}"
+                );
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected map, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a map with the expected number of entries.
+    pub fn assert_map_len(&mut self, source: &str, expected_len: usize, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::Map(map)) => {
+                let actual_len = map.len();
+                assert_eq!(actual_len, expected_len, "{spec_ref}: map length mismatch");
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected map, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a binary buffer.
+    /// Note: Binary type not yet implemented - placeholder for future use.
+    pub fn assert_binary(&mut self, source: &str, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(value) => {
+                // Binary type not yet in Value enum - check when implemented
+                // For now, check if it's something that could be binary
+                panic!("{spec_ref}: Binary type not yet implemented, got {value:?}");
             }
             Err(err) => {
                 panic!("{spec_ref}: evaluation failed: {err}");

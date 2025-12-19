@@ -1,6 +1,6 @@
 # Lonala Language Specification
 
-**Version**: 0.4.2 (Phase 4.2 - Macro Definition)
+**Version**: 0.4.3 (Phase 4 - Macros Complete)
 
 Lonala is the programming language for the Lona operating system. It combines Clojure's elegant syntax and immutable data structures with Erlang's actor-based concurrency model, designed to run on seL4's capability-based microkernel.
 
@@ -151,7 +151,9 @@ Value
 │   ├── Float (64-bit IEEE 754)
 │   └── Ratio (exact fractions)
 ├── Symbol
+├── Keyword
 ├── String
+├── Binary (raw byte buffer)
 ├── Collection
 │   ├── List (linked, immutable)
 │   ├── Vector (indexed, immutable)
@@ -273,7 +275,31 @@ Immutable sequences of UTF-8 encoded characters.
 | `\r` | Carriage return |
 | `\t` | Tab |
 
-### 3.7 List
+### 3.7 Binary
+
+Raw byte buffers for efficient binary data handling. Used for network packets, file I/O, and DMA buffers.
+
+```clojure
+(make-binary 1024)        ; allocate 1024-byte buffer (zeroed)
+(binary-get buf 0)        ; get byte at index 0
+(binary-set buf 0 0xFF)   ; set byte at index 0
+(binary-slice buf 10 20)  ; zero-copy view of bytes 10-19
+(binary-len buf)          ; => 1024
+```
+
+**Characteristics**:
+- **Mutable**: Unlike other Lonala types, binaries can be modified in place for efficiency
+- **Raw bytes**: Each element is an unsigned 8-bit integer (0-255)
+- **Zero-copy slicing**: Slices share underlying memory
+- **DMA-capable**: Can be allocated for hardware DMA with physical address access
+
+**Use cases**:
+- Network packet parsing and construction
+- Device driver buffers
+- Binary file I/O
+- Memory-mapped I/O data
+
+### 3.8 List
 
 Immutable singly-linked lists. Lists are the fundamental data structure for code representation.
 
@@ -289,7 +315,7 @@ Immutable singly-linked lists. Lists are the fundamental data structure for code
 - **Structural sharing**: Efficient memory use through shared tails
 - **Access**: O(1) first element, O(n) for nth element
 
-### 3.8 Vector
+### 3.9 Vector
 
 Immutable indexed collections with efficient random access.
 
@@ -305,7 +331,7 @@ Immutable indexed collections with efficient random access.
 - **Indexed**: O(log32 n) access to any element
 - **Structural sharing**: Efficient updates through tree structure
 
-### 3.9 Map
+### 3.10 Map
 
 Immutable associative collections mapping keys to values.
 
@@ -321,7 +347,7 @@ Immutable associative collections mapping keys to values.
 - **Any key type**: Keys can be any value that supports equality
 - **O(log32 n)**: Lookup, insertion, and update
 
-### 3.10 Function
+### 3.11 Function
 
 First-class callable values created with `fn`.
 
@@ -335,7 +361,7 @@ First-class callable values created with `fn`.
 - **Arity**: Fixed number of parameters (variadic functions planned)
 - **Identity**: Functions are compared by identity, not structure
 
-### 3.11 Truthiness
+### 3.12 Truthiness
 
 Lonala uses a simple truthiness model:
 
@@ -355,7 +381,7 @@ This includes: `true`, all numbers (including `0` and `0.0`), all strings (inclu
 (if [] "yes" "no")      ; => "yes" (empty vector is truthy!)
 ```
 
-### 3.12 Equality
+### 3.13 Equality
 
 Lonala uses structural equality for most types:
 
@@ -370,6 +396,89 @@ Lonala uses structural equality for most types:
 - Numbers of different types can be equal if they represent the same value: `(= 1 1.0)` is `true`
 - `##NaN` is not equal to anything, including itself
 - Functions are compared by identity (same object), not structure
+
+### 3.14 Metadata
+
+Metadata is a map of data *about* a value, attached to the value without affecting its identity or equality. Two values that differ only in metadata are still equal.
+
+**What Supports Metadata**:
+- Symbols
+- Lists
+- Vectors
+- Maps
+- Vars (the binding between a symbol and its value)
+
+**Primitives and scalars (nil, booleans, numbers, strings, binaries) do NOT support metadata.**
+
+#### 3.14.1 Reading Metadata
+
+```clojure
+(meta obj)              ; => metadata map or nil
+```
+
+#### 3.14.2 Attaching Metadata
+
+```clojure
+;; Create new value with metadata (immutable - original unchanged)
+(with-meta [1 2 3] {:source "user"})
+
+;; Transform existing metadata
+(vary-meta obj assoc :new-key value)
+```
+
+#### 3.14.3 Reader Syntax
+
+```clojure
+;; Full metadata map
+^{:doc "A vector" :private true} [1 2 3]
+
+;; Shorthand for ^{:keyword true}
+^:private my-var
+
+;; Multiple metadata items
+^:private ^:dynamic my-var
+;; equivalent to: ^{:private true :dynamic true} my-var
+```
+
+#### 3.14.4 Var Metadata
+
+Vars (created by `def`) carry metadata separate from their value:
+
+```clojure
+(def my-var 42)
+(meta #'my-var)         ; => {:name my-var, :ns user, :line 1, ...}
+
+;; Docstrings become :doc metadata
+(def my-var "Documentation here" 42)
+(meta #'my-var)         ; => {:doc "Documentation here", ...}
+```
+
+#### 3.14.5 Standard Metadata Keys
+
+| Key | Set By | Purpose |
+|-----|--------|---------|
+| `:doc` | User/defn | Documentation string |
+| `:arglists` | defn/defmacro | List of argument vectors |
+| `:macro` | defmacro | `true` if this var names a macro |
+| `:private` | User | `true` for namespace-private vars |
+| `:file` | Compiler | Source file path |
+| `:line` | Compiler | Source line number |
+| `:column` | Compiler | Source column number |
+| `:name` | Compiler | Simple symbol name |
+| `:ns` | Compiler | Namespace symbol |
+
+#### 3.14.6 Metadata and Equality
+
+Metadata does NOT affect equality or hash codes:
+
+```clojure
+(= [1 2 3] (with-meta [1 2 3] {:foo :bar}))  ; => true
+
+(= (hash [1 2 3])
+   (hash (with-meta [1 2 3] {:foo :bar})))   ; => true
+```
+
+This allows metadata to annotate values without changing program semantics.
 
 ---
 
@@ -922,9 +1031,77 @@ Returns `true` if x is greater than or equal to y.
 (>= 1 2)        ; => false
 ```
 
-### 7.3 Logical Operators
+### 7.3 Bitwise Operators
 
-#### 7.3.1 Logical Not: `not`
+Bitwise operations work on integers.
+
+#### 7.3.1 Bitwise AND: `bit-and`
+
+**Syntax**: `(bit-and x y)`
+
+Returns the bitwise AND of x and y.
+
+```clojure
+(bit-and 0xFF 0x0F)     ; => 15 (0x0F)
+(bit-and 0b1100 0b1010) ; => 8 (0b1000)
+```
+
+#### 7.3.2 Bitwise OR: `bit-or`
+
+**Syntax**: `(bit-or x y)`
+
+Returns the bitwise OR of x and y.
+
+```clojure
+(bit-or 0b1100 0b0011)  ; => 15 (0b1111)
+```
+
+#### 7.3.3 Bitwise XOR: `bit-xor`
+
+**Syntax**: `(bit-xor x y)`
+
+Returns the bitwise XOR of x and y.
+
+```clojure
+(bit-xor 0b1100 0b1010) ; => 6 (0b0110)
+```
+
+#### 7.3.4 Bitwise NOT: `bit-not`
+
+**Syntax**: `(bit-not x)`
+
+Returns the bitwise complement of x.
+
+```clojure
+(bit-not 0)             ; => -1
+(bit-and (bit-not 0xFF) 0xFFFF) ; => 0xFF00
+```
+
+#### 7.3.5 Shift Left: `bit-shift-left`
+
+**Syntax**: `(bit-shift-left x n)`
+
+Shifts x left by n bits.
+
+```clojure
+(bit-shift-left 1 4)    ; => 16
+(bit-shift-left 0xFF 8) ; => 0xFF00
+```
+
+#### 7.3.6 Shift Right: `bit-shift-right`
+
+**Syntax**: `(bit-shift-right x n)`
+
+Shifts x right by n bits (arithmetic shift, preserves sign).
+
+```clojure
+(bit-shift-right 16 2)  ; => 4
+(bit-shift-right 0xFF00 8) ; => 0xFF
+```
+
+### 7.4 Logical Operators
+
+#### 7.4.1 Logical Not: `not`
 
 **Syntax**: `(not x)`
 
@@ -938,7 +1115,7 @@ Returns `true` if x is falsy, `false` otherwise.
 (not "")        ; => false (empty string is truthy)
 ```
 
-### 7.4 Numeric Type Coercion
+### 7.5 Numeric Type Coercion
 
 When operations mix numeric types:
 
@@ -1080,72 +1257,291 @@ The following function features are planned for future implementation:
 
 ## 9. Built-in Functions
 
-Built-in functions (also called primitives or natives) are implemented in Rust and provide core functionality.
+Built-in functions (also called primitives or natives) are implemented in Rust and provide core functionality that cannot be implemented in Lonala itself.
 
-### 9.1 I/O Functions
+### 9.1 Design Principle: Minimal Native Functions
 
-#### 9.1.1 `print`
+Lonala follows the Lisp tradition of building the entire language from minimal primitives. Native functions are only used when:
 
-**Syntax**: `(print args*)`
+1. **Hardware access is required** (MMIO, DMA, IRQ)
+2. **Runtime type inspection is required** (type predicates)
+3. **Core data structure operations** (cons, first, rest on internal representations)
+4. **Scheduler/process integration** (spawn, send, irq-wait)
+5. **seL4 kernel operations** (domain creation, capabilities)
 
-**Parameters**: Zero or more values to print
+Everything else — including collection constructors (`list`, `vector`, `hash-map`), sequence operations (`map`, `filter`, `reduce`), and even the REPL — is implemented in Lonala itself.
 
-**Returns**: `nil`
+### 9.2 Type Predicates
 
-**Semantics**: Prints each argument separated by spaces, followed by a newline.
+Type predicates inspect runtime type tags and return boolean values.
+
+| Function | Description |
+|----------|-------------|
+| `nil?` | Is the value nil? |
+| `boolean?` | Is the value a boolean? |
+| `integer?` | Is the value an integer? |
+| `float?` | Is the value a float? |
+| `ratio?` | Is the value a ratio? |
+| `string?` | Is the value a string? |
+| `symbol?` | Is the value a symbol? |
+| `keyword?` | Is the value a keyword? |
+| `binary?` | Is the value a binary buffer? |
+| `list?` | Is the value a list? |
+| `vector?` | Is the value a vector? |
+| `map?` | Is the value a map? |
+| `fn?` | Is the value a function? |
+
+```clojure
+(nil? nil)        ; => true
+(list? '(1 2 3))  ; => true
+(vector? [1 2])   ; => true
+(fn? +)           ; => true
+```
+
+### 9.3 Collection Primitives
+
+Core operations on collections. Higher-level functions like `map`, `filter`, `reduce` are implemented in Lonala using these primitives.
+
+#### 9.3.1 List Operations
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `cons` | `(cons x coll)` | Prepend x to collection |
+| `first` | `(first coll)` | Get first element (nil if empty) |
+| `rest` | `(rest coll)` | Get all but first element (empty list if empty) |
+
+```clojure
+(cons 1 '(2 3))   ; => (1 2 3)
+(first '(1 2 3))  ; => 1
+(rest '(1 2 3))   ; => (2 3)
+(first nil)       ; => nil
+(rest nil)        ; => ()
+```
+
+#### 9.3.2 Vector Operations
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `nth` | `(nth coll index)` | Get element at index |
+| `conj` | `(conj coll x)` | Add element to collection |
+| `count` | `(count coll)` | Get collection size |
+
+```clojure
+(nth [1 2 3] 1)   ; => 2
+(conj [1 2] 3)    ; => [1 2 3]
+(count [1 2 3])   ; => 3
+```
+
+#### 9.3.3 Map Operations
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `get` | `(get m key)` | Get value for key (nil if missing) |
+| `assoc` | `(assoc m key val)` | Associate key with value |
+| `dissoc` | `(dissoc m key)` | Remove key |
+| `keys` | `(keys m)` | Get sequence of keys |
+| `vals` | `(vals m)` | Get sequence of values |
+
+```clojure
+(get {:a 1} :a)       ; => 1
+(assoc {:a 1} :b 2)   ; => {:a 1 :b 2}
+(dissoc {:a 1 :b 2} :a) ; => {:b 2}
+```
+
+### 9.4 Binary Operations
+
+Operations on raw byte buffers for systems programming.
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `make-binary` | `(make-binary size)` | Allocate zeroed byte buffer |
+| `binary-len` | `(binary-len buf)` | Get buffer length |
+| `binary-get` | `(binary-get buf index)` | Get byte at index (0-255) |
+| `binary-set` | `(binary-set buf index byte)` | Set byte at index |
+| `binary-slice` | `(binary-slice buf start end)` | Zero-copy view |
+| `binary-copy!` | `(binary-copy! dst dst-off src src-off len)` | Copy bytes |
+
+```clojure
+(def buf (make-binary 4))
+(binary-set buf 0 0xFF)
+(binary-get buf 0)        ; => 255
+(binary-len buf)          ; => 4
+```
+
+### 9.5 Symbol Operations
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `symbol` | `(symbol name)` | Create/intern a symbol |
+| `gensym` | `(gensym)` or `(gensym prefix)` | Generate unique symbol |
+
+```clojure
+(symbol "foo")    ; => foo
+(gensym)          ; => G__123
+(gensym "temp")   ; => temp__124
+```
+
+### 9.6 Metadata Operations
+
+Operations for reading and attaching metadata to values.
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `meta` | `(meta obj)` | Get metadata map (or nil) |
+| `with-meta` | `(with-meta obj map)` | Return copy with new metadata |
+| `vary-meta` | `(vary-meta obj f & args)` | Transform metadata with function |
+
+```clojure
+;; Attach metadata
+(def v (with-meta [1 2 3] {:source "test"}))
+(meta v)              ; => {:source "test"}
+
+;; Transform metadata
+(def v2 (vary-meta v assoc :modified true))
+(meta v2)             ; => {:source "test" :modified true}
+
+;; Var metadata
+(defn add "Adds two numbers" [x y] (+ x y))
+(meta #'add)          ; => {:doc "Adds two numbers"
+                      ;     :arglists ([x y])
+                      ;     :name add
+                      ;     :file "user.lona"
+                      ;     :line 1 ...}
+```
+
+See [Section 3.14 Metadata](#314-metadata) for full documentation.
+
+### 9.8 MMIO (Memory-Mapped I/O)
+
+Direct hardware register access for device drivers. These operate on physical memory addresses.
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `peek-u8` | `(peek-u8 addr)` | Read unsigned 8-bit value |
+| `peek-u16` | `(peek-u16 addr)` | Read unsigned 16-bit value |
+| `peek-u32` | `(peek-u32 addr)` | Read unsigned 32-bit value |
+| `peek-u64` | `(peek-u64 addr)` | Read unsigned 64-bit value |
+| `poke-u8` | `(poke-u8 addr val)` | Write unsigned 8-bit value |
+| `poke-u16` | `(poke-u16 addr val)` | Write unsigned 16-bit value |
+| `poke-u32` | `(poke-u32 addr val)` | Write unsigned 32-bit value |
+| `poke-u64` | `(poke-u64 addr val)` | Write unsigned 64-bit value |
+
+```clojure
+;; Example: UART driver
+(def uart-base 0x09000000)
+(poke-u8 uart-base 0x41)      ; Write 'A' to UART data register
+(peek-u8 uart-base)           ; Read from UART data register
+```
+
+### 9.9 DMA (Direct Memory Access)
+
+Primitives for zero-copy hardware I/O with physically contiguous memory.
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `dma-alloc` | `(dma-alloc size)` | Allocate DMA-capable buffer |
+| `phys-addr` | `(phys-addr binary)` | Get physical address of buffer |
+| `memory-barrier` | `(memory-barrier)` | Ensure memory ordering |
+
+```clojure
+;; Allocate DMA buffer for network card
+(def dma-buf (dma-alloc 4096))
+;; Returns {:virt <addr> :phys <addr> :buffer <binary>}
+
+;; Get physical address for device descriptor
+(phys-addr (:buffer dma-buf))
+
+;; Ensure writes are visible to device
+(memory-barrier)
+```
+
+### 9.10 IRQ (Interrupt Handling)
+
+Interrupt handling for device drivers.
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `irq-wait` | `(irq-wait irq-cap)` | Block until interrupt fires |
+
+```clojure
+;; Driver main loop
+(loop []
+  (irq-wait uart-irq-cap)
+  (handle-uart-interrupt)
+  (recur))
+```
+
+### 9.11 Time
+
+Time-related primitives.
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `now-ms` | `(now-ms)` | Current time in milliseconds |
+| `send-after` | `(send-after pid delay msg)` | Send message after delay |
+
+```clojure
+(now-ms)                  ; => 1234567890
+(send-after (self) 1000 :timeout)  ; Send :timeout to self after 1 second
+```
+
+### 9.12 I/O
+
+Basic output primitives. Note: The REPL and high-level I/O are implemented in Lonala using MMIO primitives.
+
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `print` | `(print args*)` | Print values followed by newline |
 
 ```clojure
 (print "Hello")           ; prints: Hello
 (print 1 2 3)             ; prints: 1 2 3
-(print "x =" 42)          ; prints: x = 42
-(print)                   ; prints newline only
 ```
 
-### 9.2 Planned Built-in Functions
+### 9.13 Process Primitives
 
-The following categories of built-in functions are planned:
+See [Section 13: Concurrency](#13-concurrency) for process-related functions.
 
-#### Type Predicates (Planned)
-- `nil?` — Is the value nil?
-- `boolean?` — Is the value a boolean?
-- `number?` — Is the value a number?
-- `integer?` — Is the value an integer?
-- `float?` — Is the value a float?
-- `ratio?` — Is the value a ratio?
-- `string?` — Is the value a string?
-- `symbol?` — Is the value a symbol?
-- `keyword?` — Is the value a keyword?
-- `list?` — Is the value a list?
-- `vector?` — Is the value a vector?
-- `map?` — Is the value a map?
-- `fn?` — Is the value a function?
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `spawn` | `(spawn fn)` | Create new process |
+| `self` | `(self)` | Get current process ID |
+| `exit` | `(exit reason)` | Exit current process |
+| `send` | `(send pid msg)` | Send message to process |
 
-#### Collection Functions (Planned)
-- `cons` — Prepend element to list
-- `first` — Get first element
-- `rest` — Get all but first element
-- `list` — Create a list
-- `vector` — Create a vector
-- `hash-map` — Create a map
-- `get` — Get value by key/index
-- `assoc` — Associate key with value
-- `dissoc` — Remove key
-- `count` — Get collection size
-- `empty?` — Is collection empty?
-- `conj` — Add element to collection
+### 9.14 seL4 / Domain Primitives
 
-#### String Functions (Planned)
-- `str` — Convert to string / concatenate strings
-- `subs` — Substring
-- `string/join` — Join strings with separator
-- `string/split` — Split string
+Low-level seL4 operations for domain isolation.
 
-#### Numeric Functions (Planned)
-- `inc` — Increment by 1
-- `dec` — Decrement by 1
-- `abs` — Absolute value
-- `min` — Minimum of arguments
-- `max` — Maximum of arguments
+| Function | Syntax | Description |
+|----------|--------|-------------|
+| `domain-create` | `(domain-create opts)` | Create isolated domain |
+| `cap-grant` | `(cap-grant domain cap)` | Grant capability to domain |
+| `cap-revoke` | `(cap-revoke domain cap)` | Revoke capability |
+
+### 9.15 Standard Library Functions (Lonala)
+
+The following functions are implemented in Lonala (in `lona/core.lona`), not as native primitives:
+
+**Collection Constructors:**
+- `list` — `(defn list [& args] args)`
+- `vector` — `(defn vector [& args] (into [] args))`
+- `hash-map` — `(defn hash-map [& kvs] (apply assoc {} kvs))`
+
+**Sequence Operations:**
+- `map`, `filter`, `reduce`, `concat`, `take`, `drop`, `partition`
+
+**Higher-Order Functions:**
+- `apply`, `comp`, `partial`, `identity`, `constantly`
+
+**Predicates:**
+- `empty?`, `seq?`, `coll?`
+
+**Numeric:**
+- `inc`, `dec`, `abs`, `min`, `max`
+
+**String:**
+- `str`, `subs`, `join`, `split`
 
 ---
 

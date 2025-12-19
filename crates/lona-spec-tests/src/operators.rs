@@ -365,107 +365,205 @@ fn test_7_2_5_greater_than_or_equal() {
 }
 
 // ============================================================================
-// Section 7.3.1: Logical Not (not)
-// Reference: docs/lonala.md#731-logical-not-not
+// Section 7.3: Bitwise Operators
+// Reference: docs/lonala.md#73-bitwise-operators
 // ============================================================================
 
-/// Spec 7.3.1: "Returns true if x is falsy, false otherwise"
+/// [IGNORED] Spec 7.3.1: Bitwise AND
+/// Tracking: Bitwise operators not yet implemented
 #[test]
-fn test_7_3_1_not_falsy_values() {
+#[ignore]
+fn test_7_3_1_bit_and() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(bit-and 0xFF 0x0F)",
+        15,
+        &spec_ref("7.3.1", "bit-and", "0xFF AND 0x0F = 0x0F"),
+    );
+    ctx.assert_int(
+        "(bit-and 0b1100 0b1010)",
+        8,
+        &spec_ref("7.3.1", "bit-and", "0b1100 AND 0b1010 = 0b1000"),
+    );
+}
+
+/// [IGNORED] Spec 7.3.2: Bitwise OR
+/// Tracking: Bitwise operators not yet implemented
+#[test]
+#[ignore]
+fn test_7_3_2_bit_or() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(bit-or 0b1100 0b0011)",
+        15,
+        &spec_ref("7.3.2", "bit-or", "0b1100 OR 0b0011 = 0b1111"),
+    );
+}
+
+/// [IGNORED] Spec 7.3.3: Bitwise XOR
+/// Tracking: Bitwise operators not yet implemented
+#[test]
+#[ignore]
+fn test_7_3_3_bit_xor() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(bit-xor 0b1100 0b1010)",
+        6,
+        &spec_ref("7.3.3", "bit-xor", "0b1100 XOR 0b1010 = 0b0110"),
+    );
+}
+
+/// [IGNORED] Spec 7.3.4: Bitwise NOT
+/// Tracking: Bitwise operators not yet implemented
+#[test]
+#[ignore]
+fn test_7_3_4_bit_not() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(bit-not 0)",
+        -1,
+        &spec_ref("7.3.4", "bit-not", "NOT 0 = -1"),
+    );
+}
+
+/// [IGNORED] Spec 7.3.5: Shift Left
+/// Tracking: Bitwise operators not yet implemented
+#[test]
+#[ignore]
+fn test_7_3_5_bit_shift_left() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(bit-shift-left 1 4)",
+        16,
+        &spec_ref("7.3.5", "bit-shift-left", "1 << 4 = 16"),
+    );
+    ctx.assert_int(
+        "(bit-shift-left 0xFF 8)",
+        0xFF00,
+        &spec_ref("7.3.5", "bit-shift-left", "0xFF << 8 = 0xFF00"),
+    );
+}
+
+/// [IGNORED] Spec 7.3.6: Shift Right
+/// Tracking: Bitwise operators not yet implemented
+#[test]
+#[ignore]
+fn test_7_3_6_bit_shift_right() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(bit-shift-right 16 2)",
+        4,
+        &spec_ref("7.3.6", "bit-shift-right", "16 >> 2 = 4"),
+    );
+    ctx.assert_int(
+        "(bit-shift-right 0xFF00 8)",
+        0xFF,
+        &spec_ref("7.3.6", "bit-shift-right", "0xFF00 >> 8 = 0xFF"),
+    );
+}
+
+// ============================================================================
+// Section 7.4: Logical Operators
+// Reference: docs/lonala.md#74-logical-operators
+// ============================================================================
+
+/// Spec 7.4.1: "Returns true if x is falsy, false otherwise"
+#[test]
+fn test_7_4_1_not_falsy_values() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
         "(not false)",
         true,
-        &spec_ref("7.3.1", "not", "not false is true"),
+        &spec_ref("7.4.1", "not", "not false is true"),
     );
     ctx.assert_bool(
         "(not nil)",
         true,
-        &spec_ref("7.3.1", "not", "not nil is true"),
+        &spec_ref("7.4.1", "not", "not nil is true"),
     );
 }
 
-/// Spec 7.3.1: Truthy values
+/// Spec 7.4.1: Truthy values
 #[test]
-fn test_7_3_1_not_truthy_values() {
+fn test_7_4_1_not_truthy_values() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
         "(not true)",
         false,
-        &spec_ref("7.3.1", "not", "not true is false"),
+        &spec_ref("7.4.1", "not", "not true is false"),
     );
     ctx.assert_bool(
         "(not 0)",
         false,
-        &spec_ref("7.3.1", "not", "not 0 is false (0 is truthy)"),
+        &spec_ref("7.4.1", "not", "not 0 is false (0 is truthy)"),
     );
     ctx.assert_bool(
         "(not \"\")",
         false,
-        &spec_ref("7.3.1", "not", "not \"\" is false (empty string is truthy)"),
+        &spec_ref("7.4.1", "not", "not \"\" is false (empty string is truthy)"),
     );
 }
 
 // ============================================================================
-// Section 7.4: Numeric Type Coercion
-// Reference: docs/lonala.md#74-numeric-type-coercion
+// Section 7.5: Numeric Type Coercion
+// Reference: docs/lonala.md#75-numeric-type-coercion
 // ============================================================================
 
-/// Spec 7.4: Integer + Integer = Integer
+/// Spec 7.5: Integer + Integer = Integer
 #[test]
-fn test_7_4_coercion_int_int() {
+fn test_7_5_coercion_int_int() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
         "(+ 1 2)",
         3,
-        &spec_ref("7.4", "Coercion", "int + int = int"),
+        &spec_ref("7.5", "Coercion", "int + int = int"),
     );
 }
 
-/// Spec 7.4: Integer + Float = Float
+/// Spec 7.5: Integer + Float = Float
 #[test]
-fn test_7_4_coercion_int_float() {
+fn test_7_5_coercion_int_float() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_float(
         "(+ 1 2.0)",
         3.0,
-        &spec_ref("7.4", "Coercion", "int + float = float"),
+        &spec_ref("7.5", "Coercion", "int + float = float"),
     );
 }
 
-/// [IGNORED] Spec 7.4: Integer + Ratio = Ratio
+/// [IGNORED] Spec 7.5: Integer + Ratio = Ratio
 /// Tracking: Ratio literals not yet implemented
 #[test]
 #[ignore]
-fn test_7_4_coercion_int_ratio() {
+fn test_7_5_coercion_int_ratio() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_ratio(
         "(+ 1 1/2)",
         3,
         2,
-        &spec_ref("7.4", "Coercion", "int + ratio = ratio"),
+        &spec_ref("7.5", "Coercion", "int + ratio = ratio"),
     );
 }
 
-/// Spec 7.4: Integer / Integer (exact) = Integer
+/// Spec 7.5: Integer / Integer (exact) = Integer
 #[test]
-fn test_7_4_coercion_division_exact() {
+fn test_7_5_coercion_division_exact() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
         "(/ 6 2)",
         3,
-        &spec_ref("7.4", "Coercion", "int / int exact = int"),
+        &spec_ref("7.5", "Coercion", "int / int exact = int"),
     );
 }
 
-/// Spec 7.4: Integer / Integer (inexact) = Ratio
+/// Spec 7.5: Integer / Integer (inexact) = Ratio
 #[test]
-fn test_7_4_coercion_division_inexact() {
+fn test_7_5_coercion_division_inexact() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_ratio(
         "(/ 5 2)",
         5,
         2,
-        &spec_ref("7.4", "Coercion", "int / int inexact = ratio"),
+        &spec_ref("7.5", "Coercion", "int / int inexact = ratio"),
     );
 }

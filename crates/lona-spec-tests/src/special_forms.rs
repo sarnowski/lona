@@ -19,7 +19,11 @@ use crate::{SpecTestContext, spec_ref};
 #[test]
 fn test_6_1_def_returns_symbol() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_symbol("(def x 42)", &spec_ref("6.1", "def", "returns the symbol"));
+    ctx.assert_symbol_eq(
+        "(def x 42)",
+        "x",
+        &spec_ref("6.1", "def", "returns the symbol 'x'"),
+    );
 }
 
 /// Spec 6.1: "Evaluates value and binds the result to name"
@@ -318,19 +322,37 @@ fn test_6_5_fn_arity_error() {
 #[test]
 fn test_6_6_quote_symbol() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_symbol(
+    ctx.assert_symbol_eq(
         "(quote foo)",
-        &spec_ref("6.6", "quote", "returns symbol unevaluated"),
+        "foo",
+        &spec_ref("6.6", "quote", "returns symbol 'foo' unevaluated"),
     );
 }
 
-/// Spec 6.6: Quote list
+/// Spec 6.6: Quote list - verify structure
 #[test]
 fn test_6_6_quote_list() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_list(
+    // Verify the quoted list (+ 1 2) has correct structure
+    ctx.assert_list_len(
         "(quote (+ 1 2))",
-        &spec_ref("6.6", "quote", "returns list unevaluated"),
+        3,
+        &spec_ref("6.6", "quote", "quoted list has 3 elements"),
+    );
+    ctx.assert_symbol_eq(
+        "(first (quote (+ 1 2)))",
+        "+",
+        &spec_ref("6.6", "quote", "first element is symbol '+'"),
+    );
+    ctx.assert_int(
+        "(first (rest (quote (+ 1 2))))",
+        1,
+        &spec_ref("6.6", "quote", "second element is 1"),
+    );
+    ctx.assert_int(
+        "(first (rest (rest (quote (+ 1 2)))))",
+        2,
+        &spec_ref("6.6", "quote", "third element is 2"),
     );
 }
 
@@ -338,10 +360,11 @@ fn test_6_6_quote_list() {
 #[test]
 fn test_6_6_quote_prevents_evaluation() {
     let mut ctx = SpecTestContext::new();
-    // (+ 1 2) would be 3 if evaluated, but quote returns the list
-    ctx.assert_list(
-        "'(+ 1 2)",
-        &spec_ref("6.6", "quote", "prevents evaluation of list"),
+    // (+ 1 2) would be 3 if evaluated, but quote returns the list with symbol + as first element
+    ctx.assert_symbol_eq(
+        "(first '(+ 1 2))",
+        "+",
+        &spec_ref("6.6", "quote", "quoted list contains symbol, not evaluated"),
     );
 }
 
@@ -370,16 +393,21 @@ fn test_6_7_syntax_quote_literals() {
 #[test]
 fn test_6_7_syntax_quote_symbols() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_symbol("`foo", &spec_ref("6.7", "syntax-quote", "symbol is quoted"));
+    ctx.assert_symbol_eq(
+        "`foo",
+        "foo",
+        &spec_ref("6.7", "syntax-quote", "symbol 'foo' is quoted"),
+    );
 }
 
 /// Spec 6.7: Syntax-quote on lists
 #[test]
 fn test_6_7_syntax_quote_lists() {
     let mut ctx = SpecTestContext::new();
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "`(1 2 3)",
-        &spec_ref("6.7", "syntax-quote", "list is quoted"),
+        "'(1 2 3)",
+        &spec_ref("6.7", "syntax-quote", "list (1 2 3) is quoted"),
     );
 }
 
@@ -388,10 +416,15 @@ fn test_6_7_syntax_quote_lists() {
 fn test_6_7_unquote() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def x 10)").unwrap();
-    // The list should contain the evaluated value of x
-    ctx.assert_list(
+    // The list should be (1 10 3) with evaluated x
+    ctx.assert_list_eq(
         "`(1 ~x 3)",
-        &spec_ref("6.7", "syntax-quote", "unquote evaluates x"),
+        "'(1 10 3)",
+        &spec_ref(
+            "6.7",
+            "syntax-quote",
+            "unquote evaluates x to produce (1 10 3)",
+        ),
     );
 }
 
@@ -400,8 +433,9 @@ fn test_6_7_unquote() {
 fn test_6_7_unquote_splicing() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def nums (list 2 3 4))").unwrap();
-    ctx.assert_list(
+    ctx.assert_list_eq(
         "`(1 ~@nums 5)",
-        &spec_ref("6.7", "syntax-quote", "unquote-splicing splices elements"),
+        "'(1 2 3 4 5)",
+        &spec_ref("6.7", "syntax-quote", "unquote-splicing yields (1 2 3 4 5)"),
     );
 }
