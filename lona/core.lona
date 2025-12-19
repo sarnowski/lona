@@ -1,9 +1,17 @@
-;; Lona Core Standard Library
-;;
-;; This file defines the core macros that form the foundation of Lonala
-;; programming. These macros are loaded automatically at runtime startup.
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 
-;; defn - Define a named function
+;;; Lona Core Standard Library
+;;;
+;;; This file defines the core macros that form the foundation of Lonala
+;;; programming. These macros are loaded automatically at runtime startup.
+
+;;;; Function Definition
+
+;; defn - Define a named function.
+;;
+;; Creates a new function bound to `name` with the specified `params`
+;; and `body`. The function is added to the current namespace.
 ;;
 ;; Usage: (defn name [params...] body...)
 ;;
@@ -13,14 +21,19 @@
 (defmacro defn [name params & body]
   `(def ~name (fn ~name ~params ~@body)))
 
-;; when - Conditional execution with multiple body expressions
+;;;; Control Flow
+
+;; when - Conditional execution with implicit do.
+;;
+;; Evaluates `test` and, if truthy, executes all `body` expressions
+;; in an implicit `do` block. Returns the value of the last body
+;; expression if test is truthy, otherwise returns nil.
 ;;
 ;; Usage: (when test body...)
 ;;
-;; Returns the value of the last body expression if test is truthy,
-;; otherwise returns nil.
-;;
 ;; Example:
-;;   (when (> x 0) (print "positive") x)
+;;   (when (> x 0)
+;;     (print "positive")
+;;     x)
 (defmacro when [test & body]
   `(if ~test (do ~@body) nil))

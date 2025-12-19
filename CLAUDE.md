@@ -106,9 +106,10 @@ lona/
 │   ├── architecture/
 │   │   └── register-based-vm.md  # VM architecture documentation
 │   └── development/
-│       ├── implementation-plan.md    # Phased roadmap and task checklist
-│       ├── testing-strategy.md       # Three-tier testing pyramid
-│       └── rust-coding-guidelines.md # Coding standards
+│       ├── implementation-plan.md      # Phased roadmap and task checklist
+│       ├── testing-strategy.md         # Three-tier testing pyramid
+│       ├── rust-coding-guidelines.md   # Rust coding standards
+│       └── lonala-coding-guidelines.md # Lonala coding standards
 │
 ├── docker/
 │   └── Dockerfile                # Development environment with seL4 SDK
@@ -117,18 +118,22 @@ lona/
 │   └── targets/
 │       └── aarch64-sel4.json     # Custom Rust target for seL4
 │
+├── lona/                         # Lonala standard library
+│   └── core.lona                 # Core macros (defn, when, etc.)
+│
 ├── tests/ (planned)              # Integration tests (Tier 3)
 │   └── integration/
 │
 └── .claude/                      # Claude Code configuration
     ├── commands/                 # Custom slash commands
     ├── agents/                   # Custom agent definitions
-    └── skills/                   # Workflow skills (develop-runtime, finishing-work)
+    └── skills/                   # Workflow skills (develop-runtime, develop-lona, finishing-work)
 ```
 
 ## Workflows
 
 - **Before writing any Rust code**: Load the `develop-runtime` skill and follow its instructions
+- **Before writing any Lonala code**: Load the `develop-lona` skill and follow its instructions
 - **When finishing all work**: Load the `finishing-work` skill and follow its instructions
 
 ## Test-First Bug Fixing (MANDATORY)
