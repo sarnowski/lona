@@ -136,12 +136,15 @@ The Lona runtime must provide a complete execution environment for Lonala code o
 
 | Component | Description |
 |-----------|-------------|
-| **Primitive Types** | Integers, floats, atoms, binaries |
-| **Persistent Collections** | Vectors, maps, sets with structural sharing |
-| **Sequence Abstraction** | Lazy sequences, transducers |
-| **String/Binary** | UTF-8 strings, binary manipulation |
+| **Primitive Types** | Integers, floats, ratios, binaries |
+| **Persistent Collections** | Vectors, maps, sets, sorted collections with structural sharing |
+| **Sequence Abstraction** | Lazy sequences, transducers, sequence functions |
+| **String/Binary** | UTF-8 strings, binary manipulation, regex |
 | **Arithmetic** | Arbitrary precision integers, checked ops |
 | **I/O Primitives** | Low-level read/write for drivers |
+| **Polymorphism** | Protocols, multimethods, hierarchies |
+| **Control Flow** | Comprehensive macros: cond, case, for, threading |
+| **State Management** | Process-local atoms with watches and validators |
 
 ### 11. Hardware Abstraction Layer
 
@@ -331,14 +334,17 @@ lona> (macroexpand '(unless false (print "runs")))
 
 ### Phase 5: Functions and Closures
 
-**Goal**: Define and call functions, lexical scope
+**Goal**: Define and call functions, lexical scope, destructuring
 
 | Task | Description | Status |
 |------|-------------|--------|
 | 5.1a Rest Arguments | `& rest` syntax for variadic functions and macros | **Done** |
 | 5.1b Multi-Arity | Multiple arities via `(fn ([x] ...) ([x y] ...))` | Pending |
+| 5.1c Sequential Destructuring | `[a b & rest]` in `let`, `fn`, `loop` bindings | Pending |
+| 5.1d Associative Destructuring | `{:keys [a b]}`, `:as`, `:or` in bindings | Pending |
+| 5.1e Nested Destructuring | `[[a b] {:keys [c]}]` arbitrary nesting | Pending |
 | 5.2 Closures | Capture lexical environment, upvalue handling | Pending |
-| 5.3 Tail Call Optimization | Detect tail position, reuse frame, `recur` | Pending |
+| 5.3 Loop and Recur | `loop` special form, tail position detection, frame reuse | Pending |
 | 5.4 Dispatch Table | Symbol to function mapping, late binding | Pending |
 
 **5.1a Details**: Rest arguments enable:
@@ -346,11 +352,29 @@ lona> (macroexpand '(unless false (print "runs")))
 - Core macros: `defn`, `when` defined in `lona/core.lona`
 - Core library loaded at REPL boot
 
+**5.1c-e Details**: Full Clojure-style destructuring:
+```clojure
+;; Sequential
+(let [[a b & rest] [1 2 3 4 5]]
+  [a b rest])  ; => [1 2 (3 4 5)]
+
+;; Associative
+(let [{:keys [name age] :or {age 0}} {:name "Alice"}]
+  [name age])  ; => ["Alice" 0]
+
+;; Nested
+(let [[{:keys [x y]}] [{:x 1 :y 2}]]
+  (+ x y))  ; => 3
+```
+
 **Deliverable**:
 ```clojure
 lona> (defn factorial [n]
         (if (<= n 1) 1 (* n (factorial (- n 1)))))
 lona> (factorial 10)
+3628800
+lona> (loop [n 10 acc 1]
+        (if (<= n 1) acc (recur (dec n) (* acc n))))
 3628800
 ```
 
@@ -363,15 +387,19 @@ lona> (factorial 10)
 | Task | Description | Status |
 |------|-------------|--------|
 | 5.5.1 Binary Type | Add `Value::Binary` (raw byte buffer) to lona-core | Pending |
-| 5.5.2 Type Predicates | `nil?`, `symbol?`, `list?`, `vector?`, `map?`, `fn?`, `integer?`, `string?`, `keyword?`, `binary?` | Pending |
+| 5.5.2 Type Predicates | `nil?`, `symbol?`, `list?`, `vector?`, `map?`, `fn?`, `integer?`, `string?`, `keyword?`, `binary?`, `set?`, `coll?`, `seq?` | Pending |
 | 5.5.3 Bitwise Operations | `bit-and`, `bit-or`, `bit-xor`, `bit-not`, `bit-shift-left`, `bit-shift-right` | Pending |
 | 5.5.4 Binary Constructors | `make-binary`, `binary-len` | Pending |
 | 5.5.5 Binary Mutators | `binary-get`, `binary-set`, `binary-slice`, `binary-copy!` | Pending |
+| 5.5.6 Set Type | Add `Value::Set` with `#{}` literal, `hash-set`, `set`, `conj`, `disj`, `contains?` | Pending |
+| 5.5.7 Set Operations | `union`, `intersection`, `difference`, `subset?`, `superset?` | Pending |
+| 5.5.8 Sorted Collections | `sorted-map`, `sorted-set`, `sorted-map-by`, `sorted-set-by`, `subseq`, `rsubseq` | Pending |
 
 **Why This Phase Exists**: These primitives are prerequisites for:
 - Lonala UART driver (needs bitwise ops for register manipulation)
 - Network drivers (needs binary buffers for packets)
 - Any protocol parsing (needs bitwise ops)
+- Idiomatic Clojure code (sets are fundamental)
 
 **Deliverable**:
 ```clojure
@@ -381,6 +409,12 @@ lona> (binary-get buf 0)
 255
 lona> (bit-and 0xFF 0x0F)
 15
+lona> #{1 2 3}
+#{1 2 3}
+lona> (conj #{1 2} 3)
+#{1 2 3}
+lona> (contains? #{:a :b} :a)
+true
 ```
 
 ---
@@ -438,16 +472,103 @@ lona> (meta v)
 
 ---
 
+### Phase 5.7: Extended Reader Macros
+
+**Goal**: Complete Clojure reader macro support for ergonomic code
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 5.7.1 Anonymous Function Literal | `#(+ % %2)` expands to `(fn [p1 p2] (+ p1 p2))` | Pending |
+| 5.7.2 Var Quote | `#'symbol` reader macro for getting var objects | Pending |
+| 5.7.3 Discard Macro | `#_form` discards next form (useful for commenting) | Pending |
+| 5.7.4 Regex Literal | `#"pattern"` for regular expressions | Pending |
+| 5.7.5 Regex Functions | `re-pattern`, `re-find`, `re-matches`, `re-seq`, `re-groups` | Pending |
+| 5.7.6 Tagged Literals | Infrastructure for extensible data readers `#tag value` | Pending |
+| 5.7.7 Built-in Tagged Literals | `#inst "..."`, `#uuid "..."` | Pending |
+
+**Why This Phase Exists**: These reader features are heavily used in idiomatic Clojure:
+- `#()` is the primary way to write short lambdas
+- `#'` is needed for var introspection
+- Regex is fundamental for string processing
+- Tagged literals enable extensible data formats
+
+**Deliverable**:
+```clojure
+lona> (map #(* % %) [1 2 3 4])
+(1 4 9 16)
+lona> (filter #(> % 2) [1 2 3 4])
+(3 4)
+lona> #'map
+#'lona.core/map
+lona> (re-find #"\d+" "abc123def")
+"123"
+```
+
+---
+
+### Phase 5.8: Error Handling
+
+**Goal**: Exception-style error handling with try/catch/throw
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 5.8.1 Exception Type | Add `Value::Exception` with message and data | Pending |
+| 5.8.2 throw Special Form | `(throw ex)` raises an exception | Pending |
+| 5.8.3 try/catch/finally | `(try expr (catch type e handler) (finally cleanup))` | Pending |
+| 5.8.4 ex-info and ex-data | `(ex-info msg data)` creates exception, `(ex-data ex)` retrieves data | Pending |
+| 5.8.5 Exception Predicates | `exception?`, `ex-message`, `ex-cause` | Pending |
+
+**Why This Phase Exists**: Error handling is essential for:
+- Robust application code
+- Driver error recovery
+- Integration with condition/restart system (Phase 13)
+
+**Note**: This provides Clojure-compatible exception handling. The more powerful Common Lisp-style condition/restart system in Phase 13 builds on top of this but doesn't replace it.
+
+**Deliverable**:
+```clojure
+lona> (try
+        (/ 1 0)
+        (catch :arithmetic-error e
+          (str "Error: " (ex-message e))))
+"Error: Division by zero"
+lona> (throw (ex-info "Something went wrong" {:code 42}))
+;; Exception: Something went wrong
+lona> (try
+        (throw (ex-info "oops" {:x 1}))
+        (catch :default e
+          (ex-data e)))
+{:x 1}
+```
+
+---
+
 ### Phase 6: Namespace System
 
-**Goal**: Organize code into namespaces, avoid name collisions
+**Goal**: Organize code into namespaces, avoid name collisions, dynamic scope
 
-| Task | Description |
-|------|-------------|
-| 6.1 Qualified Symbols | Parse `ns/name` syntax, extend Symbol representation |
-| 6.2 Namespace Declaration | `ns` special form, namespace registry, current namespace tracking |
-| 6.3 Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution |
-| 6.4 Require/Use/Refer | Load namespaces, create aliases, selectively import symbols |
+| Task | Description | Status |
+|------|-------------|--------|
+| 6.1 Qualified Symbols | Parse `ns/name` syntax, extend Symbol representation | Pending |
+| 6.2 Namespace Declaration | `ns` special form, namespace registry, current namespace tracking | Pending |
+| 6.3 Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution | Pending |
+| 6.4 Require/Use/Refer | Load namespaces, create aliases, selectively import symbols | Pending |
+| 6.5 Var System | First-class vars with `var`, `var?`, `var-get`, `var-set` | Pending |
+| 6.6 Dynamic Vars | `^:dynamic` metadata, thread/process-local bindings | Pending |
+| 6.7 binding Special Form | `(binding [*var* val] body)` for dynamic scope | Pending |
+| 6.8 Private Vars | `:private` metadata, enforce namespace-local access | Pending |
+
+**6.6-6.7 Details**: Dynamic vars provide process-local scope:
+```clojure
+(def ^:dynamic *out* default-output-stream)
+(def ^:dynamic *context* nil)
+
+(binding [*out* my-stream
+          *context* {:user "alice"}]
+  ;; Within this body, *out* and *context* have new values
+  ;; Other processes see the original values
+  (print-to *out*))
+```
 
 **Deliverable**:
 ```clojure
@@ -458,21 +579,109 @@ lona> (c/map inc [1 2 3])
 (2 3 4)
 lona> (join ", " ["a" "b" "c"])
 "a, b, c"
+lona> (def ^:dynamic *level* 0)
+lona> (defn nested [] *level*)
+lona> (nested)
+0
+lona> (binding [*level* 1] (nested))
+1
+```
+
+---
+
+### Phase 6.5: Polymorphism
+
+**Goal**: Type-based and value-based polymorphism without inheritance
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 6.5.1 defprotocol | Define named sets of functions with dispatch on first arg type | Pending |
+| 6.5.2 extend-protocol | Implement protocol for existing types | Pending |
+| 6.5.3 extend-type | Implement multiple protocols for one type | Pending |
+| 6.5.4 satisfies? | Check if value satisfies protocol | Pending |
+| 6.5.5 defmulti | Define multimethod with dispatch function | Pending |
+| 6.5.6 defmethod | Define method implementation for dispatch value | Pending |
+| 6.5.7 Hierarchies | `derive`, `isa?`, `parents`, `ancestors`, `descendants` | Pending |
+| 6.5.8 prefer-method | Resolve ambiguous multimethod dispatch | Pending |
+
+**Why This Phase Exists**: Polymorphism is essential for:
+- Extensible abstractions (e.g., `Seq` protocol for all sequence types)
+- Library design that doesn't require modifying existing types
+- Value-based dispatch for complex routing logic
+
+**Deliverable**:
+```clojure
+;; Protocols - type-based dispatch
+lona> (defprotocol Countable
+        (item-count [x] "Returns the count of items"))
+lona> (extend-protocol Countable
+        :vector (item-count [v] (count v))
+        :list   (item-count [l] (count l))
+        :map    (item-count [m] (count (keys m))))
+lona> (item-count [1 2 3])
+3
+
+;; Multimethods - value-based dispatch
+lona> (defmulti area :shape)
+lona> (defmethod area :circle [{:keys [radius]}]
+        (* 3.14159 radius radius))
+lona> (defmethod area :rectangle [{:keys [width height]}]
+        (* width height))
+lona> (area {:shape :circle :radius 2})
+12.56636
 ```
 
 ---
 
 ### Phase 7: Embedded Standard Library
 
-**Goal**: Load Lonala code at boot, Lonala UART driver, Lonala REPL
+**Goal**: Load Lonala code at boot, comprehensive standard library, Lonala REPL
 
-| Task | Description |
-|------|-------------|
-| 7.1 Build System Integration | `build.rs` embeds `lona/*.lona`, compile at boot |
-| 7.2 `lona/core.lona` | `map`, `filter`, `reduce`, `comp`, `partial`, `str`, `list`, `vector`, `hash-map` constructors |
-| 7.3 Native Primitives | `read-string` (parser access) — **Note**: No uart-* or eval; UART is Lonala, eval is Lonala |
-| 7.4 `lona/repl.lona` | `read-line`, `print-result`, `repl-loop` (uses UART driver) |
-| 7.5 Boot Sequence | Load core, load repl, call `(lona.repl/main)` |
+| Task | Description | Status |
+|------|-------------|--------|
+| 7.1 Build System Integration | `build.rs` embeds `lona/*.lona`, compile at boot | Pending |
+| 7.2 `lona/core.lona` | `map`, `filter`, `reduce`, `comp`, `partial`, `str`, `list`, `vector`, `hash-map` constructors | Pending |
+| 7.3 Native Primitives | `read-string` (parser access) — **Note**: No uart-* or eval; UART is Lonala, eval is Lonala | Pending |
+| 7.4 `lona/repl.lona` | `read-line`, `print-result`, `repl-loop` (uses UART driver) | Pending |
+| 7.5 Boot Sequence | Load core, load repl, call `(lona.repl/main)` | Pending |
+| 7.6 Lazy Sequences | `lazy-seq`, `LazySeq` type, lazy `map`/`filter`/`take`/`drop` | Pending |
+| 7.7 Sequence Functions | `take`, `drop`, `take-while`, `drop-while`, `repeat`, `cycle`, `iterate`, `range` | Pending |
+| 7.8 Transducers | `transduce`, `eduction`, `into`, transducer-producing arities of `map`/`filter`/etc. | Pending |
+| 7.9 Control Flow Macros | `cond`, `condp`, `case`, `when-let`, `if-let`, `when-some`, `if-some`, `when-not`, `if-not` | Pending |
+| 7.10 Iteration Macros | `for`, `doseq`, `dotimes`, `while` | Pending |
+| 7.11 letfn | `(letfn [(f [x] ...) (g [y] ...)] body)` for mutually recursive locals | Pending |
+| 7.12 Threading Macros | `->`, `->>`, `as->`, `some->`, `some->>`, `cond->`, `cond->>` | Pending |
+| 7.13 defrecord | `(defrecord Name [fields])` for efficient structured data | Pending |
+| 7.14 deftype | `(deftype Name [fields] Protocol (method [this] ...))` for low-level types | Pending |
+| 7.15 Pre/Post Conditions | `:pre` and `:post` assertions in `defn` | Pending |
+| 7.16 String Functions | `str`, `subs`, `split`, `join`, `trim`, `upper-case`, `lower-case`, `replace` | Pending |
+| 7.17 Collection Functions | `into`, `empty`, `not-empty`, `seq`, `vec`, `set`, `frequencies`, `group-by` | Pending |
+
+**7.6 Details**: Lazy sequences are fundamental to Clojure's memory efficiency:
+```clojure
+;; Infinite sequence, computed on demand
+(def naturals (iterate inc 0))
+(take 5 naturals)  ; => (0 1 2 3 4)
+
+;; Lazy map doesn't realize entire collection
+(def squares (map #(* % %) (range)))
+(take 3 squares)  ; => (0 1 4)
+```
+
+**7.8 Details**: Transducers provide composable, reusable transformations:
+```clojure
+(def xf (comp (filter odd?) (map inc) (take 5)))
+(into [] xf (range 100))  ; => [2 4 6 8 10]
+(transduce xf + (range 100))  ; => 30
+```
+
+**7.15 Details**: Pre/post conditions for contract programming:
+```clojure
+(defn sqrt [x]
+  {:pre [(>= x 0)]
+   :post [(>= % 0)]}
+  (Math/sqrt x))
+```
 
 **Important**: The UART driver and REPL are implemented in Lonala, not Rust. This requires Phase 9.5 (MMIO/IRQ primitives) to be complete first. See dependency note below.
 
@@ -504,20 +713,45 @@ lona> (greet "Alice")
 
 ### Phase 9: Multiple Processes
 
-**Goal**: Concurrent execution within single domain
+**Goal**: Concurrent execution within single domain, process-local state
 
-| Task | Description |
-|------|-------------|
-| 9.1 Process Data Structure | PID, status, heap, stack, mailbox |
-| 9.2 Per-Process Heap | Each process gets own allocator |
-| 9.3 Cooperative Scheduler | Run queue, yield points, context switching |
-| 9.4 Process Primitives | `spawn`, `self`, `exit` |
+| Task | Description | Status |
+|------|-------------|--------|
+| 9.1 Process Data Structure | PID, status, heap, stack, mailbox | Pending |
+| 9.2 Per-Process Heap | Each process gets own allocator | Pending |
+| 9.3 Cooperative Scheduler | Run queue, yield points, context switching | Pending |
+| 9.4 Process Primitives | `spawn`, `self`, `exit` | Pending |
+| 9.5 Atoms | `atom`, `deref`/`@`, `swap!`, `reset!`, `compare-and-set!` | Pending |
+| 9.6 Atom Watches | `add-watch`, `remove-watch` for observing state changes | Pending |
+| 9.7 Atom Validators | `set-validator!` for constraining atom values | Pending |
+
+**9.5-9.7 Details**: Atoms provide synchronous state management within a process:
+```clojure
+;; Create and update atoms
+(def counter (atom 0))
+@counter  ; => 0
+(swap! counter inc)  ; => 1
+(reset! counter 100)  ; => 100
+
+;; Watches observe changes
+(add-watch counter :logger
+  (fn [key atom old-val new-val]
+    (println "Changed from" old-val "to" new-val)))
+
+;; Validators constrain values
+(set-validator! counter pos?)  ; Only positive values allowed
+```
+
+**Note**: Unlike Clojure's atoms which are thread-safe across threads, Lonala atoms are process-local. Cross-process coordination uses message passing (Erlang model).
 
 **Deliverable**:
 ```clojure
 lona> (spawn (fn [] (println "Hello from process!")))
 #<pid:2>
 Hello from process!
+lona> (def state (atom {:count 0}))
+lona> (swap! state update :count inc)
+{:count 1}
 ```
 
 ---
@@ -714,9 +948,12 @@ lona> (spawn sandboxed-fn []
 | Phase | Milestone | Key Deliverable |
 |-------|-----------|-----------------|
 | 1-3 | **"Hello REPL"** | Interactive Lonala over UART |
-| 4-7 | **"Self-Hosting"** | Macros, functions, namespaces, REPL is Lonala code |
+| 4 | **"Macros"** | Compile-time code transformation |
+| 5-5.8 | **"Full Language"** | Functions, closures, destructuring, error handling, reader macros |
+| 6-6.5 | **"Organized"** | Namespaces, dynamic vars, protocols, multimethods |
+| 7 | **"Self-Hosting"** | Standard library, lazy sequences, REPL is Lonala code |
 | 8 | **"Inspectable"** | View source, hot-patch functions |
-| 9-10 | **"Concurrent"** | Spawn processes, send messages |
+| 9-10 | **"Concurrent"** | Spawn processes, send messages, atoms |
 | 11 | **"Sustainable"** | Long-running without memory exhaustion |
 | 12 | **"Resilient"** | Supervision trees, automatic restart |
 | 13 | **"Debuggable"** | Fix production bugs without restart |
@@ -903,78 +1140,124 @@ All implementation tasks with status tracking.
 | 15 | 4.2 | Macro Definition | defmacro special form, macro storage registry | done |
 | 16 | 4.3 | Macro Expansion Pass | Recursive expansion before compilation | done |
 | 17 | 4.4 | Macro Introspection | macroexpand, macroexpand-1 primitives | done |
-| 18 | 5.1 | Named Functions | defn macro expands to def + fn, multi-arity | open |
-| 19 | 5.2 | Closures | Lexical capture, upvalue handling | open |
-| 20 | 5.3 | Tail Call Optimization | Tail position detection, frame reuse, recur | open |
-| 21 | 5.4 | Dispatch Table | Symbol-to-function mapping, late binding | open |
-| 22 | 5.5.1 | Binary Type | Add Value::Binary (raw byte buffer) to lona-core | open |
-| 23 | 5.5.2 | Type Predicates | nil?, symbol?, list?, vector?, map?, fn?, integer?, string?, keyword?, binary? | open |
-| 24 | 5.5.3 | Bitwise Operations | bit-and, bit-or, bit-xor, bit-not, bit-shift-left, bit-shift-right | open |
-| 25 | 5.5.4 | Binary Constructors | make-binary, binary-len | open |
-| 26 | 5.5.5 | Binary Mutators | binary-get, binary-set, binary-slice, binary-copy! | open |
-| 27 | 5.6.1 | Value Metadata Storage | Add optional metadata map to List, Vector, Map, Symbol | open |
-| 28 | 5.6.2 | Var Metadata | Vars carry metadata separate from their value | open |
-| 29 | 5.6.3 | Metadata Primitives | meta, with-meta, vary-meta | open |
-| 30 | 5.6.4 | Metadata Reader Syntax | Parser support for ^{...} and ^:keyword | open |
-| 31 | 5.6.5 | Compiler Source Tracking | Auto-attach :file, :line, :column to defs | open |
-| 32 | 5.6.6 | Update def | Handle docstrings → :doc, merge symbol metadata | open |
-| 33 | 5.6.7 | Update defmacro | Set :macro true on var metadata | open |
-| 34 | 5.6.8 | Update defn Macro | Generate :doc and :arglists metadata | open |
-| 35 | 5.6.9 | Refactor macro? | Use metadata instead of MacroRegistry | open |
-| 36 | 6.1 | Qualified Symbols | Parse ns/name syntax, extend Symbol representation | open |
-| 37 | 6.2 | Namespace Declaration | ns special form, namespace registry, current namespace | open |
-| 38 | 6.3 | Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution | open |
-| 39 | 6.4 | Require/Use/Refer | Load namespaces, create aliases, selectively import | open |
-| 40 | 7.1 | Build Integration | build.rs embeds lona/*.lona files | open |
-| 41 | 7.2 | lona.core | map, filter, reduce, comp, partial, str, list, vector, hash-map | open |
-| 42 | 7.3 | Native Primitives | read-string (parser access only) | open |
-| 43 | 7.4 | lona.repl | read-line, print-result, repl-loop (uses UART driver) | open |
-| 44 | 7.5 | Boot Sequence | Load core, load repl, call (lona.repl/main) | open |
-| 45 | 8.1 | Source Storage | Per-definition source via :source metadata | open |
-| 46 | 8.2 | Introspection Primitives | source, doc, ns-publics, ns-map (use metadata) | open |
-| 47 | 8.3 | Hot Patching | Redefine updates dispatch table | open |
-| 48 | 9.1 | Process Data Structure | PID, status, heap, stack, mailbox | open |
-| 49 | 9.2 | Per-Process Heap | Independent allocator per process | open |
-| 50 | 9.3 | Cooperative Scheduler | Run queue, yield points, context switch | open |
-| 51 | 9.4 | Process Primitives | spawn, self, exit | open |
-| 52 | 9.5.1 | MMIO Primitives | peek-u8/16/32/64, poke-u8/16/32/64 | open |
-| 53 | 9.5.2 | DMA Primitives | dma-alloc, phys-addr, memory-barrier | open |
-| 54 | 9.5.3 | IRQ Primitives | irq-wait (blocks process until interrupt) | open |
-| 55 | 9.5.4 | Time Primitives | now-ms, send-after | open |
-| 56 | 9.5.5 | Lonala UART Driver | lona/driver/uart.lona using MMIO primitives | open |
-| 57 | 10.1 | Mailbox | FIFO message queue per process | open |
-| 58 | 10.2 | send Primitive | Copy message to target mailbox | open |
-| 59 | 10.3 | receive Special Form | Pattern matching, selective receive | open |
-| 60 | 10.4 | Timeouts | after clause, timer management | open |
-| 61 | 10.5 | lona.process | call (sync), cast (async) helpers | open |
-| 62 | 11.1 | Root Discovery | Stack, dispatch table, mailbox roots | open |
-| 63 | 11.2 | Mark-Sweep Collector | Per-process GC on allocation pressure | open |
-| 64 | 11.3 | GC Primitives | gc, gc-stats functions | open |
-| 65 | 12.1 | Process Linking | link, unlink, spawn-link | open |
-| 66 | 12.2 | Process Monitoring | monitor, demonitor, DOWN messages | open |
-| 67 | 12.3 | Exit Signals | Normal/abnormal exits, propagation | open |
-| 68 | 12.4 | Preemptive Scheduling | Reduction counting, fair preemption | open |
-| 69 | 12.5 | lona.supervisor | Supervisor behavior, restart strategies | open |
-| 70 | 13.1 | Stack Introspection | current-stack-frames, frame-locals | open |
-| 71 | 13.2 | Breakpoints | break-on-entry, break-on-exit | open |
-| 72 | 13.3 | Tracing | trace-calls, trace-messages | open |
-| 73 | 13.4 | Condition/Restart System | signal, restart-case, handler-bind | open |
-| 74 | 13.5 | lona.debug | Debugger UI, inspector | open |
-| 75 | 14.1 | VSpace Manager | Address space creation, page mapping | open |
-| 76 | 14.2 | CSpace Manager | Capability space, slots, delegation | open |
-| 77 | 14.3 | Domain Creation | spawn with :domain, capabilities | open |
-| 78 | 14.4 | Domain Registry | Hierarchical naming, metadata | open |
-| 79 | 15.1 | seL4 IPC Integration | Endpoints, Call/Send/Recv | open |
-| 80 | 15.2 | Serialization | Values to bytes, capability transfer | open |
-| 81 | 15.3 | Transparent Routing | send works across domains | open |
-| 82 | 15.4 | Cross-Domain Supervision | Link/monitor across domains | open |
-| 83 | 16.1 | Read-Only Code Mapping | Share bytecode/source pages | open |
-| 84 | 16.2 | Dispatch Table Cloning | Child inherits parent bindings | open |
-| 85 | 16.3 | Shared Memory Regions | create-shared-region, grant-capability | open |
-| 86 | 16.4 | Code Propagation | push-code, pull-code | open |
-| 87 | 17.1 | IRQ Handling | seL4 IRQ to process message (see also 9.5.3) | open |
-| 88 | 17.2 | MMIO Abstraction | Memory-mapped device access (see also 9.5.1) | open |
-| 89 | 17.3 | Driver Framework | Driver behaviors in Lonala | open |
-| 90 | 17.4 | VirtIO Drivers | virtio-net, virtio-blk | open |
-| 91 | 17.5 | TCP/IP Stack | IP, TCP, UDP in Lonala | open |
-| 92 | 17.6 | Telnet Server | Network REPL, per-user domains | open |
+| 18 | 5.1a | Rest Arguments | `& rest` syntax for variadic functions and macros | done |
+| 19 | 5.1b | Multi-Arity | Multiple arities via `(fn ([x] ...) ([x y] ...))` | open |
+| 20 | 5.1c | Sequential Destructuring | `[a b & rest]` in `let`, `fn`, `loop` bindings | open |
+| 21 | 5.1d | Associative Destructuring | `{:keys [a b]}`, `:as`, `:or` in bindings | open |
+| 22 | 5.1e | Nested Destructuring | `[[a b] {:keys [c]}]` arbitrary nesting | open |
+| 23 | 5.2 | Closures | Lexical capture, upvalue handling | open |
+| 24 | 5.3 | Loop and Recur | `loop` special form, tail position detection, frame reuse | open |
+| 25 | 5.4 | Dispatch Table | Symbol-to-function mapping, late binding | open |
+| 26 | 5.5.1 | Binary Type | Add Value::Binary (raw byte buffer) to lona-core | open |
+| 27 | 5.5.2 | Type Predicates | nil?, symbol?, list?, vector?, map?, fn?, integer?, string?, keyword?, binary?, set?, coll?, seq? | open |
+| 28 | 5.5.3 | Bitwise Operations | bit-and, bit-or, bit-xor, bit-not, bit-shift-left, bit-shift-right | open |
+| 29 | 5.5.4 | Binary Constructors | make-binary, binary-len | open |
+| 30 | 5.5.5 | Binary Mutators | binary-get, binary-set, binary-slice, binary-copy! | open |
+| 31 | 5.5.6 | Set Type | Add Value::Set with `#{}` literal, hash-set, set, conj, disj, contains? | open |
+| 32 | 5.5.7 | Set Operations | union, intersection, difference, subset?, superset? | open |
+| 33 | 5.5.8 | Sorted Collections | sorted-map, sorted-set, sorted-map-by, sorted-set-by, subseq, rsubseq | open |
+| 34 | 5.6.1 | Value Metadata Storage | Add optional metadata map to List, Vector, Map, Symbol | open |
+| 35 | 5.6.2 | Var Metadata | Vars carry metadata separate from their value | open |
+| 36 | 5.6.3 | Metadata Primitives | meta, with-meta, vary-meta | open |
+| 37 | 5.6.4 | Metadata Reader Syntax | Parser support for ^{...} and ^:keyword | open |
+| 38 | 5.6.5 | Compiler Source Tracking | Auto-attach :file, :line, :column to defs | open |
+| 39 | 5.6.6 | Update def | Handle docstrings → :doc, merge symbol metadata | open |
+| 40 | 5.6.7 | Update defmacro | Set :macro true on var metadata | open |
+| 41 | 5.6.8 | Update defn Macro | Generate :doc and :arglists metadata | open |
+| 42 | 5.6.9 | Refactor macro? | Use metadata instead of MacroRegistry | open |
+| 43 | 5.7.1 | Anonymous Function Literal | `#(+ % %2)` expands to `(fn [p1 p2] (+ p1 p2))` | open |
+| 44 | 5.7.2 | Var Quote | `#'symbol` reader macro for getting var objects | open |
+| 45 | 5.7.3 | Discard Macro | `#_form` discards next form (useful for commenting) | open |
+| 46 | 5.7.4 | Regex Literal | `#"pattern"` for regular expressions | open |
+| 47 | 5.7.5 | Regex Functions | re-pattern, re-find, re-matches, re-seq, re-groups | open |
+| 48 | 5.7.6 | Tagged Literals | Infrastructure for extensible data readers `#tag value` | open |
+| 49 | 5.7.7 | Built-in Tagged Literals | `#inst "..."`, `#uuid "..."` | open |
+| 50 | 5.8.1 | Exception Type | Add Value::Exception with message and data | open |
+| 51 | 5.8.2 | throw Special Form | `(throw ex)` raises an exception | open |
+| 52 | 5.8.3 | try/catch/finally | `(try expr (catch type e handler) (finally cleanup))` | open |
+| 53 | 5.8.4 | ex-info and ex-data | `(ex-info msg data)` creates exception, `(ex-data ex)` retrieves data | open |
+| 54 | 5.8.5 | Exception Predicates | exception?, ex-message, ex-cause | open |
+| 55 | 6.1 | Qualified Symbols | Parse ns/name syntax, extend Symbol representation | open |
+| 56 | 6.2 | Namespace Declaration | ns special form, namespace registry, current namespace | open |
+| 57 | 6.3 | Namespace-Aware Dispatch | Extend dispatch table for qualified symbol resolution | open |
+| 58 | 6.4 | Require/Use/Refer | Load namespaces, create aliases, selectively import | open |
+| 59 | 6.5 | Var System | First-class vars with var, var?, var-get, var-set | open |
+| 60 | 6.6 | Dynamic Vars | ^:dynamic metadata, thread/process-local bindings | open |
+| 61 | 6.7 | binding Special Form | (binding [*var* val] body) for dynamic scope | open |
+| 62 | 6.8 | Private Vars | :private metadata, enforce namespace-local access | open |
+| 63 | 6.5.1 | defprotocol | Define named sets of functions with dispatch on first arg type | open |
+| 64 | 6.5.2 | extend-protocol | Implement protocol for existing types | open |
+| 65 | 6.5.3 | extend-type | Implement multiple protocols for one type | open |
+| 66 | 6.5.4 | satisfies? | Check if value satisfies protocol | open |
+| 67 | 6.5.5 | defmulti | Define multimethod with dispatch function | open |
+| 68 | 6.5.6 | defmethod | Define method implementation for dispatch value | open |
+| 69 | 6.5.7 | Hierarchies | derive, isa?, parents, ancestors, descendants | open |
+| 70 | 6.5.8 | prefer-method | Resolve ambiguous multimethod dispatch | open |
+| 71 | 7.1 | Build Integration | build.rs embeds lona/*.lona files | open |
+| 72 | 7.2 | lona.core | map, filter, reduce, comp, partial, str, list, vector, hash-map | open |
+| 73 | 7.3 | Native Primitives | read-string (parser access only) | open |
+| 74 | 7.4 | lona.repl | read-line, print-result, repl-loop (uses UART driver) | open |
+| 75 | 7.5 | Boot Sequence | Load core, load repl, call (lona.repl/main) | open |
+| 76 | 7.6 | Lazy Sequences | lazy-seq, LazySeq type, lazy map/filter/take/drop | open |
+| 77 | 7.7 | Sequence Functions | take, drop, take-while, drop-while, repeat, cycle, iterate, range | open |
+| 78 | 7.8 | Transducers | transduce, eduction, into, transducer-producing arities | open |
+| 79 | 7.9 | Control Flow Macros | cond, condp, case, when-let, if-let, when-some, if-some, when-not, if-not | open |
+| 80 | 7.10 | Iteration Macros | for, doseq, dotimes, while | open |
+| 81 | 7.11 | letfn | (letfn [(f [x] ...) (g [y] ...)] body) for mutually recursive locals | open |
+| 82 | 7.12 | Threading Macros | ->, ->>, as->, some->, some->>, cond->, cond->> | open |
+| 83 | 7.13 | defrecord | (defrecord Name [fields]) for efficient structured data | open |
+| 84 | 7.14 | deftype | (deftype Name [fields] Protocol ...) for low-level types | open |
+| 85 | 7.15 | Pre/Post Conditions | :pre and :post assertions in defn | open |
+| 86 | 7.16 | String Functions | str, subs, split, join, trim, upper-case, lower-case, replace | open |
+| 87 | 7.17 | Collection Functions | into, empty, not-empty, seq, vec, set, frequencies, group-by | open |
+| 88 | 8.1 | Source Storage | Per-definition source via :source metadata | open |
+| 89 | 8.2 | Introspection Primitives | source, doc, ns-publics, ns-map (use metadata) | open |
+| 90 | 8.3 | Hot Patching | Redefine updates dispatch table | open |
+| 91 | 9.1 | Process Data Structure | PID, status, heap, stack, mailbox | open |
+| 92 | 9.2 | Per-Process Heap | Independent allocator per process | open |
+| 93 | 9.3 | Cooperative Scheduler | Run queue, yield points, context switch | open |
+| 94 | 9.4 | Process Primitives | spawn, self, exit | open |
+| 95 | 9.5 | Atoms | atom, deref/@, swap!, reset!, compare-and-set! | open |
+| 96 | 9.6 | Atom Watches | add-watch, remove-watch for observing state changes | open |
+| 97 | 9.7 | Atom Validators | set-validator! for constraining atom values | open |
+| 98 | 9.5.1 | MMIO Primitives | peek-u8/16/32/64, poke-u8/16/32/64 | open |
+| 99 | 9.5.2 | DMA Primitives | dma-alloc, phys-addr, memory-barrier | open |
+| 100 | 9.5.3 | IRQ Primitives | irq-wait (blocks process until interrupt) | open |
+| 101 | 9.5.4 | Time Primitives | now-ms, send-after | open |
+| 102 | 9.5.5 | Lonala UART Driver | lona/driver/uart.lona using MMIO primitives | open |
+| 103 | 10.1 | Mailbox | FIFO message queue per process | open |
+| 104 | 10.2 | send Primitive | Copy message to target mailbox | open |
+| 105 | 10.3 | receive Special Form | Pattern matching, selective receive | open |
+| 106 | 10.4 | Timeouts | after clause, timer management | open |
+| 107 | 10.5 | lona.process | call (sync), cast (async) helpers | open |
+| 108 | 11.1 | Root Discovery | Stack, dispatch table, mailbox roots | open |
+| 109 | 11.2 | Mark-Sweep Collector | Per-process GC on allocation pressure | open |
+| 110 | 11.3 | GC Primitives | gc, gc-stats functions | open |
+| 111 | 12.1 | Process Linking | link, unlink, spawn-link | open |
+| 112 | 12.2 | Process Monitoring | monitor, demonitor, DOWN messages | open |
+| 113 | 12.3 | Exit Signals | Normal/abnormal exits, propagation | open |
+| 114 | 12.4 | Preemptive Scheduling | Reduction counting, fair preemption | open |
+| 115 | 12.5 | lona.supervisor | Supervisor behavior, restart strategies | open |
+| 116 | 13.1 | Stack Introspection | current-stack-frames, frame-locals | open |
+| 117 | 13.2 | Breakpoints | break-on-entry, break-on-exit | open |
+| 118 | 13.3 | Tracing | trace-calls, trace-messages | open |
+| 119 | 13.4 | Condition/Restart System | signal, restart-case, handler-bind | open |
+| 120 | 13.5 | lona.debug | Debugger UI, inspector | open |
+| 121 | 14.1 | VSpace Manager | Address space creation, page mapping | open |
+| 122 | 14.2 | CSpace Manager | Capability space, slots, delegation | open |
+| 123 | 14.3 | Domain Creation | spawn with :domain, capabilities | open |
+| 124 | 14.4 | Domain Registry | Hierarchical naming, metadata | open |
+| 125 | 15.1 | seL4 IPC Integration | Endpoints, Call/Send/Recv | open |
+| 126 | 15.2 | Serialization | Values to bytes, capability transfer | open |
+| 127 | 15.3 | Transparent Routing | send works across domains | open |
+| 128 | 15.4 | Cross-Domain Supervision | Link/monitor across domains | open |
+| 129 | 16.1 | Read-Only Code Mapping | Share bytecode/source pages | open |
+| 130 | 16.2 | Dispatch Table Cloning | Child inherits parent bindings | open |
+| 131 | 16.3 | Shared Memory Regions | create-shared-region, grant-capability | open |
+| 132 | 16.4 | Code Propagation | push-code, pull-code | open |
+| 133 | 17.1 | IRQ Handling | seL4 IRQ to process message (see also 9.5.3) | open |
+| 134 | 17.2 | MMIO Abstraction | Memory-mapped device access (see also 9.5.1) | open |
+| 135 | 17.3 | Driver Framework | Driver behaviors in Lonala | open |
+| 136 | 17.4 | VirtIO Drivers | virtio-net, virtio-blk | open |
+| 137 | 17.5 | TCP/IP Stack | IP, TCP, UDP in Lonala | open |
+| 138 | 17.6 | Telnet Server | Network REPL, per-user domains | open |
