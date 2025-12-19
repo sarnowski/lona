@@ -9,6 +9,7 @@
 use alloc::format;
 use alloc::vec::Vec;
 
+use lona_core::list::List;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
 use lonala_compiler::{MacroDefinition, MacroExpander, MacroExpansionError};
@@ -61,6 +62,9 @@ impl MacroExpander for Expander {
     ///
     /// The collection primitives (`list`, `concat`, `vec`, etc.) are required
     /// for quasiquote expansion to work properly.
+    ///
+    /// Supports rest parameters: if the macro has `has_rest`, extra arguments
+    /// are collected into a list in the rest parameter position.
     #[inline]
     fn expand(
         &mut self,
@@ -68,16 +72,48 @@ impl MacroExpander for Expander {
         args: Vec<Value>,
         interner: &mut Interner,
     ) -> Result<Value, MacroExpansionError> {
+        let fixed_arity = usize::from(definition.arity());
+        let has_rest = definition.has_rest();
+
         // Verify arity
-        let expected_arity = usize::from(definition.arity());
-        if args.len() != expected_arity {
-            return Err(MacroExpansionError::new(format!(
-                "macro '{}' expects {} arguments, got {}",
-                definition.name(),
-                expected_arity,
-                args.len()
-            )));
+        if has_rest {
+            // With rest args: need at least `fixed_arity` arguments
+            if args.len() < fixed_arity {
+                return Err(MacroExpansionError::new(format!(
+                    "macro '{}' expects at least {} arguments, got {}",
+                    definition.name(),
+                    fixed_arity,
+                    args.len()
+                )));
+            }
+        } else {
+            // Without rest args: need exactly `fixed_arity` arguments
+            if args.len() != fixed_arity {
+                return Err(MacroExpansionError::new(format!(
+                    "macro '{}' expects {} arguments, got {}",
+                    definition.name(),
+                    fixed_arity,
+                    args.len()
+                )));
+            }
         }
+
+        // Build the effective arguments list
+        // Fixed args: args[0..fixed_arity]
+        // Rest arg (if has_rest): args[fixed_arity..] collected into a list
+        let effective_args: Vec<Value> = if has_rest {
+            let mut effective = Vec::with_capacity(fixed_arity.saturating_add(1));
+            // Add fixed arguments
+            for arg in args.iter().take(fixed_arity) {
+                effective.push(arg.clone());
+            }
+            // Collect rest arguments into a list
+            let rest_elements: Vec<Value> = args.iter().skip(fixed_arity).cloned().collect();
+            effective.push(Value::List(List::from_vec(rest_elements)));
+            effective
+        } else {
+            args
+        };
 
         // Intern the collection primitive symbols (required for quasiquote)
         let collection_symbols = intern_primitives(interner);
@@ -91,7 +127,7 @@ impl MacroExpander for Expander {
 
         // Execute the macro's chunk with the arguments as initial register values
         let result = vm
-            .execute_with_args(definition.chunk(), &args)
+            .execute_with_args(definition.chunk(), &effective_args)
             .map_err(|vm_err| MacroExpansionError::new(format!("{vm_err:?}")))?;
 
         Ok(result)
@@ -127,7 +163,8 @@ mod tests {
         let mut expander = Expander::new();
 
         let chunk = Arc::new(make_identity_chunk());
-        let definition = MacroDefinition::new(chunk, 1_u8, alloc::string::String::from("identity"));
+        let definition =
+            MacroDefinition::new(chunk, 1_u8, false, alloc::string::String::from("identity"));
 
         let args = vec![Value::Integer(Integer::from_i64(42_i64))];
         let result = expander.expand(&definition, args, &mut interner).unwrap();
@@ -141,7 +178,8 @@ mod tests {
         let mut expander = Expander::new();
 
         let chunk = Arc::new(make_identity_chunk());
-        let definition = MacroDefinition::new(chunk, 1_u8, alloc::string::String::from("identity"));
+        let definition =
+            MacroDefinition::new(chunk, 1_u8, false, alloc::string::String::from("identity"));
 
         // Pass 2 arguments when 1 is expected
         let args = vec![
@@ -176,6 +214,7 @@ mod tests {
         let definition = MacroDefinition::new(
             Arc::new(chunk),
             0_u8,
+            false,
             alloc::string::String::from("nil-macro"),
         );
 

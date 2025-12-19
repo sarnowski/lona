@@ -49,7 +49,7 @@ fn is_macro_returns_true_for_registered_macro() {
 
     let macro_name = interner.intern("my-macro");
     let chunk = Arc::new(make_identity_chunk());
-    let def = MacroDefinition::new(chunk, 1_u8, String::from("my-macro"));
+    let def = MacroDefinition::new(chunk, 1_u8, false, String::from("my-macro"));
     registry.register(macro_name, def);
 
     let ctx = ctx_with_macros(&interner, &registry);
@@ -158,7 +158,7 @@ fn expand_once_expands_macro_call() {
     // Register an identity macro
     let macro_name = interner.intern("identity");
     let chunk = Arc::new(make_identity_chunk());
-    let def = MacroDefinition::new(chunk, 1_u8, String::from("identity"));
+    let def = MacroDefinition::new(chunk, 1_u8, false, String::from("identity"));
     registry.register(macro_name, def);
 
     // Create call: (identity 42)

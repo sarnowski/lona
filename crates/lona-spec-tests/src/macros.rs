@@ -173,14 +173,13 @@ fn test_11_2_macroexpand_non_macro() {
 }
 
 // ============================================================================
-// Section 11.3: Common Macro Patterns (Planned)
-// Reference: docs/lonala.md#113-common-macro-patterns-planned
+// Section 11.3: Common Macro Patterns
+// Reference: docs/lonala.md#113-common-macro-patterns
 // ============================================================================
 
-/// [IGNORED] Spec 11.3: when macro with rest args
-/// Tracking: Requires rest arguments (&) planned for Phase 5
+/// Spec 11.3: when macro with rest args
+/// Tests that rest arguments (&) work in macro parameter lists
 #[test]
-#[ignore]
 fn test_11_3_when_with_rest_args() {
     let mut ctx = SpecTestContext::new();
     // (defmacro when [test & body] `(if ~test (do ~@body) nil))
@@ -194,11 +193,59 @@ fn test_11_3_when_with_rest_args() {
     );
 }
 
-/// [IGNORED] Spec 11.3: defn macro
-/// Tracking: Requires rest arguments (&) planned for Phase 5
+/// Spec 11.3: defn macro
+/// Tests that defn macro works correctly with rest args
 #[test]
-#[ignore]
 fn test_11_3_defn_macro() {
-    let mut _ctx = SpecTestContext::new();
+    let mut ctx = SpecTestContext::new();
     // (defmacro defn [name params & body] `(def ~name (fn ~name ~params ~@body)))
+    let _res = ctx
+        .eval("(defmacro defn [name params & body] `(def ~name (fn ~name ~params ~@body)))")
+        .unwrap();
+    // Define a function using defn
+    let _res = ctx.eval("(defn add [a b] (+ a b))").unwrap();
+    // Test that the function works
+    ctx.assert_int(
+        "(add 1 2)",
+        3,
+        &spec_ref("11.3", "defn", "defines function"),
+    );
+}
+
+/// Spec 11.3: Function rest args
+/// Tests that rest arguments (&) work in function parameter lists
+#[test]
+fn test_11_3_fn_rest_args() {
+    let mut ctx = SpecTestContext::new();
+    // Define a function with rest args
+    let _res = ctx.eval("(def sum-list (fn [& args] args))").unwrap();
+    // Test with various numbers of arguments
+    ctx.assert_list(
+        "(sum-list)",
+        &spec_ref("11.3", "fn rest", "empty rest args"),
+    );
+    ctx.assert_list(
+        "(sum-list 1 2 3)",
+        &spec_ref("11.3", "fn rest", "multiple rest args"),
+    );
+}
+
+/// Spec 11.3: Function with fixed and rest args
+/// Tests that fixed and rest parameters work together
+#[test]
+fn test_11_3_fn_fixed_and_rest_args() {
+    let mut ctx = SpecTestContext::new();
+    // Define a function with one fixed param and rest args
+    let _res = ctx.eval("(def take-first-rest (fn [x & rest] x))").unwrap();
+    ctx.assert_int(
+        "(take-first-rest 1 2 3)",
+        1,
+        &spec_ref("11.3", "fn rest", "fixed arg returned"),
+    );
+    // Define a function that returns the rest
+    let _res = ctx.eval("(def get-rest (fn [x & rest] rest))").unwrap();
+    ctx.assert_list(
+        "(get-rest 1 2 3)",
+        &spec_ref("11.3", "fn rest", "rest args returned"),
+    );
 }

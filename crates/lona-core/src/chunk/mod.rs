@@ -73,10 +73,12 @@ pub enum Constant {
     Function {
         /// The compiled bytecode for the function body.
         chunk: Box<Chunk>,
-        /// Number of parameters the function expects.
+        /// Number of fixed parameters the function expects.
         arity: u8,
         /// Optional function name for debugging and error messages.
         name: Option<String>,
+        /// Whether this function accepts rest arguments.
+        has_rest: bool,
     },
 }
 
@@ -111,11 +113,19 @@ impl fmt::Display for Constant {
                 write!(f, "]")
             }
             Self::Function {
-                ref name, arity, ..
-            } => match *name {
-                Some(ref func_name) => write!(f, "#<fn {func_name}/{arity}>"),
-                None => write!(f, "#<fn/{arity}>"),
-            },
+                ref name,
+                arity,
+                has_rest,
+                ..
+            } => {
+                let rest_indicator = if has_rest { "+" } else { "" };
+                match *name {
+                    Some(ref func_name) => {
+                        write!(f, "#<fn {func_name}/{arity}{rest_indicator}>")
+                    }
+                    None => write!(f, "#<fn/{arity}{rest_indicator}>"),
+                }
+            }
         }
     }
 }
@@ -133,8 +143,10 @@ pub struct Chunk {
     constants: Vec<Constant>,
     /// Maximum registers used by this chunk.
     max_registers: u8,
-    /// Number of parameters (0 for top-level code).
+    /// Number of fixed parameters (0 for top-level code).
     arity: u8,
+    /// Whether this chunk uses rest parameters.
+    has_rest: bool,
     /// Source spans for each instruction (parallel to `code`).
     spans: Vec<Span>,
     /// Function name for debugging (empty for anonymous/top-level).
@@ -151,6 +163,7 @@ impl Chunk {
             constants: Vec::new(),
             max_registers: 0,
             arity: 0,
+            has_rest: false,
             spans: Vec::new(),
             name: String::new(),
         }
@@ -165,6 +178,7 @@ impl Chunk {
             constants: Vec::new(),
             max_registers: 0,
             arity: 0,
+            has_rest: false,
             spans: Vec::new(),
             name,
         }
@@ -190,10 +204,23 @@ impl Chunk {
         self.arity
     }
 
-    /// Sets the number of parameters.
+    /// Sets the number of fixed parameters.
     #[inline]
     pub const fn set_arity(&mut self, arity: u8) {
         self.arity = arity;
+    }
+
+    /// Returns whether this chunk uses rest parameters.
+    #[inline]
+    #[must_use]
+    pub const fn has_rest(&self) -> bool {
+        self.has_rest
+    }
+
+    /// Sets whether this chunk uses rest parameters.
+    #[inline]
+    pub const fn set_has_rest(&mut self, has_rest: bool) {
+        self.has_rest = has_rest;
     }
 
     /// Returns the maximum number of registers used.
@@ -324,9 +351,10 @@ impl Chunk {
             &self.name
         };
         let _result = writeln!(output, "== {display_name} ==");
+        let rest_info = if self.has_rest { " (variadic)" } else { "" };
         let _result = writeln!(
             output,
-            "arity: {}, max_registers: {}",
+            "arity: {}{rest_info}, max_registers: {}",
             self.arity, self.max_registers
         );
         let _result = writeln!(output);

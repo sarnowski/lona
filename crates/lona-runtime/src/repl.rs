@@ -81,6 +81,10 @@ pub struct Repl {
     input_counter: u32,
 }
 
+/// The core standard library source, embedded at compile time.
+#[cfg(not(feature = "integration-test"))]
+const CORE_LIBRARY: &str = include_str!("../../../lona/core.lona");
+
 impl Repl {
     /// Creates a new REPL instance with empty state.
     ///
@@ -96,6 +100,70 @@ impl Repl {
             sources: source::Registry::new(),
             input_counter: 0_u32,
         }
+    }
+
+    /// Loads the core standard library (`lona/core.lona`).
+    ///
+    /// This defines essential macros like `defn` and `when` that form the
+    /// foundation of Lonala programming. Call this before interactive use
+    /// or when testing code that depends on core macros.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error string if the core library fails to load (which
+    /// indicates a bug in the core library).
+    #[cfg(not(feature = "integration-test"))]
+    pub fn load_core(&mut self) -> Result<(), String> {
+        // Skip if core.lona is empty (shouldn't happen in practice)
+        if CORE_LIBRARY.trim().is_empty() {
+            return Ok(());
+        }
+
+        // Register the core library source
+        let source_id = self
+            .sources
+            .add(String::from("<core>"), String::from(CORE_LIBRARY))
+            .ok_or_else(|| String::from("source registry full"))?;
+
+        // Create a macro expander
+        let mut expander = MacroExpander::new();
+
+        // Compile the core library with macro expansion
+        let chunk = compile_with_expansion(
+            CORE_LIBRARY,
+            source_id,
+            &mut self.interner,
+            &mut self.macros,
+            &mut expander,
+        )
+        .map_err(|err| format!("Core library error: {err}"))?;
+
+        // Pre-intern primitive symbols before creating VM
+        let collection_symbols = intern_collection_primitives(&mut self.interner);
+        let introspection_symbols = intern_introspection_primitives(&mut self.interner);
+
+        // Create a VM for core library initialization
+        let mut vm = Vm::new(&self.interner);
+        vm.set_source(source_id);
+
+        // Restore persistent globals into the VM
+        *vm.globals_mut() = self.globals.clone();
+
+        // Register collection primitives with pre-interned symbols
+        register_collection_primitives(&mut vm, &collection_symbols);
+
+        // Set up macro introspection functions
+        vm.set_macro_registry(&self.macros);
+        register_introspection_primitives(&mut vm, &introspection_symbols);
+
+        // Execute the core library
+        vm.execute(&chunk)
+            .map_err(|err| format!("Core library execution error: {err:?}"))?;
+
+        // Save globals back to persistent storage
+        self.globals = vm.globals().clone();
+
+        Ok(())
     }
 
     /// Evaluates a source string and returns the result.
@@ -152,12 +220,6 @@ impl Repl {
 
         // Restore persistent globals into the VM
         *vm.globals_mut() = self.globals.clone();
-
-        // Register the print function
-        if let Some(print_sym) = self.interner.get("print") {
-            vm.update_print_symbol(print_sym);
-            vm.set_global(print_sym, Value::Symbol(print_sym));
-        }
 
         // Register collection primitives with pre-interned symbols
         register_collection_primitives(&mut vm, &collection_symbols);
@@ -317,6 +379,12 @@ mod interactive {
         pub fn run(&mut self) -> ! {
             self.writeln("Lona REPL v0.1.0");
             self.writeln("Type expressions to evaluate. Ctrl+C to cancel input.");
+
+            // Load the core standard library
+            if let Err(err) = self.repl.load_core() {
+                self.io.write_fmt(format_args!("Warning: {err}\n"));
+            }
+
             self.writeln("");
 
             loop {

@@ -37,8 +37,10 @@ pub struct MacroDefinition {
     /// Compiled bytecode for the macro transformer function.
     /// When called, receives unevaluated arguments and returns transformed AST.
     chunk: Arc<Chunk>,
-    /// Number of parameters the macro expects.
+    /// Number of fixed parameters the macro expects.
     arity: u8,
+    /// Whether this macro accepts rest arguments.
+    has_rest: bool,
     /// Macro name for error messages and debugging.
     name: String,
 }
@@ -47,8 +49,13 @@ impl MacroDefinition {
     /// Creates a new macro definition.
     #[inline]
     #[must_use]
-    pub const fn new(chunk: Arc<Chunk>, arity: u8, name: String) -> Self {
-        Self { chunk, arity, name }
+    pub const fn new(chunk: Arc<Chunk>, arity: u8, has_rest: bool, name: String) -> Self {
+        Self {
+            chunk,
+            arity,
+            has_rest,
+            name,
+        }
     }
 
     /// Returns a reference to the macro's compiled chunk.
@@ -58,11 +65,18 @@ impl MacroDefinition {
         &self.chunk
     }
 
-    /// Returns the macro's arity.
+    /// Returns the macro's fixed arity.
     #[inline]
     #[must_use]
     pub const fn arity(&self) -> u8 {
         self.arity
+    }
+
+    /// Returns whether this macro accepts rest arguments.
+    #[inline]
+    #[must_use]
+    pub const fn has_rest(&self) -> bool {
+        self.has_rest
     }
 
     /// Returns the macro's name.
@@ -257,7 +271,7 @@ mod tests {
 
         let name = interner.intern("my-macro");
         let chunk = Arc::new(Chunk::new());
-        let def = MacroDefinition::new(chunk, 2, String::from("my-macro"));
+        let def = MacroDefinition::new(chunk, 2, false, String::from("my-macro"));
 
         registry.register(name, def);
 
@@ -266,6 +280,7 @@ mod tests {
 
         let retrieved = registry.get(name).unwrap();
         assert_eq!(retrieved.arity(), 2);
+        assert!(!retrieved.has_rest());
         assert_eq!(retrieved.name(), "my-macro");
     }
 
@@ -277,11 +292,11 @@ mod tests {
         let name = interner.intern("my-macro");
 
         let chunk1 = Arc::new(Chunk::new());
-        let def1 = MacroDefinition::new(chunk1, 1, String::from("my-macro"));
+        let def1 = MacroDefinition::new(chunk1, 1, false, String::from("my-macro"));
         registry.register(name, def1);
 
         let chunk2 = Arc::new(Chunk::new());
-        let def2 = MacroDefinition::new(chunk2, 3, String::from("my-macro"));
+        let def2 = MacroDefinition::new(chunk2, 3, false, String::from("my-macro"));
         registry.register(name, def2);
 
         assert_eq!(registry.len(), 1);
@@ -313,7 +328,7 @@ mod tests {
 
         let name = interner.intern("my-macro");
         let chunk = Arc::new(Chunk::new());
-        let def = MacroDefinition::new(chunk, 2, String::from("my-macro"));
+        let def = MacroDefinition::new(chunk, 2, false, String::from("my-macro"));
 
         registry.register(name, def);
         assert!(registry.contains(name));
@@ -341,11 +356,11 @@ mod tests {
         let name2 = interner.intern("macro2");
 
         let chunk1 = Arc::new(Chunk::new());
-        let def1 = MacroDefinition::new(chunk1, 1, String::from("macro1"));
+        let def1 = MacroDefinition::new(chunk1, 1, false, String::from("macro1"));
         registry.register(name1, def1);
 
         let chunk2 = Arc::new(Chunk::new());
-        let def2 = MacroDefinition::new(chunk2, 2, String::from("macro2"));
+        let def2 = MacroDefinition::new(chunk2, 2, false, String::from("macro2"));
         registry.register(name2, def2);
 
         assert_eq!(registry.len(), 2);
@@ -364,11 +379,11 @@ mod tests {
         let name2 = interner.intern("macro2");
 
         let chunk1 = Arc::new(Chunk::new());
-        let def1 = MacroDefinition::new(chunk1, 1, String::from("macro1"));
+        let def1 = MacroDefinition::new(chunk1, 1, false, String::from("macro1"));
         registry1.register(name1, def1);
 
         let chunk2 = Arc::new(Chunk::new());
-        let def2 = MacroDefinition::new(chunk2, 2, String::from("macro2"));
+        let def2 = MacroDefinition::new(chunk2, 2, false, String::from("macro2"));
         registry2.register(name2, def2);
 
         registry1.merge(&registry2);
@@ -387,11 +402,11 @@ mod tests {
         let name2 = interner.intern("macro2");
 
         let chunk1 = Arc::new(Chunk::new());
-        let def1 = MacroDefinition::new(chunk1, 1, String::from("macro1"));
+        let def1 = MacroDefinition::new(chunk1, 1, false, String::from("macro1"));
         registry.register(name1, def1);
 
         let chunk2 = Arc::new(Chunk::new());
-        let def2 = MacroDefinition::new(chunk2, 2, String::from("macro2"));
+        let def2 = MacroDefinition::new(chunk2, 2, false, String::from("macro2"));
         registry.register(name2, def2);
 
         let names: Vec<_> = registry.names().collect();
@@ -407,7 +422,7 @@ mod tests {
 
         let name = interner.intern("my-macro");
         let chunk = Arc::new(Chunk::new());
-        let def = MacroDefinition::new(chunk, 2, String::from("my-macro"));
+        let def = MacroDefinition::new(chunk, 2, false, String::from("my-macro"));
 
         registry.register(name, def);
 

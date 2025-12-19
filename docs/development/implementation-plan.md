@@ -299,12 +299,18 @@ lona> (macroexpand '(unless false (print "runs")))
 
 **Goal**: Define and call functions, lexical scope
 
-| Task | Description |
-|------|-------------|
-| 5.1 Named Functions | `defn` macro expands to `def` + `fn`, multi-arity |
-| 5.2 Closures | Capture lexical environment, upvalue handling |
-| 5.3 Tail Call Optimization | Detect tail position, reuse frame, `recur` |
-| 5.4 Dispatch Table | Symbol to function mapping, late binding |
+| Task | Description | Status |
+|------|-------------|--------|
+| 5.1a Rest Arguments | `& rest` syntax for variadic functions and macros | **Done** |
+| 5.1b Multi-Arity | Multiple arities via `(fn ([x] ...) ([x y] ...))` | Pending |
+| 5.2 Closures | Capture lexical environment, upvalue handling | Pending |
+| 5.3 Tail Call Optimization | Detect tail position, reuse frame, `recur` | Pending |
+| 5.4 Dispatch Table | Symbol to function mapping, late binding | Pending |
+
+**5.1a Details**: Rest arguments enable:
+- Variadic functions: `(fn [a b & rest] ...)`
+- Core macros: `defn`, `when` defined in `lona/core.lona`
+- Core library loaded at REPL boot
 
 **Deliverable**:
 ```clojure

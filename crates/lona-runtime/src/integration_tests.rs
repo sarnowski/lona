@@ -349,12 +349,6 @@ fn eval_with_state(
     let mut vm = Vm::new(interner);
     *vm.globals_mut() = globals.clone();
 
-    // Register print function like the REPL does
-    if let Some(print_sym) = interner.get("print") {
-        vm.update_print_symbol(print_sym);
-        vm.set_global(print_sym, Value::Symbol(print_sym));
-    }
-
     let result = vm.execute(&chunk).map_err(|err| {
         println!("Runtime error: {err:?}");
     })?;

@@ -1,0 +1,26 @@
+;; Lona Core Standard Library
+;;
+;; This file defines the core macros that form the foundation of Lonala
+;; programming. These macros are loaded automatically at runtime startup.
+
+;; defn - Define a named function
+;;
+;; Usage: (defn name [params...] body...)
+;;
+;; Example:
+;;   (defn add [a b] (+ a b))
+;;   (add 1 2) ; => 3
+(defmacro defn [name params & body]
+  `(def ~name (fn ~name ~params ~@body)))
+
+;; when - Conditional execution with multiple body expressions
+;;
+;; Usage: (when test body...)
+;;
+;; Returns the value of the last body expression if test is truthy,
+;; otherwise returns nil.
+;;
+;; Example:
+;;   (when (> x 0) (print "positive") x)
+(defmacro when [test & body]
+  `(if ~test (do ~@body) nil))

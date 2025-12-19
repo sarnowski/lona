@@ -475,7 +475,7 @@ fn roundtrip_vector() {
 fn value_to_ast_function_error() {
     let interner = symbol::Interner::new();
     let chunk = Arc::new(Chunk::new());
-    let func = Function::new(chunk, 0_u8, None);
+    let func = Function::new(chunk, 0_u8, false, None);
     let value = Value::Function(func);
 
     let result = value_to_ast(&value, &interner, test_source_id(), test_span());

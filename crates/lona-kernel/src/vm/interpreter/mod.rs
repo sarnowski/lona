@@ -21,7 +21,6 @@ use super::error::{Error, Kind as ErrorKind};
 use super::frame::Frame;
 use super::globals::Globals;
 use super::natives::{NativeFn, Registry as NativeRegistry};
-use super::primitives::PrintCallback;
 
 mod ops_arithmetic;
 mod ops_control;
@@ -46,10 +45,6 @@ pub struct Vm<'interner> {
     interner: &'interner Interner,
     /// Registry of native functions.
     natives: NativeRegistry,
-    /// Callback for print output.
-    print_callback: Option<PrintCallback>,
-    /// Symbol ID for "print" - cached for fast lookup.
-    print_symbol: Option<symbol::Id>,
     /// Optional macro registry for introspection functions.
     /// Passed to native functions via `NativeContext`.
     macro_registry: Option<&'interner MacroRegistry>,
@@ -64,16 +59,11 @@ impl<'interner> Vm<'interner> {
     #[inline]
     #[must_use]
     pub fn new(interner: &'interner Interner) -> Self {
-        // Look up special symbols if they exist in the interner
-        let print_symbol = interner.get("print");
-
         Self {
             registers: vec![Value::Nil; DEFAULT_REGISTER_COUNT],
             globals: Globals::new(),
             interner,
             natives: NativeRegistry::new(),
-            print_callback: None,
-            print_symbol,
             macro_registry: None,
             call_depth: 0,
             current_source: source::Id::new(0_u32),
@@ -86,22 +76,6 @@ impl<'interner> Vm<'interner> {
     #[inline]
     pub fn register_native(&mut self, symbol: symbol::Id, func: NativeFn) {
         self.natives.register(symbol, func);
-    }
-
-    /// Sets the print callback for output.
-    ///
-    /// When `print` is called, the formatted output is passed to this callback.
-    #[inline]
-    pub fn set_print_callback(&mut self, callback: PrintCallback) {
-        self.print_callback = Some(callback);
-    }
-
-    /// Updates the print symbol cache.
-    ///
-    /// Call this after interning "print" if you want to use the built-in print.
-    #[inline]
-    pub const fn update_print_symbol(&mut self, symbol: symbol::Id) {
-        self.print_symbol = Some(symbol);
     }
 
     /// Sets the macro registry for introspection functions.
@@ -405,10 +379,11 @@ impl<'interner> Vm<'interner> {
                 ref chunk,
                 arity,
                 ref name,
+                has_rest,
             } => {
                 // Create Arc from the chunk and wrap in Function value
                 let chunk_arc = alloc::sync::Arc::new((**chunk).clone());
-                Value::Function(Function::new(chunk_arc, arity, name.clone()))
+                Value::Function(Function::new(chunk_arc, arity, has_rest, name.clone()))
             }
             // Handle Nil and future Constant variants (Constant is #[non_exhaustive])
             Constant::Nil | _ => Value::Nil,

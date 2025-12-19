@@ -7,6 +7,7 @@
 //! - `fn` - function definitions
 //! - `defmacro` - macro definitions
 
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -19,6 +20,17 @@ use super::macros::MacroDefinition;
 use super::{Compiler, ExprResult, FnArgsResult};
 use crate::error::{Error, Kind as ErrorKind};
 
+/// Parsed parameter information from a parameter vector.
+///
+/// Contains the fixed (required) parameters and an optional rest parameter.
+#[derive(Debug)]
+pub(super) struct ParsedParams {
+    /// Fixed (required) parameters.
+    pub fixed: Vec<String>,
+    /// Optional rest parameter that collects remaining arguments.
+    pub rest: Option<String>,
+}
+
 impl Compiler<'_, '_, '_> {
     /// Compiles a `fn` special form.
     ///
@@ -28,6 +40,7 @@ impl Compiler<'_, '_, '_> {
     ///
     /// Creates a new function value. Parameters become local variables in the
     /// function's scope. The function body is compiled into a separate chunk.
+    /// Supports rest parameters: `(fn [a b & rest] ...)`.
     ///
     /// Note: In Phase 3.3, closures are not supported - functions cannot
     /// reference variables from enclosing scopes.
@@ -42,10 +55,11 @@ impl Compiler<'_, '_, '_> {
         // Parse: (fn [params] body...) or (fn name [params] body...)
         let (name, params_ast, body) = self.parse_fn_args(args, span)?;
 
-        // Extract parameter names
-        let params = self.extract_params(params_ast)?;
-        let arity = u8::try_from(params.len())
+        // Extract parameter names (fixed and rest)
+        let parsed_params = self.extract_params(params_ast)?;
+        let arity = u8::try_from(parsed_params.fixed.len())
             .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
+        let has_rest = parsed_params.rest.is_some();
 
         // Create a new compiler for the function body
         // Note: We share the registry so macros are available inside function bodies
@@ -55,19 +69,10 @@ impl Compiler<'_, '_, '_> {
             .unwrap_or_else(|| alloc::string::String::from("lambda"));
         fn_compiler.chunk = Chunk::with_name(fn_name_str);
         fn_compiler.chunk.set_arity(arity);
+        fn_compiler.chunk.set_has_rest(has_rest);
 
-        // Parameters become locals at R[0], R[1], etc.
-        fn_compiler.locals.push_scope();
-        for (i, param) in params.iter().enumerate() {
-            let symbol_id = fn_compiler.interner.intern(param);
-            let reg = u8::try_from(i)
-                .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
-            fn_compiler.locals.define(symbol_id, reg);
-            fn_compiler.next_register = reg.saturating_add(1);
-            if reg > fn_compiler.max_register {
-                fn_compiler.max_register = reg;
-            }
-        }
+        // Set up parameter locals
+        Self::setup_params_on_compiler(&mut fn_compiler, &parsed_params, arity, location)?;
 
         // Compile body
         let result_reg = if body.is_empty() {
@@ -110,6 +115,7 @@ impl Compiler<'_, '_, '_> {
                 chunk: alloc::boxed::Box::new(fn_chunk),
                 arity,
                 name,
+                has_rest,
             },
             span,
         )?;
@@ -182,10 +188,12 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Extracts parameter names from a parameter vector AST.
-    pub(super) fn extract_params(
-        &self,
-        params_ast: &Spanned<Ast>,
-    ) -> Result<Vec<alloc::string::String>, Error> {
+    ///
+    /// Handles rest parameters using `&` syntax:
+    /// - `[a b]` - two fixed parameters
+    /// - `[a & rest]` - one fixed, rest collects remaining
+    /// - `[& rest]` - zero fixed, rest collects all
+    pub(super) fn extract_params(&self, params_ast: &Spanned<Ast>) -> Result<ParsedParams, Error> {
         let Ast::Vector(ref params_vec) = params_ast.node else {
             return Err(Error::new(
                 ErrorKind::InvalidSpecialForm {
@@ -196,7 +204,11 @@ impl Compiler<'_, '_, '_> {
             ));
         };
 
-        let mut params = Vec::new();
+        let mut fixed = Vec::new();
+        let mut rest = None;
+        let mut found_ampersand = false;
+        let mut ampersand_span = None;
+
         for param in params_vec {
             let Ast::Symbol(ref name) = param.node else {
                 return Err(Error::new(
@@ -207,9 +219,88 @@ impl Compiler<'_, '_, '_> {
                     self.location(param.span),
                 ));
             };
-            params.push(name.clone());
+
+            if name == "&" {
+                if found_ampersand {
+                    return Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "fn",
+                            message: "multiple & in parameter list",
+                        },
+                        self.location(param.span),
+                    ));
+                }
+                found_ampersand = true;
+                ampersand_span = Some(param.span);
+            } else if found_ampersand {
+                // This symbol follows &, so it's the rest parameter
+                if rest.is_some() {
+                    return Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "fn",
+                            message: "only one parameter allowed after &",
+                        },
+                        self.location(param.span),
+                    ));
+                }
+                rest = Some(name.clone());
+            } else {
+                // Regular fixed parameter
+                fixed.push(name.clone());
+            }
         }
-        Ok(params)
+
+        // Check that & was followed by a parameter
+        if found_ampersand && rest.is_none() {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "& must be followed by a rest parameter name",
+                },
+                self.location(ampersand_span.unwrap_or(params_ast.span)),
+            ));
+        }
+
+        Ok(ParsedParams { fixed, rest })
+    }
+
+    /// Sets up parameters as local variables on a child compiler.
+    ///
+    /// This helper is used by both `compile_fn` and `compile_defmacro` to set up
+    /// the parameter locals. Fixed parameters are placed in R[0..arity], and if
+    /// a rest parameter exists, it is placed in R[arity].
+    fn setup_params_on_compiler(
+        child: &mut Compiler<'_, '_, '_>,
+        parsed: &ParsedParams,
+        arity: u8,
+        location: crate::error::SourceLocation,
+    ) -> Result<(), Error> {
+        child.locals.push_scope();
+
+        // Fixed parameters: R[0], R[1], ..., R[arity-1]
+        for (idx, param) in parsed.fixed.iter().enumerate() {
+            let symbol_id = child.interner.intern(param);
+            let reg = u8::try_from(idx)
+                .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
+            child.locals.define(symbol_id, reg);
+            child.next_register = reg.saturating_add(1);
+            if reg > child.max_register {
+                child.max_register = reg;
+            }
+        }
+
+        // Rest parameter: R[arity] (if present)
+        if let Some(ref rest_name) = parsed.rest {
+            let symbol_id = child.interner.intern(rest_name);
+            let reg = arity; // Rest param is at R[arity]
+            child.locals.define(symbol_id, reg);
+            child.next_register = reg.saturating_add(1);
+            if reg > child.max_register {
+                child.max_register = reg;
+            }
+        }
+
+        Ok(())
     }
 
     /// Compiles a `defmacro` special form.
@@ -219,6 +310,7 @@ impl Compiler<'_, '_, '_> {
     /// Defines a compile-time macro. The macro body is compiled to bytecode
     /// and stored in the compiler's macro registry. When the macro is called,
     /// it receives unevaluated arguments and returns transformed AST.
+    /// Supports rest parameters: `(defmacro when [test & body] ...)`.
     ///
     /// Returns the macro's symbol name.
     pub(super) fn compile_defmacro(
@@ -255,11 +347,11 @@ impl Compiler<'_, '_, '_> {
         };
         let name = name_ref.clone();
 
-        // Extract params (must be a vector of symbols)
+        // Extract params (must be a vector of symbols, may include &rest)
         let params_ast = args
             .get(1_usize)
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
-        let params = self.extract_params(params_ast).map_err(|_err| {
+        let parsed_params = self.extract_params(params_ast).map_err(|_err| {
             Error::new(
                 ErrorKind::InvalidSpecialForm {
                     form: "defmacro",
@@ -268,8 +360,9 @@ impl Compiler<'_, '_, '_> {
                 self.location(params_ast.span),
             )
         })?;
-        let arity = u8::try_from(params.len())
+        let arity = u8::try_from(parsed_params.fixed.len())
             .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
+        let has_rest = parsed_params.rest.is_some();
 
         // Body is everything after params
         let body = args.get(2_usize..).unwrap_or(&[]);
@@ -292,19 +385,10 @@ impl Compiler<'_, '_, '_> {
         let mut macro_compiler = Compiler::new(self.interner, self.registry, self.source_id);
         macro_compiler.chunk = Chunk::with_name(alloc::format!("macro:{name}"));
         macro_compiler.chunk.set_arity(arity);
+        macro_compiler.chunk.set_has_rest(has_rest);
 
-        // Parameters become locals at R[0], R[1], etc.
-        macro_compiler.locals.push_scope();
-        for (i, param) in params.iter().enumerate() {
-            let symbol_id = macro_compiler.interner.intern(param);
-            let reg = u8::try_from(i)
-                .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
-            macro_compiler.locals.define(symbol_id, reg);
-            macro_compiler.next_register = reg.saturating_add(1);
-            if reg > macro_compiler.max_register {
-                macro_compiler.max_register = reg;
-            }
-        }
+        // Set up parameter locals
+        Self::setup_params_on_compiler(&mut macro_compiler, &parsed_params, arity, location)?;
 
         // Compile body (all expressions, last one is return value)
         let result_reg = {
@@ -342,7 +426,7 @@ impl Compiler<'_, '_, '_> {
         // Store in macro registry
         self.registry.register(
             name_id,
-            MacroDefinition::new(Arc::new(macro_chunk), arity, name),
+            MacroDefinition::new(Arc::new(macro_chunk), arity, has_rest, name),
         );
 
         // Return the macro's symbol name

@@ -20,8 +20,10 @@ pub struct Function {
     /// The compiled bytecode chunk for this function.
     /// Uses Arc for cheap cloning when passing functions around.
     chunk: alloc::sync::Arc<crate::chunk::Chunk>,
-    /// Number of parameters this function expects.
+    /// Number of fixed parameters this function expects.
     arity: u8,
+    /// Whether this function accepts rest arguments.
+    has_rest: bool,
     /// Optional function name for debugging and error messages.
     name: Option<alloc::string::String>,
 }
@@ -33,9 +35,15 @@ impl Function {
     pub const fn new(
         chunk: alloc::sync::Arc<crate::chunk::Chunk>,
         arity: u8,
+        has_rest: bool,
         name: Option<alloc::string::String>,
     ) -> Self {
-        Self { chunk, arity, name }
+        Self {
+            chunk,
+            arity,
+            has_rest,
+            name,
+        }
     }
 
     /// Returns a reference to the function's bytecode chunk.
@@ -52,11 +60,18 @@ impl Function {
         &self.chunk
     }
 
-    /// Returns the number of parameters this function expects.
+    /// Returns the number of fixed parameters this function expects.
     #[inline]
     #[must_use]
     pub const fn arity(&self) -> u8 {
         self.arity
+    }
+
+    /// Returns whether this function accepts rest arguments.
+    #[inline]
+    #[must_use]
+    pub const fn has_rest(&self) -> bool {
+        self.has_rest
     }
 
     /// Returns the function name, if any.
@@ -88,9 +103,12 @@ impl Hash for Function {
 impl Display for Function {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let rest_indicator = if self.has_rest { "+" } else { "" };
         match self.name {
-            Some(ref func_name) => write!(f, "#<function {func_name}>"),
-            None => write!(f, "#<function>"),
+            Some(ref func_name) => {
+                write!(f, "#<function {func_name}/{}{rest_indicator}>", self.arity)
+            }
+            None => write!(f, "#<function/{}{rest_indicator}>", self.arity),
         }
     }
 }

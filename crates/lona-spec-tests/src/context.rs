@@ -67,12 +67,6 @@ impl SpecTestContext {
         let mut vm = Vm::new(&self.interner);
         *vm.globals_mut() = self.globals.clone();
 
-        // Register print function
-        if let Some(print_sym) = self.interner.get("print") {
-            vm.update_print_symbol(print_sym);
-            vm.set_global(print_sym, Value::Symbol(print_sym));
-        }
-
         // Register collection primitives
         lona_kernel::vm::collections::register_primitives(&mut vm, &collection_symbols);
 

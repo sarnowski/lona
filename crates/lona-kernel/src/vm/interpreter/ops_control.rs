@@ -6,6 +6,7 @@
 use alloc::vec::Vec;
 
 use lona_core::error_context::ArityExpectation;
+use lona_core::list::List;
 use lona_core::opcode::{decode_a, decode_b, decode_c, decode_sbx};
 use lona_core::symbol;
 use lona_core::value::{Function, Value};
@@ -14,7 +15,6 @@ use super::{MAX_CALL_DEPTH, Vm};
 use crate::vm::error::{Error, Kind as ErrorKind};
 use crate::vm::frame::Frame;
 use crate::vm::natives::NativeContext;
-use crate::vm::primitives::format_print_args;
 
 impl Vm<'_> {
     // =========================================================================
@@ -100,6 +100,9 @@ impl Vm<'_> {
     }
 
     /// Calls a user-defined function.
+    ///
+    /// Handles rest parameters: if the function has `has_rest`, extra arguments
+    /// beyond `arity` are collected into a list in the rest parameter position.
     fn call_user_function(
         &mut self,
         func: &Function,
@@ -117,26 +120,63 @@ impl Vm<'_> {
             ));
         }
 
+        let fixed_arity = func.arity();
+        let has_rest = func.has_rest();
+
         // Verify arity
-        if argc != func.arity() {
-            return Err(Error::new(
-                ErrorKind::ArityMismatch {
-                    // Note: func.name() returns Option<&str>, but we need Option<symbol::Id>.
-                    // For user-defined functions we don't have the symbol ID readily available.
-                    // The error location points to the call site which is sufficient.
-                    callable: None,
-                    expected: ArityExpectation::Exact(func.arity()),
-                    got: argc,
-                },
-                frame.current_location(),
-            ));
+        if has_rest {
+            // With rest args: need at least `fixed_arity` arguments
+            if argc < fixed_arity {
+                return Err(Error::new(
+                    ErrorKind::ArityMismatch {
+                        callable: None,
+                        expected: ArityExpectation::AtLeast(fixed_arity),
+                        got: argc,
+                    },
+                    frame.current_location(),
+                ));
+            }
+        } else {
+            // Without rest args: need exactly `fixed_arity` arguments
+            if argc != fixed_arity {
+                return Err(Error::new(
+                    ErrorKind::ArityMismatch {
+                        callable: None,
+                        expected: ArityExpectation::Exact(fixed_arity),
+                        got: argc,
+                    },
+                    frame.current_location(),
+                ));
+            }
         }
 
         // Get the function's chunk directly from the Function value
         let fn_chunk = func.chunk();
 
         // Collect arguments from R[base+1] .. R[base+argc]
-        let arguments = self.collect_args(base, argc, frame)?;
+        let raw_arguments = self.collect_args(base, argc, frame)?;
+
+        // Build the effective arguments list
+        // Fixed args: raw_arguments[0..fixed_arity]
+        // Rest arg (if has_rest): raw_arguments[fixed_arity..] collected into a list
+        let arguments: Vec<Value> = if has_rest {
+            let fixed_arity_usize = usize::from(fixed_arity);
+            let mut effective = Vec::with_capacity(fixed_arity_usize.saturating_add(1));
+            // Add fixed arguments
+            for arg in raw_arguments.iter().take(fixed_arity_usize) {
+                effective.push(arg.clone());
+            }
+            // Collect rest arguments into a list
+            let rest_elements: Vec<Value> = raw_arguments
+                .iter()
+                .skip(fixed_arity_usize)
+                .cloned()
+                .collect();
+            effective.push(Value::List(List::from_vec(rest_elements)));
+            effective
+        } else {
+            raw_arguments
+        };
 
         // Calculate the new frame's base register
         // We'll use registers starting after the caller's current registers
@@ -181,12 +221,6 @@ impl Vm<'_> {
         argc: u8,
         frame: &Frame<'_>,
     ) -> Result<(), Error> {
-        // Check if this is the built-in print function
-        // (print is handled specially because it needs the print callback)
-        if self.print_symbol == Some(symbol) {
-            return self.handle_print(base, argc, frame);
-        }
-
         // Look up native function
         let native_fn = self.natives.get(symbol).ok_or_else(|| {
             Error::new(
@@ -210,24 +244,6 @@ impl Vm<'_> {
 
         // Store result in R[base]
         self.set_register(base, result, frame)?;
-        Ok(())
-    }
-
-    /// Handles the built-in print function.
-    fn handle_print(&mut self, base: u8, arg_count: u8, frame: &Frame<'_>) -> Result<(), Error> {
-        // Collect arguments
-        let arguments = self.collect_args(base, arg_count, frame)?;
-
-        // Format the output
-        let output = format_print_args(&arguments, self.interner);
-
-        // Call the print callback if set
-        if let Some(callback) = self.print_callback {
-            callback(&output);
-        }
-
-        // Store nil as result in R[base]
-        self.set_register(base, Value::Nil, frame)?;
         Ok(())
     }
 
