@@ -14,6 +14,7 @@
 use alloc::vec::Vec;
 
 use lona_core::error_context::{ArityExpectation, TypeExpectation};
+use lona_core::list::List;
 use lona_core::symbol::{self, Interner};
 use lona_core::value::Value;
 use lonala_compiler::MacroRegistry;
@@ -26,6 +27,25 @@ use super::natives::{NativeContext, NativeError};
 
 /// Maximum depth for recursive macro expansion in `macroexpand`.
 const MAX_EXPANSION_DEPTH: usize = 256;
+
+/// Builds the effective macro arguments, handling rest parameters.
+///
+/// Fixed args: `raw_args[0..arity]`
+/// Rest arg (if `has_rest`): `raw_args[arity..]` collected into a list
+fn build_effective_macro_args(raw_args: &[Value], arity: u8, has_rest: bool) -> Vec<Value> {
+    if has_rest {
+        let arity_usize = usize::from(arity);
+        let mut effective = Vec::with_capacity(arity_usize.saturating_add(1));
+        for arg in raw_args.iter().take(arity_usize) {
+            effective.push(arg.clone());
+        }
+        let rest_elements: Vec<Value> = raw_args.iter().skip(arity_usize).cloned().collect();
+        effective.push(Value::List(List::from_vec(rest_elements)));
+        effective
+    } else {
+        raw_args.to_vec()
+    }
+}
 
 /// Native implementation of `macro?`.
 ///
@@ -143,11 +163,10 @@ fn expand_once_internal(
     // Extract arguments (skip the macro name)
     let macro_args: Vec<Value> = list.iter().skip(1).cloned().collect();
 
-    // Verify arity
-    let expected_arity = usize::from(macro_def.arity());
-    if macro_args.len() != expected_arity {
-        return Err(NativeError::Error("macro arity mismatch"));
-    }
+    // Find matching arity body
+    let body = macro_def
+        .find_body(macro_args.len())
+        .ok_or(NativeError::Error("macro arity mismatch"))?;
 
     // Look up collection primitives (must be pre-interned by caller)
     let collection_symbols = lookup_primitives(interner)
@@ -157,9 +176,12 @@ fn expand_once_internal(
     let mut vm = Vm::new(interner);
     register_collection_primitives(&mut vm, &collection_symbols);
 
+    // Build effective arguments (handling rest parameters)
+    let effective_args = build_effective_macro_args(&macro_args, body.arity, body.has_rest);
+
     // Execute the macro's chunk with arguments
     let result = vm
-        .execute_with_args(macro_def.chunk(), &macro_args)
+        .execute_with_args(&body.chunk, &effective_args)
         .map_err(|_vm_err| NativeError::Error("macro expansion failed"))?;
 
     Ok(result)

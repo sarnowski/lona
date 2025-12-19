@@ -117,28 +117,12 @@ This runs the full verification suite: formatting, compilation, clippy, unit tes
 
 #### Clippy Policy
 
-**CRITICAL: You MUST NOT disable any clippy check at any level.**
+See **CLAUDE.md Clippy Policy section** for the complete policy. Key points:
 
-A pre-tool hook automatically blocks any attempt to add suppression directives without proper approval.
-
-When encountering clippy warnings:
-
-1. **Always attempt to fix the issue correctly first**
-2. **If you cannot correctly resolve a clippy issue**:
-   - STOP and explain the issue to the user
-   - Describe what the warning means and why it's occurring
-   - Provide your recommendation for how to handle it (fix approach or why an exception might be warranted)
-   - Wait for the user's EXPLICIT approval before taking any action
-3. **NEVER use `#[allow(...)]`, `#[expect(...)]`, or any other mechanism to suppress clippy warnings without explicit user approval**
-4. **NEVER add clippy exceptions to Cargo.toml, clippy.toml, or any source file without explicit user approval**
-
-Do not assume approval. The user MUST explicitly approve ANY clippy exception.
-
-**Approved Directive Format**: When the user explicitly approves, include `[approved]` in the reason:
-
-```rust
-#[expect(clippy::lint_name, reason = "[approved] explanation")]
-```
+- **Never disable clippy checks** without explicit user approval
+- A pre-tool hook blocks unauthorized suppression directives
+- Always fix issues correctly first; only escalate if truly unfixable
+- Approved directives must include `[approved]` in the reason string
 
 ### Step 6: Finish Work
 

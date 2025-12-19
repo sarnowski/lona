@@ -18,61 +18,26 @@ First, determine what type of work you are doing:
 
 ## Bug Fix Workflow
 
-**CRITICAL: You MUST follow this test-first approach for ALL bug fixes.**
+**CRITICAL: You MUST follow a test-first approach for ALL bug fixes.**
 
-### Step B1: Read the Guidelines
+The bug fix workflow for Lonala follows the same pattern as Rust development. See **CLAUDE.md Test-First Bug Fixing section** for the philosophy and the `develop-runtime` skill for detailed steps (B1-B6).
 
-Read these files completely before proceeding:
-- `docs/development/lonala-coding-guidelines.md`
-- `docs/development/testing-strategy.md`
+Key differences for Lonala:
 
-### Step B2: Understand the Bug
+1. **Read these guidelines** (Step B1):
+   - `docs/lonala/index.md`
+   - `docs/development/lonala-coding-guidelines.md`
+   - `docs/development/testing-strategy.md`
 
-Before writing any code:
-1. Reproduce the bug and understand its root cause
-2. Document what the expected behavior should be
-3. Identify which component(s) are affected
+2. **Write tests in spec test files** (Step B3):
+   - Add test cases in `crates/lona-spec-tests/src/` in the appropriate module
+   - Or add tests in Rust test modules that exercise the Lonala code
 
-### Step B3: Write a Failing Test FIRST
+3. **Follow Lonala coding guidelines** when fixing (Step B4)
 
-**You MUST write a test that demonstrates the bug BEFORE attempting any fix.**
+4. **Run verification**: `make test`
 
-For Lonala code, this typically means:
-- Adding a test case in the appropriate spec test file
-- Or adding a test in the relevant Rust test module that exercises the Lonala code
-
-This test should:
-- Clearly demonstrate the buggy behavior
-- Be named descriptively
-- FAIL when run against the current (buggy) code
-
-Run the test to confirm it fails:
-```bash
-make test
-```
-
-The test MUST fail. If it passes, your test doesn't capture the bug correctly. Revise the test until it demonstrates the failure.
-
-### Step B4: Fix the Bug
-
-Now implement the minimal fix required to make the test pass:
-- Keep the fix focused - don't refactor or add unrelated improvements
-- Follow the Lonala coding guidelines
-- Ensure the fix addresses the root cause, not just symptoms
-
-### Step B5: Verify the Fix
-
-Run the full test suite:
-```bash
-make test
-```
-
-- Your new test MUST now pass
-- All existing tests MUST still pass
-
-### Step B6: Finish Work
-
-Call the `finishing-work` skill to complete the workflow.
+5. **Finish**: Call the `finishing-work` skill
 
 ---
 

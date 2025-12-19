@@ -101,8 +101,9 @@ impl Vm<'_> {
 
     /// Calls a user-defined function.
     ///
-    /// Handles rest parameters: if the function has `has_rest`, extra arguments
-    /// beyond `arity` are collected into a list in the rest parameter position.
+    /// Handles multi-arity dispatch: finds the matching arity body based on
+    /// argument count. For rest parameters, extra arguments beyond `arity`
+    /// are collected into a list in the rest parameter position.
     fn call_user_function(
         &mut self,
         func: &Function,
@@ -120,38 +121,38 @@ impl Vm<'_> {
             ));
         }
 
-        let fixed_arity = func.arity();
-        let has_rest = func.has_rest();
+        // Find matching arity body
+        let body = func.find_body(usize::from(argc)).ok_or_else(|| {
+            // Build arity expectation for error message
+            let bodies = func.bodies();
+            let expectation = if let &[ref first] = bodies {
+                // Single body - use its arity
+                if first.has_rest() {
+                    ArityExpectation::AtLeast(first.arity())
+                } else {
+                    ArityExpectation::Exact(first.arity())
+                }
+            } else {
+                // Multi-arity - use first body's arity as fallback
+                bodies
+                    .first()
+                    .map_or(ArityExpectation::Exact(0), |first_body| {
+                        ArityExpectation::Exact(first_body.arity())
+                    })
+            };
+            Error::new(
+                ErrorKind::ArityMismatch {
+                    callable: None, // Function name is String, not symbol::Id
+                    expected: expectation,
+                    got: argc,
+                },
+                frame.current_location(),
+            )
+        })?;
 
-        // Verify arity
-        if has_rest {
-            // With rest args: need at least `fixed_arity` arguments
-            if argc < fixed_arity {
-                return Err(Error::new(
-                    ErrorKind::ArityMismatch {
-                        callable: None,
-                        expected: ArityExpectation::AtLeast(fixed_arity),
-                        got: argc,
-                    },
-                    frame.current_location(),
-                ));
-            }
-        } else {
-            // Without rest args: need exactly `fixed_arity` arguments
-            if argc != fixed_arity {
-                return Err(Error::new(
-                    ErrorKind::ArityMismatch {
-                        callable: None,
-                        expected: ArityExpectation::Exact(fixed_arity),
-                        got: argc,
-                    },
-                    frame.current_location(),
-                ));
-            }
-        }
-
-        // Get the function's chunk directly from the Function value
-        let fn_chunk = func.chunk();
+        let fixed_arity = body.arity();
+        let has_rest = body.has_rest();
+        let fn_chunk = body.chunk();
 
         // Collect arguments from R[base+1] .. R[base+argc]
         let raw_arguments = self.collect_args(base, argc, frame)?;

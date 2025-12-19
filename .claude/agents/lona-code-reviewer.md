@@ -32,6 +32,7 @@ Before performing ANY review work, you MUST complete these steps in order:
 
    **Always read:**
    - `docs/goals.md` - The complete project goals document
+   - `docs/lonala/index.md` - The Lonala language specification
    - `docs/development/testing-strategy.md` - The testing strategy document
 
    **If Rust files (*.rs) were changed, also read:**

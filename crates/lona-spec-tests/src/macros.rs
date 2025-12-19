@@ -64,7 +64,7 @@ fn test_11_1_defmacro_arity_error() {
     let _res = ctx.eval("(defmacro single [x] x)").unwrap();
     ctx.assert_error_contains(
         "(single 1 2)",
-        "expects 1 arguments",
+        "no arity matching",
         &spec_ref("11.1", "defmacro", "arity mismatch error"),
     );
 }
@@ -269,3 +269,138 @@ fn test_11_3_fn_fixed_and_rest_args() {
         &spec_ref("11.3", "fn rest", "rest args yields (2 3)"),
     );
 }
+
+// ============================================================================
+// Section 11.4: Multi-Arity Macros
+// Reference: docs/lonala.md#114-multi-arity-macros
+// ============================================================================
+
+/// Spec 11.4: Multi-arity macro with different arities
+#[test]
+fn test_11_4_multi_arity_macro_basic() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx
+        .eval("(defmacro m ([] 1) ([x] x) ([x y] `(+ ~x ~y)))")
+        .unwrap();
+    ctx.assert_int("(m)", 1, &spec_ref("11.4", "Multi-arity macro", "0-arity"));
+    ctx.assert_int(
+        "(m 42)",
+        42,
+        &spec_ref("11.4", "Multi-arity macro", "1-arity"),
+    );
+    ctx.assert_int(
+        "(m 1 2)",
+        3,
+        &spec_ref("11.4", "Multi-arity macro", "2-arity expands"),
+    );
+}
+
+/// Spec 11.4: Multi-arity macro with rest args
+#[test]
+fn test_11_4_multi_arity_macro_with_rest() {
+    let mut ctx = SpecTestContext::new();
+    // A macro that handles 0, 1, or many args
+    let _res = ctx
+        .eval("(defmacro m2 ([] 0) ([x] x) ([x & rest] `(do ~x ~@rest)))")
+        .unwrap();
+    ctx.assert_int(
+        "(m2)",
+        0,
+        &spec_ref("11.4", "Multi-arity macro", "0-arity returns 0"),
+    );
+    ctx.assert_int(
+        "(m2 42)",
+        42,
+        &spec_ref("11.4", "Multi-arity macro", "1-arity exact match"),
+    );
+    ctx.assert_int(
+        "(m2 1 2 3)",
+        3,
+        &spec_ref("11.4", "Multi-arity macro", "variadic expands"),
+    );
+}
+
+/// Spec 11.4: Multi-arity macro error for wrong arity
+#[test]
+fn test_11_4_multi_arity_macro_arity_error() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(defmacro m3 ([a] 1) ([a b] 2))").unwrap();
+    ctx.assert_error_contains(
+        "(m3)",
+        "no arity matching",
+        &spec_ref("11.4", "Multi-arity macro", "0 args is error"),
+    );
+    ctx.assert_error_contains(
+        "(m3 1 2 3)",
+        "no arity matching",
+        &spec_ref("11.4", "Multi-arity macro", "3 args is error"),
+    );
+}
+
+/// Spec 11.4: macroexpand-1 works with multi-arity macros
+#[test]
+fn test_11_4_macroexpand_multi_arity() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx
+        .eval("(defmacro cond-m ([] nil) ([x] x) ([x y] `(if ~x ~y nil)))")
+        .unwrap();
+    // Expand 0-arity
+    ctx.assert_nil(
+        "(macroexpand-1 '(cond-m))",
+        &spec_ref("11.4", "macroexpand-1", "0-arity expands to nil"),
+    );
+    // Expand 2-arity should give if-form
+    ctx.assert_symbol_eq(
+        "(first (macroexpand-1 '(cond-m true 42)))",
+        "if",
+        &spec_ref("11.4", "macroexpand-1", "2-arity expands to if"),
+    );
+}
+
+// ============================================================================
+// Section 11.5: defn with Multi-Arity
+// Reference: docs/lonala.md#87-multi-arity-functions
+// ============================================================================
+
+/// Spec 11.5: defn macro with multi-arity function
+#[test]
+fn test_11_5_defn_multi_arity() {
+    let mut ctx = SpecTestContext::new();
+    // First define the multi-arity defn macro
+    let _res = ctx
+        .eval("(defmacro defn [name & bodies] `(def ~name (fn ~name ~@bodies)))")
+        .unwrap();
+    // Define a multi-arity function using defn
+    let _res = ctx.eval("(defn my-fn ([x] x) ([x y] (+ x y)))").unwrap();
+    ctx.assert_int(
+        "(my-fn 5)",
+        5,
+        &spec_ref("11.5", "defn multi-arity", "1-arity"),
+    );
+    ctx.assert_int(
+        "(my-fn 3 4)",
+        7,
+        &spec_ref("11.5", "defn multi-arity", "2-arity"),
+    );
+}
+
+/// Spec 11.5: defn with single arity in list form
+#[test]
+fn test_11_5_defn_single_arity_list_form() {
+    let mut ctx = SpecTestContext::new();
+    // First define the multi-arity defn macro
+    let _res = ctx
+        .eval("(defmacro defn [name & bodies] `(def ~name (fn ~name ~@bodies)))")
+        .unwrap();
+    // Single arity in list form
+    let _res = ctx.eval("(defn square ([x] (* x x)))").unwrap();
+    ctx.assert_int(
+        "(square 5)",
+        25,
+        &spec_ref("11.5", "defn single-arity list", "computes 5*5=25"),
+    );
+}
+
+// Note: Error handling macros (with, if-ok, when-ok, ok->, ok->>) are
+// implemented in Lonala, not as native primitives. Tests for those
+// belong in the Lonala standard library test suite, not here.

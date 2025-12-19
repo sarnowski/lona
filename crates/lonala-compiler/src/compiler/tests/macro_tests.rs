@@ -38,7 +38,7 @@ fn defmacro_stores_in_registry() {
     assert!(compiler.is_macro_by_name("my-macro"));
 
     let macro_def = compiler.get_macro_by_name("my-macro").unwrap();
-    assert_eq!(macro_def.arity(), 1);
+    assert_eq!(macro_def.first_body().unwrap().arity, 1);
     assert_eq!(macro_def.name(), "my-macro");
 }
 
@@ -80,7 +80,8 @@ fn defmacro_requires_params_vector() {
     }) = result
     {
         assert_eq!(form, "defmacro");
-        assert!(message.contains("vector"));
+        // Multi-arity support changed error message
+        assert!(message.contains("[params]") || message.contains("vector"));
     } else {
         panic!("expected InvalidSpecialForm error for defmacro with non-vector params");
     }
@@ -116,7 +117,7 @@ fn defmacro_multiple_params() {
     let _chunk = compiler.compile_program(&exprs).unwrap();
 
     let macro_def = compiler.get_macro_by_name("swap").unwrap();
-    assert_eq!(macro_def.arity(), 2);
+    assert_eq!(macro_def.first_body().unwrap().arity, 2);
 }
 
 #[test]
@@ -128,7 +129,7 @@ fn defmacro_zero_params() {
     let _chunk = compiler.compile_program(&exprs).unwrap();
 
     let macro_def = compiler.get_macro_by_name("always-nil").unwrap();
-    assert_eq!(macro_def.arity(), 0);
+    assert_eq!(macro_def.first_body().unwrap().arity, 0);
 }
 
 #[test]
@@ -217,7 +218,7 @@ fn defmacro_redefine() {
 
     let macro_def = compiler.get_macro_by_name("foo").unwrap();
     // Should have the latest definition (2 params)
-    assert_eq!(macro_def.arity(), 2);
+    assert_eq!(macro_def.first_body().unwrap().arity, 2);
 }
 
 // =========================================================================

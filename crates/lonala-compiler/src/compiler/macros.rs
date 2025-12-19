@@ -28,19 +28,43 @@ use alloc::vec::Vec;
 use lona_core::chunk::Chunk;
 use lona_core::symbol;
 
+/// A single macro arity body.
+///
+/// Each body represents one arity variant of a (potentially multi-arity)
+/// macro. Contains the compiled bytecode, fixed parameter count, and
+/// whether this arity accepts rest arguments.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct MacroBody {
+    /// Compiled bytecode for this macro arity.
+    pub chunk: Arc<Chunk>,
+    /// Number of fixed parameters.
+    pub arity: u8,
+    /// Whether this arity accepts rest arguments.
+    pub has_rest: bool,
+}
+
+impl MacroBody {
+    /// Creates a new macro body.
+    #[inline]
+    #[must_use]
+    pub const fn new(chunk: Arc<Chunk>, arity: u8, has_rest: bool) -> Self {
+        Self {
+            chunk,
+            arity,
+            has_rest,
+        }
+    }
+}
+
 /// A compiled macro definition.
 ///
-/// Macros are compile-time functions that transform AST. The macro body
-/// is compiled to bytecode and stored here for later expansion.
+/// Macros are compile-time functions that transform AST. Each macro can have
+/// multiple arity bodies for multi-arity support.
 #[derive(Debug, Clone)]
 pub struct MacroDefinition {
-    /// Compiled bytecode for the macro transformer function.
-    /// When called, receives unevaluated arguments and returns transformed AST.
-    chunk: Arc<Chunk>,
-    /// Number of fixed parameters the macro expects.
-    arity: u8,
-    /// Whether this macro accepts rest arguments.
-    has_rest: bool,
+    /// All arity bodies for this macro.
+    bodies: Vec<MacroBody>,
     /// Macro name for error messages and debugging.
     name: String,
 }
@@ -49,34 +73,26 @@ impl MacroDefinition {
     /// Creates a new macro definition.
     #[inline]
     #[must_use]
-    pub const fn new(chunk: Arc<Chunk>, arity: u8, has_rest: bool, name: String) -> Self {
+    pub const fn new(bodies: Vec<MacroBody>, name: String) -> Self {
+        Self { bodies, name }
+    }
+
+    /// Creates a single-arity macro (convenience constructor).
+    #[inline]
+    #[must_use]
+    pub fn single_arity(chunk: Arc<Chunk>, arity: u8, has_rest: bool, name: String) -> Self {
+        let body = MacroBody::new(chunk, arity, has_rest);
         Self {
-            chunk,
-            arity,
-            has_rest,
+            bodies: alloc::vec![body],
             name,
         }
     }
 
-    /// Returns a reference to the macro's compiled chunk.
+    /// Returns all arity bodies for this macro.
     #[inline]
     #[must_use]
-    pub const fn chunk(&self) -> &Arc<Chunk> {
-        &self.chunk
-    }
-
-    /// Returns the macro's fixed arity.
-    #[inline]
-    #[must_use]
-    pub const fn arity(&self) -> u8 {
-        self.arity
-    }
-
-    /// Returns whether this macro accepts rest arguments.
-    #[inline]
-    #[must_use]
-    pub const fn has_rest(&self) -> bool {
-        self.has_rest
+    pub fn bodies(&self) -> &[MacroBody] {
+        &self.bodies
     }
 
     /// Returns the macro's name.
@@ -84,6 +100,37 @@ impl MacroDefinition {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Returns the first body (for single-arity macros).
+    ///
+    /// Returns `None` if the macro has no bodies.
+    #[inline]
+    #[must_use]
+    pub fn first_body(&self) -> Option<&MacroBody> {
+        self.bodies.first()
+    }
+
+    /// Finds the matching body for the given argument count.
+    ///
+    /// Dispatch priority:
+    /// 1. Exact fixed arity match (no rest args)
+    /// 2. Variadic match (`has_rest` and argc >= fixed arity)
+    ///
+    /// Returns `None` if no arity matches.
+    #[inline]
+    #[must_use]
+    pub fn find_body(&self, argc: usize) -> Option<&MacroBody> {
+        // First try exact fixed match
+        self.bodies
+            .iter()
+            .find(|body| !body.has_rest && usize::from(body.arity) == argc)
+            .or_else(|| {
+                // Then try variadic match
+                self.bodies
+                    .iter()
+                    .find(|body| body.has_rest && argc >= usize::from(body.arity))
+            })
     }
 }
 
@@ -271,7 +318,7 @@ mod tests {
 
         let name = interner.intern("my-macro");
         let chunk = Arc::new(Chunk::new());
-        let def = MacroDefinition::new(chunk, 2, false, String::from("my-macro"));
+        let def = MacroDefinition::single_arity(chunk, 2, false, String::from("my-macro"));
 
         registry.register(name, def);
 
@@ -279,8 +326,9 @@ mod tests {
         assert_eq!(registry.len(), 1);
 
         let retrieved = registry.get(name).unwrap();
-        assert_eq!(retrieved.arity(), 2);
-        assert!(!retrieved.has_rest());
+        let body = retrieved.first_body().unwrap();
+        assert_eq!(body.arity, 2);
+        assert!(!body.has_rest);
         assert_eq!(retrieved.name(), "my-macro");
     }
 
@@ -292,15 +340,15 @@ mod tests {
         let name = interner.intern("my-macro");
 
         let chunk1 = Arc::new(Chunk::new());
-        let def1 = MacroDefinition::new(chunk1, 1, false, String::from("my-macro"));
+        let def1 = MacroDefinition::single_arity(chunk1, 1, false, String::from("my-macro"));
         registry.register(name, def1);
 
         let chunk2 = Arc::new(Chunk::new());
-        let def2 = MacroDefinition::new(chunk2, 3, false, String::from("my-macro"));
+        let def2 = MacroDefinition::single_arity(chunk2, 3, false, String::from("my-macro"));
         registry.register(name, def2);
 
         assert_eq!(registry.len(), 1);
-        assert_eq!(registry.get(name).unwrap().arity(), 3);
+        assert_eq!(registry.get(name).unwrap().first_body().unwrap().arity, 3);
     }
 
     #[test]
@@ -328,7 +376,7 @@ mod tests {
 
         let name = interner.intern("my-macro");
         let chunk = Arc::new(Chunk::new());
-        let def = MacroDefinition::new(chunk, 2, false, String::from("my-macro"));
+        let def = MacroDefinition::single_arity(chunk, 2, false, String::from("my-macro"));
 
         registry.register(name, def);
         assert!(registry.contains(name));
@@ -356,11 +404,11 @@ mod tests {
         let name2 = interner.intern("macro2");
 
         let chunk1 = Arc::new(Chunk::new());
-        let def1 = MacroDefinition::new(chunk1, 1, false, String::from("macro1"));
+        let def1 = MacroDefinition::single_arity(chunk1, 1, false, String::from("macro1"));
         registry.register(name1, def1);
 
         let chunk2 = Arc::new(Chunk::new());
-        let def2 = MacroDefinition::new(chunk2, 2, false, String::from("macro2"));
+        let def2 = MacroDefinition::single_arity(chunk2, 2, false, String::from("macro2"));
         registry.register(name2, def2);
 
         assert_eq!(registry.len(), 2);
@@ -379,11 +427,11 @@ mod tests {
         let name2 = interner.intern("macro2");
 
         let chunk1 = Arc::new(Chunk::new());
-        let def1 = MacroDefinition::new(chunk1, 1, false, String::from("macro1"));
+        let def1 = MacroDefinition::single_arity(chunk1, 1, false, String::from("macro1"));
         registry1.register(name1, def1);
 
         let chunk2 = Arc::new(Chunk::new());
-        let def2 = MacroDefinition::new(chunk2, 2, false, String::from("macro2"));
+        let def2 = MacroDefinition::single_arity(chunk2, 2, false, String::from("macro2"));
         registry2.register(name2, def2);
 
         registry1.merge(&registry2);
@@ -402,11 +450,11 @@ mod tests {
         let name2 = interner.intern("macro2");
 
         let chunk1 = Arc::new(Chunk::new());
-        let def1 = MacroDefinition::new(chunk1, 1, false, String::from("macro1"));
+        let def1 = MacroDefinition::single_arity(chunk1, 1, false, String::from("macro1"));
         registry.register(name1, def1);
 
         let chunk2 = Arc::new(Chunk::new());
-        let def2 = MacroDefinition::new(chunk2, 2, false, String::from("macro2"));
+        let def2 = MacroDefinition::single_arity(chunk2, 2, false, String::from("macro2"));
         registry.register(name2, def2);
 
         let names: Vec<_> = registry.names().collect();
@@ -422,7 +470,7 @@ mod tests {
 
         let name = interner.intern("my-macro");
         let chunk = Arc::new(Chunk::new());
-        let def = MacroDefinition::new(chunk, 2, false, String::from("my-macro"));
+        let def = MacroDefinition::single_arity(chunk, 2, false, String::from("my-macro"));
 
         registry.register(name, def);
 

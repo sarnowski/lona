@@ -37,7 +37,7 @@ mod tests;
 #[cfg(feature = "alloc")]
 pub use display::Displayable;
 #[cfg(feature = "alloc")]
-pub use function::Function;
+pub use function::{Function, FunctionBody};
 
 /// Runtime value type classification.
 ///

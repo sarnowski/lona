@@ -68,7 +68,7 @@ static ALLOCATOR: Allocator<&Sel4PageProvider> = Allocator::new(&PAGE_PROVIDER);
 ///   - Untyped memory capabilities for dynamic allocation
 ///   - Device memory regions
 ///   - Kernel reserved memory regions
-#[root_task]
+#[root_task(stack_size = 0x0004_0000)] // 256 KB (default is only 64 KB)
 fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
     sel4::debug_println!("Lona runtime starting...");
 

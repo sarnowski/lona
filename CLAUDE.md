@@ -15,8 +15,9 @@ The runtime is written in Rust (`no_std`) and runs as seL4's root task. Userspac
 
 **Read when planning new features or tasks:**
 - `docs/goals.md` - The complete vision and design philosophy. Consult when making architectural decisions.
-- `docs/development/implementation-plan.md` - The phased roadmap, component dependencies, and current status.
-- `docs/development/minimal-rust.md` - The Lonala-first principle. Consult before adding any native function.
+- `docs/roadmap/index.md` - The phased roadmap, component dependencies, and current status.
+- `docs/lonala/index.md` - The Lonala language specification.
+- `docs/minimal-rust.md` - The Lonala-first principle. Consult before adding any native function.
 
 ## Required Principle
 
@@ -27,42 +28,6 @@ Always aim for the correct solution. Never take a shortcut, workaround, hack or 
 **Everything achievable in Lonala MUST be implemented in Lonala, not Rust.**
 
 The Rust runtime exists solely to provide the minimal foundation that Lonala cannot provide for itself. This follows the LISP tradition where the entire language is built from a handful of primitives.
-
-### What MUST Be Native (Rust)
-
-Only these categories require Rust implementation:
-
-| Category | Primitives | Why Native |
-|----------|-----------|------------|
-| **Cons cell operations** | `cons`, `first`, `rest` | Fundamental data structure |
-| **Type predicates** | `nil?`, `symbol?`, `list?`, `fn?`, etc. | Inspect runtime type tags |
-| **Equality** | `eq?`, `=` | Pointer/value comparison |
-| **Memory access** | `peek`, `poke`, `address-of` | Direct hardware access for drivers |
-| **Arithmetic** | `+`, `-`, `*`, `/`, `mod` on integers | Efficiency, bootstrap |
-| **Comparison** | `<`, `>`, `<=`, `>=` | Efficiency |
-| **Symbol interning** | `symbol`, `gensym` | Interner access |
-
-Note: The Rust runtime has its own UART access for panic handlers and early boot diagnostics, but this is NOT exposed to Lonala. Lonala implements device drivers (including UART) using `peek`/`poke` on memory-mapped I/O registers.
-
-Special forms (`quote`, `if`, `fn`, `def`, `do`, `defmacro`) are handled by the compiler, not native functions.
-
-### What MUST Be Lonala
-
-Everything else, including:
-
-- **All macros**: `defn`, `when`, `unless`, `let`, `cond`, `and`, `or`
-- **Collection constructors**: `list`, `vector`, `hash-map` (build from `cons`)
-- **Sequence operations**: `map`, `filter`, `reduce`, `concat`, `nth`, `count`
-- **Higher-order functions**: `apply`, `comp`, `partial`, `identity`
-- **The REPL itself**: Read-eval-print loop in Lonala
-- **String operations**: All string manipulation beyond raw bytes
-- **ALL device drivers**: Including UART, via `peek`/`poke` on memory-mapped I/O
-- **Process management**: Supervision trees, spawn, message passing
-- **The evaluator**: `eval` written in Lonala (self-hosting)
-
-### Current Interim Code
-
-The current Rust implementations of REPL, collections, and introspection are **interim scaffolding** that will be replaced by Lonala implementations. When extending these, remember they are temporary.
 
 ### Review Checklist
 
@@ -77,8 +42,6 @@ Before adding ANY native function, ask:
 
 ## Directory Structure
 
-> **Note**: Directories marked with `(planned)` are defined in the implementation plan but do not exist yet.
-
 ```
 lona/
 ├── Cargo.toml                    # Workspace root
@@ -90,81 +53,108 @@ lona/
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── allocator.rs      # Bump allocator traits
-│   │       ├── integer.rs        # Arbitrary-precision integers
-│   │       ├── ratio.rs          # Arbitrary-precision ratios
+│   │       ├── chunk/            # Bytecode chunk format
+│   │       ├── hamt/             # Hash Array Mapped Trie (persistent maps)
+│   │       ├── integer/          # Arbitrary-precision integers
+│   │       ├── list.rs           # Cons cell lists
+│   │       ├── map/              # Persistent hash maps
+│   │       ├── opcode/           # VM instruction encoding
+│   │       ├── pvec/             # Persistent vectors
+│   │       ├── ratio/            # Arbitrary-precision ratios
+│   │       ├── source.rs         # Source tracking
 │   │       ├── string.rs         # Immutable string type
 │   │       ├── symbol.rs         # Interned symbols
-│   │       └── value.rs          # Core value types
+│   │       ├── value/            # Core value types
+│   │       └── vector.rs         # Vector utilities
+│   │
+│   ├── lona-kernel/              # VM and runtime abstractions (host-testable)
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       └── vm/               # Bytecode virtual machine
+│   │           ├── mod.rs
+│   │           ├── collections/  # Collection operations
+│   │           ├── error.rs      # Runtime errors
+│   │           ├── frame.rs      # Call frames
+│   │           ├── globals.rs    # Global variable storage
+│   │           ├── helpers.rs    # Interpreter helper functions
+│   │           ├── interpreter/  # Bytecode execution
+│   │           ├── introspection.rs # Runtime introspection
+│   │           ├── macro_expander.rs # Macro expansion
+│   │           ├── natives.rs    # Native function registry
+│   │           ├── numeric.rs    # Numeric operations
+│   │           ├── primitives.rs # Built-in functions
+│   │           └── tests/        # VM tests
 │   │
 │   ├── lona-runtime/             # seL4 root task (QEMU-tested only)
 │   │   └── src/
 │   │       ├── main.rs           # Entry point, receives bootinfo
-│   │       ├── repl.rs           # Interactive REPL
+│   │       ├── repl.rs           # Interactive REPL (bootstrap)
+│   │       ├── integration_tests.rs # QEMU integration tests
 │   │       ├── memory/           # seL4 memory management
-│   │       │   ├── mod.rs
-│   │       │   ├── provider.rs   # Memory provider implementation
-│   │       │   ├── untyped.rs    # Untyped memory handling
-│   │       │   └── slots.rs      # Capability slot management
-│   │       └── platform/         # Hardware abstraction
-│   │           ├── mod.rs
-│   │           ├── uart.rs       # UART driver
-│   │           └── fdt.rs        # Device tree parsing
+│   │       └── platform/         # Hardware abstraction (UART, FDT)
 │   │
 │   ├── lonala-parser/            # Lexer and parser (100% host-testable)
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── ast.rs            # Abstract syntax tree types
-│   │       ├── error.rs          # Error types and spans
-│   │       ├── token.rs          # Token types
 │   │       ├── lexer/            # Tokenizer
-│   │       │   ├── mod.rs
-│   │       │   └── tests.rs
 │   │       └── parser/           # S-expression parser
-│   │           ├── mod.rs
-│   │           └── tests.rs
 │   │
 │   ├── lonala-compiler/          # Bytecode compiler (100% host-testable)
 │   │   └── src/
 │   │       ├── lib.rs
-│   │       ├── chunk.rs          # Bytecode chunk format
 │   │       ├── error.rs          # Compiler errors
-│   │       ├── opcode.rs         # VM instruction encoding
 │   │       └── compiler/         # AST to bytecode compiler
-│   │           ├── mod.rs
-│   │           └── tests.rs
 │   │
-│   ├── lona-kernel/              # Process/scheduler abstractions (host-testable with mocks)
+│   ├── lonala-human/             # Human-readable output formatting
 │   │   └── src/
-│   │       ├── lib.rs
-│   │       └── vm/               # Bytecode virtual machine
-│   │           ├── mod.rs
-│   │           ├── error.rs      # Runtime errors
-│   │           ├── frame.rs      # Call frames
-│   │           ├── globals.rs    # Global variable storage
-│   │           ├── helpers.rs    # Interpreter helper functions
-│   │           ├── interpreter.rs# Bytecode execution
-│   │           ├── natives.rs    # Native function registry
-│   │           ├── numeric.rs    # Numeric operations
-│   │           ├── output.rs     # Output abstraction
-│   │           ├── primitives.rs # Built-in functions (print)
-│   │           └── tests.rs      # VM tests
+│   │
+│   ├── lona-spec-tests/          # Language specification tests
+│   │   └── src/
+│   │       ├── builtins/         # Built-in function tests
+│   │       ├── data_types/       # Data type tests
+│   │       ├── evaluation.rs     # Evaluation tests
+│   │       ├── functions.rs      # Function tests
+│   │       ├── literals.rs       # Literal tests
+│   │       ├── macros.rs         # Macro tests
+│   │       ├── operators.rs      # Operator tests
+│   │       ├── reader_macros.rs  # Reader macro tests
+│   │       └── special_forms.rs  # Special form tests
 │   │
 │   └── lona-test/                # Test harness for QEMU tests
 │       └── src/
-│           └── lib.rs            # Test utilities and markers
 │
 ├── docs/
-│   ├── index.md                  # Documentation index
 │   ├── goals.md                  # Project vision and design philosophy
-│   ├── license.md                # License information
-│   ├── architecture/
-│   │   └── register-based-vm.md  # VM architecture documentation
-│   └── development/
-│       ├── implementation-plan.md      # Phased roadmap and task checklist
-│       ├── minimal-rust.md             # Lonala-first principle (minimal Rust runtime)
-│       ├── testing-strategy.md         # Three-tier testing pyramid
-│       ├── rust-coding-guidelines.md   # Rust coding standards
-│       └── lonala-coding-guidelines.md # Lonala coding standards
+│   ├── installation.md           # Installation guide for physical hardware
+│   ├── license.md                # License information (GPL-3.0)
+│   ├── minimal-rust.md           # Lonala-first principle
+│   │
+│   ├── development/              # Development guidelines
+│   │   ├── rust-coding-guidelines.md
+│   │   ├── lonala-coding-guidelines.md
+│   │   └── testing-strategy.md
+│   │
+│   ├── lonala/                   # Lonala language specification
+│   │   ├── index.md              # Specification table of contents
+│   │   ├── introduction.md       # Language overview
+│   │   ├── lexical-structure.md  # Tokens, whitespace, comments
+│   │   ├── data-types.md         # Type hierarchy
+│   │   ├── literals.md           # Literal syntax
+│   │   ├── evaluation.md         # Evaluation rules
+│   │   ├── special-forms.md      # def, let, if, fn, etc.
+│   │   ├── operators.md          # Arithmetic, comparison, bitwise
+│   │   ├── functions.md          # Function definition and calling
+│   │   ├── reader-macros.md      # Quote, syntax-quote, unquote
+│   │   ├── macros.md             # defmacro
+│   │   ├── namespaces.md         # Module system (planned)
+│   │   ├── concurrency.md        # Process model (planned)
+│   │   ├── builtins/             # Built-in function reference
+│   │   └── appendices/           # Grammar, bytecode, Clojure differences
+│   │
+│   └── roadmap/                  # Implementation roadmap
+│       ├── index.md              # Roadmap overview and task status
+│       └── milestone-*.md        # Individual milestone details
 │
 ├── docker/
 │   └── Dockerfile                # Development environment with seL4 SDK
@@ -176,12 +166,9 @@ lona/
 ├── lona/                         # Lonala standard library
 │   └── core.lona                 # Core macros (defn, when, etc.)
 │
-├── tests/ (planned)              # Integration tests (Tier 3)
-│   └── integration/
-│
 └── .claude/                      # Claude Code configuration
-    ├── commands/                 # Custom slash commands
-    ├── agents/                   # Custom agent definitions
+    ├── commands/                 # Custom slash commands (git-commit)
+    ├── agents/                   # Custom agents (lona-code-reviewer)
     └── skills/                   # Workflow skills (develop-runtime, develop-lona, finishing-work)
 ```
 

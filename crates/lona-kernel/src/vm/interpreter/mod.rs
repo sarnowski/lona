@@ -376,14 +376,19 @@ impl<'interner> Vm<'interner> {
                 Value::Vector(lona_core::vector::Vector::from_vec(values?))
             }
             Constant::Function {
-                ref chunk,
-                arity,
+                ref bodies,
                 ref name,
-                has_rest,
             } => {
-                // Create Arc from the chunk and wrap in Function value
-                let chunk_arc = alloc::sync::Arc::new((**chunk).clone());
-                Value::Function(Function::new(chunk_arc, arity, has_rest, name.clone()))
+                // Convert each FunctionBodyData to FunctionBody
+                use lona_core::value::FunctionBody;
+                let fn_bodies: alloc::vec::Vec<FunctionBody> = bodies
+                    .iter()
+                    .map(|body| {
+                        let chunk_arc = alloc::sync::Arc::new((*body.chunk).clone());
+                        FunctionBody::new(chunk_arc, body.arity, body.has_rest)
+                    })
+                    .collect();
+                Value::Function(Function::new(fn_bodies, name.clone()))
             }
             // Handle Nil and future Constant variants (Constant is #[non_exhaustive])
             Constant::Nil | _ => Value::Nil,

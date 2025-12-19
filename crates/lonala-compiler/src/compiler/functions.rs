@@ -4,21 +4,22 @@
 //! Function and macro definition compilation.
 //!
 //! This module handles compilation of:
-//! - `fn` - function definitions
-//! - `defmacro` - macro definitions
+//! - `fn` - function definitions (single and multi-arity)
+//! - `defmacro` - macro definitions (single and multi-arity)
 
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lona_core::chunk::{Chunk, Constant};
+use lona_core::chunk::{Chunk, Constant, FunctionBodyData};
 use lona_core::opcode::{Opcode, encode_abc, encode_abx};
 use lona_core::span::Span;
 use lonala_parser::{Ast, Spanned};
 
-use super::macros::MacroDefinition;
-use super::{Compiler, ExprResult, FnArgsResult};
-use crate::error::{Error, Kind as ErrorKind};
+use super::macros::{MacroBody, MacroDefinition};
+use super::{Compiler, ExprResult};
+use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 
 /// Parsed parameter information from a parameter vector.
 ///
@@ -31,15 +32,35 @@ pub(super) struct ParsedParams {
     pub rest: Option<String>,
 }
 
+/// Result of parsing an `fn` special form.
+///
+/// Distinguishes between single-arity and multi-arity syntax.
+#[derive(Debug)]
+pub(super) enum FnForm<'args> {
+    /// Single arity: `(fn [params] body...)` or `(fn name [params] body...)`
+    SingleArity {
+        name: Option<String>,
+        params: &'args Spanned<Ast>,
+        body: &'args [Spanned<Ast>],
+    },
+    /// Multi arity: `(fn ([p1] b1) ([p2] b2)...)` or `(fn name ([p1] b1)...)`
+    MultiArity {
+        name: Option<String>,
+        /// Each element is a list `([params] body...)`
+        bodies: &'args [Spanned<Ast>],
+    },
+}
+
 impl Compiler<'_, '_, '_> {
     /// Compiles a `fn` special form.
     ///
-    /// Syntax:
-    /// - `(fn [params...] body...)`
-    /// - `(fn name [params...] body...)` - named for recursion/debugging
+    /// Supports both single-arity and multi-arity syntax:
+    /// - Single arity: `(fn [params...] body...)` or `(fn name [params...] body...)`
+    /// - Multi-arity: `(fn ([params1] body1...) ([params2] body2...))` or
+    ///   `(fn name ([params1] body1...) ([params2] body2...))`
     ///
     /// Creates a new function value. Parameters become local variables in the
-    /// function's scope. The function body is compiled into a separate chunk.
+    /// function's scope. Each arity body is compiled into a separate chunk.
     /// Supports rest parameters: `(fn [a b & rest] ...)`.
     ///
     /// Note: In Phase 3.3, closures are not supported - functions cannot
@@ -49,24 +70,209 @@ impl Compiler<'_, '_, '_> {
         args: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
-        // Pre-compute location for error messages (before creating child compiler)
+        let location = self.location(span);
+        let form = self.parse_fn_form(args, span)?;
+
+        match form {
+            FnForm::SingleArity { name, params, body } => {
+                // Compile single body, wrap in vec
+                let body_data = self.compile_fn_body(name.as_deref(), params, body, span)?;
+                self.emit_function(alloc::vec![body_data], name, span)
+            }
+            FnForm::MultiArity { name, bodies } => {
+                // Compile each arity body
+                let mut body_datas = Vec::with_capacity(bodies.len());
+                for body_ast in bodies {
+                    let (params, body) =
+                        Self::parse_arity_body(body_ast, self.location(body_ast.span))?;
+                    let body_data =
+                        self.compile_fn_body(name.as_deref(), params, body, body_ast.span)?;
+                    body_datas.push(body_data);
+                }
+                // Validate arities
+                Self::validate_arities(&body_datas, location)?;
+                self.emit_function(body_datas, name, span)
+            }
+        }
+    }
+
+    /// Parses the `fn` form to determine if it's single-arity or multi-arity.
+    fn parse_fn_form<'args>(
+        &self,
+        args: &'args [Spanned<Ast>],
+        span: Span,
+    ) -> Result<FnForm<'args>, Error> {
+        let location = self.location(span);
+        let first = args.first().ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "expected (fn [params] body...) or (fn name [params] body...) or (fn ([params] body...)...)",
+                },
+                location,
+            )
+        })?;
+
+        match first.node {
+            Ast::Vector(_) => {
+                // (fn [params] body...) - single arity
+                let body = args.get(1_usize..).unwrap_or(&[]);
+                Ok(FnForm::SingleArity {
+                    name: None,
+                    params: first,
+                    body,
+                })
+            }
+            Ast::Symbol(ref name) => {
+                // (fn name ...) - need to check second arg
+                let second = args.get(1_usize).ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "fn",
+                            message: "expected parameter vector or arity body after function name",
+                        },
+                        location,
+                    )
+                })?;
+
+                match second.node {
+                    Ast::Vector(_) => {
+                        // (fn name [params] body...) - single arity
+                        let body = args.get(2_usize..).unwrap_or(&[]);
+                        Ok(FnForm::SingleArity {
+                            name: Some(name.clone()),
+                            params: second,
+                            body,
+                        })
+                    }
+                    Ast::List(_) if Self::is_arity_body(&second.node) => {
+                        // (fn name ([params] body...)...) - multi arity
+                        let bodies = args.get(1_usize..).unwrap_or(&[]);
+                        Ok(FnForm::MultiArity {
+                            name: Some(name.clone()),
+                            bodies,
+                        })
+                    }
+                    Ast::Integer(_)
+                    | Ast::Float(_)
+                    | Ast::String(_)
+                    | Ast::Bool(_)
+                    | Ast::Nil
+                    | Ast::Symbol(_)
+                    | Ast::Keyword(_)
+                    | Ast::List(_)
+                    | Ast::Map(_)
+                    | _ => Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "fn",
+                            message: "expected [params] or ([params] body...) after function name",
+                        },
+                        self.location(second.span),
+                    )),
+                }
+            }
+            Ast::List(_) if Self::is_arity_body(&first.node) => {
+                // (fn ([params] body...)...) - multi arity (anonymous)
+                Ok(FnForm::MultiArity {
+                    name: None,
+                    bodies: args,
+                })
+            }
+            Ast::Integer(_)
+            | Ast::Float(_)
+            | Ast::String(_)
+            | Ast::Bool(_)
+            | Ast::Nil
+            | Ast::Keyword(_)
+            | Ast::List(_)
+            | Ast::Map(_)
+            | _ => Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "expected [params], name, or ([params] body...)",
+                },
+                self.location(first.span),
+            )),
+        }
+    }
+
+    /// Checks if an AST node is an arity body: a list whose first element is a vector.
+    fn is_arity_body(ast: &Ast) -> bool {
+        match *ast {
+            Ast::List(ref elements) => elements
+                .first()
+                .is_some_and(|first| matches!(first.node, Ast::Vector(_))),
+            Ast::Integer(_)
+            | Ast::Float(_)
+            | Ast::String(_)
+            | Ast::Bool(_)
+            | Ast::Nil
+            | Ast::Symbol(_)
+            | Ast::Keyword(_)
+            | Ast::Vector(_)
+            | Ast::Map(_)
+            | _ => false,
+        }
+    }
+
+    /// Parses an arity body: `([params] body...)`
+    fn parse_arity_body(
+        body_ast: &Spanned<Ast>,
+        location: SourceLocation,
+    ) -> Result<(&Spanned<Ast>, &[Spanned<Ast>]), Error> {
+        let Ast::List(ref elements) = body_ast.node else {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "arity body must be a list ([params] body...)",
+                },
+                location,
+            ));
+        };
+
+        let params = elements.first().ok_or_else(|| {
+            Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "arity body must have parameter vector",
+                },
+                location,
+            )
+        })?;
+
+        if !matches!(params.node, Ast::Vector(_)) {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "first element of arity body must be parameter vector",
+                },
+                location,
+            ));
+        }
+
+        let body = elements.get(1_usize..).unwrap_or(&[]);
+        Ok((params, body))
+    }
+
+    /// Compiles a single function body (params + body expressions) into a `FunctionBodyData`.
+    fn compile_fn_body(
+        &mut self,
+        name: Option<&str>,
+        params_ast: &Spanned<Ast>,
+        body: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<FunctionBodyData, Error> {
         let location = self.location(span);
 
-        // Parse: (fn [params] body...) or (fn name [params] body...)
-        let (name, params_ast, body) = self.parse_fn_args(args, span)?;
-
-        // Extract parameter names (fixed and rest)
+        // Extract parameter names
         let parsed_params = self.extract_params(params_ast)?;
         let arity = u8::try_from(parsed_params.fixed.len())
             .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
         let has_rest = parsed_params.rest.is_some();
 
         // Create a new compiler for the function body
-        // Note: We share the registry so macros are available inside function bodies
         let mut fn_compiler = Compiler::new(self.interner, self.registry, self.source_id);
-        let fn_name_str = name
-            .clone()
-            .unwrap_or_else(|| alloc::string::String::from("lambda"));
+        let fn_name_str = name.map_or_else(|| String::from("lambda"), String::from);
         fn_compiler.chunk = Chunk::with_name(fn_name_str);
         fn_compiler.chunk.set_arity(arity);
         fn_compiler.chunk.set_has_rest(has_rest);
@@ -76,20 +282,17 @@ impl Compiler<'_, '_, '_> {
 
         // Compile body
         let result_reg = if body.is_empty() {
-            // Empty body returns nil
             let reg = fn_compiler.alloc_register(span)?;
             fn_compiler
                 .chunk
                 .emit(encode_abc(Opcode::LoadNil, reg, 0, 0), span);
             reg
         } else {
-            // Compile all but last expression, discarding results
             for expr in body.get(..body.len().saturating_sub(1)).unwrap_or(&[]) {
                 let checkpoint = fn_compiler.next_register;
                 let _result = fn_compiler.compile_expr(expr)?;
                 fn_compiler.free_registers_to(checkpoint);
             }
-            // Compile last expression to return
             let last = body
                 .last()
                 .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
@@ -103,88 +306,86 @@ impl Compiler<'_, '_, '_> {
             .emit(encode_abc(Opcode::Return, result_reg, 1, 0), span);
         fn_compiler.locals.pop_scope();
 
-        // Finalize function chunk
+        // Finalize
         fn_compiler
             .chunk
             .set_max_registers(fn_compiler.max_register.saturating_add(1));
-        let fn_chunk = fn_compiler.chunk;
 
-        // Add function as constant in parent chunk
-        let const_idx = self.add_constant(
-            Constant::Function {
-                chunk: alloc::boxed::Box::new(fn_chunk),
-                arity,
-                name,
-                has_rest,
-            },
-            span,
-        )?;
+        Ok(FunctionBodyData::new(
+            Box::new(fn_compiler.chunk),
+            arity,
+            has_rest,
+        ))
+    }
 
-        // Load function into destination register
+    /// Validates multi-arity constraints.
+    fn validate_arities(
+        bodies: &[FunctionBodyData],
+        location: SourceLocation,
+    ) -> Result<(), Error> {
+        let mut fixed_arities = Vec::new();
+        let mut variadic: Option<u8> = None;
+
+        for body in bodies {
+            if body.has_rest {
+                if variadic.is_some() {
+                    return Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "fn",
+                            message: "only one variadic arity allowed",
+                        },
+                        location,
+                    ));
+                }
+                variadic = Some(body.arity);
+            } else {
+                if fixed_arities.contains(&body.arity) {
+                    return Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "fn",
+                            message: "duplicate arity",
+                        },
+                        location,
+                    ));
+                }
+                fixed_arities.push(body.arity);
+            }
+        }
+
+        // Check variadic constraint: fixed arities cannot exceed variadic's fixed param count.
+        // Equal is allowed (exact match beats variadic), but greater is an error because
+        // those calls would never reach the fixed arity body.
+        // Example: (fn ([x] 1) ([x & r] 2)) is VALID - 1-arg calls use exact match
+        // Example: (fn ([x y] 1) ([x & r] 2)) is INVALID - 2-arg calls never reach first body
+        if let Some(var_arity) = variadic {
+            for &fixed in &fixed_arities {
+                if fixed > var_arity {
+                    return Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "fn",
+                            message: "fixed arity cannot exceed variadic arity",
+                        },
+                        location,
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Emits the function constant and loads it into a register.
+    fn emit_function(
+        &mut self,
+        bodies: Vec<FunctionBodyData>,
+        name: Option<String>,
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        let const_idx = self.add_constant(Constant::Function { bodies, name }, span)?;
         let dest = self.alloc_register(span)?;
         self.chunk
             .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
-
         Ok(ExprResult { register: dest })
-    }
-
-    /// Parses the arguments to a `fn` special form.
-    ///
-    /// Returns (name, `params_ast`, body) where name is optional.
-    pub(super) fn parse_fn_args<'args>(
-        &self,
-        args: &'args [Spanned<Ast>],
-        span: Span,
-    ) -> Result<FnArgsResult<'args>, Error> {
-        let location = self.location(span);
-        let first = args.first().ok_or_else(|| {
-            Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "fn",
-                    message: "expected (fn [params] body...) or (fn name [params] body...)",
-                },
-                location,
-            )
-        })?;
-
-        // Check if first arg is a name (symbol) or params (vector)
-        match first.node {
-            Ast::Vector(_) => {
-                // (fn [params] body...)
-                let body = args.get(1_usize..).unwrap_or(&[]);
-                Ok((None, first, body))
-            }
-            Ast::Symbol(ref name) => {
-                // (fn name [params] body...)
-                let params_ast = args.get(1_usize).ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::InvalidSpecialForm {
-                            form: "fn",
-                            message: "expected parameter vector after function name",
-                        },
-                        location,
-                    )
-                })?;
-                let body = args.get(2_usize..).unwrap_or(&[]);
-                Ok((Some(name.clone()), params_ast, body))
-            }
-            // All other AST variants are invalid as the first argument to fn
-            Ast::Integer(_)
-            | Ast::Float(_)
-            | Ast::String(_)
-            | Ast::Bool(_)
-            | Ast::Nil
-            | Ast::Keyword(_)
-            | Ast::List(_)
-            | Ast::Map(_)
-            | _ => Err(Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "fn",
-                    message: "expected [params] or name",
-                },
-                self.location(first.span),
-            )),
-        }
     }
 
     /// Extracts parameter names from a parameter vector AST.
@@ -305,7 +506,9 @@ impl Compiler<'_, '_, '_> {
 
     /// Compiles a `defmacro` special form.
     ///
-    /// Syntax: `(defmacro name [params...] body...)`
+    /// Supports both single-arity and multi-arity syntax:
+    /// - Single arity: `(defmacro name [params...] body...)`
+    /// - Multi-arity: `(defmacro name ([] body1) ([x] body2) ([x y] body3))`
     ///
     /// Defines a compile-time macro. The macro body is compiled to bytecode
     /// and stored in the compiler's macro registry. When the macro is called,
@@ -318,39 +521,118 @@ impl Compiler<'_, '_, '_> {
         args: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
-        // Pre-compute location for error messages (before creating child compiler)
         let location = self.location(span);
-
-        // Need at least name and params
         if args.len() < 2_usize {
-            return Err(Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "defmacro",
-                    message: "expected (defmacro name [params...] body...)",
-                },
+            return Err(Self::defmacro_error(
+                "expected (defmacro name [params...] body...) or (defmacro name ([params] body)...)",
                 location,
             ));
         }
-
         // Extract name (must be a symbol)
         let name_ast = args
             .first()
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
         let Ast::Symbol(ref name_ref) = name_ast.node else {
-            return Err(Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "defmacro",
-                    message: "macro name must be a symbol",
-                },
+            return Err(Self::defmacro_error(
+                "macro name must be a symbol",
                 self.location(name_ast.span),
             ));
         };
         let name = name_ref.clone();
+        let name_id = self.interner.intern(&name);
+        // Check if this is single-arity or multi-arity syntax
+        let second = args.get(1_usize).ok_or_else(|| {
+            Self::defmacro_error(
+                "expected parameter vector or arity body after macro name",
+                location,
+            )
+        })?;
 
-        // Extract params (must be a vector of symbols, may include &rest)
-        let params_ast = args
-            .get(1_usize)
-            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
+        let macro_bodies = match second.node {
+            Ast::Vector(_) => {
+                let body = args.get(2_usize..).unwrap_or(&[]);
+                if body.is_empty() {
+                    return Err(Self::defmacro_error("macro body cannot be empty", location));
+                }
+                alloc::vec![self.compile_macro_body(&name, second, body, span)?]
+            }
+            Ast::List(_) if Self::is_arity_body(&second.node) => {
+                self.compile_multi_arity_macro(&name, args.get(1_usize..).unwrap_or(&[]), location)?
+            }
+            Ast::Integer(_)
+            | Ast::Float(_)
+            | Ast::String(_)
+            | Ast::Bool(_)
+            | Ast::Nil
+            | Ast::Symbol(_)
+            | Ast::Keyword(_)
+            | Ast::List(_)
+            | Ast::Map(_)
+            | _ => {
+                return Err(Self::defmacro_error(
+                    "expected [params] or ([params] body...) after macro name",
+                    self.location(second.span),
+                ));
+            }
+        };
+
+        self.registry
+            .register(name_id, MacroDefinition::new(macro_bodies, name));
+        let const_idx = self.add_constant(Constant::Symbol(name_id), span)?;
+        let dest = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Helper for defmacro error messages.
+    const fn defmacro_error(message: &'static str, location: SourceLocation) -> Error {
+        Error::new(
+            ErrorKind::InvalidSpecialForm {
+                form: "defmacro",
+                message,
+            },
+            location,
+        )
+    }
+
+    /// Compiles multi-arity macro bodies.
+    fn compile_multi_arity_macro(
+        &mut self,
+        name: &str,
+        bodies_ast: &[Spanned<Ast>],
+        location: SourceLocation,
+    ) -> Result<Vec<MacroBody>, Error> {
+        let mut macro_bodies = Vec::with_capacity(bodies_ast.len());
+        for body_ast in bodies_ast {
+            let (params, body) = Self::parse_arity_body(body_ast, self.location(body_ast.span))?;
+            if body.is_empty() {
+                return Err(Self::defmacro_error(
+                    "macro body cannot be empty",
+                    self.location(body_ast.span),
+                ));
+            }
+            macro_bodies.push(self.compile_macro_body(name, params, body, body_ast.span)?);
+        }
+        let body_datas: Vec<FunctionBodyData> = macro_bodies
+            .iter()
+            .map(|mb| FunctionBodyData::new(Box::new((*mb.chunk).clone()), mb.arity, mb.has_rest))
+            .collect();
+        Self::validate_arities(&body_datas, location)?;
+        Ok(macro_bodies)
+    }
+
+    /// Compiles a single macro body into a `MacroBody`.
+    fn compile_macro_body(
+        &mut self,
+        name: &str,
+        params_ast: &Spanned<Ast>,
+        body: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<MacroBody, Error> {
+        let location = self.location(span);
+
+        // Extract parameter names
         let parsed_params = self.extract_params(params_ast).map_err(|_err| {
             Error::new(
                 ErrorKind::InvalidSpecialForm {
@@ -364,24 +646,7 @@ impl Compiler<'_, '_, '_> {
             .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
         let has_rest = parsed_params.rest.is_some();
 
-        // Body is everything after params
-        let body = args.get(2_usize..).unwrap_or(&[]);
-        if body.is_empty() {
-            return Err(Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "defmacro",
-                    message: "macro body cannot be empty",
-                },
-                location,
-            ));
-        }
-
-        // Intern the macro name before creating the child compiler to avoid
-        // double mutable borrow of self.interner
-        let name_id = self.interner.intern(&name);
-
-        // Create a child compiler for the macro body.
-        // Note: We share the registry so macros can be used inside macro bodies.
+        // Create a child compiler for the macro body
         let mut macro_compiler = Compiler::new(self.interner, self.registry, self.source_id);
         macro_compiler.chunk = Chunk::with_name(alloc::format!("macro:{name}"));
         macro_compiler.chunk.set_arity(arity);
@@ -390,9 +655,8 @@ impl Compiler<'_, '_, '_> {
         // Set up parameter locals
         Self::setup_params_on_compiler(&mut macro_compiler, &parsed_params, arity, location)?;
 
-        // Compile body (all expressions, last one is return value)
+        // Compile body
         let result_reg = {
-            // Compile all but last, discarding results
             for expr in body
                 .get(..body.len().saturating_sub(1_usize))
                 .unwrap_or(&[])
@@ -401,7 +665,6 @@ impl Compiler<'_, '_, '_> {
                 let _result = macro_compiler.compile_expr(expr)?;
                 macro_compiler.free_registers_to(checkpoint);
             }
-            // Compile last expression as return value
             let last = body
                 .last()
                 .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
@@ -409,33 +672,21 @@ impl Compiler<'_, '_, '_> {
             result.register
         };
 
-        // Emit return instruction
+        // Emit return
         macro_compiler
             .chunk
             .emit(encode_abc(Opcode::Return, result_reg, 1, 0), span);
         macro_compiler.locals.pop_scope();
 
-        // Finalize the macro chunk
+        // Finalize
         macro_compiler
             .chunk
             .set_max_registers(macro_compiler.max_register.saturating_add(1));
 
-        // Extract the macro chunk before using self again
-        let macro_chunk = macro_compiler.chunk;
-
-        // Store in macro registry
-        self.registry.register(
-            name_id,
-            MacroDefinition::new(Arc::new(macro_chunk), arity, has_rest, name),
-        );
-
-        // Return the macro's symbol name
-        // This mimics `def` behavior - the expression evaluates to the defined name
-        let const_idx = self.add_constant(Constant::Symbol(name_id), span)?;
-        let dest = self.alloc_register(span)?;
-        self.chunk
-            .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
-
-        Ok(ExprResult { register: dest })
+        Ok(MacroBody::new(
+            Arc::new(macro_compiler.chunk),
+            arity,
+            has_rest,
+        ))
     }
 }

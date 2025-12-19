@@ -72,31 +72,17 @@ impl MacroExpander for Expander {
         args: Vec<Value>,
         interner: &mut Interner,
     ) -> Result<Value, MacroExpansionError> {
-        let fixed_arity = usize::from(definition.arity());
-        let has_rest = definition.has_rest();
+        // Find matching arity body
+        let body = definition.find_body(args.len()).ok_or_else(|| {
+            MacroExpansionError::new(format!(
+                "macro '{}' has no arity matching {} arguments",
+                definition.name(),
+                args.len()
+            ))
+        })?;
 
-        // Verify arity
-        if has_rest {
-            // With rest args: need at least `fixed_arity` arguments
-            if args.len() < fixed_arity {
-                return Err(MacroExpansionError::new(format!(
-                    "macro '{}' expects at least {} arguments, got {}",
-                    definition.name(),
-                    fixed_arity,
-                    args.len()
-                )));
-            }
-        } else {
-            // Without rest args: need exactly `fixed_arity` arguments
-            if args.len() != fixed_arity {
-                return Err(MacroExpansionError::new(format!(
-                    "macro '{}' expects {} arguments, got {}",
-                    definition.name(),
-                    fixed_arity,
-                    args.len()
-                )));
-            }
-        }
+        let fixed_arity = usize::from(body.arity);
+        let has_rest = body.has_rest;
 
         // Build the effective arguments list
         // Fixed args: args[0..fixed_arity]
@@ -127,7 +113,7 @@ impl MacroExpander for Expander {
 
         // Execute the macro's chunk with the arguments as initial register values
         let result = vm
-            .execute_with_args(definition.chunk(), &effective_args)
+            .execute_with_args(&body.chunk, &effective_args)
             .map_err(|vm_err| MacroExpansionError::new(format!("{vm_err:?}")))?;
 
         Ok(result)
@@ -163,8 +149,12 @@ mod tests {
         let mut expander = Expander::new();
 
         let chunk = Arc::new(make_identity_chunk());
-        let definition =
-            MacroDefinition::new(chunk, 1_u8, false, alloc::string::String::from("identity"));
+        let definition = MacroDefinition::single_arity(
+            chunk,
+            1_u8,
+            false,
+            alloc::string::String::from("identity"),
+        );
 
         let args = vec![Value::Integer(Integer::from_i64(42_i64))];
         let result = expander.expand(&definition, args, &mut interner).unwrap();
@@ -178,8 +168,12 @@ mod tests {
         let mut expander = Expander::new();
 
         let chunk = Arc::new(make_identity_chunk());
-        let definition =
-            MacroDefinition::new(chunk, 1_u8, false, alloc::string::String::from("identity"));
+        let definition = MacroDefinition::single_arity(
+            chunk,
+            1_u8,
+            false,
+            alloc::string::String::from("identity"),
+        );
 
         // Pass 2 arguments when 1 is expected
         let args = vec![
@@ -190,7 +184,7 @@ mod tests {
 
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.message.contains("expects 1 arguments"));
+        assert!(err.message.contains("no arity matching"));
     }
 
     #[test]
@@ -211,7 +205,7 @@ mod tests {
         );
         chunk.set_max_registers(1_u8);
 
-        let definition = MacroDefinition::new(
+        let definition = MacroDefinition::single_arity(
             Arc::new(chunk),
             0_u8,
             false,

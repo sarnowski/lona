@@ -67,7 +67,17 @@ Operations on the internal representation of data structures.
 | `keys` | Get sequence of keys |
 | `vals` | Get sequence of values |
 
-**Note**: The *data structures themselves* (persistent vectors, HAMT maps) are Rust implementations for efficiency. The *constructor functions* (`list`, `vector`, `hash-map`) are Lonala wrappers around these primitives.
+#### Set Operations
+
+| Primitive | Purpose |
+|-----------|---------|
+| `conj` | Add element to set (polymorphic with vector) |
+| `disj` | Remove element from set |
+| `contains?` | Test if set contains element |
+
+**Note**: Higher-level set operations (`union`, `intersection`, `difference`, `subset?`, `superset?`) are implemented in Lonala using these primitives. See "What Must Be Lonala" section.
+
+**Note**: The *data structures themselves* (persistent vectors, HAMT maps, hash sets) are Rust implementations for efficiency. The *constructor functions* (`list`, `vector`, `hash-map`, `hash-set`) are Lonala wrappers around these primitives.
 
 #### Binary Operations
 
@@ -102,6 +112,7 @@ Inspect runtime type tags that are opaque to Lonala.
 | `list?` | Test for list/cons |
 | `vector?` | Test for vector |
 | `map?` | Test for hash map |
+| `set?` | Test for hash set |
 | `fn?` | Test for function |
 
 ---
@@ -250,12 +261,32 @@ Require deep integration with the runtime scheduler.
 |-----------|---------|
 | `spawn` | Create new process (allocates PCB, heap, registers with scheduler) |
 | `self` | Get current process ID |
-| `exit` | Exit current process |
+| `exit` | Exit current process (trappable by linked processes) |
+| `panic!` | Abort current process immediately (untrappable, for bugs/invariants) |
 | `send` | Send message to process mailbox |
 
 `receive` is a **special form** (not a function) because it involves pattern matching and blocking semantics handled by the compiler.
 
-**Note**: Higher-level process patterns (supervision trees, GenServer, call/cast) are implemented in Lonala using these primitives.
+**`panic!` vs `exit`**: Normal `exit` can be trapped by linked processes (they receive exit signals as messages). `panic!` is for unrecoverable errors—invariant violations, bugs, corruption—and cannot be caught. The process terminates immediately with reason `{:panic {:message msg :data data}}`. Supervisors still receive the signal and can restart the process.
+
+**Note**: Higher-level process patterns (supervision trees, GenServer, call/cast) are implemented in Lonala using these primitives. The `assert!` macro is also Lonala—it expands to a `panic!` call.
+
+---
+
+### Category 8b: Fault Tolerance
+
+Process linking and monitoring for supervision trees.
+
+| Primitive | Purpose |
+|-----------|---------|
+| `link` | Create bidirectional link between processes |
+| `unlink` | Remove bidirectional link |
+| `spawn-link` | Atomically spawn and link (avoids race condition) |
+| `monitor` | Create unidirectional monitor, returns reference |
+| `demonitor` | Remove monitor by reference |
+| `process-flag` | Set process flags (e.g., `:trap-exit true`) |
+
+**Links vs Monitors**: Links are bidirectional—if either process dies, the other receives an exit signal. Monitors are unidirectional—only the monitoring process receives a `:DOWN` message. Links propagate crashes (unless trapped); monitors never do.
 
 ---
 
@@ -268,6 +299,130 @@ Require seL4 syscalls that cannot be made from Lonala.
 | `domain-create` | Create new domain (VSpace + CSpace) |
 | `cap-grant` | Grant capability to domain |
 | `cap-revoke` | Revoke capability from domain |
+
+---
+
+### Category 10: Atoms
+
+Atoms provide process-local mutable state. Unlike Clojure's thread-safe atoms, Lonala atoms are process-local (cross-process coordination uses message passing).
+
+| Primitive | Purpose |
+|-----------|---------|
+| `atom` | Create mutable reference cell with initial value |
+| `deref` | Get current value (also `@` reader macro) |
+| `reset!` | Set value directly, returns new value |
+| `compare-and-set!` | Atomically set if current equals expected |
+
+**Can be Lonala** (given the above primitives):
+- `swap!` — implemented using `compare-and-set!` in a retry loop
+- `add-watch`, `remove-watch` — watch management stored in atom metadata or side table
+- `set-validator!` — validator stored alongside atom
+
+```clojure
+;; swap! in Lonala
+(defn swap! [a f & args]
+  (loop []
+    (let [old @a
+          new (apply f old args)]
+      (if (compare-and-set! a old new)
+        new
+        (recur)))))
+```
+
+---
+
+### Category 11: Sorted Collections
+
+Sorted collections maintain elements in sorted order using a balanced tree structure.
+
+| Primitive | Purpose |
+|-----------|---------|
+| `sorted-map` | Create map with keys in natural order |
+| `sorted-set` | Create set with elements in natural order |
+| `sorted-map-by` | Create map with custom key comparator |
+| `sorted-set-by` | Create set with custom element comparator |
+
+**Can be Lonala** (given iteration primitives):
+- `subseq`, `rsubseq` — subsequence operations can iterate the sorted structure
+
+---
+
+### Category 12: Regular Expressions (Optional)
+
+Regular expression support can be implemented two ways:
+
+**Option A: Native (Recommended for performance)**
+
+| Primitive | Purpose |
+|-----------|---------|
+| `re-pattern` | Compile string to regex pattern |
+| `re-find` | Find first match in string |
+| `re-matches` | Match entire string against pattern |
+| `re-seq` | Return lazy sequence of all matches |
+
+**Option B: Pure Lonala**
+
+A regex engine can be implemented entirely in Lonala using string primitives, but will be significantly slower. This is acceptable for an OS where regex is not performance-critical.
+
+**Recommendation**: Start with native regex for practical usability; consider Lonala implementation as a self-hosting milestone.
+
+---
+
+### Category 13: Introspection
+
+Runtime introspection for debugging and LISP-machine-style development.
+
+#### Process Introspection
+
+| Primitive | Purpose |
+|-----------|---------|
+| `process-info` | Get process details (pid, name, status, heap-size, etc.) |
+| `process-state` | Get process internal state |
+| `process-messages` | View mailbox contents |
+| `list-processes` | Enumerate all processes |
+
+#### Domain Introspection
+
+| Primitive | Purpose |
+|-----------|---------|
+| `domain-of` | Get domain name for a process |
+| `domain-info` | Get domain details (parent, capabilities, processes, memory) |
+| `domain-meta` | Get domain metadata |
+| `list-domains` | Enumerate all domains |
+| `same-domain?` | Check if two processes are in the same domain |
+
+#### Namespace Introspection
+
+| Primitive | Purpose |
+|-----------|---------|
+| `ns-map` | All mappings in namespace |
+| `ns-publics` | Public vars only |
+| `ns-interns` | Vars defined in namespace |
+| `ns-refers` | Referred vars from other namespaces |
+| `all-ns` | List all namespaces |
+
+#### Code Introspection
+
+| Primitive | Purpose |
+|-----------|---------|
+| `source` | Get source code of a function |
+| `disassemble` | Get bytecode representation |
+
+#### Tracing
+
+| Primitive | Purpose |
+|-----------|---------|
+| `trace-calls` | Trace function invocations |
+| `trace-messages` | Trace message send/receive for a process |
+| `untrace` | Stop tracing |
+
+#### Hot Code Propagation
+
+| Primitive | Purpose |
+|-----------|---------|
+| `push-code` | Push updated function to child domain |
+| `pull-code` | Pull updated function from parent domain |
+| `on-code-push` | Register handler for incoming code pushes |
 
 ---
 
@@ -317,14 +472,77 @@ All control flow macros:
 - `and`, `or` — short-circuit boolean
 - `->`, `->>` — threading macros
 - `let` bindings beyond the primitive form
+- `assert!` — expands to `panic!` call
+
+### Logical Operations
+
+- `not` — logical negation: `(defn not [x] (if x false true))`
+
+This is pure conditional logic, no type inspection or hardware access required.
 
 ### Collection Constructors
 
 - `list` — create list (uses `cons` internally)
-- `vector` — create vector
-- `hash-map` — create map
+- `vector` — create vector (uses `conj` on `[]`)
+- `hash-map` — create map (uses `assoc` on `{}`)
+- `hash-set` — create set (uses `conj` on `#{}`)
 
 These can be implemented as functions that call `cons` or allocate via primitives.
+
+### Set Operations
+
+Higher-level set operations built on native `conj`, `disj`, `contains?`:
+
+```clojure
+(defn union [s1 s2]
+  (reduce conj s1 (seq s2)))
+
+(defn intersection [s1 s2]
+  (reduce (fn [acc x] (if (contains? s2 x) (conj acc x) acc))
+          #{}
+          (seq s1)))
+
+(defn difference [s1 s2]
+  (reduce (fn [acc x] (if (contains? s2 x) acc (conj acc x)))
+          #{}
+          (seq s1)))
+
+(defn subset? [s1 s2]
+  (every? (fn [x] (contains? s2 x)) (seq s1)))
+
+(defn superset? [s1 s2]
+  (subset? s2 s1))
+```
+
+### Atom Operations
+
+Higher-level atom operations built on native `atom`, `deref`, `reset!`, `compare-and-set!`:
+
+- `swap!` — update via function (CAS retry loop)
+- `add-watch`, `remove-watch` — observer pattern
+- `set-validator!` — constraint enforcement
+
+### Error Handling
+
+Result tuple predicates and accessors (no native support needed):
+
+```clojure
+(defn ok? [x] (and (map? x) (contains? x :ok)))
+(defn error? [x] (and (map? x) (contains? x :error)))
+
+(defn unwrap! [result]
+  (if (ok? result)
+    (get result :ok)
+    (panic! "unwrap! called on error" {:result result})))
+
+(defn unwrap-or [result default]
+  (if (ok? result) (get result :ok) default))
+
+(defn unwrap-error [result]
+  (if (error? result)
+    (get result :error)
+    (panic! "unwrap-error called on ok" {:result result})))
+```
 
 ### Sequence Operations
 
@@ -387,17 +605,17 @@ The `eval` function can be implemented in Lonala:
 
 This enables runtime code evaluation, REPLs, and dynamic code loading—all in Lonala.
 
-## Current Interim Code
+## Bootstrap Code
 
-The following Rust implementations are **temporary scaffolding**:
+The following Rust modules provide bootstrap functionality that will be implemented in Lonala:
 
-| Module | Location | Future |
-|--------|----------|--------|
-| REPL | `lona-runtime/src/repl.rs` | Replace with Lonala REPL |
-| Collections | `lona-kernel/src/vm/collections/` | Replace with Lonala implementations |
-| Introspection | `lona-kernel/src/vm/introspection.rs` | Replace with Lonala implementations |
+| Module | Location | Purpose |
+|--------|----------|---------|
+| REPL | `lona-runtime/src/repl.rs` | Interactive evaluation |
+| Collection Constructors | `lona-kernel/src/vm/natives.rs` | `vector`, `hash-map`, `vec` |
+| Introspection | `lona-kernel/src/vm/introspection.rs` | Source inspection, tracing |
 
-When working on these modules, remember they will be deleted once Lonala is capable enough to replace them.
+These modules exist because Lonala cannot yet implement them (missing primitives or self-hosting). Once Lonala can implement them, the Rust versions are deleted.
 
 ## Complete Native Primitive Summary
 
@@ -406,21 +624,41 @@ When working on these modules, remember they will be deleted once Lonala is capa
 | **List Ops** | `cons`, `first`, `rest` | 3 |
 | **Vector Ops** | `nth`, `conj`, `count` | 3 |
 | **Map Ops** | `get`, `assoc`, `dissoc`, `keys`, `vals` | 5 |
+| **Set Ops** | `conj` (shared), `disj`, `contains?` | 2 |
 | **Binary Ops** | `make-binary`, `binary-len`, `binary-get`, `binary-set`, `binary-slice`, `binary-copy!` | 6 |
-| **Type Predicates** | `nil?`, `boolean?`, `integer?`, `float?`, `ratio?`, `symbol?`, `keyword?`, `string?`, `binary?`, `list?`, `vector?`, `map?`, `fn?` | 13 |
+| **Type Predicates** | `nil?`, `boolean?`, `integer?`, `float?`, `ratio?`, `symbol?`, `keyword?`, `string?`, `binary?`, `list?`, `vector?`, `map?`, `set?`, `fn?`, `type-of` | 15 |
 | **Arithmetic** | `+`, `-`, `*`, `/`, `mod` | 5 |
-| **Comparison** | `=`, `<`, `>`, `<=`, `>=` | 5 |
+| **Comparison** | `=`, `<`, `>`, `<=`, `>=`, `identical?` | 6 |
 | **Bitwise** | `bit-and`, `bit-or`, `bit-xor`, `bit-not`, `bit-shift-left`, `bit-shift-right` | 6 |
 | **Symbol** | `symbol`, `gensym` | 2 |
 | **Metadata** | `meta`, `with-meta`, `vary-meta` | 3 |
+| **Sequence** | `seq`, `apply` | 2 |
+| **String** | `string-concat`, `read-string`, `string-length`, `codepoint-at`, `subs` | 5 |
 | **MMIO** | `peek-u8`, `peek-u16`, `peek-u32`, `peek-u64`, `poke-u8`, `poke-u16`, `poke-u32`, `poke-u64` | 8 |
+| **x86 Port I/O** | `port-in-u8`, `port-in-u16`, `port-in-u32`, `port-out-u8`, `port-out-u16`, `port-out-u32` | 6 |
 | **DMA** | `dma-alloc`, `phys-addr`, `memory-barrier` | 3 |
 | **IRQ** | `irq-wait` | 1 |
 | **Time** | `now-ms`, `send-after` | 2 |
-| **Process** | `spawn`, `self`, `exit`, `send` | 4 |
+| **Process** | `spawn`, `self`, `exit`, `panic!`, `send` | 5 |
+| **Fault Tolerance** | `link`, `unlink`, `spawn-link`, `monitor`, `demonitor`, `process-flag` | 6 |
 | **Domain** | `domain-create`, `cap-grant`, `cap-revoke` | 3 |
-| **I/O** | `print` (temporary) | 1 |
-| **TOTAL** | | **73** |
+| **Atoms** | `atom`, `deref`, `reset!`, `compare-and-set!` | 4 |
+| **Sorted** | `sorted-map`, `sorted-set`, `sorted-map-by`, `sorted-set-by` | 4 |
+| **Regex** | `re-pattern`, `re-find`, `re-matches`, `re-seq` (optional) | 4 |
+| **I/O** | `native-print` (temporary bootstrap) | 1 |
+| **Process Introspection** | `process-info`, `process-state`, `process-messages`, `list-processes` | 4 |
+| **Domain Introspection** | `domain-of`, `domain-info`, `domain-meta`, `list-domains`, `same-domain?` | 5 |
+| **Namespace Introspection** | `ns-map`, `ns-publics`, `ns-interns`, `ns-refers`, `all-ns` | 5 |
+| **Code Introspection** | `source`, `disassemble` | 2 |
+| **Tracing** | `trace-calls`, `trace-messages`, `untrace` | 3 |
+| **Hot Code** | `push-code`, `pull-code`, `on-code-push` | 3 |
+| **TOTAL** | | **133** |
+
+**Note on counts**:
+- Set Ops count is 2 because `conj` is polymorphic (shared with Vector Ops)
+- Regex is marked optional—can be deferred to pure Lonala implementation
+- x86 Port I/O only available on x86/x86_64 platforms
+- Without optional regex: **129 primitives**
 
 **Special Forms** (compiler, not runtime): `quote`, `if`, `fn`, `def`, `do`, `defmacro`, `let`, `receive`
 
@@ -439,17 +677,29 @@ Before adding ANY native function, answer these questions:
    - If no → **Implement in Lonala**
 
 3. **Does this require direct hardware access?**
-   - If yes → Native is acceptable (memory, raw I/O)
+   - If yes → Native is acceptable (MMIO, DMA, IRQ)
    - If no → **Implement in Lonala**
 
-4. **Is this purely for performance?**
+4. **Does this require scheduler/process integration?**
+   - If yes → Native is acceptable (spawn, exit, panic!, send)
+   - If no → **Implement in Lonala**
+
+5. **Does this require mutable state primitives?**
+   - If yes → Native is acceptable for the core cell (atom, deref, reset!, CAS)
+   - Higher-level operations (swap!, watchers) → **Implement in Lonala**
+
+6. **Is this purely for performance?**
    - **Implement in Lonala first**
    - Only move to native after profiling proves it's a bottleneck
    - Femtolisp proves this approach works
 
-5. **Does this require access to the symbol interner?**
+7. **Does this require access to the symbol interner?**
    - If yes → Native is acceptable
    - If no → **Implement in Lonala**
+
+8. **Does this require internal data structure access?**
+   - If yes → Native is acceptable (nth, get, assoc, etc.)
+   - Higher-level operations (map, filter, reduce) → **Implement in Lonala**
 
 **The default answer is always: Lonala.**
 

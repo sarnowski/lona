@@ -43,6 +43,35 @@ impl Display for ConstantPoolFullError {
     }
 }
 
+/// Compile-time representation of a single function arity body.
+///
+/// Each body represents one arity variant of a (potentially multi-arity)
+/// function. Contains the compiled bytecode, fixed parameter count, and
+/// whether this arity accepts rest arguments.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub struct FunctionBodyData {
+    /// Compiled bytecode for this arity.
+    pub chunk: Box<Chunk>,
+    /// Number of fixed parameters.
+    pub arity: u8,
+    /// Whether this arity accepts rest arguments.
+    pub has_rest: bool,
+}
+
+impl FunctionBodyData {
+    /// Creates a new function body data.
+    #[inline]
+    #[must_use]
+    pub const fn new(chunk: Box<Chunk>, arity: u8, has_rest: bool) -> Self {
+        Self {
+            chunk,
+            arity,
+            has_rest,
+        }
+    }
+}
+
 /// A constant value stored in a chunk's constant pool.
 ///
 /// Constants are referenced by index from `LoadK` instructions and
@@ -68,17 +97,14 @@ pub enum Constant {
     Vector(Vec<Self>),
     /// A compiled function.
     ///
-    /// Contains the function's bytecode chunk, arity (parameter count),
-    /// and an optional name for debugging. Used when compiling `fn` expressions.
+    /// Contains all arity bodies for this function. Single-arity functions
+    /// have exactly one body. Multi-arity functions have multiple bodies,
+    /// each with different parameter counts.
     Function {
-        /// The compiled bytecode for the function body.
-        chunk: Box<Chunk>,
-        /// Number of fixed parameters the function expects.
-        arity: u8,
+        /// All arity bodies for this function.
+        bodies: Vec<FunctionBodyData>,
         /// Optional function name for debugging and error messages.
         name: Option<String>,
-        /// Whether this function accepts rest arguments.
-        has_rest: bool,
     },
 }
 
@@ -113,17 +139,41 @@ impl fmt::Display for Constant {
                 write!(f, "]")
             }
             Self::Function {
+                ref bodies,
                 ref name,
-                arity,
-                has_rest,
-                ..
             } => {
-                let rest_indicator = if has_rest { "+" } else { "" };
-                match *name {
-                    Some(ref func_name) => {
-                        write!(f, "#<fn {func_name}/{arity}{rest_indicator}>")
+                // Format: #<fn/1,2+> or #<fn name/1,2+>
+                // The + indicates the last body (if variadic) has rest params
+                if bodies.is_empty() {
+                    match *name {
+                        Some(ref func_name) => write!(f, "#<fn {func_name}/?>"),
+                        None => write!(f, "#<fn/?>"),
                     }
-                    None => write!(f, "#<fn/{arity}{rest_indicator}>"),
+                } else if let &[ref body] = bodies.as_slice() {
+                    // Single arity - simpler format
+                    let rest_indicator = if body.has_rest { "+" } else { "" };
+                    match *name {
+                        Some(ref func_name) => {
+                            write!(f, "#<fn {func_name}/{}{rest_indicator}>", body.arity)
+                        }
+                        None => write!(f, "#<fn/{}{rest_indicator}>", body.arity),
+                    }
+                } else {
+                    // Multi-arity - list all arities
+                    match *name {
+                        Some(ref func_name) => write!(f, "#<fn {func_name}/")?,
+                        None => write!(f, "#<fn/")?,
+                    }
+                    for (idx, body) in bodies.iter().enumerate() {
+                        if idx > 0 {
+                            write!(f, ",")?;
+                        }
+                        write!(f, "{}", body.arity)?;
+                        if body.has_rest {
+                            write!(f, "+")?;
+                        }
+                    }
+                    write!(f, ">")
                 }
             }
         }

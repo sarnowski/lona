@@ -217,11 +217,224 @@ fn test_10_4_splice_function_call() {
 // Reference: docs/lonala.md#105-nested-syntax-quote
 // ============================================================================
 
-/// [IGNORED] Spec 10.5: Complex nested quoting
+/// [IGNORED] Spec 10.5: Nested syntax-quote preserves inner quote
 /// Tracking: Complex nested quoting needs additional work
 #[test]
 #[ignore]
-fn test_10_5_nested_syntax_quote() {
-    let mut _ctx = SpecTestContext::new();
-    // Nested syntax-quote tests when fully supported
+fn test_10_5_nested_syntax_quote_inner_literal() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def x 10)").unwrap();
+    // `(a `(b ~x)) - inner ~x should NOT be evaluated, it's quoted
+    ctx.assert_list_len(
+        "`(a `(b ~x))",
+        2,
+        &spec_ref("10.5", "Nested Quote", "outer list has 2 elements"),
+    );
+}
+
+/// [IGNORED] Spec 10.5: Double unquote ~~x
+/// Tracking: Complex nested quoting needs additional work
+#[test]
+#[ignore]
+fn test_10_5_double_unquote() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def x 10)").unwrap();
+    // `(a `(b ~~x)) - double unquote evaluates in outer context
+    // Result should have the evaluated value
+    ctx.assert_list_len(
+        "`(a `(b ~~x))",
+        2,
+        &spec_ref("10.5", "Nested Quote", "double unquote"),
+    );
+}
+
+/// [IGNORED] Spec 10.5: Nested unquote-splicing
+/// Tracking: Complex nested quoting needs additional work
+#[test]
+#[ignore]
+fn test_10_5_nested_unquote_splice() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def xs '(1 2 3))").unwrap();
+    // Nested splicing behavior
+    ctx.assert_list_len(
+        "`(a `(b ~@xs))",
+        2,
+        &spec_ref("10.5", "Nested Quote", "nested unquote-splice"),
+    );
+}
+
+/// [IGNORED] Spec 10.5: Three levels of nesting
+/// Tracking: Complex nested quoting needs additional work
+#[test]
+#[ignore]
+fn test_10_5_three_levels() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def x 10)").unwrap();
+    // ```(~~~x) - three levels deep
+    ctx.assert_list_len(
+        "```(~~~x)",
+        1,
+        &spec_ref("10.5", "Nested Quote", "three levels of nesting"),
+    );
+}
+
+// ============================================================================
+// Section 10.6: Anonymous Function (Planned)
+// Reference: docs/lonala.md#106-anonymous-function
+// ============================================================================
+
+/// [IGNORED] Spec 10.6: #() creates anonymous function
+/// Tracking: Anonymous function reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_6_anonymous_fn_basic() {
+    let mut ctx = SpecTestContext::new();
+    // #(+ % 1) is sugar for (fn [x] (+ x 1))
+    ctx.assert_int(
+        "(#(+ % 1) 5)",
+        6,
+        &spec_ref("10.6", "#()", "basic anonymous function"),
+    );
+}
+
+/// [IGNORED] Spec 10.6: Multiple arguments with %1, %2
+/// Tracking: Anonymous function reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_6_anonymous_fn_multiple_args() {
+    let mut ctx = SpecTestContext::new();
+    // #(+ %1 %2) is sugar for (fn [x y] (+ x y))
+    ctx.assert_int(
+        "(#(+ %1 %2) 3 4)",
+        7,
+        &spec_ref("10.6", "#()", "multiple arguments"),
+    );
+}
+
+/// [IGNORED] Spec 10.6: Rest arguments with %&
+/// Tracking: Anonymous function reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_6_anonymous_fn_rest() {
+    let mut ctx = SpecTestContext::new();
+    // #(apply + %&) is sugar for (fn [& args] (apply + args))
+    ctx.assert_list_len(
+        "(#(list %&) 1 2 3)",
+        1,
+        &spec_ref("10.6", "#()", "rest arguments"),
+    );
+}
+
+// ============================================================================
+// Section 10.7: Var Quote (Planned)
+// Reference: docs/lonala.md#107-var-quote
+// ============================================================================
+
+/// [IGNORED] Spec 10.7: #'symbol returns the var
+/// Tracking: Var quote reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_7_var_quote() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def my-var 42)").unwrap();
+    // #'my-var returns the var object, not the value
+    ctx.assert_map(
+        "(meta #'my-var)",
+        &spec_ref("10.7", "#'", "var quote returns var with metadata"),
+    );
+}
+
+// ============================================================================
+// Section 10.8: Discard (Planned)
+// Reference: docs/lonala.md#108-discard
+// ============================================================================
+
+/// [IGNORED] Spec 10.8: #_ discards the next form
+/// Tracking: Discard reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_8_discard() {
+    let mut ctx = SpecTestContext::new();
+    // #_form reads and discards the form
+    ctx.assert_int(
+        "(+ 1 #_2 3)",
+        4,
+        &spec_ref("10.8", "#_", "discards form, result is 1+3"),
+    );
+}
+
+/// [IGNORED] Spec 10.8: Discard in collection
+/// Tracking: Discard reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_8_discard_in_collection() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_vector_len(
+        "[1 #_2 3 4]",
+        3,
+        &spec_ref("10.8", "#_", "vector has 3 elements after discard"),
+    );
+}
+
+// ============================================================================
+// Section 10.9: Regex Literal (Planned)
+// Reference: docs/lonala.md#109-regex-literal
+// ============================================================================
+
+/// [IGNORED] Spec 10.9: #"pattern" creates compiled regex
+/// Tracking: Regex literal reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_9_regex_literal() {
+    let mut ctx = SpecTestContext::new();
+    // #"\\d+" is sugar for (re-pattern "\\d+")
+    ctx.assert_string(
+        "(re-find #\"\\d+\" \"abc123\")",
+        "123",
+        &spec_ref("10.9", "#\"\"", "regex literal matches digits"),
+    );
+}
+
+// ============================================================================
+// Section 10.10: Metadata (Planned)
+// Reference: docs/lonala.md#1010-metadata
+// ============================================================================
+
+/// [IGNORED] Spec 10.10: ^{:key val} attaches metadata map
+/// Tracking: Metadata reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_10_metadata_map() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_map(
+        "(meta ^{:doc \"A vector\"} [1 2 3])",
+        &spec_ref("10.10", "^", "metadata map attached"),
+    );
+}
+
+/// [IGNORED] Spec 10.10: ^:keyword shorthand for {:keyword true}
+/// Tracking: Metadata reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_10_metadata_keyword() {
+    let mut ctx = SpecTestContext::new();
+    // ^:private expands to ^{:private true}
+    ctx.assert_bool(
+        "(get (meta ^:private 'my-var) :private)",
+        true,
+        &spec_ref("10.10", "^:", "keyword shorthand sets true"),
+    );
+}
+
+/// [IGNORED] Spec 10.10: Multiple metadata items
+/// Tracking: Metadata reader macro not yet implemented
+#[test]
+#[ignore]
+fn test_10_10_metadata_multiple() {
+    let mut ctx = SpecTestContext::new();
+    // ^:private ^:dynamic my-var => ^{:private true :dynamic true} my-var
+    ctx.assert_map(
+        "(meta ^:private ^:dynamic 'my-var)",
+        &spec_ref("10.10", "^:", "multiple metadata items merge"),
+    );
 }

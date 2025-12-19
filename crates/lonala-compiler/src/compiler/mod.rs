@@ -27,17 +27,10 @@ pub mod macros;
 mod quasiquote;
 mod special_forms;
 
-pub use macros::{MacroDefinition, MacroExpander, MacroExpansionError, MacroRegistry};
+pub use macros::{MacroBody, MacroDefinition, MacroExpander, MacroExpansionError, MacroRegistry};
 
 #[cfg(test)]
 mod tests;
-
-/// Result type for parsing `fn` arguments: (optional name, params AST, body expressions).
-type FnArgsResult<'args> = (
-    Option<alloc::string::String>,
-    &'args Spanned<Ast>,
-    &'args [Spanned<Ast>],
-);
 
 /// Tracks local variable bindings across nested scopes.
 ///
