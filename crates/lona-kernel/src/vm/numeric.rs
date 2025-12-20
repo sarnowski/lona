@@ -456,6 +456,71 @@ pub fn integer_to_f64(int_val: &Integer) -> f64 {
     int_val.to_bigint().to_f64().unwrap_or(f64::NAN)
 }
 
+/// Compares two numeric values and returns their ordering.
+///
+/// Returns `Ordering::Equal`, `Ordering::Less`, or `Ordering::Greater`
+/// for comparable numeric values. Returns a `TypeError` for non-numeric types.
+///
+/// Note: NaN comparisons follow IEEE 754 semantics where NaN is unordered
+/// with respect to all values, but this function will return an ordering
+/// based on f64's `partial_cmp` behavior.
+pub fn compare_values(left: &Value, right: &Value) -> Result<core::cmp::Ordering, NativeError> {
+    // Error for NaN comparisons
+    const NAN_ERROR: NativeError = NativeError::Error("cannot compare NaN values");
+
+    match (left, right) {
+        // Integer <=> Integer
+        (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => Ok(lhs.cmp(rhs)),
+
+        // Float <=> Float
+        (&Value::Float(lhs), &Value::Float(rhs)) => lhs.partial_cmp(&rhs).ok_or(NAN_ERROR),
+
+        // Integer <=> Float
+        (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+            let lhs_float = integer_to_f64(lhs);
+            lhs_float.partial_cmp(&rhs).ok_or(NAN_ERROR)
+        }
+        (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+            let rhs_float = integer_to_f64(rhs);
+            lhs.partial_cmp(&rhs_float).ok_or(NAN_ERROR)
+        }
+
+        // Ratio <=> Ratio
+        (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => Ok(lhs.cmp(rhs)),
+
+        // Integer <=> Ratio
+        (&Value::Integer(ref lhs), &Value::Ratio(ref rhs)) => {
+            let lhs_ratio = Ratio::from_integer(lhs.clone());
+            Ok(lhs_ratio.cmp(rhs))
+        }
+        (&Value::Ratio(ref lhs), &Value::Integer(ref rhs)) => {
+            let rhs_ratio = Ratio::from_integer(rhs.clone());
+            Ok(lhs.cmp(&rhs_ratio))
+        }
+
+        // Float <=> Ratio
+        (&Value::Float(lhs), &Value::Ratio(ref rhs)) => {
+            let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+            lhs.partial_cmp(&rhs_float).ok_or(NAN_ERROR)
+        }
+        (&Value::Ratio(ref lhs), &Value::Float(rhs)) => {
+            let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+            lhs_float.partial_cmp(&rhs).ok_or(NAN_ERROR)
+        }
+
+        // Non-numeric types
+        _ => Err(NativeError::TypeError {
+            expected: TypeExpectation::Numeric,
+            got: if left.kind().is_numeric() {
+                right.kind()
+            } else {
+                left.kind()
+            },
+            arg_index: u8::from(left.kind().is_numeric()),
+        }),
+    }
+}
+
 /// Compares two integers using the given float comparison function.
 ///
 /// For integers, we first try to compare using the Integer type's Ord implementation,

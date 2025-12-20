@@ -48,5 +48,6 @@ pub use interpreter::Vm;
 pub use macro_expander::Expander as MacroExpander;
 pub use natives::{
     NativeContext, NativeError, NativeFn, Registry as NativeRegistry, intern_arithmetic_primitives,
-    lookup_arithmetic_primitives, register_arithmetic_primitives,
+    intern_comparison_primitives, lookup_arithmetic_primitives, lookup_comparison_primitives,
+    register_arithmetic_primitives, register_comparison_primitives,
 };

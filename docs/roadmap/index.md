@@ -91,7 +91,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.0.1 | Native Addition and Subtraction | done |
 | 1.0.2 | Native Multiplication and Division | done |
 | 1.0.3 | Modulo | done |
-| 1.0.4 | Comparison - Equality | open |
+| 1.0.4 | Comparison - Equality | done |
 | 1.0.5 | Comparison - Ordering | open |
 
 #### Phase 1.1: Core Value Type Extensions
@@ -100,10 +100,11 @@ This section provides a complete index of all tasks across all milestones. Use t
 |------|------|--------|
 | 1.1.1 | Keyword Value Type | open |
 | 1.1.2 | Set Value Type | open |
-| 1.1.3 | Binary Value Type | open |
-| 1.1.4 | Metadata System - Value Storage | open |
-| 1.1.5 | Metadata System - Reader Syntax | open |
-| 1.1.6 | Metadata System - Compiler Integration | open |
+| 1.1.3 | Collection Literal Syntax | open |
+| 1.1.4 | Binary Value Type | open |
+| 1.1.5 | Metadata System - Value Storage | open |
+| 1.1.6 | Metadata System - Reader Syntax | open |
+| 1.1.7 | Metadata System - Compiler Integration | open |
 
 #### Phase 1.2: Language Feature Completion
 

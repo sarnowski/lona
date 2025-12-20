@@ -289,7 +289,7 @@ This includes: `true`, all numbers (including `0` and `0.0`), all strings (inclu
 
 ## 3.15 Equality
 
-Lonala uses structural equality for most types:
+Lonala uses deep structural equality with Clojure-style semantics:
 
 ```clojure
 (= 1 1)                 ; => true
@@ -298,10 +298,40 @@ Lonala uses structural equality for most types:
 (= {:a 1} {:a 1})       ; => true
 ```
 
-**Special cases**:
-- Numbers of different types can be equal if they represent the same value: `(= 1 1.0)` is `true`
-- `##NaN` is not equal to anything, including itself
-- Functions are compared by identity (same object), not structure
+### 3.15.1 Numeric Equality
+
+Numbers of different types are equal if they represent the same mathematical value:
+
+```clojure
+(= 1 1.0)               ; => true (integer equals float)
+(= 1 1/1)               ; => true (integer equals ratio)
+(= 2.0 4/2)             ; => true (float equals ratio)
+```
+
+This applies recursively within collections:
+
+```clojure
+(= [1] [1.0])           ; => true
+(= {:a 1} {:a 1.0})     ; => true
+```
+
+### 3.15.2 Sequential Equality
+
+Lists and vectors belong to the same "sequential" partition. Two sequences are equal if they have the same elements in the same order, regardless of concrete type:
+
+```clojure
+(= [1 2 3] '(1 2 3))    ; => true (vector equals list)
+(= '(1 2) [1 2])        ; => true (list equals vector)
+```
+
+This follows Clojure semantics where sequential collections are compared by their contents, not their type.
+
+### 3.15.3 Special Cases
+
+- **NaN**: `##NaN` is not equal to anything, including itself: `(= ##NaN ##NaN)` is `false`
+- **NaN in collections**: `(= [##NaN] [##NaN])` is `false` (elements compared with `=`)
+- **Functions**: Compared by identity (same object), not structure
+- **Symbols**: Compared by identity (interned)
 
 ## 3.16 Metadata *(Planned)*
 

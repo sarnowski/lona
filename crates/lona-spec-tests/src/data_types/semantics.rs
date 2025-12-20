@@ -172,7 +172,7 @@ fn test_3_15_nan_equality() {
     );
 }
 
-/// Spec 3.15: Different types are not equal (except numeric)
+/// Spec 3.15: Different types are not equal (except numeric and sequential)
 #[test]
 fn test_3_15_different_types() {
     let mut ctx = SpecTestContext::new();
@@ -182,13 +182,19 @@ fn test_3_15_different_types() {
         &spec_ref("3.15", "Equality", "integer not equal to string"),
     );
     ctx.assert_bool(
-        "(= '(1 2 3) (vector 1 2 3))",
-        false,
-        &spec_ref("3.15", "Equality", "list not equal to vector"),
-    );
-    ctx.assert_bool(
         "(= nil false)",
         false,
         &spec_ref("3.15", "Equality", "nil not equal to false"),
+    );
+}
+
+/// Spec 3.15: Sequential equality (lists and vectors with same elements are equal)
+#[test]
+fn test_3_15_sequential_equality() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= '(1 2 3) (vector 1 2 3))",
+        true,
+        &spec_ref("3.15", "Equality", "list equals vector with same elements"),
     );
 }

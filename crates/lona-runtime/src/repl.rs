@@ -35,7 +35,10 @@ use lona_kernel::vm::introspection::{
     intern_primitives as intern_introspection_primitives,
     register_primitives as register_introspection_primitives,
 };
-use lona_kernel::vm::{Globals, MacroExpander, Vm};
+use lona_kernel::vm::{
+    Globals, MacroExpander, Vm, intern_arithmetic_primitives, intern_comparison_primitives,
+    register_arithmetic_primitives, register_comparison_primitives,
+};
 use lonala_compiler::{MacroRegistry, compile_with_expansion};
 use lonala_human::{Config as FormatConfig, render as render_error};
 
@@ -141,6 +144,8 @@ impl Repl {
         // Pre-intern primitive symbols before creating VM
         let collection_symbols = intern_collection_primitives(&mut self.interner);
         let introspection_symbols = intern_introspection_primitives(&mut self.interner);
+        let arithmetic_symbols = intern_arithmetic_primitives(&mut self.interner);
+        let comparison_symbols = intern_comparison_primitives(&mut self.interner);
 
         // Create a VM for core library initialization
         let mut vm = Vm::new(&self.interner);
@@ -151,6 +156,12 @@ impl Repl {
 
         // Register collection primitives with pre-interned symbols
         register_collection_primitives(&mut vm, &collection_symbols);
+
+        // Register arithmetic primitives (first-class +, -, *, /, mod)
+        register_arithmetic_primitives(&mut vm, &arithmetic_symbols);
+
+        // Register comparison primitives (first-class =, <, >, <=, >=)
+        register_comparison_primitives(&mut vm, &comparison_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
@@ -211,6 +222,8 @@ impl Repl {
         // Pre-intern primitive symbols before creating VM
         let collection_symbols = intern_collection_primitives(&mut self.interner);
         let introspection_symbols = intern_introspection_primitives(&mut self.interner);
+        let arithmetic_symbols = intern_arithmetic_primitives(&mut self.interner);
+        let comparison_symbols = intern_comparison_primitives(&mut self.interner);
 
         // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
@@ -223,6 +236,12 @@ impl Repl {
 
         // Register collection primitives with pre-interned symbols
         register_collection_primitives(&mut vm, &collection_symbols);
+
+        // Register arithmetic primitives (first-class +, -, *, /, mod)
+        register_arithmetic_primitives(&mut vm, &arithmetic_symbols);
+
+        // Register comparison primitives (first-class =, <, >, <=, >=)
+        register_comparison_primitives(&mut vm, &comparison_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);

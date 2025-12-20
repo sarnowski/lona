@@ -26,7 +26,44 @@ Before code review, verify the changes work correctly in the real seL4 environme
 
 4. **Document any issues found** and fix them before proceeding to code review
 
+5. **Report ALL tests to the user** (see format below)
+
 This step ensures the implementation actually works in the target environment, not just in host-based unit tests.
+
+#### REPL Test Reporting (MANDATORY)
+
+After completing manual tests, you MUST present a summary to the user in exactly this format:
+
+```markdown
+## Manual REPL Verification
+
+### Test Results
+
+| # | Expression | Expected | Actual | Status |
+|---|------------|----------|--------|--------|
+| 1 | `(+ 1 2)` | `3` | `3` | ✓ |
+| 2 | `(/ 1 0)` | Error | `Error: Division by zero` | ✓ |
+| ... | ... | ... | ... | ... |
+
+### Expressions for Copy/Paste
+
+​```clojure
+;; Test 1: Basic addition
+(+ 1 2)
+
+;; Test 2: Division by zero error handling
+(/ 1 0)
+
+;; ... additional tests
+​```
+```
+
+**Requirements:**
+- Report EVERY expression you evaluated, not just failures
+- Include the actual REPL output verbatim (do not paraphrase)
+- Use ✓ for passing tests, ✗ for failures
+- Provide a copy-paste block with all expressions so the user can reproduce your tests
+- If any test fails unexpectedly, fix the issue and re-run ALL tests before proceeding
 
 ### Step 2: Invoke Code Review
 

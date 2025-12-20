@@ -297,6 +297,97 @@ fn test_7_2_1_equality_cross_type() {
     );
 }
 
+/// Spec 7.2.1: Cross-type numeric in collections (deep structural equality)
+#[test]
+fn test_7_2_1_equality_collection_cross_type_numeric() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= (vector 1) (vector 1.0))",
+        true,
+        &spec_ref("7.2.1", "=", "vector with cross-type numeric elements"),
+    );
+    ctx.assert_bool(
+        "(= (vector 1 2) (vector 1.0 2.0))",
+        true,
+        &spec_ref("7.2.1", "=", "vector with multiple cross-type elements"),
+    );
+    ctx.assert_bool(
+        "(= '(1) '(1.0))",
+        true,
+        &spec_ref("7.2.1", "=", "list with cross-type numeric elements"),
+    );
+}
+
+/// Spec 7.2.1: List vs Vector equality (sequential partition)
+#[test]
+fn test_7_2_1_equality_list_vs_vector() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= (vector 1 2) '(1 2))",
+        true,
+        &spec_ref("7.2.1", "=", "vector equals list with same elements"),
+    );
+    ctx.assert_bool(
+        "(= '(1 2 3) (vector 1 2 3))",
+        true,
+        &spec_ref("7.2.1", "=", "list equals vector with same elements"),
+    );
+}
+
+/// Spec 7.2.1: Nested collection equality
+#[test]
+fn test_7_2_1_equality_nested_collections() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= (vector (vector 1)) (vector (vector 1.0)))",
+        true,
+        &spec_ref("7.2.1", "=", "nested vectors with cross-type elements"),
+    );
+    ctx.assert_bool(
+        "(= (vector 1 (vector 2 3)) (vector 1.0 (vector 2.0 3.0)))",
+        true,
+        &spec_ref("7.2.1", "=", "deeply nested cross-type"),
+    );
+}
+
+/// Spec 7.2.1: Map equality with semantic values
+#[test]
+fn test_7_2_1_equality_map_values() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= (hash-map 1 2) (hash-map 1 2.0))",
+        true,
+        &spec_ref("7.2.1", "=", "map with cross-type numeric values"),
+    );
+}
+
+/// Spec 7.2.1: NaN in collections
+#[test]
+fn test_7_2_1_equality_nan_in_collections() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= (vector ##NaN) (vector ##NaN))",
+        false,
+        &spec_ref("7.2.1", "=", "NaN in vectors not equal"),
+    );
+}
+
+/// Spec 7.2.1: Different length collections
+#[test]
+fn test_7_2_1_equality_different_lengths() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= (vector 1 2) (vector 1 2 3))",
+        false,
+        &spec_ref("7.2.1", "=", "different length vectors"),
+    );
+    ctx.assert_bool(
+        "(= '(1) '(1 2))",
+        false,
+        &spec_ref("7.2.1", "=", "different length lists"),
+    );
+}
+
 // ============================================================================
 // Section 7.2.2-7.2.5: Comparison Operators (<, >, <=, >=)
 // Reference: docs/lonala.md#722-less-than-
@@ -859,5 +950,225 @@ fn test_7_7_error_attribution_third_arg() {
         "(do (def times *) (times 1 2 true))",
         "arg_index: 2",
         &spec_ref("7.7", "Error", "* third arg error attribution"),
+    );
+}
+
+// ============================================================================
+// Section 7.2.1: Comparison Operator Arity
+// Reference: Clojure semantics - vacuously true for 0 or 1 arguments
+// ============================================================================
+
+/// Spec 7.2.1: Zero-argument comparisons return true (vacuously)
+#[test]
+fn test_7_2_1_comparison_zero_args() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(=)",
+        true,
+        &spec_ref("7.2.1", "=", "zero args returns true"),
+    );
+    ctx.assert_bool(
+        "(<)",
+        true,
+        &spec_ref("7.2.1", "<", "zero args returns true"),
+    );
+    ctx.assert_bool(
+        "(>)",
+        true,
+        &spec_ref("7.2.1", ">", "zero args returns true"),
+    );
+    ctx.assert_bool(
+        "(<=)",
+        true,
+        &spec_ref("7.2.1", "<=", "zero args returns true"),
+    );
+    ctx.assert_bool(
+        "(>=)",
+        true,
+        &spec_ref("7.2.1", ">=", "zero args returns true"),
+    );
+}
+
+/// Spec 7.2.1: One-argument comparisons return true (vacuously)
+#[test]
+fn test_7_2_1_comparison_one_arg() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= 42)",
+        true,
+        &spec_ref("7.2.1", "=", "one arg returns true"),
+    );
+    ctx.assert_bool(
+        "(< 42)",
+        true,
+        &spec_ref("7.2.1", "<", "one arg returns true"),
+    );
+    ctx.assert_bool(
+        "(> 42)",
+        true,
+        &spec_ref("7.2.1", ">", "one arg returns true"),
+    );
+    ctx.assert_bool(
+        "(<= 42)",
+        true,
+        &spec_ref("7.2.1", "<=", "one arg returns true"),
+    );
+    ctx.assert_bool(
+        "(>= 42)",
+        true,
+        &spec_ref("7.2.1", ">=", "one arg returns true"),
+    );
+}
+
+/// Spec 7.2.1: One-argument comparisons evaluate the argument for side effects
+#[test]
+fn test_7_2_1_comparison_one_arg_evaluates() {
+    let mut ctx = SpecTestContext::new();
+    // Verify that the argument is evaluated (def has side effect of creating binding)
+    // After evaluating (= (def x 42)), x should be defined with value 42
+    ctx.eval("(= (def x 42))").unwrap();
+    ctx.assert_int(
+        "x",
+        42,
+        &spec_ref("7.2.1", "=", "one arg evaluates argument"),
+    );
+}
+
+// ============================================================================
+// Section 7.2.1: Multi-argument Equality (=)
+// Reference: docs/lonala.md#721-equality-
+// ============================================================================
+
+/// Spec 7.2.1: Multi-argument equality with all equal values
+#[test]
+fn test_7_2_1_equality_multi_arg_all_equal() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= 1 1 1)",
+        true,
+        &spec_ref("7.2.1", "=", "three equal integers"),
+    );
+    ctx.assert_bool(
+        "(= 1 1 1 1 1)",
+        true,
+        &spec_ref("7.2.1", "=", "five equal integers"),
+    );
+}
+
+/// Spec 7.2.1: Multi-argument equality with not all equal
+#[test]
+fn test_7_2_1_equality_multi_arg_not_equal() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool("(= 1 1 2)", false, &spec_ref("7.2.1", "=", "last differs"));
+    ctx.assert_bool(
+        "(= 1 2 1)",
+        false,
+        &spec_ref("7.2.1", "=", "middle differs"),
+    );
+}
+
+/// Spec 7.2.1: Multi-argument equality with cross-type numeric
+#[test]
+fn test_7_2_1_equality_multi_arg_cross_type() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(= 1 1.0 1)",
+        true,
+        &spec_ref("7.2.1", "=", "mixed int and float all equal"),
+    );
+}
+
+// ============================================================================
+// Section 7.6: First-class Equality (=)
+// Reference: docs/lonala.md (operators as first-class values)
+// ============================================================================
+
+/// `=` can be bound to a variable and called
+#[test]
+fn test_7_6_equality_as_value() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(do (def eq =) (eq 1 1))",
+        true,
+        &spec_ref("7.6", "First-class", "= can be bound and called"),
+    );
+}
+
+/// `=` can be passed to a user-defined higher-order function
+#[test]
+fn test_7_6_equality_passed_to_function() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def apply-pred (fn [p a b] (p a b)))").unwrap();
+    ctx.assert_bool(
+        "(apply-pred = 1 1)",
+        true,
+        &spec_ref("7.6", "First-class", "= passed as argument"),
+    );
+}
+
+/// Bound `=` works with multi-argument calls
+#[test]
+fn test_7_6_equality_bound_multi_arg() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(do (def eq =) (eq 1 1 1))",
+        true,
+        &spec_ref("7.6", "First-class", "bound = with three args"),
+    );
+    ctx.assert_bool(
+        "(do (def eq =) (eq 1 1 2))",
+        false,
+        &spec_ref("7.6", "First-class", "bound = fails when last differs"),
+    );
+}
+
+/// Other comparison operators can be bound and used as first-class values
+#[test]
+fn test_7_6_comparison_operators_as_values() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(do (def lt <) (lt 1 2))",
+        true,
+        &spec_ref("7.6", "First-class", "< can be bound and called"),
+    );
+    ctx.assert_bool(
+        "(do (def gt >) (gt 2 1))",
+        true,
+        &spec_ref("7.6", "First-class", "> can be bound and called"),
+    );
+    ctx.assert_bool(
+        "(do (def le <=) (le 1 1))",
+        true,
+        &spec_ref("7.6", "First-class", "<= can be bound and called"),
+    );
+    ctx.assert_bool(
+        "(do (def ge >=) (ge 2 2))",
+        true,
+        &spec_ref("7.6", "First-class", ">= can be bound and called"),
+    );
+}
+
+/// Multi-argument comparison operators work as first-class functions
+#[test]
+fn test_7_6_comparison_multi_arg_first_class() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(do (def lt <) (lt 1 2 3))",
+        true,
+        &spec_ref("7.6", "First-class", "bound < with three args (ascending)"),
+    );
+    ctx.assert_bool(
+        "(do (def lt <) (lt 1 3 2))",
+        false,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "bound < with three args (not ascending)",
+        ),
+    );
+    ctx.assert_bool(
+        "(do (def gt >) (gt 3 2 1))",
+        true,
+        &spec_ref("7.6", "First-class", "bound > with three args (descending)"),
     );
 }

@@ -240,7 +240,37 @@ Extend the value system with missing fundamental types.
 
 ---
 
-#### Task 1.1.3: Binary Value Type
+#### Task 1.1.3: Collection Literal Syntax
+
+**Description**: Implement compiler support for vector, map, and set literal syntax.
+
+**Dependencies**: Task 1.1.1 (Keywords for map keys), Task 1.1.2 (Set type)
+
+**Files to modify**:
+- `crates/lonala-parser/src/lexer/mod.rs` (add `#` dispatch character)
+- `crates/lonala-compiler/src/compiler/mod.rs` (emit bytecode for literals)
+
+**Requirements**:
+- `[1 2 3]` compiles to vector construction
+- `{:a 1 :b 2}` compiles to hash-map construction
+- `#{1 2 3}` compiles to hash-set construction (requires lexer update for `#` prefix)
+- Empty literals: `[]`, `{}`, `#{}` all work
+- Nested literals: `[{:a [1 2]}]`
+
+**Tests**:
+- Vector literal creates vector
+- Map literal creates hash-map
+- Set literal creates hash-set
+- Empty collection literals
+- Nested collection literals
+- Duplicate key in map literal (error or last-wins)
+- Duplicate element in set literal (error)
+
+**Estimated effort**: 1-2 context windows
+
+---
+
+#### Task 1.1.4: Binary Value Type
 
 **Description**: Add `Binary` for raw byte buffers (mutable, for drivers).
 
@@ -266,7 +296,7 @@ Extend the value system with missing fundamental types.
 
 ---
 
-#### Task 1.1.4: Metadata System - Value Storage
+#### Task 1.1.5: Metadata System - Value Storage
 
 **Description**: Add optional metadata map storage to values that support it.
 
@@ -295,7 +325,7 @@ Extend the value system with missing fundamental types.
 
 ---
 
-#### Task 1.1.5: Metadata System - Reader Syntax
+#### Task 1.1.6: Metadata System - Reader Syntax
 
 **Description**: Add parser support for `^` metadata reader macro.
 
@@ -320,7 +350,7 @@ Extend the value system with missing fundamental types.
 
 ---
 
-#### Task 1.1.6: Metadata System - Compiler Integration
+#### Task 1.1.7: Metadata System - Compiler Integration
 
 **Description**: Integrate metadata into compilation and var definitions.
 

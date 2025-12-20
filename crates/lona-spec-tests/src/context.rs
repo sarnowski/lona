@@ -63,6 +63,7 @@ impl SpecTestContext {
         let introspection_symbols =
             lona_kernel::vm::introspection::intern_primitives(&mut self.interner);
         let arithmetic_symbols = lona_kernel::vm::intern_arithmetic_primitives(&mut self.interner);
+        let comparison_symbols = lona_kernel::vm::intern_comparison_primitives(&mut self.interner);
 
         // Create VM and restore persistent globals
         let mut vm = Vm::new(&self.interner);
@@ -73,6 +74,9 @@ impl SpecTestContext {
 
         // Register arithmetic primitives (first-class + and -)
         lona_kernel::vm::register_arithmetic_primitives(&mut vm, &arithmetic_symbols);
+
+        // Register comparison primitives (first-class =, <, >, <=, >=)
+        lona_kernel::vm::register_comparison_primitives(&mut vm, &comparison_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
