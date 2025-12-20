@@ -31,6 +31,8 @@ impl Display for Value {
             #[cfg(feature = "alloc")]
             Self::Map(ref map) => write!(f, "{map}"),
             #[cfg(feature = "alloc")]
+            Self::Set(ref set) => write!(f, "{set}"),
+            #[cfg(feature = "alloc")]
             Self::Function(ref func) => write!(f, "{func}"),
         }
     }
@@ -133,6 +135,7 @@ impl Display for Displayable<'_> {
             Value::List(ref list) => write!(f, "{}", list.display(self.interner)),
             Value::Vector(ref vector) => write!(f, "{}", vector.display(self.interner)),
             Value::Map(ref map) => write!(f, "{}", map.display(self.interner)),
+            Value::Set(ref set) => write!(f, "{}", set.display(self.interner)),
             Value::Function(ref func) => write!(f, "{func}"),
         }
     }

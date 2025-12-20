@@ -64,6 +64,16 @@ pub fn native_cons(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
             }
             list.cons(element.clone())
         }
+        Value::Set(ref set) => {
+            // Convert set to list, then prepend
+            let mut list = List::empty();
+            let items: Vec<_> = set.iter().collect();
+            // Build list in reverse order since cons prepends
+            for item in items.into_iter().rev() {
+                list = list.cons(item.value().clone());
+            }
+            list.cons(element.clone())
+        }
         Value::Nil => List::empty().cons(element.clone()),
         // All other types are errors (explicit list + wildcard for future variants)
         Value::Bool(_)
@@ -71,8 +81,10 @@ pub fn native_cons(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
         | Value::Float(_)
         | Value::Ratio(_)
         | Value::Symbol(_)
+        | Value::Keyword(_)
         | Value::String(_)
         | Value::Function(_)
+        | Value::NativeFunction(_)
         | _ => {
             return Err(NativeError::TypeError {
                 expected: TypeExpectation::Sequence,
@@ -117,6 +129,12 @@ pub fn native_first(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, N
                 Value::Nil
             }
         }
+        Value::Set(ref set) => {
+            // Get first element of set (order is hash-based, not insertion order)
+            set.iter()
+                .next()
+                .map_or(Value::Nil, |item| item.value().clone())
+        }
         Value::Nil => Value::Nil,
         // All other types are errors (explicit list + wildcard for future variants)
         Value::Bool(_)
@@ -124,8 +142,10 @@ pub fn native_first(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, N
         | Value::Float(_)
         | Value::Ratio(_)
         | Value::Symbol(_)
+        | Value::Keyword(_)
         | Value::String(_)
         | Value::Function(_)
+        | Value::NativeFunction(_)
         | _ => {
             return Err(NativeError::TypeError {
                 expected: TypeExpectation::Sequence,
@@ -183,6 +203,16 @@ pub fn native_rest(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
             }
             list
         }
+        Value::Set(ref set) => {
+            // Get remaining elements as list (order is hash-based)
+            let mut list = List::empty();
+            let mut items: Vec<_> = set.iter().skip(1_usize).collect();
+            items.reverse();
+            for item in items {
+                list = list.cons(item.value().clone());
+            }
+            list
+        }
         Value::Nil => List::empty(),
         // All other types are errors (explicit list + wildcard for future variants)
         Value::Bool(_)
@@ -190,8 +220,10 @@ pub fn native_rest(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
         | Value::Float(_)
         | Value::Ratio(_)
         | Value::Symbol(_)
+        | Value::Keyword(_)
         | Value::String(_)
         | Value::Function(_)
+        | Value::NativeFunction(_)
         | _ => {
             return Err(NativeError::TypeError {
                 expected: TypeExpectation::Sequence,
@@ -237,15 +269,23 @@ pub fn native_concat(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, 
                     result.push(Value::Vector(entry));
                 }
             }
+            Value::Set(ref set) => {
+                // Sets are sequences of their elements
+                for item in set.iter() {
+                    result.push(item.value().clone());
+                }
+            }
             Value::Nil => {} // Empty sequence, skip
-            // All other types are errors
+            // All other types are errors (explicit list + wildcard for future variants)
             Value::Bool(_)
             | Value::Integer(_)
             | Value::Float(_)
             | Value::Ratio(_)
             | Value::Symbol(_)
+            | Value::Keyword(_)
             | Value::String(_)
             | Value::Function(_)
+            | Value::NativeFunction(_)
             | _ => {
                 return Err(NativeError::TypeError {
                     expected: TypeExpectation::Sequence,

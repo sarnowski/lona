@@ -81,6 +81,50 @@ impl Compiler<'_, '_, '_> {
     }
 
     // =========================================================================
+    // Collection Literals
+    // =========================================================================
+
+    /// Compiles a set literal.
+    ///
+    /// Set literals are compiled as calls to the `hash-set` function.
+    /// For example, `#{1 2 3}` compiles to `(hash-set 1 2 3)`.
+    pub(super) fn compile_set(
+        &mut self,
+        elements: &[lonala_parser::Spanned<lonala_parser::Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        // Allocate contiguous registers: R_base = hash-set fn, R_base+1..N = elements
+        let base = self.next_register;
+
+        // Load the `hash-set` native function into base register
+        let hash_set_sym = self.interner.intern("hash-set");
+        let dest = self.alloc_register(span)?;
+        let const_idx = self.add_constant(Constant::Symbol(hash_set_sym), span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
+
+        // Compile each element into consecutive registers
+        for element in elements {
+            let _element_result = self.compile_expr(element)?;
+            // Elements are automatically placed in consecutive registers
+        }
+
+        // Emit call instruction
+        let arg_count = u8::try_from(elements.len()).map_err(|_err| {
+            Error::new(crate::error::Kind::TooManyRegisters, self.location(span))
+        })?;
+
+        self.chunk
+            .emit(encode_abc(Opcode::Call, base, arg_count, 1), span);
+
+        // Result is left in base register
+        // Free element registers
+        self.free_registers_to(base.saturating_add(1));
+
+        Ok(ExprResult { register: base })
+    }
+
+    // =========================================================================
     // Symbol Compilation
     // =========================================================================
 

@@ -104,7 +104,7 @@ Maps are written with curly braces containing alternating keys and values:
 {"key" "value"} ; string keys
 ```
 
-### 4.5.4 Set Literals *(Planned)*
+### 4.5.4 Set Literals
 
 Sets are written with `#{}`:
 
@@ -145,8 +145,6 @@ Keywords begin with a colon:
 :bar-baz
 :ns/qualified
 ```
-
-> **Note**: Keywords are parsed but full keyword semantics are planned for future implementation.
 
 ---
 

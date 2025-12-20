@@ -55,7 +55,7 @@ This document provides a detailed, task-level breakdown of the Lona operating sy
 
 | # | Milestone | Summary |
 |---|-----------|---------|
-| 1 | [Rust Foundation](milestone-01-rust-foundation.md) | Complete all Rust code for the runtime: VM with processes, garbage collection, domain isolation, and all native primitives. After this milestone, no new Rust code should be needed for the runtime. |
+| 1 | [Rust Foundation](milestone-01-rust-foundation.md) | Complete all Rust code for the runtime: VM with processes, garbage collection, domain isolation, condition/restart system, debug infrastructure (Two-Mode Architecture), and all native primitives. After this milestone, no new Rust code should be needed for the runtime. |
 | 2 | [Lonala Standard Library](milestone-02-lonala-standard-library.md) | Implement complete standard library in Lonala: test framework, core functions (map/filter/reduce), control flow macros, collections, protocols, strings, process patterns (GenServer, Supervisor), and lazy sequences. Enables self-hosting via `eval` and `load`. |
 | 3 | [UART Driver](milestone-03-uart-driver.md) | Implement abstract UART driver in Lonala with platform implementations for ARM64 (PL011) and x86_64 (16550). First driver running in isolated domain with capability-controlled MMIO access. |
 | 4 | [Init System](milestone-04-init-system.md) | Implement Lonala init system that bootstraps the OS: platform detection, driver supervision tree, and Rust-to-Lonala handoff. Establishes the root supervision hierarchy for all system services. |
@@ -99,7 +99,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | Task | Name | Status |
 |------|------|--------|
 | 1.1.1 | Keyword Value Type | done |
-| 1.1.2 | Set Value Type | open |
+| 1.1.2 | Set Value Type | done |
 | 1.1.3 | Collection Literal Syntax | open |
 | 1.1.4 | Binary Value Type | open |
 | 1.1.5 | Metadata System - Value Storage | open |
@@ -245,7 +245,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.10.4 | Restart Registry | open |
 | 1.10.5 | `restart-case` Macro | open |
 | 1.10.6 | `invoke-restart` Function | open |
-| 1.10.7 | Debugger Integration | open |
+| 1.10.7 | Basic Condition REPL Integration | open |
 
 #### Phase 1.11: Introspection System
 
@@ -258,6 +258,22 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.11.5 | Domain Introspection | open |
 | 1.11.6 | Tracing Infrastructure | open |
 | 1.11.7 | Hot Code Propagation | open |
+
+#### Phase 1.12: Debug Infrastructure
+
+| Task | Name | Status |
+|------|------|--------|
+| 1.12.1 | Process Debug State | open |
+| 1.12.2 | Debug Attach/Detach | open |
+| 1.12.3 | Panic Behavior in Debug Mode | open |
+| 1.12.4 | Stack Frame Reification | open |
+| 1.12.5 | In-Frame Evaluation | open |
+| 1.12.6 | Debug Control Operations | open |
+| 1.12.7 | Breakpoint Infrastructure | open |
+| 1.12.8 | Breakpoint via Dispatch Table | open |
+| 1.12.9 | Trace-to-Break Upgrade | open |
+| 1.12.10 | Debugger REPL Integration | open |
+| 1.12.11 | Supervisor Debug Awareness | open |
 
 ---
 

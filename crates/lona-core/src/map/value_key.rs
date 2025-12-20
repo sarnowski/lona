@@ -20,7 +20,7 @@ use super::Map;
 /// A wrapper around `Value` that implements `Ord` for use as map keys.
 ///
 /// The ordering is defined as:
-/// `Nil < Bool < Integer < Float < Ratio < Symbol < Keyword < String < List < Vector < Map`
+/// `Nil < Bool < Integer < Float < Ratio < Symbol < Keyword < String < List < Vector < Map < Set`
 ///
 /// Within each type, natural ordering is used.
 #[derive(Clone, Debug)]
@@ -62,8 +62,9 @@ impl ValueKey {
             Value::List(_) => 8,
             Value::Vector(_) => 9,
             Value::Map(_) => 10,
-            Value::Function(_) => 11,
-            Value::NativeFunction(_) => 12,
+            Value::Set(_) => 11,
+            Value::Function(_) => 12,
+            Value::NativeFunction(_) => 13,
         }
     }
 }
@@ -111,6 +112,9 @@ impl Ord for ValueKey {
             (&Value::List(ref left), &Value::List(ref right)) => compare_lists(left, right),
             (&Value::Vector(ref left), &Value::Vector(ref right)) => compare_vectors(left, right),
             (&Value::Map(ref left), &Value::Map(ref right)) => compare_maps(left, right),
+            (&Value::Set(ref left), &Value::Set(ref right)) => {
+                crate::set::compare_sets(left, right)
+            }
             // Nil and any other same-type comparisons
             _ => Ordering::Equal,
         }

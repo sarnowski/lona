@@ -210,13 +210,144 @@ Template quoting with unquote support.
 
 See [Reader Macros](reader-macros.md) for details on unquote operators.
 
-## 6.8 Process Termination *(Planned)*
+## 6.8 Condition System *(Planned)*
 
-For truly unrecoverable errors—bugs, invariant violations, fatal hardware failures—Lonala provides `panic!` to terminate the current process immediately.
+Lonala provides a condition system inspired by Common Lisp that separates error detection from error handling. Unlike exceptions that immediately unwind the stack, conditions preserve full context and allow recovery.
 
-### 6.8.1 `panic!` *(Planned)*
+### 6.8.1 `signal` *(Planned)*
 
-Terminates the current process with an error reason.
+Signals a condition without unwinding the stack.
+
+**Syntax**: `(signal type data)`
+
+**Parameters**:
+- `type` — A keyword identifying the condition type
+- `data` — A map of contextual information
+
+**Behavior**:
+- Searches for a handler established by `handler-bind`
+- If handler found, calls it with the condition
+- Handler can invoke a restart, re-signal, or return
+- If no handler or handler returns, execution continues
+
+```clojure
+;; Signal a condition
+(signal :file-not-found {:path "/etc/config"})
+
+;; Signal with rich context
+(signal :validation-failed {:field :email
+                             :value "not-an-email"
+                             :reason "Invalid format"})
+```
+
+### 6.8.2 `restart-case` *(Planned)*
+
+Establishes restarts around a protected expression.
+
+**Syntax**:
+```clojure
+(restart-case expr
+  (restart-name [params*] description? body*)
+  ...)
+```
+
+**Parameters**:
+- `expr` — The expression to protect
+- `restart-name` — Keyword naming the restart
+- `params` — Parameters accepted by the restart
+- `description` — Optional string describing the restart
+- `body` — Code to execute if restart is invoked
+
+**Returns**: Value of `expr` or the invoked restart's body
+
+```clojure
+(defn read-config [path]
+  (restart-case
+    (if (file-exists? path)
+      (parse-config (slurp path))
+      (signal :file-not-found {:path path}))
+
+    (:retry []
+      "Try reading the file again"
+      (read-config path))
+
+    (:use-default []
+      "Use default configuration"
+      default-config)
+
+    (:use-value [config]
+      "Provide a configuration value"
+      config)))
+```
+
+### 6.8.3 `handler-bind` *(Planned)*
+
+Establishes handlers for conditions.
+
+**Syntax**:
+```clojure
+(handler-bind
+  [condition-type handler-fn]*
+  body*)
+```
+
+**Parameters**:
+- `condition-type` — Keyword matching condition types
+- `handler-fn` — Function called when matching condition signaled
+- `body` — Expressions to evaluate with handlers active
+
+**Handler Function**:
+- Receives the condition as argument
+- Can call `(invoke-restart restart-name args*)` to recover
+- Can re-signal or signal a different condition
+- If returns normally, condition is considered unhandled
+
+```clojure
+(handler-bind
+  [:file-not-found
+   (fn [condition]
+     (if (= (:path condition) "/etc/critical.conf")
+       (invoke-restart :use-default)
+       (invoke-restart :retry)))]
+
+  [:validation-failed
+   (fn [condition]
+     (log/warn "Validation failed" condition)
+     (invoke-restart :use-value nil))]
+
+  (start-application))
+```
+
+### 6.8.4 `invoke-restart` *(Planned)*
+
+Invokes a restart established by `restart-case`.
+
+**Syntax**: `(invoke-restart restart-name args*)`
+
+**Parameters**:
+- `restart-name` — Keyword naming the restart to invoke
+- `args` — Arguments passed to the restart
+
+**Behavior**: Transfers control to the restart, passing arguments.
+
+```clojure
+;; Invoke restart without arguments
+(invoke-restart :use-default)
+
+;; Invoke restart with arguments
+(invoke-restart :use-value {:timeout 5000})
+
+;; Invoke retry
+(invoke-restart :retry)
+```
+
+## 6.9 Process Termination *(Planned)*
+
+For truly unrecoverable errors—bugs, invariant violations, fatal hardware failures—Lonala provides `panic!`.
+
+### 6.9.1 `panic!` *(Planned)*
+
+Signals an unrecoverable condition.
 
 **Syntax**: `(panic! message)` or `(panic! message data)`
 
@@ -224,11 +355,12 @@ Terminates the current process with an error reason.
 - `message` — A string describing what went wrong
 - `data` — Optional map of contextual information
 
-**Behavior**:
-- Immediately terminates the current process
-- The process exits with reason `{:panic {:message msg :data data}}`
-- **Cannot be caught** — this is intentional
-- Linked processes and supervisors receive the exit signal
+**Behavior depends on debug mode** (see [Two-Mode Architecture](debugging.md#two-mode-architecture)):
+
+| Mode | Behavior |
+|------|----------|
+| **Production** (default) | Terminates process immediately, supervisor restarts |
+| **Debug** (attached) | Pauses process, presents debugger UI with restarts |
 
 ```clojure
 ;; Invariant violation (bug)
@@ -253,7 +385,46 @@ Terminates the current process with an error reason.
     data))
 ```
 
-### 6.8.2 When to Use `panic!`
+### 6.9.2 Production Mode Behavior
+
+In production mode (no debugger attached):
+- Process exits with reason `{:panic {:message msg :data data}}`
+- Linked processes receive exit signal
+- Supervisor applies restart strategy
+
+```clojure
+;; Supervisor restarts crashed workers
+(def-supervisor my-workers
+  :strategy :one-for-one
+  :children
+  [{:id :worker-1 :start worker/start}
+   {:id :worker-2 :start worker/start}])
+
+;; If worker-1 panics, supervisor restarts only worker-1
+```
+
+### 6.9.3 Debug Mode Behavior
+
+In debug mode (debugger attached):
+- Execution pauses at the panic point
+- Debugger presents the error, stack, and available restarts
+- User can inspect locals, evaluate expressions
+- User chooses: continue (if possible), step, or crash
+
+```
+╭─ PROCESS BREAK ─────────────────────────────────────────────────╮
+│ Panic: User must have an ID                                     │
+│ Data: {:user {:name "Alice"}}                                   │
+╰──────────────────────────────────────────────────────────────────╯
+
+Restarts:
+  [1] :abort      - Crash process, trigger supervisor restart
+  [2] :continue   - Continue execution (may cause further errors)
+
+proc-debug[0]> _
+```
+
+### 6.9.4 When to Use `panic!`
 
 | Situation | Use `panic!`? | Instead |
 |-----------|---------------|---------|
@@ -266,27 +437,11 @@ Terminates the current process with an error reason.
 | Data corruption | Yes | — |
 | Hardware unrecoverable | Yes | — |
 
-**Rule of thumb**: If the error indicates a bug in the code or an unrecoverable external condition, use `panic!`. If the error is an expected possible outcome, return an error tuple.
+**Rule of thumb**: If the error indicates a bug or unrecoverable condition, use `panic!`. If the error is an expected possible outcome, return an error tuple.
 
-### 6.8.3 Recovery via Supervision
+See [Error Handling](error-handling.md) for the complete error handling philosophy.
 
-Processes terminated by `panic!` are restarted by their supervisor:
-
-```clojure
-;; Supervisor restarts crashed workers
-(def-supervisor my-workers
-  :strategy :one-for-one
-  :children
-  [{:id :worker-1 :start worker/start}
-   {:id :worker-2 :start worker/start}])
-
-;; If worker-1 panics, supervisor restarts only worker-1
-;; Other workers continue unaffected
-```
-
-See [Concurrency](concurrency.md) for supervision details.
-
-### 6.8.4 `assert!` *(Planned)*
+### 6.9.5 `assert!` *(Planned)*
 
 Convenience macro for invariant checking.
 
@@ -303,6 +458,63 @@ Convenience macro for invariant checking.
 (assert! (> n 0))
 (assert! (valid-state? state) "Invalid state transition")
 ```
+
+---
+
+## 6.10 `receive` *(Planned)*
+
+Pattern-matched message receive for process mailboxes.
+
+**Syntax**: `(receive pattern1 result1 pattern2 result2 ... (after timeout timeout-result)?)`
+
+**Parameters**:
+- `pattern` — A pattern to match against incoming messages
+- `result` — Expression to evaluate when pattern matches
+- `timeout` — Optional timeout in milliseconds
+- `timeout-result` — Expression to evaluate if timeout is reached
+
+**Returns**: The value of the matched result expression, or the timeout-result
+
+**Semantics**: Blocks the current process until a message arrives in its mailbox that matches one of the patterns. When a match is found, the corresponding result expression is evaluated with any pattern bindings in scope. If an `after` clause is provided and no matching message arrives within the timeout, the timeout-result is evaluated.
+
+`receive` is a **special form** (not a function) because it involves pattern matching and blocking semantics handled by the compiler.
+
+```clojure
+;; Simple message handling
+(receive
+  {:type :greeting :text text}
+    (print "Got greeting:" text)
+  {:type :shutdown}
+    (exit :normal))
+
+;; With timeout
+(receive
+  {:type :response :data data}
+    {:ok data}
+  (after 5000
+    {:error :timeout}))
+
+;; In a server loop
+(defn server-loop [state]
+  (receive
+    {:type :get :from pid}
+      (do
+        (send pid {:type :response :value state})
+        (server-loop state))
+    {:type :set :value new-state}
+      (server-loop new-state)
+    {:type :stop}
+      :ok))
+```
+
+**Pattern Matching**: Patterns in `receive` support:
+- Literal values: `:ok`, `42`, `"hello"`
+- Binding symbols: `x`, `data`, `pid`
+- Maps: `{:type :greeting :text text}`
+- Vectors: `[first second & rest]`
+- Nested patterns: `{:user {:name name :id id}}`
+
+See [Concurrency](concurrency.md) (Planned) for more details on the process model and message passing.
 
 ---
 

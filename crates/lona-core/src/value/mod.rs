@@ -18,6 +18,8 @@ use crate::map::Map;
 #[cfg(feature = "alloc")]
 use crate::ratio::Ratio;
 #[cfg(feature = "alloc")]
+use crate::set::Set;
+#[cfg(feature = "alloc")]
 use crate::string::HeapStr;
 use crate::symbol;
 #[cfg(feature = "alloc")]
@@ -75,6 +77,9 @@ pub enum Kind {
     /// Immutable map type.
     #[cfg(feature = "alloc")]
     Map,
+    /// Immutable set type.
+    #[cfg(feature = "alloc")]
+    Set,
     /// Compiled function type.
     #[cfg(feature = "alloc")]
     Function,
@@ -104,6 +109,8 @@ impl Kind {
             Self::Vector => "vector",
             #[cfg(feature = "alloc")]
             Self::Map => "map",
+            #[cfg(feature = "alloc")]
+            Self::Set => "set",
             #[cfg(feature = "alloc")]
             Self::Function => "function",
             Self::NativeFunction => "native-function",
@@ -139,6 +146,7 @@ impl Kind {
                         | (Self::List, Self::List)
                         | (Self::Vector, Self::Vector)
                         | (Self::Map, Self::Map)
+                        | (Self::Set, Self::Set)
                         | (Self::Function, Self::Function)
                 )
             }
@@ -159,7 +167,9 @@ impl Kind {
             Self::Ratio => true,
             Self::Nil | Self::Bool | Self::Symbol | Self::Keyword | Self::NativeFunction => false,
             #[cfg(feature = "alloc")]
-            Self::String | Self::List | Self::Vector | Self::Map | Self::Function => false,
+            Self::String | Self::List | Self::Vector | Self::Map | Self::Set | Self::Function => {
+                false
+            }
         }
     }
 
@@ -172,14 +182,18 @@ impl Kind {
         matches!(self, Self::Integer | Self::Float)
     }
 
-    /// Returns true if this is a sequence type (list, vector, string, or map).
+    /// Returns true if this is a sequence type (list, vector, string, map, or set).
     ///
     /// Maps are sequences of `[key, value]` pairs, following Clojure semantics.
+    /// Sets are sequences of their elements.
     #[cfg(feature = "alloc")]
     #[inline]
     #[must_use]
     pub const fn is_sequence(self) -> bool {
-        matches!(self, Self::List | Self::Vector | Self::String | Self::Map)
+        matches!(
+            self,
+            Self::List | Self::Vector | Self::String | Self::Map | Self::Set
+        )
     }
 
     /// Returns true if this is a callable type (function or native function).
@@ -237,6 +251,9 @@ pub enum Value {
     /// Immutable map (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     Map(Map),
+    /// Immutable set (requires `alloc` feature).
+    #[cfg(feature = "alloc")]
+    Set(Set),
     /// Compiled function (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     Function(Function),
@@ -269,6 +286,8 @@ impl Value {
             Self::Vector(_) => Kind::Vector,
             #[cfg(feature = "alloc")]
             Self::Map(_) => Kind::Map,
+            #[cfg(feature = "alloc")]
+            Self::Set(_) => Kind::Set,
             #[cfg(feature = "alloc")]
             Self::Function(_) => Kind::Function,
             Self::NativeFunction(_) => Kind::NativeFunction,
@@ -309,6 +328,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -331,6 +351,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -376,6 +397,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -398,6 +420,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -428,6 +451,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -457,6 +481,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -487,6 +512,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -517,6 +543,7 @@ impl Value {
             | Self::String(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -547,6 +574,7 @@ impl Value {
             | Self::String(_)
             | Self::List(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -577,6 +605,38 @@ impl Value {
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
+            | Self::Set(_)
+            | Self::Function(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `Set`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_set(&self) -> bool {
+        matches!(self, Self::Set(_))
+    }
+
+    /// Returns a reference to the contained set if this is a `Set` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_set(&self) -> Option<&Set> {
+        match *self {
+            Self::Set(ref set) => Some(set),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Symbol(_)
+            | Self::Keyword(_)
+            | Self::NativeFunction(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
             | Self::Function(_) => None,
         }
     }
@@ -607,7 +667,8 @@ impl Value {
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
-            | Self::Map(_) => None,
+            | Self::Map(_)
+            | Self::Set(_) => None,
         }
     }
 
@@ -636,6 +697,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Set(_)
             | Self::Function(_) => None,
         }
     }
@@ -674,6 +736,8 @@ impl PartialEq for Value {
             #[cfg(feature = "alloc")]
             (&Self::Map(ref left), &Self::Map(ref right)) => left == right,
             #[cfg(feature = "alloc")]
+            (&Self::Set(ref left), &Self::Set(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
             (&Self::Function(ref left), &Self::Function(ref right)) => left == right,
             _ => false,
         }
@@ -708,6 +772,8 @@ impl Hash for Value {
             Self::Vector(ref vector) => vector.hash(state),
             #[cfg(feature = "alloc")]
             Self::Map(ref map) => map.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::Set(ref set) => set.hash(state),
             #[cfg(feature = "alloc")]
             Self::Function(ref func) => func.hash(state),
         }

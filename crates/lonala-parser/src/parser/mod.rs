@@ -132,6 +132,7 @@ impl<'src> Parser<'src> {
             TokenKind::LeftParen => self.parse_list(trivia_start),
             TokenKind::LeftBracket => self.parse_vector(trivia_start),
             TokenKind::LeftBrace => self.parse_map(trivia_start),
+            TokenKind::SetStart => self.parse_set(trivia_start),
 
             // Reader macros
             TokenKind::Quote => self.parse_reader_macro("quote", trivia_start),
@@ -196,6 +197,30 @@ impl<'src> Parser<'src> {
 
         Ok(Self::spanned_with_trivia(
             Ast::map(elements),
+            span,
+            trivia_start,
+        ))
+    }
+
+    /// Parses a set `#{...}`.
+    fn parse_set(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
+        let (elements, span) =
+            self.parse_collection(TokenKind::SetStart, TokenKind::RightBrace, '#', '}')?;
+
+        // Check for duplicate AST nodes (O(n²) but n is typically small)
+        for (i, elem) in elements.iter().enumerate() {
+            for prev in elements.iter().take(i) {
+                if elem.node == prev.node {
+                    return Err(Error::new(
+                        ErrorKind::DuplicateSetElement,
+                        self.location(elem.span),
+                    ));
+                }
+            }
+        }
+
+        Ok(Self::spanned_with_trivia(
+            Ast::set(elements),
             span,
             trivia_start,
         ))
@@ -352,6 +377,7 @@ impl<'src> Parser<'src> {
             TokenKind::LeftParen
             | TokenKind::LeftBracket
             | TokenKind::LeftBrace
+            | TokenKind::SetStart
             | TokenKind::RightParen
             | TokenKind::RightBracket
             | TokenKind::RightBrace

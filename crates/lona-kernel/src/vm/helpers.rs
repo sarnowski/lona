@@ -117,7 +117,27 @@ pub fn values_equal(left: &Value, right: &Value) -> bool {
         // Map equality (recursive value comparison)
         (&Value::Map(ref left_map), &Value::Map(ref right_map)) => maps_equal(left_map, right_map),
 
+        // Set equality (order-independent, semantic value comparison)
+        (&Value::Set(ref left_set), &Value::Set(ref right_set)) => sets_equal(left_set, right_set),
+
         // Different types are not equal
         _ => false,
     }
+}
+
+/// Compares two sets for equality with semantic value comparison.
+///
+/// Two sets are equal if they have the same size and all elements in one set
+/// are semantically equal to elements in the other set.
+fn sets_equal(left: &lona_core::set::Set, right: &lona_core::set::Set) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    // For each element in left, check it exists in right
+    for item in left.iter() {
+        if !right.contains(item.value()) {
+            return false;
+        }
+    }
+    true
 }

@@ -40,8 +40,7 @@ build/release-x86_64/
 # For 8GB model (default)
 make release-rpi4b
 
-# For specific RAM variants
-make release-rpi4b-8gb
+# For 4GB model
 make release-rpi4b-4gb
 ```
 

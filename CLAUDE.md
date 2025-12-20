@@ -251,7 +251,7 @@ Requires Docker and GNU Make 4.0+ (on macOS: `brew install make`, use `gmake`).
 ```bash
 make docker          # Build Docker development image (first time only)
 make build           # Create bootable QEMU image
-make run             # Run in QEMU (includes build)
+make run-arm64       # Run in QEMU (includes build)
 make test            # Full verification: fmt, clippy, unit tests, build, integration tests
 make clean           # Remove build artifacts
 make shell           # Interactive Docker shell for debugging

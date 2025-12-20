@@ -477,19 +477,17 @@ M0 (Foundation)
 
 **Rationale**: This infrastructure enables consistent human-readable output across all user-facing components. It must be completed before any editor integration.
 
-> **Cross-Reference**: The core foundation work for this milestone (source tracking, error types, `lonala-human` crate, and REPL integration) has been implemented as part of the **Standardized Error Handling** initiative. See [`PLAN.md`](./PLAN.md) for implementation details and current status.
+> **Status (verified 2025-12-20)**: The core foundation work has been completed as part of the **Standardized Error Handling** initiative.
 >
-> **Completed via PLAN.md**:
-> - Task 0.1 (Source Tracking) → PLAN.md Tasks 1.1, 2.1, 3.1, 4.1
-> - Task 0.4 (Compiler Source Tracking) → PLAN.md Tasks 3.1, 3.2
-> - Task 0.5 (lonala-human Crate) → PLAN.md Tasks 1.3, 5.1-5.5
-> - Task 0.6 (REPL Integration) → PLAN.md Tasks 6.1, 6.2
+> **Completed**:
+> - Task 0.1 (Source Tracking) - `SourceId`, `SourceRegistry` implemented
+> - Task 0.2 (Parser API) - Parser accepts `SourceId`, errors include `SourceLocation`
+> - Task 0.3 (Full Span Tracking) - `Spanned<T>` has `full_span`, parser uses `trivia_start()` (20+ tests)
+> - Task 0.4 (Compiler Source Tracking) - Compiler errors include `SourceLocation`
+> - Task 0.5 (lonala-human Crate) - Error formatting with context lines
+> - Task 0.6 (REPL Integration) - REPL uses `lonala-human` for output
 >
-> **Remaining work in this plan**: Task 0.7 (Foundation Tests)
->
-> **Additionally completed** (verified 2025-12-20):
-> - Task 0.2 (Parser API) → Parser accepts `SourceId`, errors include `SourceLocation`
-> - Task 0.3 (Full Span Tracking) → `Spanned<T>` has `full_span`, parser uses `trivia_start()` (20+ tests in `full_span_tests.rs`)
+> **Remaining**: Task 0.7 (Foundation Tests)
 
 ### 5.1 Tasks
 
@@ -577,10 +575,10 @@ impl SourceRegistry {
 ```
 
 **Acceptance criteria**:
-- [x] `SourceId`, `SourceLocation`, `Source`, `SourceRegistry` implemented *(PLAN.md Task 1.1)*
-- [x] All types are `no_std` + `alloc` compatible *(PLAN.md Task 1.1)*
-- [x] Unit tests for registry operations *(PLAN.md Task 1.1)*
-- [x] Documentation with examples *(PLAN.md Task 1.1)*
+- [x] `SourceId`, `SourceLocation`, `Source`, `SourceRegistry` implemented
+- [x] All types are `no_std` + `alloc` compatible
+- [x] Unit tests for registry operations
+- [x] Documentation with examples
 
 ---
 
@@ -783,9 +781,9 @@ impl Error {
 ```
 
 **Acceptance criteria**:
-- [x] All compiler errors include `SourceLocation` *(PLAN.md Tasks 3.1, 3.2)*
-- [x] Existing tests updated and passing *(PLAN.md Tasks 3.1, 3.2)*
-- [x] Error kinds remain structured (no human text) *(PLAN.md Tasks 3.1, 3.2)*
+- [x] All compiler errors include `SourceLocation`
+- [x] Existing tests updated and passing
+- [x] Error kinds remain structured (no human text)
 
 ---
 
@@ -1118,12 +1116,12 @@ pub fn is_builtin(name: &str) -> bool {
 ```
 
 **Acceptance criteria**:
-- [x] `lonala-human` crate created with `no_std` + `alloc` support *(PLAN.md Task 1.3)*
-- [x] `LineIndex` correctly converts offsets to line/column *(PLAN.md Task 1.3)*
-- [x] `format_parse_error` produces properly formatted error messages *(PLAN.md Tasks 5.2, 5.3)*
-- [x] `format_compile_error` produces properly formatted error messages *(PLAN.md Tasks 5.2, 5.4)*
+- [x] `lonala-human` crate created with `no_std` + `alloc` support
+- [x] `LineIndex` correctly converts offsets to line/column
+- [x] `format_parse_error` produces properly formatted error messages
+- [x] `format_compile_error` produces properly formatted error messages
 - [ ] Documentation functions return correct content *(partially done)*
-- [x] Unit tests for all formatting functions *(PLAN.md Tasks 5.1-5.5)*
+- [x] Unit tests for all formatting functions
 
 ---
 
@@ -1147,10 +1145,10 @@ fn handle_parse_error(&self, error: ParseError) {
 ```
 
 **Acceptance criteria**:
-- [x] REPL uses `lonala-human` for error messages *(PLAN.md Tasks 6.1, 6.2)*
-- [x] Error messages include source location (`<repl>:1:5`) *(PLAN.md Tasks 6.1, 6.2)*
-- [x] Error messages include source context and underline *(PLAN.md Tasks 6.1, 6.2)*
-- [x] All existing REPL functionality preserved *(PLAN.md Tasks 6.1, 6.2)*
+- [x] REPL uses `lonala-human` for error messages
+- [x] Error messages include source location (`<repl>:1:5`)
+- [x] Error messages include source context and underline
+- [x] All existing REPL functionality preserved
 
 ---
 
@@ -1173,7 +1171,7 @@ fn handle_parse_error(&self, error: ParseError) {
 6. `full_source()` returns exact original text
 
 **Acceptance criteria**:
-- [ ] All tests pass *(see PLAN.md Tasks 8.1, 8.2 for integration tests)*
+- [ ] All tests pass
 - [ ] Edge cases covered (empty input, unicode, CRLF line endings)
 - [ ] Error messages match expected Rust-style format
 - [ ] Tests run in both `std` and `no_std` environments
@@ -1182,12 +1180,12 @@ fn handle_parse_error(&self, error: ParseError) {
 
 ### 5.2 Milestone 0 Deliverables
 
-- [x] Source tracking in `lona-core` (`SourceId`, `SourceRegistry`) *(PLAN.md Task 1.1)*
+- [x] Source tracking in `lona-core` (`SourceId`, `SourceRegistry`)
 - [x] Parser updated with `full_span` tracking *(Task 0.3 - verified 2025-12-20)*
-- [x] Compiler updated for source tracking *(PLAN.md Tasks 3.1, 3.2)*
-- [x] `lonala-human` crate with error formatting and documentation *(PLAN.md Tasks 1.3, 5.1-5.5)*
-- [x] REPL updated to use `lonala-human` *(PLAN.md Tasks 6.1, 6.2)*
-- [ ] Comprehensive test coverage *(PLAN.md Tasks 8.1, 8.2 - OPEN)*
+- [x] Compiler updated for source tracking
+- [x] `lonala-human` crate with error formatting and documentation
+- [x] REPL updated to use `lonala-human`
+- [ ] Comprehensive test coverage
 
 ---
 

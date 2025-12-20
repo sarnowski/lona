@@ -46,6 +46,11 @@ Lonala is the programming language for the Lona operating system. It combines Cl
 12. [Namespaces](namespaces.md) - `ns`, `require`, qualified references *(Planned)*
 13. [Concurrency](concurrency.md) - Processes, message passing, supervision *(Planned)*
 
+### Error Handling and Debugging
+
+14. [Error Handling](error-handling.md) - Result tuples vs conditions, when to use each
+15. [Debugging](debugging.md) - Two-Mode Architecture, breakpoints, process debugging
+
 ### Appendices
 
 - [Appendix A: Grammar](appendices/grammar.md) - Formal EBNF grammar

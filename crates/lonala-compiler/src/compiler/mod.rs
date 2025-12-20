@@ -319,6 +319,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
                 },
                 self.location(expr.span),
             )),
+            Ast::Set(ref elements) => self.compile_set(elements, expr.span),
 
             // Handle future Ast variants (Ast is #[non_exhaustive])
             _ => Err(Error::new(

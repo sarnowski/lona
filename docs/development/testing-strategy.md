@@ -365,7 +365,7 @@ This pattern enables testing scheduler logic, process management, and memory alg
 ```bash
 make build    # Create bootable QEMU image
 make test     # Full verification: fmt, clippy, unit tests, build, integration tests
-make run      # Interactive QEMU session
+make run-arm64      # Interactive QEMU session
 ```
 
 ### Development Workflow

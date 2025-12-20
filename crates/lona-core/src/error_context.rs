@@ -38,6 +38,9 @@ pub enum TypeExpectation {
     Symbol,
     /// Any type that supports ordering (numeric types or string).
     Comparable,
+    /// Any collection type that supports `conj` (list, vector, set, or nil).
+    #[cfg(feature = "alloc")]
+    Collection,
 }
 
 impl TypeExpectation {
@@ -56,6 +59,8 @@ impl TypeExpectation {
             Self::Boolean => "boolean",
             Self::Symbol => "symbol",
             Self::Comparable => "comparable type (number or string)",
+            #[cfg(feature = "alloc")]
+            Self::Collection => "collection (list, vector, set, or nil)",
         }
     }
 
@@ -81,6 +86,11 @@ impl TypeExpectation {
             Self::Comparable => kind.is_numeric() || kind.eq_const(value::Kind::String),
             #[cfg(not(feature = "alloc"))]
             Self::Comparable => kind.is_numeric(),
+            #[cfg(feature = "alloc")]
+            Self::Collection => matches!(
+                kind,
+                value::Kind::List | value::Kind::Vector | value::Kind::Set | value::Kind::Nil
+            ),
         }
     }
 }

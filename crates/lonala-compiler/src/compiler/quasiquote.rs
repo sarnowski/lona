@@ -113,6 +113,14 @@ impl Compiler<'_, '_, '_> {
                 self.location(ast.span),
             )),
 
+            // Handle sets (basic support)
+            Ast::Set(ref _elements) => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "quasiquoted sets",
+                },
+                self.location(ast.span),
+            )),
+
             // Atoms: wrap in (quote ...)
             Ast::Integer(_)
             | Ast::Float(_)

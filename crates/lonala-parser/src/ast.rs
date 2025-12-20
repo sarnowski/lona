@@ -48,6 +48,8 @@ pub enum Ast {
     Vector(Vec<Spanned<Self>>),
     /// Map `{...}` - key-value pairs (must have even number of elements).
     Map(Vec<Spanned<Self>>),
+    /// Set `#{...}` - unique elements, no duplicates allowed.
+    Set(Vec<Spanned<Self>>),
 }
 
 impl Ast {
@@ -121,6 +123,13 @@ impl Ast {
         Self::Map(elements)
     }
 
+    /// Creates a set AST node.
+    #[inline]
+    #[must_use]
+    pub const fn set(elements: Vec<Spanned<Self>>) -> Self {
+        Self::Set(elements)
+    }
+
     /// Returns a human-readable type name for this AST node.
     #[inline]
     #[must_use]
@@ -136,6 +145,7 @@ impl Ast {
             Self::List(_) => "list",
             Self::Vector(_) => "vector",
             Self::Map(_) => "map",
+            Self::Set(_) => "set",
         }
     }
 }
@@ -185,6 +195,16 @@ impl fmt::Display for Ast {
             }
             Self::Map(ref elements) => {
                 write!(f, "{{")?;
+                for (idx, elem) in elements.iter().enumerate() {
+                    if idx > 0_usize {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", elem.node)?;
+                }
+                write!(f, "}}")
+            }
+            Self::Set(ref elements) => {
+                write!(f, "#{{")?;
                 for (idx, elem) in elements.iter().enumerate() {
                     if idx > 0_usize {
                         write!(f, " ")?;

@@ -29,6 +29,8 @@ pub enum Kind {
     LeftBrace,
     /// Right brace `}`.
     RightBrace,
+    /// Set start `#{`.
+    SetStart,
 
     // Literals
     /// Integer literal (e.g., `42`, `-17`, `0xFF`, `0b1010`, `0o755`).
@@ -73,6 +75,7 @@ impl Kind {
             Self::RightBracket => "right bracket",
             Self::LeftBrace => "left brace",
             Self::RightBrace => "right brace",
+            Self::SetStart => "set start",
             Self::Integer => "integer",
             Self::Float => "float",
             Self::String => "string",

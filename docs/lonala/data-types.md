@@ -116,7 +116,7 @@ ns/name       ; qualified symbol (namespace/name)
 - May contain: alphanumerics, `*`, `+`, `!`, `-`, `_`, `'`, `?`, `<`, `>`, `=`, `/`
 - The `/` character separates namespace from name in qualified symbols
 
-## 3.6 Keyword *(Planned)*
+## 3.6 Keyword
 
 Keywords begin with a colon and evaluate to themselves. They are typically used as map keys and for enumeration values.
 
@@ -130,8 +130,6 @@ Keywords begin with a colon and evaluate to themselves. They are typically used 
 - **Self-evaluating**: Keywords evaluate to themselves
 - **Interned**: Fast equality comparison via identity
 - **Common use**: Map keys, option flags, enumeration values
-
-> **Note**: Keywords are currently parsed but not yet represented as values. Full keyword semantics are planned for a future phase.
 
 ## 3.7 String
 
@@ -226,7 +224,7 @@ Immutable associative collections mapping keys to values.
 - **Any key type**: Keys can be any value that supports equality
 - **O(log32 n)**: Lookup, insertion, and update
 
-## 3.12 Set *(Planned)*
+## 3.12 Set
 
 Immutable unordered collections of unique elements.
 

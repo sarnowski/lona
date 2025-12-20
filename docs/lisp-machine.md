@@ -73,6 +73,38 @@ The synthesis: a system where **processes are isolated by hardware-enforced capa
 - **Presentation types**: The semantic output concept may come later; the foundation comes first
 - **Persistent images**: Lona emphasizes source files and reproducible builds over saved images
 
+### The Two-Mode Architecture
+
+A tension exists between the LISP machine philosophy ("errors are opportunities for exploration") and the BEAM/OTP philosophy ("let it crash, supervisor restarts"). Lona resolves this through **Two-Mode Architecture**:
+
+| Mode | Trigger | Behavior | Use Case |
+|------|---------|----------|----------|
+| **Production** (default) | Normal operation | Errors crash process, supervisor restarts | Server workloads |
+| **Debug** (attached) | Debugger attached | Errors pause process, user inspects | Live troubleshooting |
+
+**Production Mode** is the default for server-side, non-interactive applications:
+- `panic!` and unhandled conditions terminate the process
+- Supervisor detects exit and applies restart strategy
+- System self-heals without human intervention
+
+**Debug Mode** activates when a developer attaches a debugger to a specific process:
+- `panic!` and unhandled conditions **pause** instead of crash
+- Full stack inspection, local variable access, in-frame evaluation available
+- Developer chooses: fix and continue, step through, or "crash now" (let supervisor handle)
+
+This architecture ensures:
+- **No compromise on resilience**: Unattended systems run pure BEAM/OTP patterns
+- **No compromise on debuggability**: When attached, full LISP-machine power available
+- **Per-process granularity**: Debug one process while others run normally
+- **seL4 capability control**: Debug attachment requires explicit capability
+
+The condition/restart system (inspired by Common Lisp) provides the unified API for both modes:
+- Library code signals conditions and defines restarts
+- In production: default handler invokes `:abort` → crash → supervisor restarts
+- In debug: default handler invokes debugger → shows options → user chooses
+
+See [Debugging](lonala/debugging.md) for complete specification.
+
 ## The Lona REPL
 
 The REPL is Lona's primary user interface. It is not merely a read-eval-print loop but the control surface for the entire system.

@@ -63,6 +63,8 @@ pub enum Kind {
     },
     /// Map literal has an odd number of elements.
     OddMapEntries,
+    /// Set literal contains a duplicate element.
+    DuplicateSetElement,
     /// Reader macro not followed by an expression.
     ReaderMacroMissingExpr,
 }
@@ -84,6 +86,7 @@ impl Kind {
             Self::UnmatchedDelimiter { .. } => "UnmatchedDelimiter",
             Self::UnexpectedEof { .. } => "UnexpectedEof",
             Self::OddMapEntries => "OddMapEntries",
+            Self::DuplicateSetElement => "DuplicateSetElement",
             Self::ReaderMacroMissingExpr => "ReaderMacroMissingExpr",
         }
     }
@@ -121,6 +124,9 @@ impl fmt::Display for Kind {
             }
             Self::OddMapEntries => {
                 write!(f, "map literal must have an even number of elements")
+            }
+            Self::DuplicateSetElement => {
+                write!(f, "set literal contains duplicate element")
             }
             Self::ReaderMacroMissingExpr => {
                 write!(f, "reader macro must be followed by an expression")

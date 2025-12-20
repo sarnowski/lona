@@ -88,6 +88,13 @@ pub fn ast_to_value(ast: &Spanned<Ast>, interner: &mut symbol::Interner) -> Valu
 
             Value::Map(Map::from_pairs(pairs))
         }
+        Ast::Set(ref elements) => {
+            let values: Vec<Value> = elements
+                .iter()
+                .map(|elem| ast_to_value(elem, interner))
+                .collect();
+            Value::Set(lona_core::set::Set::from_values(values))
+        }
         // Ast::Nil and any future variants (non-exhaustive enum) become Value::Nil
         Ast::Nil | _ => Value::Nil,
     }
@@ -170,6 +177,13 @@ pub fn value_to_ast(
                 elements.push(value_to_ast(value, interner, source_id, span)?);
             }
             Ast::Map(elements)
+        }
+        Value::Set(ref set) => {
+            let elements: Result<Vec<Spanned<Ast>>, Error> = set
+                .iter()
+                .map(|key| value_to_ast(key.value(), interner, source_id, span))
+                .collect();
+            Ast::Set(elements?)
         }
         Value::Function(ref _func) => {
             return Err(Error::new(

@@ -12,10 +12,8 @@ use crate::{SpecTestContext, spec_ref};
 // Reference: docs/lonala.md#312-set
 // ============================================================================
 
-/// [IGNORED] Spec 3.12: Set literal syntax
-/// Tracking: Set type not yet implemented
+/// Spec 3.12: Set literal syntax
 #[test]
-#[ignore]
 fn test_3_12_set_literal() {
     let mut ctx = SpecTestContext::new();
     // Set literals use #{} syntax
@@ -26,24 +24,23 @@ fn test_3_12_set_literal() {
     );
 }
 
-/// [IGNORED] Spec 3.12: Sets automatically remove duplicates
-/// Tracking: Set type not yet implemented
+/// Spec 3.12: Sets automatically remove duplicates
+///
+/// Note: Set literals with duplicates are rejected at parse time (DuplicateSetElement error).
+/// To test duplicate handling at runtime, we use the `hash-set` function instead.
 #[test]
-#[ignore]
 fn test_3_12_set_duplicate_removed() {
     let mut ctx = SpecTestContext::new();
-    // #{1 2 2 3} => #{1 2 3}
+    // Runtime duplicate handling via hash-set
     ctx.assert_bool(
-        "(= #{1 2 2 3} #{1 2 3})",
+        "(= (hash-set 1 2 2 3) #{1 2 3})",
         true,
         &spec_ref("3.12", "Set", "duplicates are automatically removed"),
     );
 }
 
-/// [IGNORED] Spec 3.12: Set equality (unordered)
-/// Tracking: Set type not yet implemented
+/// Spec 3.12: Set equality (unordered)
 #[test]
-#[ignore]
 fn test_3_12_set_equality() {
     let mut ctx = SpecTestContext::new();
     // Sets with same elements are equal regardless of order
@@ -59,10 +56,8 @@ fn test_3_12_set_equality() {
     );
 }
 
-/// [IGNORED] Spec 3.12: Empty set
-/// Tracking: Set type not yet implemented
+/// Spec 3.12: Empty set
 #[test]
-#[ignore]
 fn test_3_12_empty_set() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -77,10 +72,8 @@ fn test_3_12_empty_set() {
     );
 }
 
-/// [IGNORED] Spec 3.12: Set membership test
-/// Tracking: Set type not yet implemented
+/// Spec 3.12: Set membership test
 #[test]
-#[ignore]
 fn test_3_12_set_contains() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -95,10 +88,8 @@ fn test_3_12_set_contains() {
     );
 }
 
-/// [IGNORED] Spec 3.12: Sets can contain mixed types
-/// Tracking: Set type not yet implemented
+/// Spec 3.12: Sets can contain mixed types
 #[test]
-#[ignore]
 fn test_3_12_set_mixed_types() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -108,10 +99,8 @@ fn test_3_12_set_mixed_types() {
     );
 }
 
-/// [IGNORED] Spec 3.12: conj adds element to set
-/// Tracking: Set type not yet implemented
+/// Spec 3.12: conj adds element to set
 #[test]
-#[ignore]
 fn test_3_12_set_conj() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -126,10 +115,8 @@ fn test_3_12_set_conj() {
     );
 }
 
-/// [IGNORED] Spec 3.12: disj removes element from set
-/// Tracking: Set type not yet implemented
+/// Spec 3.12: disj removes element from set
 #[test]
-#[ignore]
 fn test_3_12_set_disj() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -144,10 +131,27 @@ fn test_3_12_set_disj() {
     );
 }
 
-/// [IGNORED] Spec 3.12: set? predicate
-/// Tracking: Type predicates not fully exposed yet
+/// Spec 3.12: Parser rejects duplicate elements in set literals
+///
+/// The parser correctly rejects set literals with duplicate elements at parse time.
+/// This test demonstrates that `#{1 2 2 3}` produces a DuplicateSetElement error.
 #[test]
-#[ignore]
+fn test_3_12_set_literal_duplicate_rejected() {
+    let mut ctx = SpecTestContext::new();
+    // This should produce a parse error (DuplicateSetElement), not silently deduplicate
+    ctx.assert_error_contains(
+        "#{1 2 2 3}",
+        "DuplicateSetElement",
+        &spec_ref(
+            "3.12",
+            "Set",
+            "set literals reject duplicates at parse time",
+        ),
+    );
+}
+
+/// Spec 3.12: set? predicate
+#[test]
 fn test_3_12_set_predicate() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -155,8 +159,9 @@ fn test_3_12_set_predicate() {
         true,
         &spec_ref("3.12", "Set", "set? returns true for set"),
     );
+    // Note: Using `(vector ...)` since vector literals aren't implemented yet
     ctx.assert_bool(
-        "(set? [1 2 3])",
+        "(set? (vector 1 2 3))",
         false,
         &spec_ref("3.12", "Set", "set? returns false for vector"),
     );

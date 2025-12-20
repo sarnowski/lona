@@ -975,6 +975,94 @@ Lona provides LISP-machine-style debugging capabilities: the ability to inspect,
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### The Two-Mode Architecture
+
+Lona targets server-side, non-interactive applications as its primary use case. In production, systems must be self-healing without human intervention. Yet when developers or administrators need to troubleshoot, they require full LISP-machine-style debugging power.
+
+These seemingly conflicting requirements are resolved through a **Two-Mode Architecture** that treats debuggability as a runtime state:
+
+| Mode | Trigger | Behavior | Use Case |
+|------|---------|----------|----------|
+| **Production Mode** (default) | Normal operation | Errors crash process, supervisor restarts | Server workloads |
+| **Debug Mode** | Debugger attached | Errors pause process, user inspects | Live troubleshooting |
+
+**Production Mode** (no debugger attached):
+- `panic!` and unhandled conditions crash the process
+- Supervisor detects the crash and restarts according to its strategy
+- System self-heals without human intervention
+- Pure BEAM/OTP resilience pattern
+
+**Debug Mode** (debugger attached to a specific process):
+- `panic!` and unhandled conditions **pause** the process instead of crashing
+- The debugger presents the condition, available restarts, and full stack
+- Developer can inspect locals, evaluate expressions in any frame, hot-patch functions
+- Developer chooses: continue execution, step through code, or "crash now" (let supervisor handle)
+
+```clojure
+;; Attach debugger to a running process
+lona> (debug-attach 1042)
+Debugger attached to :worker-1 (pid=1042)
+Process will pause on errors instead of crashing.
+
+;; Later, when an error occurs in that process:
+╭─ PROCESS BREAK: :worker-1 (pid=1042) ───────────────────────────╮
+│ Division by zero                                                 │
+│ Process paused. Other processes continue running.                │
+╰──────────────────────────────────────────────────────────────────╯
+
+Restarts:
+  [1] :abort      - Abort and trigger supervisor restart
+  [2] :use-value  - Return a substitute value
+  [3] :retry      - Retry with different arguments
+
+proc-debug[0]> l                    ; show locals
+╭─ Locals in frame 0 ─────────────────────────────────────────────╮
+│ a = 10                                                           │
+│ b = 0                                                            │
+╰──────────────────────────────────────────────────────────────────╯
+
+proc-debug[0]> e                    ; evaluate in frame
+eval[0]> (set! b 2)                 ; fix the bug
+2
+eval[0]> (exit)
+
+proc-debug[0]> 3                    ; retry with fixed value
+5                                   ; 10 / 2 = 5, process continues!
+```
+
+This architecture ensures:
+- **No compromise on resilience**: Unattended systems run pure BEAM/OTP patterns
+- **No compromise on debuggability**: When attached, full LISP-machine power available
+- **Per-process granularity**: Debug one process while others run normally
+- **seL4 capability control**: Debug attachment requires explicit capability
+
+### Pattern-Matching Breakpoints
+
+In a message-passing system, traditional line-number breakpoints are less useful than semantic breakpoints. Lona supports breakpoints triggered by pattern matching:
+
+```clojure
+;; Break when function returns an error
+(break-on-return fetch-data {:error _})
+
+;; Break when function is called with specific arguments
+(break-on-call process-request [{:user "admin" & _}])
+
+;; Break when process receives specific message
+(break-on-receive {:type :shutdown :reason reason}
+                  :when (not= reason :normal))
+```
+
+Breakpoints can also be non-blocking traces (inspired by Erlang's `:dbg`):
+
+```clojure
+;; Trace without pausing - useful for timing-sensitive debugging
+(trace-on-return api/handle-request {:error _}
+                 :action :log)
+
+;; Upgrade a trace to a breakpoint on the fly
+(trace-to-break trace-id)
+```
+
 ### The REPL
 
 The Read-Eval-Print Loop is the primary interface to a Lona system:

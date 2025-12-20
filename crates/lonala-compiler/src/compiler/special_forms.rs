@@ -434,6 +434,12 @@ impl Compiler<'_, '_, '_> {
                 },
                 self.location(ast.span),
             )),
+            Ast::Set(_) => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "quoted sets",
+                },
+                self.location(ast.span),
+            )),
             // Ast is non-exhaustive, handle future variants
             _ => Err(Error::new(
                 ErrorKind::NotImplemented {

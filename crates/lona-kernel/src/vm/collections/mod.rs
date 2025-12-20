@@ -31,10 +31,14 @@ use super::interpreter::Vm;
 
 mod list_ops;
 mod map_ops;
+mod set_ops;
 mod vector_ops;
 
 pub use list_ops::{native_concat, native_cons, native_first, native_list, native_rest};
 pub use map_ops::native_hash_map;
+pub use set_ops::{
+    native_conj, native_contains_p, native_count, native_disj, native_hash_set, native_set_p,
+};
 pub use vector_ops::{native_vec, native_vector};
 
 #[cfg(test)]
@@ -42,7 +46,20 @@ mod tests;
 
 /// The names of all collection primitives.
 pub const PRIMITIVE_NAMES: &[&str] = &[
-    "cons", "first", "rest", "vector", "hash-map", "list", "concat", "vec",
+    "cons",
+    "first",
+    "rest",
+    "vector",
+    "hash-map",
+    "list",
+    "concat",
+    "vec",
+    "hash-set",
+    "disj",
+    "set?",
+    "conj",
+    "contains?",
+    "count",
 ];
 
 /// Pre-interns all collection primitive symbols.
@@ -86,10 +103,16 @@ pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
         native_list,
         native_concat,
         native_vec,
+        native_hash_set,
+        native_disj,
+        native_set_p,
+        native_conj,
+        native_contains_p,
+        native_count,
     ];
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
         vm.register_native(*sym, *func);
-        vm.set_global(*sym, Value::Symbol(*sym));
+        vm.set_global(*sym, Value::NativeFunction(*sym));
     }
 }

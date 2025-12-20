@@ -60,6 +60,7 @@ impl Diagnostic for Error {
                 format!("unexpected end of input, expected {expected}")
             }
             Kind::OddMapEntries => String::from("map literal must have an even number of elements"),
+            Kind::DuplicateSetElement => String::from("set literal contains duplicate element"),
             Kind::ReaderMacroMissingExpr => {
                 String::from("reader macro must be followed by an expression")
             }

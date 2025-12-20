@@ -1,5 +1,5 @@
 # Macros
-> **Status**: The macro system is fully functional. `defmacro` (single and multi-arity), macro expansion at compile time, and introspection (`macro?`, `macroexpand-1`, `macroexpand`) are all implemented. Only `gensym` is pending.
+> **Status**: The macro system is implemented. `defmacro` (single and multi-arity), macro expansion at compile time, and introspection (`macro?`, `macroexpand-1`, `macroexpand`) are all working. `gensym` support is pending, which means hygienic macros require manual naming conventions for now.
 
 Macros enable compile-time code transformation. They receive unevaluated code as data and return new code to be compiled.
 

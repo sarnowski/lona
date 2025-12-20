@@ -16,6 +16,7 @@
 //! - [`list`] - Cons-cell linked lists (requires `alloc` feature)
 //! - [`map`] - Immutable maps using HAMT (requires `alloc` feature)
 //! - [`ratio`] - Exact rational numbers (requires `alloc` feature)
+//! - [`set`] - Immutable sets using HAMT (requires `alloc` feature)
 //! - [`source`] - Source tracking for error reporting (requires `alloc` feature)
 //! - [`string`] - Immutable reference-counted strings (requires `alloc` feature)
 //! - [`symbol`] - Symbol interning for efficient identifier handling
@@ -46,6 +47,8 @@ pub mod opcode;
 mod pvec;
 #[cfg(feature = "alloc")]
 pub mod ratio;
+#[cfg(feature = "alloc")]
+pub mod set;
 #[cfg(feature = "alloc")]
 pub mod source;
 pub mod span;
