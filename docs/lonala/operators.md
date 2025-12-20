@@ -73,13 +73,13 @@ Returns the remainder of dividing x by y.
 
 ## 7.2 Comparison Operators
 
-All comparison operators return boolean values.
+All comparison operators return boolean values. Ordering operators (`<`, `>`, `<=`, `>=`) support both numeric types and strings, using lexicographic ordering for strings.
 
 ### 7.2.1 Equality: `=`
 
-**Syntax**: `(= x y)`
+**Syntax**: `(= x y)` or `(= x y z ...)`
 
-Returns `true` if x and y are equal.
+Returns `true` if all arguments are equal. With 0 or 1 arguments, returns `true` (vacuously).
 
 ```clojure
 (= 1 1)         ; => true
@@ -87,54 +87,93 @@ Returns `true` if x and y are equal.
 (= "a" "a")     ; => true
 (= [1 2] [1 2]) ; => true
 (= 1 1.0)       ; => true (numeric equality)
+(= 1 1 1)       ; => true (multi-argument)
+(=)             ; => true (vacuously)
+(= 42)          ; => true (vacuously)
 ```
 
 ### 7.2.2 Less Than: `<`
 
-**Syntax**: `(< x y)`
+**Syntax**: `(< x y)` or `(< x y z ...)`
 
-Returns `true` if x is less than y.
+Returns `true` if arguments are in strictly increasing order. Supports numbers and strings.
 
 ```clojure
+;; Numeric comparison
 (< 1 2)         ; => true
 (< 2 1)         ; => false
 (< 1 1)         ; => false
+
+;; String comparison (lexicographic)
+(< "a" "b")     ; => true
+(< "apple" "banana") ; => true
+(< "A" "a")     ; => true (UTF-8 byte order)
+
+;; Multi-argument chaining
+(< 1 2 3)       ; => true (all increasing)
+(< "a" "b" "c") ; => true
+(< 1 3 2)       ; => false (3 > 2 breaks chain)
 ```
 
 ### 7.2.3 Greater Than: `>`
 
-**Syntax**: `(> x y)`
+**Syntax**: `(> x y)` or `(> x y z ...)`
 
-Returns `true` if x is greater than y.
+Returns `true` if arguments are in strictly decreasing order. Supports numbers and strings.
 
 ```clojure
+;; Numeric comparison
 (> 2 1)         ; => true
 (> 1 2)         ; => false
 (> 1 1)         ; => false
+
+;; String comparison (lexicographic)
+(> "b" "a")     ; => true
+(> "z" "a")     ; => true
+
+;; Multi-argument chaining
+(> 3 2 1)       ; => true (all decreasing)
 ```
 
 ### 7.2.4 Less Than or Equal: `<=`
 
-**Syntax**: `(<= x y)`
+**Syntax**: `(<= x y)` or `(<= x y z ...)`
 
-Returns `true` if x is less than or equal to y.
+Returns `true` if arguments are in non-decreasing order. Supports numbers and strings.
 
 ```clojure
 (<= 1 2)        ; => true
 (<= 1 1)        ; => true
 (<= 2 1)        ; => false
+(<= "a" "a")    ; => true
+(<= "a" "b")    ; => true
 ```
 
 ### 7.2.5 Greater Than or Equal: `>=`
 
-**Syntax**: `(>= x y)`
+**Syntax**: `(>= x y)` or `(>= x y z ...)`
 
-Returns `true` if x is greater than or equal to y.
+Returns `true` if arguments are in non-increasing order. Supports numbers and strings.
 
 ```clojure
 (>= 2 1)        ; => true
 (>= 1 1)        ; => true
 (>= 1 2)        ; => false
+(>= "b" "a")    ; => true
+(>= "a" "a")    ; => true
+```
+
+### 7.2.6 Type Requirements
+
+Ordering operators require all arguments to be the same comparable type:
+- All numeric (Integer, Float, Ratio can be mixed)
+- All strings
+
+Mixing numbers and strings produces a type error:
+
+```clojure
+(< 1 "a")       ; => ERROR: cannot compare Integer and String
+(< "a" 1)       ; => ERROR: cannot compare String and Integer
 ```
 
 ## 7.3 Bitwise Operators *(Planned)*

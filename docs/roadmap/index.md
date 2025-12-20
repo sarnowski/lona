@@ -92,7 +92,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.0.2 | Native Multiplication and Division | done |
 | 1.0.3 | Modulo | done |
 | 1.0.4 | Comparison - Equality | done |
-| 1.0.5 | Comparison - Ordering | open |
+| 1.0.5 | Comparison - Ordering | done |
 
 #### Phase 1.1: Core Value Type Extensions
 

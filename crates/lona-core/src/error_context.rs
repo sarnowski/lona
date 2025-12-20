@@ -36,6 +36,8 @@ pub enum TypeExpectation {
     Boolean,
     /// Symbol type specifically required.
     Symbol,
+    /// Any type that supports ordering (numeric types or string).
+    Comparable,
 }
 
 impl TypeExpectation {
@@ -53,6 +55,7 @@ impl TypeExpectation {
             Self::Callable => "callable",
             Self::Boolean => "boolean",
             Self::Symbol => "symbol",
+            Self::Comparable => "comparable type (number or string)",
         }
     }
 
@@ -74,6 +77,10 @@ impl TypeExpectation {
             Self::Callable => false,
             Self::Boolean => kind.eq_const(value::Kind::Bool),
             Self::Symbol => kind.eq_const(value::Kind::Symbol),
+            #[cfg(feature = "alloc")]
+            Self::Comparable => kind.is_numeric() || kind.eq_const(value::Kind::String),
+            #[cfg(not(feature = "alloc"))]
+            Self::Comparable => kind.is_numeric(),
         }
     }
 }
@@ -168,6 +175,23 @@ mod tests {
         assert!(!exp.matches(value::Kind::Integer));
     }
 
+    #[cfg(feature = "alloc")]
+    #[test]
+    fn type_expectation_comparable_matches() {
+        let exp = TypeExpectation::Comparable;
+        // Numeric types are comparable
+        assert!(exp.matches(value::Kind::Integer));
+        assert!(exp.matches(value::Kind::Float));
+        assert!(exp.matches(value::Kind::Ratio));
+        // String is comparable
+        assert!(exp.matches(value::Kind::String));
+        // Other types are not comparable
+        assert!(!exp.matches(value::Kind::Bool));
+        assert!(!exp.matches(value::Kind::Nil));
+        assert!(!exp.matches(value::Kind::List));
+        assert!(!exp.matches(value::Kind::Vector));
+    }
+
     #[test]
     fn type_expectation_description() {
         assert_eq!(
@@ -177,6 +201,10 @@ mod tests {
         assert_eq!(TypeExpectation::Numeric.description(), "numeric type");
         assert_eq!(TypeExpectation::Sequence.description(), "sequence type");
         assert_eq!(TypeExpectation::Callable.description(), "callable");
+        assert_eq!(
+            TypeExpectation::Comparable.description(),
+            "comparable type (number or string)"
+        );
     }
 
     #[test]

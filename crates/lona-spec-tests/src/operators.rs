@@ -438,6 +438,203 @@ fn test_7_2_5_greater_than_or_equal() {
 }
 
 // ============================================================================
+// Section 7.2.6: String Ordering Comparison
+// Reference: docs/lonala/operators.md#722-less-than-
+// ============================================================================
+
+/// Spec 7.2.2: Less than for strings (lexicographic)
+#[test]
+fn test_7_2_2_less_than_strings() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(< \"a\" \"b\")",
+        true,
+        &spec_ref("7.2.2", "<", "a < b lexicographic"),
+    );
+    ctx.assert_bool(
+        "(< \"A\" \"a\")",
+        true,
+        &spec_ref("7.2.2", "<", "A < a (UTF-8 byte order)"),
+    );
+    ctx.assert_bool(
+        "(< \"apple\" \"banana\")",
+        true,
+        &spec_ref("7.2.2", "<", "apple < banana"),
+    );
+    ctx.assert_bool(
+        "(< \"a\" \"a\")",
+        false,
+        &spec_ref("7.2.2", "<", "a < a is false"),
+    );
+    ctx.assert_bool(
+        "(< \"b\" \"a\")",
+        false,
+        &spec_ref("7.2.2", "<", "b < a is false"),
+    );
+    ctx.assert_bool(
+        "(< \"\" \"a\")",
+        true,
+        &spec_ref("7.2.2", "<", "empty string < a"),
+    );
+}
+
+/// Spec 7.2.3: Greater than for strings (lexicographic)
+#[test]
+fn test_7_2_3_greater_than_strings() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(> \"b\" \"a\")",
+        true,
+        &spec_ref("7.2.3", ">", "b > a lexicographic"),
+    );
+    ctx.assert_bool(
+        "(> \"a\" \"A\")",
+        true,
+        &spec_ref("7.2.3", ">", "a > A (UTF-8 byte order)"),
+    );
+    ctx.assert_bool(
+        "(> \"banana\" \"apple\")",
+        true,
+        &spec_ref("7.2.3", ">", "banana > apple"),
+    );
+    ctx.assert_bool(
+        "(> \"a\" \"a\")",
+        false,
+        &spec_ref("7.2.3", ">", "a > a is false"),
+    );
+    ctx.assert_bool(
+        "(> \"a\" \"\")",
+        true,
+        &spec_ref("7.2.3", ">", "a > empty string"),
+    );
+}
+
+/// Spec 7.2.4: Less than or equal for strings
+#[test]
+fn test_7_2_4_less_than_or_equal_strings() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool("(<= \"a\" \"b\")", true, &spec_ref("7.2.4", "<=", "a <= b"));
+    ctx.assert_bool(
+        "(<= \"a\" \"a\")",
+        true,
+        &spec_ref("7.2.4", "<=", "a <= a (equal)"),
+    );
+    ctx.assert_bool(
+        "(<= \"b\" \"a\")",
+        false,
+        &spec_ref("7.2.4", "<=", "b <= a is false"),
+    );
+}
+
+/// Spec 7.2.5: Greater than or equal for strings
+#[test]
+fn test_7_2_5_greater_than_or_equal_strings() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool("(>= \"b\" \"a\")", true, &spec_ref("7.2.5", ">=", "b >= a"));
+    ctx.assert_bool(
+        "(>= \"a\" \"a\")",
+        true,
+        &spec_ref("7.2.5", ">=", "a >= a (equal)"),
+    );
+    ctx.assert_bool(
+        "(>= \"a\" \"b\")",
+        false,
+        &spec_ref("7.2.5", ">=", "a >= b is false"),
+    );
+}
+
+/// Spec 7.2: Multi-argument string chaining
+#[test]
+fn test_7_2_comparison_chained_strings() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(< \"a\" \"b\" \"c\")",
+        true,
+        &spec_ref("7.2", "<", "a < b < c chain"),
+    );
+    ctx.assert_bool(
+        "(< \"a\" \"c\" \"b\")",
+        false,
+        &spec_ref("7.2", "<", "a < c < b breaks chain (c > b)"),
+    );
+    ctx.assert_bool(
+        "(> \"c\" \"b\" \"a\")",
+        true,
+        &spec_ref("7.2", ">", "c > b > a chain"),
+    );
+    ctx.assert_bool(
+        "(<= \"a\" \"a\" \"b\")",
+        true,
+        &spec_ref("7.2", "<=", "a <= a <= b chain"),
+    );
+    ctx.assert_bool(
+        "(>= \"c\" \"b\" \"b\")",
+        true,
+        &spec_ref("7.2", ">=", "c >= b >= b chain"),
+    );
+}
+
+/// Spec 7.2: Cross-type numeric ordering
+#[test]
+fn test_7_2_comparison_cross_type_numeric() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool("(< 1 1.5)", true, &spec_ref("7.2", "<", "int < float"));
+    ctx.assert_bool(
+        "(< 1 1.5 2)",
+        true,
+        &spec_ref("7.2", "<", "int < float < int chain"),
+    );
+    ctx.assert_bool("(> 2.0 1)", true, &spec_ref("7.2", ">", "float > int"));
+    ctx.assert_bool(
+        "(<= 1 1.0)",
+        true,
+        &spec_ref("7.2", "<=", "int <= float (equal value)"),
+    );
+}
+
+/// Spec 7.2: Type error for mixed comparable types
+#[test]
+fn test_7_2_comparison_type_error() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_error_contains(
+        "(< 1 \"a\")",
+        "TypeError",
+        &spec_ref("7.2", "<", "number vs string error"),
+    );
+    ctx.assert_error_contains(
+        "(< \"a\" 1)",
+        "TypeError",
+        &spec_ref("7.2", "<", "string vs number error"),
+    );
+    ctx.assert_error_contains(
+        "(< 1 2 \"a\")",
+        "TypeError",
+        &spec_ref("7.2", "<", "mixed types in chain error"),
+    );
+    ctx.assert_error_contains(
+        "(< nil 1)",
+        "TypeError",
+        &spec_ref("7.2", "<", "nil not comparable"),
+    );
+}
+
+/// Spec 7.6: String comparison operators as first-class values
+#[test]
+fn test_7_6_string_comparison_first_class() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(do (def lt <) (lt \"a\" \"b\"))",
+        true,
+        &spec_ref("7.6", "First-class", "bound < with strings"),
+    );
+    ctx.assert_bool(
+        "(do (def gt >) (gt \"z\" \"a\"))",
+        true,
+        &spec_ref("7.6", "First-class", "bound > with strings"),
+    );
+}
+
+// ============================================================================
 // Section 7.3: Bitwise Operators
 // Reference: docs/lonala.md#73-bitwise-operators
 // ============================================================================

@@ -438,11 +438,28 @@ where
             Ok(Value::Bool(float_cmp(lhs_float, rhs)))
         }
 
+        // String <=> String (lexicographic)
+        (&Value::String(ref lhs), &Value::String(ref rhs)) => {
+            // Map string ordering to f64 values that work with float comparison closure:
+            // Less → (0.0, 1.0), Equal → (0.0, 0.0), Greater → (1.0, 0.0)
+            let (lhs_val, rhs_val) = match lhs.cmp(rhs) {
+                core::cmp::Ordering::Less => (0.0, 1.0),
+                core::cmp::Ordering::Equal => (0.0, 0.0),
+                core::cmp::Ordering::Greater => (1.0, 0.0),
+            };
+            Ok(Value::Bool(float_cmp(lhs_val, rhs_val)))
+        }
+
+        // Non-comparable types or mixed types (number vs string)
         _ => Err(Error::new(
             ErrorKind::TypeError {
                 operation: "compare",
-                expected: TypeExpectation::Numeric,
-                got: first_non_numeric_kind(left, right),
+                expected: TypeExpectation::Comparable,
+                got: if left.kind().is_numeric() || matches!(left, Value::String(_)) {
+                    right.kind()
+                } else {
+                    left.kind()
+                },
                 operand: None,
             },
             frame.current_location(),
@@ -508,15 +525,18 @@ pub fn compare_values(left: &Value, right: &Value) -> Result<core::cmp::Ordering
             lhs_float.partial_cmp(&rhs).ok_or(NAN_ERROR)
         }
 
-        // Non-numeric types
+        // String <=> String (lexicographic)
+        (&Value::String(ref lhs), &Value::String(ref rhs)) => Ok(lhs.cmp(rhs)),
+
+        // Non-comparable types or mixed types (number vs string)
         _ => Err(NativeError::TypeError {
-            expected: TypeExpectation::Numeric,
-            got: if left.kind().is_numeric() {
+            expected: TypeExpectation::Comparable,
+            got: if left.kind().is_numeric() || matches!(left, Value::String(_)) {
                 right.kind()
             } else {
                 left.kind()
             },
-            arg_index: u8::from(left.kind().is_numeric()),
+            arg_index: u8::from(left.kind().is_numeric() || matches!(left, Value::String(_))),
         }),
     }
 }
