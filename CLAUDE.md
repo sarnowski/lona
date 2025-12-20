@@ -256,3 +256,12 @@ make test            # Full verification: fmt, clippy, unit tests, build, integr
 make clean           # Remove build artifacts
 make shell           # Interactive Docker shell for debugging
 ```
+
+## MCP Tools
+
+The following MCP tools are available for interactive testing in the real seL4 environment:
+
+| Tool | Description |
+|------|-------------|
+| `mcp__lona-dev-repl__eval` | Evaluate Lonala expressions in the REPL running on seL4 in QEMU. Use this to test language features in the actual runtime environment. The REPL maintains state between calls, so defined functions and variables persist across evaluations. |
+| `mcp__lona-dev-repl__restart` | Rebuild Lona and restart the QEMU instance with a fresh state. Use this after making changes to Rust code (runtime, kernel, or compiler crates) to ensure the newest version is running. Also use before verification to ensure a clean state. |

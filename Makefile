@@ -180,6 +180,24 @@ help: ## Show this help
 	@echo "  docker        Build all Docker images"
 	@echo "  shell         Interactive shell (aarch64)"
 	@echo "  shell-x86_64  Interactive shell (x86_64)"
+	@echo "  mcp           Start Lona dev REPL MCP server"
+
+# ==============================================================================
+# Python Tooling
+# ==============================================================================
+
+VENV := .venv
+PYTHON := $(VENV)/bin/python
+PIP := $(VENV)/bin/pip
+
+$(VENV): requirements.txt
+	python3 -m venv $(VENV)
+	$(PIP) install -r requirements.txt
+	@touch $(VENV)
+
+.PHONY: mcp
+mcp: $(VENV) ## Start Lona dev REPL MCP server
+	$(PYTHON) -m tools.lona_dev_repl
 
 # ==============================================================================
 # Internal Targets (run inside Docker container)

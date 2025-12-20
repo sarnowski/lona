@@ -16,6 +16,9 @@
 
     "permissions": {
         "allow": [
+            "mcp__lona-dev-repl__eval",
+            "mcp__lona-dev-repl__restart",
+
             "Skill(develop-runtime)",
             "Skill(finishing-work)",
 

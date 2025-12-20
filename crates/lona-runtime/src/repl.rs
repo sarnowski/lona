@@ -272,8 +272,11 @@ mod interactive {
     /// Control character for backspace (Ctrl+H).
     const CTRL_H: u8 = 0x08;
 
-    /// Control character for carriage return (Enter key).
-    const ENTER: u8 = 0x0D;
+    /// Control character for carriage return (Enter key on terminals).
+    const CARRIAGE_RETURN: u8 = 0x0D;
+
+    /// Control character for line feed (newline in piped/non-TTY input).
+    const LINE_FEED: u8 = 0x0A;
 
     /// Control character for Ctrl+C (cancel input).
     const CTRL_C: u8 = 0x03;
@@ -430,7 +433,8 @@ mod interactive {
                 };
 
                 match input_byte {
-                    ENTER => {
+                    // Accept both carriage return (TTY) and line feed (piped input)
+                    CARRIAGE_RETURN | LINE_FEED => {
                         self.writeln("");
                         return LineResult::Line(buffer.to_string_lossy());
                     }

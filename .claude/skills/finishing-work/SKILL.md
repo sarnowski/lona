@@ -11,7 +11,24 @@ You MUST NOT claim success or completion without following this workflow.
 
 ## Mandatory Workflow
 
-### Step 1: Invoke Code Review
+### Step 1: Manual Verification in seL4
+
+Before code review, verify the changes work correctly in the real seL4 environment:
+
+1. **Use `mcp__lona-dev-repl__restart`** to rebuild Lona and start a fresh QEMU instance with the latest code changes
+
+2. **Identify new features** by reviewing the changed files (use `git diff` or `git status`)
+
+3. **Perform manual tests** using `mcp__lona-dev-repl__eval` to verify the new functionality:
+   - Test the happy path for each new feature
+   - Test edge cases and error conditions
+   - Verify that error messages are helpful and accurate
+
+4. **Document any issues found** and fix them before proceeding to code review
+
+This step ensures the implementation actually works in the target environment, not just in host-based unit tests.
+
+### Step 2: Invoke Code Review
 
 Use the Task tool to invoke the `lona-code-reviewer` subagent:
 
@@ -20,11 +37,11 @@ subagent_type: lona-code-reviewer
 prompt: Perform a full review of all changes in the current repository.
 ```
 
-### Step 2: Present Findings
+### Step 3: Present Findings
 
 Present ALL findings from the reviewer to the user, regardless of severity.
 
-### Step 3: Resolve All Issues
+### Step 4: Resolve All Issues
 
 **CRITICAL: You MUST resolve EVERY issue before proceeding. No exceptions.**
 
@@ -51,9 +68,9 @@ See **CLAUDE.md Clippy Policy section** for the complete policy. Key points:
 - A pre-tool hook blocks unauthorized suppression directives
 - Approved directives must include `[approved]` in the reason string
 
-### Step 4: Repeat Until Clean
+### Step 5: Repeat Until Clean
 
-After resolving all issues, return to Step 1 and run another review.
+After resolving all issues, return to Step 2 and run another code review.
 
 Continue this loop until the reviewer reports **exactly ZERO issues**.
 

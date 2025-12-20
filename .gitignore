@@ -8,7 +8,7 @@
 # Rust
 Cargo.lock
 
-# Python virtual environment (documentation)
+# Python virtual environment
 /.venv/
 __pycache__/
 *.pyc
