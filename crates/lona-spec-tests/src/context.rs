@@ -426,6 +426,73 @@ impl SpecTestContext {
         }
     }
 
+    /// Asserts that an expression evaluates to a set (type check only).
+    ///
+    /// Prefer `assert_set_eq` when you know the expected set contents.
+    pub fn assert_set(&mut self, source: &str, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::Set(_set)) => {
+                // Expected - got a set
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected set, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a set with the expected number of elements.
+    pub fn assert_set_len(&mut self, source: &str, expected_len: usize, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::Set(set)) => {
+                let actual_len = set.len();
+                assert_eq!(actual_len, expected_len, "{spec_ref}: set length mismatch");
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected set, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a keyword (type check only).
+    pub fn assert_keyword(&mut self, source: &str, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::Keyword(_kw)) => {
+                // Expected - got a keyword
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected keyword, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
+    /// Asserts that an expression evaluates to a keyword with the expected name.
+    pub fn assert_keyword_eq(&mut self, source: &str, expected_name: &str, spec_ref: &str) {
+        match self.eval(source) {
+            Ok(Value::Keyword(kw_id)) => {
+                let actual_name = self.interner.resolve(kw_id);
+                assert_eq!(
+                    actual_name, expected_name,
+                    "{spec_ref}: keyword name mismatch"
+                );
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected keyword, got {other:?}");
+            }
+            Err(err) => {
+                panic!("{spec_ref}: evaluation failed: {err}");
+            }
+        }
+    }
+
     /// Asserts that an expression evaluates to a binary buffer.
     /// Note: Binary type not yet implemented - placeholder for future use.
     pub fn assert_binary(&mut self, source: &str, spec_ref: &str) {

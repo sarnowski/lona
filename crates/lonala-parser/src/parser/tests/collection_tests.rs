@@ -9,8 +9,13 @@ use alloc::string::ToString;
 use alloc::vec;
 
 use crate::ast::Ast;
+use crate::error::{Kind as ErrorKind, SourceId};
+use crate::parser::parse_one;
 
 use super::parse_ast;
+
+/// Test source ID for error tests.
+const TEST_SOURCE_ID: SourceId = SourceId::new(0_u32);
 
 // ==================== Collections: Lists ====================
 
@@ -176,4 +181,65 @@ fn parse_let_binding() {
         }
         _ => panic!("expected List"),
     }
+}
+
+// ==================== Map Duplicate Key Detection ====================
+
+#[test]
+fn map_duplicate_keyword_key_error() {
+    let result = parse_one("{:a 1 :a 2}", TEST_SOURCE_ID);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::DuplicateMapKey));
+}
+
+#[test]
+fn map_duplicate_integer_key_error() {
+    let result = parse_one("{1 :a 1 :b}", TEST_SOURCE_ID);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::DuplicateMapKey));
+}
+
+#[test]
+fn map_duplicate_string_key_error() {
+    let result = parse_one("{\"key\" 1 \"key\" 2}", TEST_SOURCE_ID);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::DuplicateMapKey));
+}
+
+#[test]
+fn map_duplicate_symbol_key_error() {
+    let result = parse_one("{foo 1 foo 2}", TEST_SOURCE_ID);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::DuplicateMapKey));
+}
+
+#[test]
+fn map_different_keys_ok() {
+    let result = parse_one("{:a 1 :b 2 :c 3}", TEST_SOURCE_ID);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn map_same_value_different_key_ok() {
+    // Same values but different keys should be OK
+    let result = parse_one("{:a 1 :b 1 :c 1}", TEST_SOURCE_ID);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn map_different_type_same_text_ok() {
+    // :abc (keyword) and abc (symbol) have the same text but are different types
+    let result = parse_one("{:abc 1 abc 2}", TEST_SOURCE_ID);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn map_string_vs_integer_key_ok() {
+    // "1" (string) and 1 (integer) are different types
+    let result = parse_one("{\"1\" :a 1 :b}", TEST_SOURCE_ID);
+    assert!(result.is_ok());
 }

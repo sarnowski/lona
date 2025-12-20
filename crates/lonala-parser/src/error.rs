@@ -65,6 +65,8 @@ pub enum Kind {
     OddMapEntries,
     /// Set literal contains a duplicate element.
     DuplicateSetElement,
+    /// Map literal contains a duplicate key.
+    DuplicateMapKey,
     /// Reader macro not followed by an expression.
     ReaderMacroMissingExpr,
 }
@@ -87,6 +89,7 @@ impl Kind {
             Self::UnexpectedEof { .. } => "UnexpectedEof",
             Self::OddMapEntries => "OddMapEntries",
             Self::DuplicateSetElement => "DuplicateSetElement",
+            Self::DuplicateMapKey => "DuplicateMapKey",
             Self::ReaderMacroMissingExpr => "ReaderMacroMissingExpr",
         }
     }
@@ -127,6 +130,9 @@ impl fmt::Display for Kind {
             }
             Self::DuplicateSetElement => {
                 write!(f, "set literal contains duplicate element")
+            }
+            Self::DuplicateMapKey => {
+                write!(f, "map literal contains duplicate key")
             }
             Self::ReaderMacroMissingExpr => {
                 write!(f, "reader macro must be followed by an expression")
@@ -280,6 +286,14 @@ mod tests {
             "map literal must have an even number of elements"
         );
         assert_eq!(
+            format!("{}", Kind::DuplicateSetElement),
+            "set literal contains duplicate element"
+        );
+        assert_eq!(
+            format!("{}", Kind::DuplicateMapKey),
+            "map literal contains duplicate key"
+        );
+        assert_eq!(
             format!("{}", Kind::ReaderMacroMissingExpr),
             "reader macro must be followed by an expression"
         );
@@ -329,6 +343,11 @@ mod tests {
             "UnexpectedEof"
         );
         assert_eq!(Kind::OddMapEntries.variant_name(), "OddMapEntries");
+        assert_eq!(
+            Kind::DuplicateSetElement.variant_name(),
+            "DuplicateSetElement"
+        );
+        assert_eq!(Kind::DuplicateMapKey.variant_name(), "DuplicateMapKey");
         assert_eq!(
             Kind::ReaderMacroMissingExpr.variant_name(),
             "ReaderMacroMissingExpr"

@@ -273,17 +273,28 @@ fn test_4_5_1_quoted_list() {
 // Reference: docs/lonala.md#452-vector-literals
 // ============================================================================
 
-/// [IGNORED] Spec 4.5.2: Vector literals not yet compiled
-/// Tracking: Implementation planned
+/// Spec 4.5.2: Empty vector literal
 #[test]
-#[ignore]
-fn test_4_5_2_vector_literal() {
+fn test_4_5_2_empty_vector() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_vector("[]", &spec_ref("4.5.2", "Vector", "empty vector"));
+}
+
+/// Spec 4.5.2: Vector literal with elements
+#[test]
+fn test_4_5_2_vector_with_elements() {
+    let mut ctx = SpecTestContext::new();
     ctx.assert_vector(
         "[1 2 3]",
         &spec_ref("4.5.2", "Vector", "vector of integers"),
     );
+}
+
+/// Spec 4.5.2: Nested vector literal
+#[test]
+fn test_4_5_2_nested_vector() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_vector("[1 [2 3] 4]", &spec_ref("4.5.2", "Vector", "nested vector"));
 }
 
 // ============================================================================
@@ -291,13 +302,93 @@ fn test_4_5_2_vector_literal() {
 // Reference: docs/lonala.md#453-map-literals
 // ============================================================================
 
-/// [IGNORED] Spec 4.5.3: Map literals not yet compiled
-/// Tracking: Implementation planned
+/// Spec 4.5.3: Empty map literal
 #[test]
-#[ignore]
-fn test_4_5_3_map_literal() {
-    let mut _ctx = SpecTestContext::new();
-    // Map literal tests when implemented
+fn test_4_5_3_empty_map() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_map("{}", &spec_ref("4.5.3", "Map", "empty map"));
+}
+
+/// Spec 4.5.3: Map literal with entries
+#[test]
+fn test_4_5_3_map_with_entries() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_map(
+        "{:a 1 :b 2}",
+        &spec_ref("4.5.3", "Map", "map with keyword keys"),
+    );
+}
+
+/// Spec 4.5.3: Nested map literal
+#[test]
+fn test_4_5_3_nested_map() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_map("{:a {:b 1}}", &spec_ref("4.5.3", "Map", "nested map"));
+}
+
+/// Spec 4.5.3: Map with mixed key types
+#[test]
+fn test_4_5_3_map_mixed_keys() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_map(
+        "{:key 1 \"str\" 2 42 3}",
+        &spec_ref("4.5.3", "Map", "map with mixed key types"),
+    );
+}
+
+// ============================================================================
+// Section 4.5.4: Set Literals
+// Reference: docs/lonala.md#454-set-literals
+// ============================================================================
+
+/// Spec 4.5.4: Empty set literal
+#[test]
+fn test_4_5_4_empty_set() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_set("#{}", &spec_ref("4.5.4", "Set", "empty set"));
+}
+
+/// Spec 4.5.4: Set literal with elements
+#[test]
+fn test_4_5_4_set_with_elements() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_set("#{1 2 3}", &spec_ref("4.5.4", "Set", "set of integers"));
+}
+
+/// Spec 4.5.4: Set literal with mixed types
+#[test]
+fn test_4_5_4_set_mixed_types() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_set(
+        "#{:a \"b\" 3}",
+        &spec_ref("4.5.4", "Set", "set with mixed types"),
+    );
+}
+
+// ============================================================================
+// Section 4.5.5: Mixed Collection Literals
+// Reference: Combined test of collection interoperability
+// ============================================================================
+
+/// Collection literals can be nested
+#[test]
+fn test_4_5_5_nested_collections() {
+    let mut ctx = SpecTestContext::new();
+    // Vector containing a map
+    ctx.assert_vector(
+        "[{:a 1}]",
+        &spec_ref("4.5", "Collections", "vector containing map"),
+    );
+    // Map containing a vector
+    ctx.assert_map(
+        "{:v [1 2 3]}",
+        &spec_ref("4.5", "Collections", "map containing vector"),
+    );
+    // Vector containing a set
+    ctx.assert_vector(
+        "[#{1 2}]",
+        &spec_ref("4.5", "Collections", "vector containing set"),
+    );
 }
 
 // ============================================================================
@@ -318,11 +409,31 @@ fn test_4_6_quoted_symbol() {
 // Reference: docs/lonala.md#47-keyword-literals
 // ============================================================================
 
-/// [IGNORED] Spec 4.7: Keywords parsed but not compiled
-/// Tracking: Full keyword support planned
+/// Spec 4.7: Simple keyword literal
 #[test]
-#[ignore]
 fn test_4_7_keyword_literal() {
-    let mut _ctx = SpecTestContext::new();
-    // Keyword tests when implemented
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_keyword(":foo", &spec_ref("4.7", "Keyword", "simple keyword"));
+}
+
+/// Spec 4.7: Keyword with hyphens
+#[test]
+fn test_4_7_keyword_with_hyphens() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_keyword(
+        ":my-key",
+        &spec_ref("4.7", "Keyword", "keyword with hyphens"),
+    );
+}
+
+/// Spec 4.7: Keywords are self-evaluating
+#[test]
+fn test_4_7_keyword_self_evaluating() {
+    let mut ctx = SpecTestContext::new();
+    // Keywords evaluate to themselves
+    ctx.assert_keyword_eq(
+        ":test",
+        "test",
+        &spec_ref("4.7", "Keyword", "self-evaluating"),
+    );
 }

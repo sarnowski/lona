@@ -195,6 +195,20 @@ impl<'src> Parser<'src> {
             return Err(Error::new(ErrorKind::OddMapEntries, self.location(span)));
         }
 
+        // Check for duplicate keys (keys are at indices 0, 2, 4, ...)
+        // Uses O(n²) comparison but n is typically small for literal maps
+        let keys: Vec<&Spanned<Ast>> = elements.iter().step_by(2_usize).collect();
+        for (i, key) in keys.iter().enumerate() {
+            for prev in keys.iter().take(i) {
+                if key.node == prev.node {
+                    return Err(Error::new(
+                        ErrorKind::DuplicateMapKey,
+                        self.location(key.span),
+                    ));
+                }
+            }
+        }
+
         Ok(Self::spanned_with_trivia(
             Ast::map(elements),
             span,

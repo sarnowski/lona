@@ -100,7 +100,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 |------|------|--------|
 | 1.1.1 | Keyword Value Type | done |
 | 1.1.2 | Set Value Type | done |
-| 1.1.3 | Collection Literal Syntax | open |
+| 1.1.3 | Collection Literal Syntax | done |
 | 1.1.4 | Binary Value Type | open |
 | 1.1.5 | Metadata System - Value Storage | open |
 | 1.1.6 | Metadata System - Reader Syntax | open |

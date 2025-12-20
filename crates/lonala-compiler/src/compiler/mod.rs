@@ -307,18 +307,8 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
             // String literals
             Ast::String(ref string) => self.compile_string(string, expr.span),
             Ast::Keyword(ref name) => self.compile_keyword(name, expr.span),
-            Ast::Vector(ref _elements) => Err(Error::new(
-                ErrorKind::NotImplemented {
-                    feature: "vector literals",
-                },
-                self.location(expr.span),
-            )),
-            Ast::Map(ref _elements) => Err(Error::new(
-                ErrorKind::NotImplemented {
-                    feature: "map literals",
-                },
-                self.location(expr.span),
-            )),
+            Ast::Vector(ref elements) => self.compile_vector(elements, expr.span),
+            Ast::Map(ref elements) => self.compile_map(elements, expr.span),
             Ast::Set(ref elements) => self.compile_set(elements, expr.span),
 
             // Handle future Ast variants (Ast is #[non_exhaustive])

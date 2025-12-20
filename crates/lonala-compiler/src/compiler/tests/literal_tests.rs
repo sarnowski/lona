@@ -179,20 +179,97 @@ fn compile_keyword_literal() {
     assert_eq!(chunk.constants().len(), 1_usize);
 }
 
-#[test]
-fn compile_vector_not_implemented() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("[1 2 3]", TEST_SOURCE_ID, &mut interner);
-    assert!(result.is_err());
+// =========================================================================
+// Vector and Map Literal Tests
+// =========================================================================
 
-    if let Err(CompileError::Compile(Error {
-        kind: ErrorKind::NotImplemented { feature },
-        ..
-    })) = result
-    {
-        assert_eq!(feature, "vector literals");
+#[test]
+fn compile_empty_vector() {
+    let (chunk, interner) = compile_with_interner("[]");
+    let code = chunk.code();
+
+    // Empty vector: GetGlobal R0, K0 (vector); Call R0, 0, 1; Return R0, 1
+    assert_eq!(code.len(), 3_usize);
+
+    // First instruction should be GetGlobal for the 'vector' function
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
+
+    // Verify the constant is the 'vector' symbol
+    let k_idx = decode_bx(instr0);
+    if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(k_idx) {
+        assert_eq!(interner.resolve(*sym_id), "vector");
     } else {
-        panic!("expected NotImplemented error");
+        panic!("expected Symbol constant for 'vector'");
+    }
+}
+
+#[test]
+fn compile_vector_with_elements() {
+    let (chunk, interner) = compile_with_interner("[1 2 3]");
+    let code = chunk.code();
+
+    // Vector with elements:
+    // GetGlobal R0, K0 (vector)
+    // LoadK R1, K1 (1)
+    // LoadK R2, K2 (2)
+    // LoadK R3, K3 (3)
+    // Call R0, 3, 1
+    // Return R0, 1
+    assert_eq!(code.len(), 6_usize);
+
+    // First instruction should be GetGlobal for 'vector'
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
+
+    let k_idx = decode_bx(instr0);
+    if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(k_idx) {
+        assert_eq!(interner.resolve(*sym_id), "vector");
+    } else {
+        panic!("expected Symbol constant for 'vector'");
+    }
+}
+
+#[test]
+fn compile_empty_map() {
+    let (chunk, interner) = compile_with_interner("{}");
+    let code = chunk.code();
+
+    // Empty map: GetGlobal R0, K0 (hash-map); Call R0, 0, 1; Return R0, 1
+    assert_eq!(code.len(), 3_usize);
+
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
+
+    let k_idx = decode_bx(instr0);
+    if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(k_idx) {
+        assert_eq!(interner.resolve(*sym_id), "hash-map");
+    } else {
+        panic!("expected Symbol constant for 'hash-map'");
+    }
+}
+
+#[test]
+fn compile_map_with_entries() {
+    let (chunk, interner) = compile_with_interner("{:a 1}");
+    let code = chunk.code();
+
+    // Map with one entry:
+    // GetGlobal R0, K0 (hash-map)
+    // LoadK R1, K1 (:a keyword)
+    // LoadK R2, K2 (1)
+    // Call R0, 2, 1
+    // Return R0, 1
+    assert_eq!(code.len(), 5_usize);
+
+    let instr0 = *code.get(0_usize).unwrap();
+    assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
+
+    let k_idx = decode_bx(instr0);
+    if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(k_idx) {
+        assert_eq!(interner.resolve(*sym_id), "hash-map");
+    } else {
+        panic!("expected Symbol constant for 'hash-map'");
     }
 }
 

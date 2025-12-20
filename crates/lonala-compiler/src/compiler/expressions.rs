@@ -124,6 +124,86 @@ impl Compiler<'_, '_, '_> {
         Ok(ExprResult { register: base })
     }
 
+    /// Compiles a vector literal.
+    ///
+    /// Vector literals are compiled as calls to the `vector` function.
+    /// For example, `[1 2 3]` compiles to `(vector 1 2 3)`.
+    pub(super) fn compile_vector(
+        &mut self,
+        elements: &[lonala_parser::Spanned<lonala_parser::Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        // Allocate contiguous registers: R_base = vector fn, R_base+1..N = elements
+        let base = self.next_register;
+
+        // Load the `vector` native function into base register
+        let vector_sym = self.interner.intern("vector");
+        let dest = self.alloc_register(span)?;
+        let const_idx = self.add_constant(Constant::Symbol(vector_sym), span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
+
+        // Compile each element into consecutive registers
+        for element in elements {
+            let _element_result = self.compile_expr(element)?;
+            // Elements are automatically placed in consecutive registers
+        }
+
+        // Emit call instruction
+        let arg_count = u8::try_from(elements.len()).map_err(|_err| {
+            Error::new(crate::error::Kind::TooManyRegisters, self.location(span))
+        })?;
+
+        self.chunk
+            .emit(encode_abc(Opcode::Call, base, arg_count, 1), span);
+
+        // Result is left in base register
+        // Free element registers
+        self.free_registers_to(base.saturating_add(1));
+
+        Ok(ExprResult { register: base })
+    }
+
+    /// Compiles a map literal.
+    ///
+    /// Map literals are compiled as calls to the `hash-map` function.
+    /// For example, `{:a 1 :b 2}` compiles to `(hash-map :a 1 :b 2)`.
+    pub(super) fn compile_map(
+        &mut self,
+        elements: &[lonala_parser::Spanned<lonala_parser::Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        // Allocate contiguous registers: R_base = hash-map fn, R_base+1..N = elements
+        let base = self.next_register;
+
+        // Load the `hash-map` native function into base register
+        let hash_map_sym = self.interner.intern("hash-map");
+        let dest = self.alloc_register(span)?;
+        let const_idx = self.add_constant(Constant::Symbol(hash_map_sym), span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
+
+        // Compile each key-value pair into consecutive registers
+        for element in elements {
+            let _element_result = self.compile_expr(element)?;
+            // Elements are automatically placed in consecutive registers
+        }
+
+        // Emit call instruction
+        let arg_count = u8::try_from(elements.len()).map_err(|_err| {
+            Error::new(crate::error::Kind::TooManyRegisters, self.location(span))
+        })?;
+
+        self.chunk
+            .emit(encode_abc(Opcode::Call, base, arg_count, 1), span);
+
+        // Result is left in base register
+        // Free element registers
+        self.free_registers_to(base.saturating_add(1));
+
+        Ok(ExprResult { register: base })
+    }
+
     // =========================================================================
     // Symbol Compilation
     // =========================================================================

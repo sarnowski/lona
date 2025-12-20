@@ -61,6 +61,7 @@ impl Diagnostic for Error {
             }
             Kind::OddMapEntries => String::from("map literal must have an even number of elements"),
             Kind::DuplicateSetElement => String::from("set literal contains duplicate element"),
+            Kind::DuplicateMapKey => String::from("map literal contains duplicate key"),
             Kind::ReaderMacroMissingExpr => {
                 String::from("reader macro must be followed by an expression")
             }
@@ -128,6 +129,16 @@ impl Diagnostic for Error {
                 ));
                 notes.push(Note::help_static(
                     "add a value for the last key, or remove the unpaired key",
+                ));
+            }
+            Kind::DuplicateSetElement => {
+                notes.push(Note::help_static(
+                    "each element in a set literal must be unique",
+                ));
+            }
+            Kind::DuplicateMapKey => {
+                notes.push(Note::help_static(
+                    "each key in a map literal must be unique",
                 ));
             }
             Kind::ReaderMacroMissingExpr => {
@@ -318,6 +329,44 @@ mod tests {
         let error = Error::new(Kind::OddMapEntries, test_location());
         let notes = error.notes(&interner);
         assert_eq!(notes.len(), 2_usize);
+    }
+
+    #[test]
+    fn duplicate_set_element_message() {
+        let interner = Interner::new();
+        let error = Error::new(Kind::DuplicateSetElement, test_location());
+        assert_eq!(
+            error.message(&interner),
+            "set literal contains duplicate element"
+        );
+    }
+
+    #[test]
+    fn duplicate_set_element_notes() {
+        let interner = Interner::new();
+        let error = Error::new(Kind::DuplicateSetElement, test_location());
+        let notes = error.notes(&interner);
+        assert_eq!(notes.len(), 1_usize);
+        assert!(matches!(&notes[0], Note::Help(msg) if msg.contains("unique")));
+    }
+
+    #[test]
+    fn duplicate_map_key_message() {
+        let interner = Interner::new();
+        let error = Error::new(Kind::DuplicateMapKey, test_location());
+        assert_eq!(
+            error.message(&interner),
+            "map literal contains duplicate key"
+        );
+    }
+
+    #[test]
+    fn duplicate_map_key_notes() {
+        let interner = Interner::new();
+        let error = Error::new(Kind::DuplicateMapKey, test_location());
+        let notes = error.notes(&interner);
+        assert_eq!(notes.len(), 1_usize);
+        assert!(matches!(&notes[0], Note::Help(msg) if msg.contains("unique")));
     }
 
     #[test]
