@@ -62,6 +62,7 @@ pub fn values_equal(left: &Value, right: &Value) -> bool {
         (&Value::Nil, &Value::Nil) => true,
         (&Value::Bool(left_bool), &Value::Bool(right_bool)) => left_bool == right_bool,
         (&Value::Symbol(left_sym), &Value::Symbol(right_sym)) => left_sym == right_sym,
+        (&Value::Keyword(left_kw), &Value::Keyword(right_kw)) => left_kw == right_kw,
         (&Value::String(ref left_str), &Value::String(ref right_str)) => left_str == right_str,
 
         // Same-type numeric (NaN != NaN is handled naturally by f64 comparison)

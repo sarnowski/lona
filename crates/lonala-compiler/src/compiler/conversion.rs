@@ -34,10 +34,10 @@ use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 /// Used to pass macro arguments to macro transformers. The AST is converted
 /// to data values that the macro can inspect and manipulate.
 ///
-/// # Symbol Handling
+/// # Symbol and Keyword Handling
 ///
-/// Symbols and keywords are interned using the provided interner.
-/// Keywords are stored as symbols with a `:` prefix to distinguish them.
+/// Symbols are interned as `Value::Symbol` and keywords as `Value::Keyword`.
+/// Keywords are stored without the colon prefix (the colon is syntax only).
 #[inline]
 pub fn ast_to_value(ast: &Spanned<Ast>, interner: &mut symbol::Interner) -> Value {
     match ast.node {
@@ -50,10 +50,8 @@ pub fn ast_to_value(ast: &Spanned<Ast>, interner: &mut symbol::Interner) -> Valu
             Value::Symbol(id)
         }
         Ast::Keyword(ref name) => {
-            // Keywords are stored as symbols with `:` prefix
-            let keyword_name = alloc::format!(":{name}");
-            let id = interner.intern(&keyword_name);
-            Value::Symbol(id)
+            let id = interner.intern(name);
+            Value::Keyword(id)
         }
         Ast::List(ref elements) => {
             let values: Vec<Value> = elements
@@ -143,11 +141,11 @@ pub fn value_to_ast(
         }
         Value::Symbol(id) => {
             let name = interner.resolve(id);
-            // Check if it's a keyword (starts with ':')
-            name.strip_prefix(':').map_or_else(
-                || Ast::Symbol(String::from(name)),
-                |stripped| Ast::Keyword(String::from(stripped)),
-            )
+            Ast::Symbol(String::from(name))
+        }
+        Value::Keyword(id) => {
+            let name = interner.resolve(id);
+            Ast::Keyword(String::from(name))
         }
         Value::String(ref text) => Ast::String(String::from(text.as_str())),
         Value::List(ref list) => {

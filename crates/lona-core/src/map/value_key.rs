@@ -20,7 +20,7 @@ use super::Map;
 /// A wrapper around `Value` that implements `Ord` for use as map keys.
 ///
 /// The ordering is defined as:
-/// `Nil < Bool < Integer < Float < Ratio < Symbol < String < List < Vector < Map`
+/// `Nil < Bool < Integer < Float < Ratio < Symbol < Keyword < String < List < Vector < Map`
 ///
 /// Within each type, natural ordering is used.
 #[derive(Clone, Debug)]
@@ -57,12 +57,13 @@ impl ValueKey {
             Value::Float(_) => 3,
             Value::Ratio(_) => 4,
             Value::Symbol(_) => 5,
-            Value::String(_) => 6,
-            Value::List(_) => 7,
-            Value::Vector(_) => 8,
-            Value::Map(_) => 9,
-            Value::Function(_) => 10,
-            Value::NativeFunction(_) => 11,
+            Value::Keyword(_) => 6,
+            Value::String(_) => 7,
+            Value::List(_) => 8,
+            Value::Vector(_) => 9,
+            Value::Map(_) => 10,
+            Value::Function(_) => 11,
+            Value::NativeFunction(_) => 12,
         }
     }
 }
@@ -101,7 +102,8 @@ impl Ord for ValueKey {
                 float_total_order(left, right)
             }
             (&Value::Ratio(ref left), &Value::Ratio(ref right)) => left.cmp(right),
-            (&Value::Symbol(left), &Value::Symbol(right)) => left.as_u32().cmp(&right.as_u32()),
+            (&Value::Symbol(left), &Value::Symbol(right))
+            | (&Value::Keyword(left), &Value::Keyword(right)) => left.as_u32().cmp(&right.as_u32()),
             (&Value::NativeFunction(left), &Value::NativeFunction(right)) => {
                 left.as_u32().cmp(&right.as_u32())
             }

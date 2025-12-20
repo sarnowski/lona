@@ -28,14 +28,14 @@
 
 | Component | Status | Priority |
 |-----------|--------|----------|
-| Keyword Value Type | ❌ Not Started | High |
+| Keyword Value Type | ✅ Complete | High |
 | Set Value Type | ❌ Not Started | High |
 | Binary Value Type | ❌ Not Started | High |
 | Metadata System | ❌ Not Started | High |
 | Closures | ❌ Not Started | Critical |
 | Multi-Arity Functions | ❌ Not Started | High |
 | Destructuring | ❌ Not Started | Critical |
-| `loop`/`recur` (TCO) | ❌ Not Started | Critical |
+| [Proper Tail Calls](../development/tco.md) | ❌ Not Started | Critical |
 | Namespace System | ❌ Not Started | High |
 | Process Model | ❌ Not Started | Critical |
 | Green Thread Scheduler | ❌ Not Started | Critical |
@@ -510,60 +510,83 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-#### Task 1.2.6: Loop/Recur - Basic Implementation
+#### Task 1.2.6: Proper Tail Calls - Compiler
 
-**Description**: Implement `loop` special form with `recur` for TCO.
+**Description**: Add tail position tracking to the compiler and emit `TailCall` opcode for calls in tail position. See [docs/development/tco.md](../development/tco.md) for full design.
 
 **Files to modify**:
 - `crates/lonala-compiler/src/compiler/mod.rs`
-- `crates/lonala-compiler/src/compiler/loops.rs` (new)
-- `crates/lona-core/src/opcode/mod.rs`
-- `crates/lona-kernel/src/vm/interpreter/mod.rs`
-
-**Requirements**:
-- `(loop [bindings] body)` establishes recur target
-- `(recur args)` jumps back with new values
-- `recur` must be in tail position (compile-time check)
-- `recur` argument count must match binding count
-- New opcodes: `LoopStart`, `Recur`
-
-**Tests**:
-- Simple countdown loop
-- Accumulator pattern
-- Multiple bindings
-- Tail position validation (error if not tail)
-- Argument count validation
-
-**Estimated effort**: 2 context windows
-
----
-
-#### Task 1.2.7: Loop/Recur - Function Integration
-
-**Description**: Enable `recur` to work with `fn` (not just `loop`).
-
-**Files to modify**:
+- `crates/lonala-compiler/src/compiler/special_forms.rs`
 - `crates/lonala-compiler/src/compiler/functions.rs`
-- `crates/lonala-compiler/src/compiler/loops.rs`
+- `crates/lonala-compiler/src/compiler/calls.rs`
 
 **Requirements**:
-- `(fn [args] ... (recur new-args))` recurs to function start
-- Works with multi-arity (recur to same arity)
-- Named functions can use `recur`
-- `recur` from nested `loop` goes to loop, not function
+- Add `in_tail_position: bool` field to `Compiler` struct
+- Create `compile_expr_in_context(&mut self, expr, tail: bool)` method
+- Propagate tail position: `fn` body last expr, `do` last expr, `if` branches, `let` body
+- `compile_call()` emits `TailCall` when `in_tail_position` is true
 
 **Tests**:
-- Function self-recursion with recur
-- Multi-arity function with recur
-- Named function with recur
-- Nested loop inside function
-- Error: recur to wrong arity
+- `TailCall` emitted for: `(fn [x] (f x))`
+- `TailCall` emitted for: `(fn [x] (if c (f x) (g x)))`
+- `TailCall` emitted for: `(fn [x] (do (println x) (f x)))`
+- `Call` emitted for: `(fn [x] (+ 1 (f x)))` (not tail position)
 
 **Estimated effort**: 1 context window
 
 ---
 
-#### Task 1.2.8: Pattern Matching - Core Infrastructure
+#### Task 1.2.7: Proper Tail Calls - VM Trampoline
+
+**Description**: Restructure the VM interpreter to use a trampoline loop, enabling tail calls without Rust stack growth. See [docs/development/tco.md](../development/tco.md) for full design.
+
+**Files to modify**:
+- `crates/lona-kernel/src/vm/interpreter/mod.rs`
+- `crates/lona-kernel/src/vm/interpreter/ops_control.rs`
+- `crates/lona-kernel/src/vm/frame.rs`
+
+**Requirements**:
+- Define `RunResult` enum with `Return(Value)` and `TailCall { chunk, base, arguments }`
+- Restructure `run()` as outer trampoline loop calling `run_inner()`
+- Implement `op_tail_call()` returning `RunResult::TailCall` instead of recursing
+- Do NOT increment `call_depth` for tail calls
+- Store `Arc<Chunk>` in trampoline loop for frame swapping
+
+**Tests**:
+- Deep tail recursion (10,000+ calls) without stack overflow
+- Mutual tail recursion between two functions
+- Mix of tail and non-tail calls in same function
+- Tail call preserves correct return value
+
+**Estimated effort**: 2 context windows
+
+---
+
+#### Task 1.2.8: Proper Tail Calls - Integration Tests
+
+**Description**: Comprehensive integration tests for proper tail calls. See [docs/development/tco.md](../development/tco.md) for full design.
+
+**Files to modify**:
+- `crates/lona-spec-tests/src/tco.rs` (new)
+- `crates/lona-spec-tests/src/lib.rs`
+
+**Requirements**:
+- Self-recursion: `(defn countdown [n] (if (= n 0) :done (countdown (- n 1))))`
+- Mutual recursion: `even?`/`odd?` calling each other
+- Accumulator pattern with 100,000+ iterations
+- State machine pattern (3+ mutually recursive functions)
+- Verify non-tail calls DO overflow (negative test)
+
+**Tests**:
+- All patterns above with n=100,000
+- Correct return values preserved
+- Stack overflow on intentionally non-tail recursive code
+
+**Estimated effort**: 1 context window
+
+---
+
+#### Task 1.2.9: Pattern Matching - Core Infrastructure
 
 **Description**: Build pattern matching engine for `receive` and `case`.
 
@@ -590,7 +613,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-#### Task 1.2.9: Case Special Form
+#### Task 1.2.10: Case Special Form
 
 **Description**: Implement `case` for value-based dispatch.
 
@@ -615,7 +638,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-#### Task 1.2.10: Gensym Implementation
+#### Task 1.2.11: Gensym Implementation
 
 **Description**: Implement `gensym` for hygienic macro expansion.
 

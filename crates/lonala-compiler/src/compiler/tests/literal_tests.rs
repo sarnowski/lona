@@ -166,24 +166,17 @@ fn compile_string_with_escapes() {
 }
 
 // =========================================================================
-// Not Implemented Tests
+// Keyword Tests
 // =========================================================================
 
 #[test]
-fn compile_keyword_not_implemented() {
+fn compile_keyword_literal() {
     let mut interner = symbol::Interner::new();
-    let result = compile(":keyword", TEST_SOURCE_ID, &mut interner);
-    assert!(result.is_err());
+    let chunk = compile(":keyword", TEST_SOURCE_ID, &mut interner).unwrap();
 
-    if let Err(CompileError::Compile(Error {
-        kind: ErrorKind::NotImplemented { feature },
-        ..
-    })) = result
-    {
-        assert_eq!(feature, "keyword literals");
-    } else {
-        panic!("expected NotImplemented error");
-    }
+    // Verify the bytecode structure
+    assert_eq!(chunk.code().len(), 2_usize);
+    assert_eq!(chunk.constants().len(), 1_usize);
 }
 
 #[test]

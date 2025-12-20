@@ -4,7 +4,7 @@
 //! Expression compilation for literals and symbols.
 //!
 //! This module handles compilation of simple expressions:
-//! - Integer, float, boolean, nil, and string literals
+//! - Integer, float, boolean, nil, string, and keyword literals
 //! - Symbol lookups (local and global variables)
 
 use lona_core::chunk::Constant;
@@ -62,6 +62,19 @@ impl Compiler<'_, '_, '_> {
         let dest = self.alloc_register(span)?;
         let const_idx =
             self.add_constant(Constant::String(alloc::string::String::from(value)), span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles a keyword literal.
+    ///
+    /// Keywords are self-evaluating values that evaluate to themselves.
+    /// The keyword name is stored without the colon prefix (colon is syntax).
+    pub(super) fn compile_keyword(&mut self, name: &str, span: Span) -> Result<ExprResult, Error> {
+        let dest = self.alloc_register(span)?;
+        let keyword_id = self.interner.intern(name);
+        let const_idx = self.add_constant(Constant::Keyword(keyword_id), span)?;
         self.chunk
             .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
         Ok(ExprResult { register: dest })

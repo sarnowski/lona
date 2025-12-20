@@ -2,7 +2,7 @@
 
 **Version**: 2.0.0
 **Status**: Draft
-**Last Updated**: 2025-12-17
+**Last Updated**: 2025-12-20
 
 This document defines the roadmap for implementing Language Server Protocol (LSP) support and editor integrations for the Lonala programming language.
 
@@ -384,10 +384,12 @@ lona/
 | `lona-core` | Source tracking, spans, symbols | Yes |
 | `lonala-parser` | Tokenization, parsing, AST with comments | Yes |
 | `lonala-compiler` | Compilation, structured errors | Yes |
-| `lonala-human` | **All human-readable text generation** | Yes |
-| `lonala-lsp` | LSP protocol, document management (thin) | No |
+| `lonala-human` | **All human-readable text generation** (byte offsets) | Yes |
+| `lonala-lsp` | LSP protocol, document management, **UTF-16 conversion** | No |
 | `lona-runtime` | REPL, uses lonala-human for output | Yes |
 | `tree-sitter-lona` | Grammar for Zed/Neovim highlighting | N/A |
+
+**Note on UTF-16**: The LSP protocol requires UTF-16 code units for column positions. This conversion is handled entirely in `lonala-lsp/src/convert.rs`, keeping the core crates (`lonala-human`, `lona-core`) free of UTF-16 concerns and `no_std` compatible.
 
 ---
 
@@ -483,7 +485,11 @@ M0 (Foundation)
 > - Task 0.5 (lonala-human Crate) → PLAN.md Tasks 1.3, 5.1-5.5
 > - Task 0.6 (REPL Integration) → PLAN.md Tasks 6.1, 6.2
 >
-> **Remaining work in this plan**: Task 0.2 (Parser API), Task 0.3 (Full Span Tracking), Task 0.7 (Foundation Tests)
+> **Remaining work in this plan**: Task 0.7 (Foundation Tests)
+>
+> **Additionally completed** (verified 2025-12-20):
+> - Task 0.2 (Parser API) → Parser accepts `SourceId`, errors include `SourceLocation`
+> - Task 0.3 (Full Span Tracking) → `Spanned<T>` has `full_span`, parser uses `trivia_start()` (20+ tests in `full_span_tests.rs`)
 
 ### 5.1 Tasks
 
@@ -632,10 +638,10 @@ impl Error {
 ```
 
 **Acceptance criteria**:
-- [x] Parser accepts `SourceId` parameter *(PLAN.md Task 2.1)*
-- [x] All errors include `SourceId` and `Span` *(PLAN.md Task 2.1)*
-- [x] Existing tests updated and passing *(PLAN.md Task 2.1)*
-- [x] API change documented *(PLAN.md Task 2.1)*
+- [x] Parser accepts `SourceId` parameter *(verified in parser/mod.rs)*
+- [x] All errors include `SourceId` and `Span` *(verified in error.rs: `Error { kind, location: SourceLocation }`)*
+- [x] Existing tests updated and passing *(verified)*
+- [x] API change documented *(verified)*
 
 ---
 
@@ -740,12 +746,12 @@ repl> (source foo)
 ```
 
 **Acceptance criteria**:
-- [ ] `Spanned<T>` has both `span` and `full_span` fields
-- [ ] Parser tracks full span including leading whitespace/comments
-- [ ] `full_source()` returns the complete text including comments
-- [ ] Inline comments and blank lines preserved exactly
-- [ ] Existing tests updated for new Spanned structure
-- [ ] Unit tests for full span tracking
+- [x] `Spanned<T>` has both `span` and `full_span` fields *(implemented in ast.rs)*
+- [x] Parser tracks full span including leading whitespace/comments *(via `trivia_start()` and `spanned_with_trivia()`)*
+- [x] `full_source()` returns the complete text including comments *(verified)*
+- [x] Inline comments and blank lines preserved exactly *(verified)*
+- [x] Existing tests updated for new Spanned structure *(verified)*
+- [x] Unit tests for full span tracking *(20+ tests in `parser/tests/full_span_tests.rs`)*
 
 ---
 
@@ -1177,7 +1183,7 @@ fn handle_parse_error(&self, error: ParseError) {
 ### 5.2 Milestone 0 Deliverables
 
 - [x] Source tracking in `lona-core` (`SourceId`, `SourceRegistry`) *(PLAN.md Task 1.1)*
-- [ ] Parser updated with `full_span` tracking *(Task 0.3 - not yet implemented)*
+- [x] Parser updated with `full_span` tracking *(Task 0.3 - verified 2025-12-20)*
 - [x] Compiler updated for source tracking *(PLAN.md Tasks 3.1, 3.2)*
 - [x] `lonala-human` crate with error formatting and documentation *(PLAN.md Tasks 1.3, 5.1-5.5)*
 - [x] REPL updated to use `lonala-human` *(PLAN.md Tasks 6.1, 6.2)*
@@ -1298,13 +1304,9 @@ impl DocumentManager {
 
     pub fn update(&self, uri: &Url, content: String, version: i32) {
         if let Some(mut doc) = self.documents.get_mut(uri) {
-            // Update registry content
-            {
-                let mut registry = self.registry.write();
-                // Note: For simplicity, we add a new source entry.
-                // In production, we'd update in place.
-                doc.source_id = registry.add(uri.to_string(), content.clone());
-            }
+            // Update document content in place (no new SourceId allocation).
+            // The DocumentManager owns the source content; we only use
+            // SourceRegistry for parsing/compiling when needed.
             doc.content = content.clone();
             doc.line_index = LineIndex::new(&content);
             doc.version = version;
@@ -1330,52 +1332,87 @@ impl DocumentManager {
 
 #### Task 1.3: Implement LSP ↔ Internal Type Conversion
 
-**Scope**: Convert between LSP types and internal Lonala types.
+**Scope**: Convert between LSP types and internal Lonala types, including UTF-16 position encoding.
 
 **File**: `crates/lonala-lsp/src/convert.rs`
+
+**Important**: The LSP protocol uses UTF-16 code units for column positions. The `LineIndex` in `lonala-human` uses byte offsets (which is correct for `no_std` REPL usage). The UTF-16 conversion is handled entirely in the LSP layer.
 
 ```rust
 use tower_lsp::lsp_types::{Position, Range};
 use lona_core::Span;
 use lonala_human::line_index::{LineIndex, LineCol};
 
-/// Convert LSP Position to internal LineCol
-pub fn position_to_line_col(pos: Position) -> LineCol {
-    LineCol {
-        line: pos.line,
-        column: pos.character,
-    }
+/// Convert byte column to UTF-16 code unit column.
+///
+/// LSP uses UTF-16 code units for character positions. This scans the
+/// line content to count UTF-16 code units up to the byte offset.
+fn byte_col_to_utf16(line_content: &str, byte_col: usize) -> u32 {
+    line_content
+        .get(..byte_col.min(line_content.len()))
+        .unwrap_or("")
+        .chars()
+        .map(|c| c.len_utf16() as u32)
+        .sum()
 }
 
-/// Convert internal LineCol to LSP Position
-pub fn line_col_to_position(lc: LineCol) -> Position {
-    Position {
-        line: lc.line,
-        character: lc.column,
+/// Convert UTF-16 column to byte column.
+fn utf16_col_to_byte(line_content: &str, utf16_col: u32) -> usize {
+    let mut utf16_count = 0u32;
+    let mut byte_offset = 0usize;
+    for c in line_content.chars() {
+        if utf16_count >= utf16_col {
+            break;
+        }
+        utf16_count += c.len_utf16() as u32;
+        byte_offset += c.len_utf8();
     }
+    byte_offset
 }
 
-/// Convert Span to LSP Range using a LineIndex
-pub fn span_to_range(span: Span, index: &LineIndex) -> Range {
+/// Convert Span to LSP Range using a LineIndex.
+///
+/// Handles UTF-16 encoding required by LSP.
+pub fn span_to_range(span: Span, index: &LineIndex, source: &str) -> Range {
+    let start_lc = index.offset_to_line_col(span.start).unwrap_or_default();
+    let end_lc = index.offset_to_line_col(span.end).unwrap_or_default();
+
+    let start_line_content = index.line_content(source, start_lc.line).unwrap_or("");
+    let end_line_content = index.line_content(source, end_lc.line).unwrap_or("");
+
     Range {
-        start: line_col_to_position(index.offset_to_line_col(span.start)),
-        end: line_col_to_position(index.offset_to_line_col(span.end)),
+        start: Position {
+            line: start_lc.line,
+            character: byte_col_to_utf16(start_line_content, start_lc.column as usize),
+        },
+        end: Position {
+            line: end_lc.line,
+            character: byte_col_to_utf16(end_line_content, end_lc.column as usize),
+        },
     }
 }
 
-/// Convert LSP Range to Span using a LineIndex
-pub fn range_to_span(range: Range, index: &LineIndex) -> Span {
-    Span {
-        start: index.line_col_to_offset(position_to_line_col(range.start)),
-        end: index.line_col_to_offset(position_to_line_col(range.end)),
-    }
+/// Convert LSP Range to Span using a LineIndex.
+///
+/// Handles UTF-16 encoding required by LSP.
+pub fn range_to_span(range: Range, index: &LineIndex, source: &str) -> Span {
+    let start_line_content = index.line_content(source, range.start.line).unwrap_or("");
+    let end_line_content = index.line_content(source, range.end.line).unwrap_or("");
+
+    let start_byte_col = utf16_col_to_byte(start_line_content, range.start.character);
+    let end_byte_col = utf16_col_to_byte(end_line_content, range.end.character);
+
+    let start_offset = index.line_start(range.start.line).unwrap_or(0) + start_byte_col;
+    let end_offset = index.line_start(range.end.line).unwrap_or(0) + end_byte_col;
+
+    Span::new(start_offset, end_offset)
 }
 ```
 
 **Acceptance criteria**:
 - [ ] Bidirectional conversion works correctly
-- [ ] Handles UTF-16 (LSP standard) properly
-- [ ] Unit tests for conversion functions
+- [ ] UTF-16 conversion handles multi-byte characters (emoji, CJK, etc.)
+- [ ] Unit tests for conversion functions including Unicode edge cases
 
 ---
 

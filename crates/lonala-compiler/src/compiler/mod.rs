@@ -306,12 +306,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
 
             // String literals
             Ast::String(ref string) => self.compile_string(string, expr.span),
-            Ast::Keyword(ref _kw) => Err(Error::new(
-                ErrorKind::NotImplemented {
-                    feature: "keyword literals",
-                },
-                self.location(expr.span),
-            )),
+            Ast::Keyword(ref name) => self.compile_keyword(name, expr.span),
             Ast::Vector(ref _elements) => Err(Error::new(
                 ErrorKind::NotImplemented {
                     feature: "vector literals",

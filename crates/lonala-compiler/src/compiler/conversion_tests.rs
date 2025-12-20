@@ -120,11 +120,11 @@ fn ast_to_value_keyword() {
     let ast = spanned(Ast::Keyword(String::from("key")));
     let value = ast_to_value(&ast, &mut interner);
 
-    if let Value::Symbol(id) = value {
-        // Keywords are stored with ':' prefix
-        assert_eq!(interner.resolve(id), ":key");
+    if let Value::Keyword(id) = value {
+        // Keywords are stored without the ':' prefix
+        assert_eq!(interner.resolve(id), "key");
     } else {
-        panic!("Expected Symbol");
+        panic!("Expected Keyword");
     }
 }
 
@@ -285,10 +285,10 @@ fn value_to_ast_symbol() {
 #[test]
 fn value_to_ast_keyword() {
     let mut interner = symbol::Interner::new();
-    // Keywords are stored with ':' prefix
-    let id = interner.intern(":key");
+    // Keywords are stored without the ':' prefix
+    let id = interner.intern("key");
 
-    let value = Value::Symbol(id);
+    let value = Value::Keyword(id);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
 
     assert_eq!(result.node, Ast::Keyword(String::from("key")));

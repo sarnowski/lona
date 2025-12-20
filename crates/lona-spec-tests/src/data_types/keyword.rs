@@ -1,21 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 
-//! Tests for Keyword type (Planned).
+//! Tests for Keyword type.
 //!
 //! Section 3.6 of the Lonala specification.
 
 use crate::{SpecTestContext, spec_ref};
 
 // ============================================================================
-// Section 3.6: Keyword (Planned)
+// Section 3.6: Keyword
 // Reference: docs/lonala.md#36-keyword
 // ============================================================================
 
-/// [IGNORED] Spec 3.6: Keyword literals are self-evaluating
-/// Tracking: Keywords are parsed but not yet represented as values
+/// Spec 3.6: Keyword literals are self-evaluating
 #[test]
-#[ignore]
 fn test_3_6_keyword_self_evaluating() {
     let mut ctx = SpecTestContext::new();
     // Keywords should evaluate to themselves
@@ -27,10 +25,8 @@ fn test_3_6_keyword_self_evaluating() {
     );
 }
 
-/// [IGNORED] Spec 3.6: Keywords are interned for fast equality comparison
-/// Tracking: Keywords are parsed but not yet represented as values
+/// Spec 3.6: Keywords are interned for fast equality comparison
 #[test]
-#[ignore]
 fn test_3_6_keyword_equality() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -55,7 +51,7 @@ fn test_3_6_keyword_equality() {
 }
 
 /// [IGNORED] Spec 3.6: Qualified keywords with namespace prefix
-/// Tracking: Keywords are parsed but not yet represented as values
+/// Tracking: Namespace support not yet implemented
 #[test]
 #[ignore]
 fn test_3_6_keyword_qualified() {
@@ -77,7 +73,7 @@ fn test_3_6_keyword_qualified() {
 }
 
 /// [IGNORED] Spec 3.6: Keywords as map keys (common use case)
-/// Tracking: Keywords are parsed but not yet represented as values
+/// Tracking: Map literal syntax and `get` function not yet implemented
 #[test]
 #[ignore]
 fn test_3_6_keyword_as_map_key() {
@@ -99,10 +95,8 @@ fn test_3_6_keyword_as_map_key() {
     );
 }
 
-/// [IGNORED] Spec 3.6: Keywords with hyphenated names
-/// Tracking: Keywords are parsed but not yet represented as values
+/// Spec 3.6: Keywords with hyphenated names
 #[test]
-#[ignore]
 fn test_3_6_keyword_hyphenated() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -112,10 +106,8 @@ fn test_3_6_keyword_hyphenated() {
     );
 }
 
-/// [IGNORED] Spec 3.6: keyword? predicate
-/// Tracking: Type predicates not fully exposed yet
+/// Spec 3.6: keyword? predicate
 #[test]
-#[ignore]
 fn test_3_6_keyword_predicate() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(

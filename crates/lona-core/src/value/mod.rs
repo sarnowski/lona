@@ -61,6 +61,8 @@ pub enum Kind {
     Ratio,
     /// Interned symbol type.
     Symbol,
+    /// Interned keyword type.
+    Keyword,
     /// Immutable string type.
     #[cfg(feature = "alloc")]
     String,
@@ -93,6 +95,7 @@ impl Kind {
             #[cfg(feature = "alloc")]
             Self::Ratio => "ratio",
             Self::Symbol => "symbol",
+            Self::Keyword => "keyword",
             #[cfg(feature = "alloc")]
             Self::String => "string",
             #[cfg(feature = "alloc")]
@@ -124,6 +127,7 @@ impl Kind {
                 | (Self::Integer, Self::Integer)
                 | (Self::Float, Self::Float)
                 | (Self::Symbol, Self::Symbol)
+                | (Self::Keyword, Self::Keyword)
                 | (Self::NativeFunction, Self::NativeFunction)
         ) || {
             #[cfg(feature = "alloc")]
@@ -153,7 +157,7 @@ impl Kind {
             Self::Integer | Self::Float => true,
             #[cfg(feature = "alloc")]
             Self::Ratio => true,
-            Self::Nil | Self::Bool | Self::Symbol | Self::NativeFunction => false,
+            Self::Nil | Self::Bool | Self::Symbol | Self::Keyword | Self::NativeFunction => false,
             #[cfg(feature = "alloc")]
             Self::String | Self::List | Self::Vector | Self::Map | Self::Function => false,
         }
@@ -217,8 +221,10 @@ pub enum Value {
     /// Exact rational number (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     Ratio(Ratio),
-    /// Interned symbol (identifier or keyword).
+    /// Interned symbol (identifier).
     Symbol(symbol::Id),
+    /// Interned keyword (self-evaluating, commonly used as map keys).
+    Keyword(symbol::Id),
     /// Immutable string (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     String(HeapStr),
@@ -254,6 +260,7 @@ impl Value {
             #[cfg(feature = "alloc")]
             Self::Ratio(_) => Kind::Ratio,
             Self::Symbol(_) => Kind::Symbol,
+            Self::Keyword(_) => Kind::Keyword,
             #[cfg(feature = "alloc")]
             Self::String(_) => Kind::String,
             #[cfg(feature = "alloc")]
@@ -294,6 +301,7 @@ impl Value {
             | Self::Integer(_)
             | Self::Float(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
@@ -316,6 +324,7 @@ impl Value {
             | Self::Bool(_)
             | Self::Float(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_)
             | Self::Ratio(_)
             | Self::String(_)
@@ -337,6 +346,7 @@ impl Value {
             | Self::Bool(_)
             | Self::Float(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_) => None,
         }
     }
@@ -358,6 +368,7 @@ impl Value {
             | Self::Bool(_)
             | Self::Integer(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
@@ -381,6 +392,7 @@ impl Value {
             | Self::Integer(_)
             | Self::Float(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
@@ -408,6 +420,36 @@ impl Value {
             | Self::Bool(_)
             | Self::Integer(_)
             | Self::Float(_)
+            | Self::Keyword(_)
+            | Self::NativeFunction(_) => None,
+            #[cfg(feature = "alloc")]
+            Self::Ratio(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
+            | Self::Function(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `Keyword`.
+    #[inline]
+    #[must_use]
+    pub const fn is_keyword(&self) -> bool {
+        matches!(self, Self::Keyword(_))
+    }
+
+    /// Returns the contained symbol ID if this is a `Keyword` variant.
+    #[inline]
+    #[must_use]
+    pub const fn as_keyword(&self) -> Option<symbol::Id> {
+        match *self {
+            Self::Keyword(id) => Some(id),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Symbol(_)
             | Self::NativeFunction(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
@@ -440,6 +482,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_)
             | Self::List(_)
             | Self::Vector(_)
@@ -469,6 +512,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_)
             | Self::String(_)
             | Self::Vector(_)
@@ -498,6 +542,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
@@ -527,6 +572,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
@@ -556,6 +602,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::Keyword(_)
             | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
@@ -577,7 +624,12 @@ impl Value {
     pub const fn as_native_function(&self) -> Option<symbol::Id> {
         match *self {
             Self::NativeFunction(id) => Some(id),
-            Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Symbol(_)
+            | Self::Keyword(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
             | Self::String(_)
@@ -611,6 +663,7 @@ impl PartialEq for Value {
             #[cfg(feature = "alloc")]
             (&Self::Ratio(ref left), &Self::Ratio(ref right)) => left == right,
             (&Self::Symbol(ref left), &Self::Symbol(ref right)) => left == right,
+            (&Self::Keyword(ref left), &Self::Keyword(ref right)) => left == right,
             (&Self::NativeFunction(ref left), &Self::NativeFunction(ref right)) => left == right,
             #[cfg(feature = "alloc")]
             (&Self::String(ref left), &Self::String(ref right)) => left == right,
@@ -645,6 +698,7 @@ impl Hash for Value {
             #[cfg(feature = "alloc")]
             Self::Ratio(ref value) => value.hash(state),
             Self::Symbol(id) => id.hash(state),
+            Self::Keyword(id) => id.hash(state),
             Self::NativeFunction(id) => id.hash(state),
             #[cfg(feature = "alloc")]
             Self::String(ref string) => string.hash(state),

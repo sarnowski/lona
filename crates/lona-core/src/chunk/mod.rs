@@ -91,6 +91,8 @@ pub enum Constant {
     String(String),
     /// An interned symbol identifier.
     Symbol(symbol::Id),
+    /// An interned keyword identifier.
+    Keyword(symbol::Id),
     /// A list of constants (for quoted lists).
     List(Vec<Self>),
     /// A vector of constants (for quoted vectors).
@@ -118,6 +120,7 @@ impl fmt::Display for Constant {
             Self::Float(num) => write!(f, "{num}"),
             Self::String(ref text) => write!(f, "\"{text}\""),
             Self::Symbol(id) => write!(f, "sym#{}", id.as_u32()),
+            Self::Keyword(id) => write!(f, "kw#{}", id.as_u32()),
             Self::List(ref elements) => {
                 write!(f, "(")?;
                 for (idx, elem) in elements.iter().enumerate() {

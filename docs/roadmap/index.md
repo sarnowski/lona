@@ -98,7 +98,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 
 | Task | Name | Status |
 |------|------|--------|
-| 1.1.1 | Keyword Value Type | open |
+| 1.1.1 | Keyword Value Type | done |
 | 1.1.2 | Set Value Type | open |
 | 1.1.3 | Collection Literal Syntax | open |
 | 1.1.4 | Binary Value Type | open |
@@ -115,11 +115,12 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.3 | Sequential Destructuring | open |
 | 1.2.4 | Associative Destructuring | open |
 | 1.2.5 | Nested Destructuring | open |
-| 1.2.6 | Loop/Recur - Basic Implementation | open |
-| 1.2.7 | Loop/Recur - Function Integration | open |
-| 1.2.8 | Pattern Matching - Core Infrastructure | open |
-| 1.2.9 | Case Special Form | open |
-| 1.2.10 | Gensym Implementation | open |
+| 1.2.6 | [Proper Tail Calls - Compiler](../development/tco.md) | open |
+| 1.2.7 | [Proper Tail Calls - VM Trampoline](../development/tco.md) | open |
+| 1.2.8 | [Proper Tail Calls - Integration Tests](../development/tco.md) | open |
+| 1.2.9 | Pattern Matching - Core Infrastructure | open |
+| 1.2.10 | Case Special Form | open |
+| 1.2.11 | Gensym Implementation | open |
 
 #### Phase 1.3: Namespace System
 
