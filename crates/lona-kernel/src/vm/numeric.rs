@@ -9,11 +9,12 @@
 use lona_core::error_context::TypeExpectation;
 use lona_core::integer::Integer;
 use lona_core::ratio::Ratio;
-use lona_core::value::Value;
+use lona_core::value::{self, Value};
 use num_traits::{ToPrimitive as _, Zero as _};
 
 use super::error::{Error, Kind as ErrorKind};
 use super::frame::Frame;
+use super::natives::NativeError;
 
 /// Returns the `value::Kind` for the first non-numeric type in a binary operation.
 const fn first_non_numeric_kind(left: &Value, right: &Value) -> lona_core::value::Kind {
@@ -468,4 +469,168 @@ where
     let lhs_float = integer_to_f64(lhs);
     let rhs_float = integer_to_f64(rhs);
     float_cmp(lhs_float, rhs_float)
+}
+
+// =============================================================================
+// Frame-Free Numeric Helpers for Native Functions
+// =============================================================================
+
+/// Returns the `value::Kind` for type error reporting.
+const fn get_non_numeric_kind(val: &Value) -> value::Kind {
+    val.kind()
+}
+
+/// Performs addition with type promotion (frame-free version for native functions).
+///
+/// Same promotion rules as [`add`], but returns [`NativeError`] instead of
+/// requiring a `Frame` for error location.
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "[approved] Integer/Ratio arithmetic is safe with arbitrary precision"
+)]
+pub fn add_values(left: &Value, right: &Value) -> Result<Value, NativeError> {
+    match (left, right) {
+        // Integer + Integer → Integer
+        (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => Ok(Value::Integer(lhs + rhs)),
+
+        // Float + Float → Float
+        (&Value::Float(lhs), &Value::Float(rhs)) => Ok(Value::Float(lhs + rhs)),
+
+        // Integer + Float → Float
+        (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+            let lhs_float = integer_to_f64(lhs);
+            Ok(Value::Float(lhs_float + rhs))
+        }
+        (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+            let rhs_float = integer_to_f64(rhs);
+            Ok(Value::Float(lhs + rhs_float))
+        }
+
+        // Ratio + Ratio → Ratio
+        (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => Ok(Value::Ratio(lhs + rhs)),
+
+        // Integer + Ratio → Ratio
+        (&Value::Integer(ref lhs), &Value::Ratio(ref rhs)) => {
+            let lhs_ratio = Ratio::from_integer(lhs.clone());
+            Ok(Value::Ratio(lhs_ratio + rhs.clone()))
+        }
+        (&Value::Ratio(ref lhs), &Value::Integer(ref rhs)) => {
+            let rhs_ratio = Ratio::from_integer(rhs.clone());
+            Ok(Value::Ratio(lhs.clone() + rhs_ratio))
+        }
+
+        // Ratio + Float → Float
+        (&Value::Ratio(ref lhs), &Value::Float(rhs)) => {
+            let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+            Ok(Value::Float(lhs_float + rhs))
+        }
+        (&Value::Float(lhs), &Value::Ratio(ref rhs)) => {
+            let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+            Ok(Value::Float(lhs + rhs_float))
+        }
+
+        _ => Err(NativeError::TypeError {
+            expected: TypeExpectation::Numeric,
+            got: get_non_numeric_kind(if left.kind().is_numeric() {
+                right
+            } else {
+                left
+            }),
+            arg_index: u8::from(left.kind().is_numeric()),
+        }),
+    }
+}
+
+/// Performs subtraction with type promotion (frame-free version for native functions).
+///
+/// Same promotion rules as [`sub`], but returns [`NativeError`] instead of
+/// requiring a `Frame` for error location.
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "[approved] Integer/Ratio arithmetic is safe with arbitrary precision"
+)]
+pub fn sub_values(left: &Value, right: &Value) -> Result<Value, NativeError> {
+    match (left, right) {
+        // Integer - Integer → Integer
+        (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => Ok(Value::Integer(lhs - rhs)),
+
+        // Float - Float → Float
+        (&Value::Float(lhs), &Value::Float(rhs)) => Ok(Value::Float(lhs - rhs)),
+
+        // Integer - Float → Float
+        (&Value::Integer(ref lhs), &Value::Float(rhs)) => {
+            let lhs_float = integer_to_f64(lhs);
+            Ok(Value::Float(lhs_float - rhs))
+        }
+        (&Value::Float(lhs), &Value::Integer(ref rhs)) => {
+            let rhs_float = integer_to_f64(rhs);
+            Ok(Value::Float(lhs - rhs_float))
+        }
+
+        // Ratio - Ratio → Ratio
+        (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => Ok(Value::Ratio(lhs - rhs)),
+
+        // Integer - Ratio → Ratio
+        (&Value::Integer(ref lhs), &Value::Ratio(ref rhs)) => {
+            let lhs_ratio = Ratio::from_integer(lhs.clone());
+            Ok(Value::Ratio(lhs_ratio - rhs.clone()))
+        }
+        (&Value::Ratio(ref lhs), &Value::Integer(ref rhs)) => {
+            let rhs_ratio = Ratio::from_integer(rhs.clone());
+            Ok(Value::Ratio(lhs.clone() - rhs_ratio))
+        }
+
+        // Ratio - Float → Float
+        (&Value::Ratio(ref lhs), &Value::Float(rhs)) => {
+            let lhs_float = lhs.to_f64().unwrap_or(f64::NAN);
+            Ok(Value::Float(lhs_float - rhs))
+        }
+        (&Value::Float(lhs), &Value::Ratio(ref rhs)) => {
+            let rhs_float = rhs.to_f64().unwrap_or(f64::NAN);
+            Ok(Value::Float(lhs - rhs_float))
+        }
+
+        _ => Err(NativeError::TypeError {
+            expected: TypeExpectation::Numeric,
+            got: get_non_numeric_kind(if left.kind().is_numeric() {
+                right
+            } else {
+                left
+            }),
+            arg_index: u8::from(left.kind().is_numeric()),
+        }),
+    }
+}
+
+/// Negates a numeric value (frame-free version for native functions).
+///
+/// Returns the negation of the value:
+/// - Integer → Integer (negated)
+/// - Float → Float (negated)
+/// - Ratio → Ratio (negated)
+#[expect(
+    clippy::arithmetic_side_effects,
+    reason = "[approved] Integer/Ratio negation is safe with arbitrary precision"
+)]
+pub fn negate_value(val: &Value) -> Result<Value, NativeError> {
+    match *val {
+        Value::Integer(ref int_val) => Ok(Value::Integer(-int_val.clone())),
+        Value::Float(float_val) => Ok(Value::Float(-float_val)),
+        Value::Ratio(ref ratio_val) => Ok(Value::Ratio(-ratio_val.clone())),
+        // Non-numeric types cannot be negated
+        Value::Nil
+        | Value::Bool(_)
+        | Value::Symbol(_)
+        | Value::NativeFunction(_)
+        | Value::String(_)
+        | Value::List(_)
+        | Value::Vector(_)
+        | Value::Map(_)
+        | Value::Function(_)
+        | _ => Err(NativeError::TypeError {
+            expected: TypeExpectation::Numeric,
+            got: val.kind(),
+            arg_index: 0_u8,
+        }),
+    }
 }

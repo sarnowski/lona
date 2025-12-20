@@ -181,6 +181,14 @@ pub fn value_to_ast(
                 location,
             ));
         }
+        Value::NativeFunction(_) => {
+            return Err(Error::new(
+                ErrorKind::InvalidMacroResult {
+                    message: String::from("native function values cannot be converted to AST"),
+                },
+                location,
+            ));
+        }
         // Handle future Value variants
         _ => {
             return Err(Error::new(

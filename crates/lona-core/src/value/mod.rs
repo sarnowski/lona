@@ -76,6 +76,8 @@ pub enum Kind {
     /// Compiled function type.
     #[cfg(feature = "alloc")]
     Function,
+    /// Native function type (first-class reference to a native function).
+    NativeFunction,
 }
 
 impl Kind {
@@ -101,6 +103,7 @@ impl Kind {
             Self::Map => "map",
             #[cfg(feature = "alloc")]
             Self::Function => "function",
+            Self::NativeFunction => "native-function",
         }
     }
 
@@ -121,6 +124,7 @@ impl Kind {
                 | (Self::Integer, Self::Integer)
                 | (Self::Float, Self::Float)
                 | (Self::Symbol, Self::Symbol)
+                | (Self::NativeFunction, Self::NativeFunction)
         ) || {
             #[cfg(feature = "alloc")]
             {
@@ -149,7 +153,7 @@ impl Kind {
             Self::Integer | Self::Float => true,
             #[cfg(feature = "alloc")]
             Self::Ratio => true,
-            Self::Nil | Self::Bool | Self::Symbol => false,
+            Self::Nil | Self::Bool | Self::Symbol | Self::NativeFunction => false,
             #[cfg(feature = "alloc")]
             Self::String | Self::List | Self::Vector | Self::Map | Self::Function => false,
         }
@@ -165,12 +169,12 @@ impl Kind {
         matches!(self, Self::List | Self::Vector | Self::String | Self::Map)
     }
 
-    /// Returns true if this is a callable type (function).
+    /// Returns true if this is a callable type (function or native function).
     #[cfg(feature = "alloc")]
     #[inline]
     #[must_use]
     pub const fn is_callable(self) -> bool {
-        matches!(self, Self::Function)
+        matches!(self, Self::Function | Self::NativeFunction)
     }
 }
 
@@ -221,6 +225,11 @@ pub enum Value {
     /// Compiled function (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     Function(Function),
+    /// Native function reference (symbol ID for lookup).
+    ///
+    /// First-class representation of a native function, enabling `+` and `-`
+    /// to be passed to higher-order functions like `map` and `reduce`.
+    NativeFunction(symbol::Id),
 }
 
 impl Value {
@@ -246,6 +255,7 @@ impl Value {
             Self::Map(_) => Kind::Map,
             #[cfg(feature = "alloc")]
             Self::Function(_) => Kind::Function,
+            Self::NativeFunction(_) => Kind::NativeFunction,
         }
     }
 
@@ -271,7 +281,11 @@ impl Value {
     pub const fn as_bool(&self) -> Option<bool> {
         match *self {
             Self::Bool(value) => Some(value),
-            Self::Nil | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
+            Self::Nil
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Symbol(_)
+            | Self::NativeFunction(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
             | Self::String(_)
@@ -293,6 +307,7 @@ impl Value {
             | Self::Bool(_)
             | Self::Float(_)
             | Self::Symbol(_)
+            | Self::NativeFunction(_)
             | Self::Ratio(_)
             | Self::String(_)
             | Self::List(_)
@@ -309,7 +324,11 @@ impl Value {
     pub const fn as_integer(&self) -> Option<i64> {
         match *self {
             Self::Integer(value) => Some(value),
-            Self::Nil | Self::Bool(_) | Self::Float(_) | Self::Symbol(_) => None,
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Float(_)
+            | Self::Symbol(_)
+            | Self::NativeFunction(_) => None,
         }
     }
 
@@ -326,7 +345,11 @@ impl Value {
     pub const fn as_float(&self) -> Option<f64> {
         match *self {
             Self::Float(value) => Some(value),
-            Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Symbol(_) => None,
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Symbol(_)
+            | Self::NativeFunction(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
             | Self::String(_)
@@ -349,6 +372,7 @@ impl Value {
             | Self::Integer(_)
             | Self::Float(_)
             | Self::Symbol(_)
+            | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
@@ -371,7 +395,11 @@ impl Value {
     pub const fn as_symbol(&self) -> Option<symbol::Id> {
         match *self {
             Self::Symbol(id) => Some(id),
-            Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) => None,
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::NativeFunction(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
             | Self::String(_)
@@ -403,6 +431,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::NativeFunction(_)
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
@@ -431,6 +460,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::NativeFunction(_)
             | Self::String(_)
             | Self::Vector(_)
             | Self::Map(_)
@@ -459,6 +489,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
             | Self::Map(_)
@@ -487,6 +518,7 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
@@ -515,10 +547,35 @@ impl Value {
             | Self::Float(_)
             | Self::Ratio(_)
             | Self::Symbol(_)
+            | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `NativeFunction`.
+    #[inline]
+    #[must_use]
+    pub const fn is_native_function(&self) -> bool {
+        matches!(self, Self::NativeFunction(_))
+    }
+
+    /// Returns the contained symbol ID if this is a `NativeFunction` variant.
+    #[inline]
+    #[must_use]
+    pub const fn as_native_function(&self) -> Option<symbol::Id> {
+        match *self {
+            Self::NativeFunction(id) => Some(id),
+            Self::Nil | Self::Bool(_) | Self::Integer(_) | Self::Float(_) | Self::Symbol(_) => None,
+            #[cfg(feature = "alloc")]
+            Self::Ratio(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
+            | Self::Function(_) => None,
         }
     }
 
@@ -545,6 +602,7 @@ impl PartialEq for Value {
             #[cfg(feature = "alloc")]
             (&Self::Ratio(ref left), &Self::Ratio(ref right)) => left == right,
             (&Self::Symbol(ref left), &Self::Symbol(ref right)) => left == right,
+            (&Self::NativeFunction(ref left), &Self::NativeFunction(ref right)) => left == right,
             #[cfg(feature = "alloc")]
             (&Self::String(ref left), &Self::String(ref right)) => left == right,
             #[cfg(feature = "alloc")]
@@ -578,6 +636,7 @@ impl Hash for Value {
             #[cfg(feature = "alloc")]
             Self::Ratio(ref value) => value.hash(state),
             Self::Symbol(id) => id.hash(state),
+            Self::NativeFunction(id) => id.hash(state),
             #[cfg(feature = "alloc")]
             Self::String(ref string) => string.hash(state),
             #[cfg(feature = "alloc")]

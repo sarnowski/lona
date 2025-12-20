@@ -62,6 +62,7 @@ impl ValueKey {
             Value::Vector(_) => 8,
             Value::Map(_) => 9,
             Value::Function(_) => 10,
+            Value::NativeFunction(_) => 11,
         }
     }
 }
@@ -101,6 +102,9 @@ impl Ord for ValueKey {
             }
             (&Value::Ratio(ref left), &Value::Ratio(ref right)) => left.cmp(right),
             (&Value::Symbol(left), &Value::Symbol(right)) => left.as_u32().cmp(&right.as_u32()),
+            (&Value::NativeFunction(left), &Value::NativeFunction(right)) => {
+                left.as_u32().cmp(&right.as_u32())
+            }
             (&Value::String(ref left), &Value::String(ref right)) => left.cmp(right),
             (&Value::List(ref left), &Value::List(ref right)) => compare_lists(left, right),
             (&Value::Vector(ref left), &Value::Vector(ref right)) => compare_vectors(left, right),

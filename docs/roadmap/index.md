@@ -133,6 +133,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.3.7 | Dynamic Var Declaration | open |
 | 1.3.8 | Per-Process Binding Stack | open |
 | 1.3.9 | `binding` Special Form | open |
+| 1.3.10 | `defnative` Special Form | open |
 
 #### Phase 1.4: Process Model
 

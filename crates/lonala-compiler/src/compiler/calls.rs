@@ -12,7 +12,9 @@
 use alloc::vec::Vec;
 
 use lona_core::chunk::Constant;
-use lona_core::opcode::{Opcode, RK_MAX_CONSTANT, encode_abc, rk_constant, rk_register};
+use lona_core::opcode::{
+    Opcode, RK_MAX_CONSTANT, encode_abc, encode_abx, rk_constant, rk_register,
+};
 use lona_core::span::Span;
 use lonala_parser::{Ast, Spanned};
 
@@ -202,60 +204,191 @@ impl Compiler<'_, '_, '_> {
         }
     }
 
-    /// Compiles a binary operation (arithmetic or comparison).
+    /// Compiles an arithmetic or comparison operation with n-ary support.
     ///
-    /// Also handles unary negation `(- x)` as a special case.
+    /// Handles all arities:
+    /// - Zero args: `(+)` → 0, `(*)` → 1, `(-)` and `(/)` → error
+    /// - One arg: `(+ x)` → x, `(* x)` → x, `(- x)` → negation, `(/ x)` → error
+    /// - Two args: Standard binary operation
+    /// - N args: Chains binary operations left-to-right
     pub(super) fn compile_binary_op(
         &mut self,
         opcode: Opcode,
         elements: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
-        match elements.len() {
-            // Unary: (- x) → Neg
-            2_usize if opcode == Opcode::Sub => {
-                let arg = elements
-                    .get(1_usize)
-                    .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
-                let checkpoint = self.next_register;
-                let result = self.compile_expr(arg)?;
+        let arg_count = elements.len().saturating_sub(1_usize);
 
-                self.free_registers_to(checkpoint);
-                let dest = self.alloc_register(span)?;
-                self.chunk
-                    .emit(encode_abc(Opcode::Neg, dest, result.register, 0), span);
-                Ok(ExprResult { register: dest })
+        match (opcode, arg_count) {
+            // Zero args: (+) → 0, (*) → 1
+            (Opcode::Add, 0_usize) => self.compile_load_constant(Constant::Integer(0_i64), span),
+            (Opcode::Mul, 0_usize) => self.compile_load_constant(Constant::Integer(1_i64), span),
+
+            // Zero args error: (-), (/)
+            (Opcode::Sub | Opcode::Div, 0_usize) => Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: if opcode == Opcode::Sub { "-" } else { "/" },
+                    message: "requires at least one argument",
+                },
+                self.location(span),
+            )),
+
+            // Comparison/mod with 0 or 1 arg → error
+            (
+                Opcode::Eq | Opcode::Lt | Opcode::Le | Opcode::Gt | Opcode::Ge | Opcode::Mod,
+                0_usize | 1_usize,
+            ) => Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "comparison",
+                    message: "requires at least two arguments",
+                },
+                self.location(span),
+            )),
+
+            // One arg: identity for + and *
+            (Opcode::Add | Opcode::Mul, 1_usize) => self.compile_first_arg(elements, span),
+
+            // One arg: (- x) → negation
+            (Opcode::Sub, 1_usize) => self.compile_unary_negation(elements, span),
+
+            // One arg: (/ x) → reciprocal (not yet implemented)
+            (Opcode::Div, 1_usize) => Err(Error::new(
+                ErrorKind::NotImplemented {
+                    feature: "reciprocal (1/x)",
+                },
+                self.location(span),
+            )),
+
+            // Two args: standard binary operation
+            (_, 2_usize) => self.compile_binary_pair(opcode, elements, span),
+
+            // N args: comparison and mod operators require exactly 2 arguments
+            (Opcode::Eq | Opcode::Lt | Opcode::Le | Opcode::Gt | Opcode::Ge | Opcode::Mod, _) => {
+                Err(Error::new(
+                    ErrorKind::InvalidSpecialForm {
+                        form: "comparison/mod",
+                        message: "requires exactly two arguments",
+                    },
+                    self.location(span),
+                ))
             }
-            // Binary: (op x y)
-            3_usize => {
-                let arg1 = elements
-                    .get(1_usize)
-                    .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
-                let arg2 = elements
-                    .get(2_usize)
-                    .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
-                // Save register checkpoint
-                let checkpoint = self.next_register;
-
-                // Try to use RK encoding for constant operands
-                let rk_b = self.try_compile_rk_operand(arg1)?;
-                let rk_c = self.try_compile_rk_operand(arg2)?;
-
-                // Allocate destination register (reuse checkpoint if possible)
-                self.free_registers_to(checkpoint);
-                let dest = self.alloc_register(span)?;
-
-                self.chunk.emit(encode_abc(opcode, dest, rk_b, rk_c), span);
-                Ok(ExprResult { register: dest })
+            // N args: chain arithmetic operators left-to-right
+            (Opcode::Add | Opcode::Sub | Opcode::Mul | Opcode::Div, _) => {
+                self.compile_nary_arithmetic(opcode, elements, span)
             }
+
             _ => Err(Error::new(
                 ErrorKind::NotImplemented {
-                    feature: "n-ary arithmetic",
+                    feature: "unknown operator arity",
                 },
                 self.location(span),
             )),
         }
+    }
+
+    /// Loads a constant value into a register.
+    fn compile_load_constant(
+        &mut self,
+        constant: Constant,
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        let dest = self.alloc_register(span)?;
+        let idx = self.add_constant(constant, span)?;
+        self.chunk.emit(encode_abx(Opcode::LoadK, dest, idx), span);
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles the first argument of an operator expression.
+    fn compile_first_arg(
+        &mut self,
+        elements: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        let arg = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        self.compile_expr(arg)
+    }
+
+    /// Compiles unary negation: `(- x)` → `Neg`.
+    fn compile_unary_negation(
+        &mut self,
+        elements: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        let arg = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        let checkpoint = self.next_register;
+        let result = self.compile_expr(arg)?;
+
+        self.free_registers_to(checkpoint);
+        let dest = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abc(Opcode::Neg, dest, result.register, 0), span);
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles a binary operation with exactly two arguments.
+    fn compile_binary_pair(
+        &mut self,
+        opcode: Opcode,
+        elements: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        let arg1 = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        let arg2 = elements
+            .get(2_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+
+        let checkpoint = self.next_register;
+        let rk_b = self.try_compile_rk_operand(arg1)?;
+        let rk_c = self.try_compile_rk_operand(arg2)?;
+
+        self.free_registers_to(checkpoint);
+        let dest = self.alloc_register(span)?;
+        self.chunk.emit(encode_abc(opcode, dest, rk_b, rk_c), span);
+        Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles n-ary arithmetic by chaining binary operations left-to-right.
+    fn compile_nary_arithmetic(
+        &mut self,
+        opcode: Opcode,
+        elements: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        let arg1 = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        let arg2 = elements
+            .get(2_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+
+        let checkpoint = self.next_register;
+        let rk_b = self.try_compile_rk_operand(arg1)?;
+        let rk_c = self.try_compile_rk_operand(arg2)?;
+
+        self.free_registers_to(checkpoint);
+        let acc = self.alloc_register(span)?;
+        self.chunk.emit(encode_abc(opcode, acc, rk_b, rk_c), span);
+
+        // Chain remaining arguments: acc = acc op arg
+        for arg in elements.get(3_usize..).unwrap_or(&[]) {
+            let arg_checkpoint = self.next_register;
+            let rk_arg = self.try_compile_rk_operand(arg)?;
+            self.free_registers_to(arg_checkpoint);
+
+            let rk_acc = rk_register(acc)
+                .ok_or_else(|| Error::new(ErrorKind::TooManyRegisters, self.location(span)))?;
+            self.chunk
+                .emit(encode_abc(opcode, acc, rk_acc, rk_arg), span);
+        }
+
+        Ok(ExprResult { register: acc })
     }
 
     /// Compiles unary `not` operation.

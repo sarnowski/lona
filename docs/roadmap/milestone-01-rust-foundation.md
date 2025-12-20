@@ -657,6 +657,8 @@ Implement namespaces for code organization.
 - Var metadata
 - Var quote reader macro
 
+**Note**: This task enables `defnative` for native function registration with metadata. See [defnative design](../development/defnative.md).
+
 **Estimated effort**: 1 context window
 
 ---
@@ -836,6 +838,51 @@ Implement namespaces for code organization.
 - Frame popped on error exit
 
 **Estimated effort**: 1-2 context windows
+
+---
+
+#### Task 1.3.10: `defnative` Special Form
+
+**Description**: Implement `defnative` for registering native functions with full metadata support.
+
+**Design**: See [defnative design](../development/defnative.md) for full rationale.
+
+**Files to modify**:
+- `crates/lonala-compiler/src/compiler/mod.rs`
+- `crates/lona-kernel/src/vm/interpreter/mod.rs`
+- `crates/lona-kernel/src/vm/natives.rs`
+- `lona/core.lona`
+
+**Requirements**:
+- `(defnative name docstring arglists)` syntax
+- Verifies symbol exists in Rust native registry (load-time error if not)
+- Creates function value with native implementation
+- Attaches metadata: `{:doc "..." :arglists '(...) :native true}`
+- Creates Var and binds in current namespace
+- All natives in `lona/core.lona` use `defnative`
+
+**Example**:
+```clojure
+(defnative cons
+  "Returns a new list with x as first and coll as rest."
+  [x coll])
+
+(doc cons)        ; → "Returns a new list..."
+(meta #'cons)     ; → {:doc "..." :arglists '([x coll]) :native true}
+```
+
+**Dependencies**:
+- Task 1.1.4-1.1.6: Metadata System
+- Task 1.3.2: Var System
+
+**Tests**:
+- defnative creates callable function
+- Metadata accessible via `meta`
+- `doc` and `arglists` work correctly
+- Error on non-existent native
+- `:native true` in metadata
+
+**Estimated effort**: 1 context window
 
 ---
 

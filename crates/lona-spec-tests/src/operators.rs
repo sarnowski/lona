@@ -14,10 +14,8 @@ use crate::{SpecTestContext, spec_ref};
 // Reference: docs/lonala.md#711-addition-
 // ============================================================================
 
-/// [IGNORED] Spec 7.1.1: "With no arguments, returns 0"
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.1: "With no arguments, returns 0"
 #[test]
-#[ignore]
 fn test_7_1_1_addition_zero_args() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -27,10 +25,8 @@ fn test_7_1_1_addition_zero_args() {
     );
 }
 
-/// [IGNORED] Spec 7.1.1: One argument
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.1: One argument
 #[test]
-#[ignore]
 fn test_7_1_1_addition_one_arg() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -47,10 +43,8 @@ fn test_7_1_1_addition_two_args() {
     ctx.assert_int("(+ 1 2)", 3, &spec_ref("7.1.1", "+", "two arguments"));
 }
 
-/// [IGNORED] Spec 7.1.1: Variadic
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.1: Variadic
 #[test]
-#[ignore]
 fn test_7_1_1_addition_variadic() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -99,10 +93,8 @@ fn test_7_1_2_subtraction_two_args() {
     ctx.assert_int("(- 10 3)", 7, &spec_ref("7.1.2", "-", "two arguments"));
 }
 
-/// [IGNORED] Spec 7.1.2: Variadic - subtracts subsequent from first
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.2: Variadic - subtracts subsequent from first
 #[test]
-#[ignore]
 fn test_7_1_2_subtraction_variadic() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -117,10 +109,8 @@ fn test_7_1_2_subtraction_variadic() {
 // Reference: docs/lonala.md#713-multiplication-
 // ============================================================================
 
-/// [IGNORED] Spec 7.1.3: "With no arguments, returns 1"
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.3: "With no arguments, returns 1"
 #[test]
-#[ignore]
 fn test_7_1_3_multiplication_zero_args() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -130,10 +120,8 @@ fn test_7_1_3_multiplication_zero_args() {
     );
 }
 
-/// [IGNORED] Spec 7.1.3: One argument
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.3: One argument
 #[test]
-#[ignore]
 fn test_7_1_3_multiplication_one_arg() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -150,10 +138,8 @@ fn test_7_1_3_multiplication_two_args() {
     ctx.assert_int("(* 2 3)", 6, &spec_ref("7.1.3", "*", "two arguments"));
 }
 
-/// [IGNORED] Spec 7.1.3: Variadic
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.3: Variadic
 #[test]
-#[ignore]
 fn test_7_1_3_multiplication_variadic() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -207,10 +193,8 @@ fn test_7_1_4_division_two_args() {
     );
 }
 
-/// [IGNORED] Spec 7.1.4: Variadic
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.4: Variadic
 #[test]
-#[ignore]
 fn test_7_1_4_division_variadic() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -565,5 +549,109 @@ fn test_7_5_coercion_division_inexact() {
         5,
         2,
         &spec_ref("7.5", "Coercion", "int / int inexact = ratio"),
+    );
+}
+
+// ============================================================================
+// Section 7.6: First-Class Arithmetic Operators
+// Reference: docs/lonala.md (operators as first-class values)
+// ============================================================================
+
+/// `+` can be bound to a variable and called
+#[test]
+fn test_7_6_addition_as_value() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def plus +) (plus 1 2))",
+        3,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "+ can be bound to variable and called",
+        ),
+    );
+}
+
+/// `-` can be bound to a variable and called
+#[test]
+fn test_7_6_subtraction_as_value() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def minus -) (minus 10 3))",
+        7,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "- can be bound to variable and called",
+        ),
+    );
+}
+
+/// `+` can be passed to a user-defined higher-order function
+#[test]
+fn test_7_6_addition_passed_to_function() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def apply-op (fn [op a b] (op a b)))").unwrap();
+    ctx.assert_int(
+        "(apply-op + 3 4)",
+        7,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "+ can be passed as argument to function",
+        ),
+    );
+}
+
+/// `-` can be passed to a user-defined higher-order function
+#[test]
+fn test_7_6_subtraction_passed_to_function() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def apply-op (fn [op a b] (op a b)))").unwrap();
+    ctx.assert_int(
+        "(apply-op - 10 3)",
+        7,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "- can be passed as argument to function",
+        ),
+    );
+}
+
+/// Bound arithmetic operators work with variadic calls
+#[test]
+fn test_7_6_bound_operators_variadic() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def plus +) (plus 1 2 3 4))",
+        10,
+        &spec_ref("7.6", "First-class", "bound + works with variadic args"),
+    );
+    ctx.assert_int(
+        "(do (def minus -) (minus 20 5 3 2))",
+        10,
+        &spec_ref("7.6", "First-class", "bound - works with variadic args"),
+    );
+}
+
+/// Bound arithmetic operators work with edge arities
+#[test]
+fn test_7_6_bound_operators_edge_arities() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def plus +) (plus))",
+        0,
+        &spec_ref("7.6", "First-class", "bound + with zero args returns 0"),
+    );
+    ctx.assert_int(
+        "(do (def plus +) (plus 42))",
+        42,
+        &spec_ref("7.6", "First-class", "bound + with one arg returns arg"),
+    );
+    ctx.assert_int(
+        "(do (def minus -) (minus 5))",
+        -5,
+        &spec_ref("7.6", "First-class", "bound - with one arg negates"),
     );
 }

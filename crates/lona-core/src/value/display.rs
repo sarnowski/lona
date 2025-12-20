@@ -20,6 +20,7 @@ impl Display for Value {
             #[cfg(feature = "alloc")]
             Self::Ratio(ref value) => write!(f, "{value}"),
             Self::Symbol(id) => write!(f, "#<symbol:{}>", id.as_u32()),
+            Self::NativeFunction(id) => write!(f, "#<native-fn:{}>", id.as_u32()),
             #[cfg(feature = "alloc")]
             Self::String(ref string) => write_escaped_string(string.as_str(), f),
             #[cfg(feature = "alloc")]
@@ -117,6 +118,9 @@ impl Display for Displayable<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self.value {
             Value::Symbol(id) => write!(f, "{}", self.interner.resolve(id)),
+            Value::NativeFunction(id) => {
+                write!(f, "#<native-fn:{}>", self.interner.resolve(id))
+            }
             Value::Nil => write!(f, "nil"),
             Value::Bool(true) => write!(f, "true"),
             Value::Bool(false) => write!(f, "false"),

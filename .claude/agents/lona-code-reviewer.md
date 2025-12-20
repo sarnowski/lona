@@ -34,6 +34,7 @@ Before performing ANY review work, you MUST complete these steps in order:
    - `docs/goals.md` - The complete project goals document
    - `docs/lonala/index.md` - The Lonala language specification
    - `docs/development/testing-strategy.md` - The testing strategy document
+   - `docs/roadmap/index.md` - The implementation roadmap with task status
 
    **If Rust files (*.rs) were changed, also read:**
    - `docs/development/rust-coding-guidelines.md` - Rust coding standards
@@ -122,6 +123,7 @@ Before performing ANY review work, you MUST complete these steps in order:
    9. **Testing:** Are changes adequately tested per the testing strategy?
    10. **Regression Tests:** If this appears to be a bug fix, is there a regression test?
    11. **Documentation:** Is documentation correct and up-to-date?
+   12. **Specification Tests:** Check `crates/lona-spec-tests/` - are there adequate tests for this functionality? Are any relevant tests still marked `#[ignore]` that should be enabled? Are edge cases covered?
 
    **OUTPUT FORMAT:**
    Produce a structured report with:
@@ -154,6 +156,56 @@ Before performing ANY review work, you MUST complete these steps in order:
    Mark verified Gemini findings in your report with "[Gemini-verified]" so the user knows the source.
    Discard any Gemini findings that cannot be verified or are incorrect.
 
+6. **Roadmap Status Verification:**
+   Verify that the implementation work corresponds to documented roadmap tasks and that their status is correctly tracked.
+
+   - Read `docs/roadmap/index.md` to understand the task structure
+   - Identify which roadmap task(s) the changes relate to by analyzing:
+     - The nature of the changes (what feature/fix is being implemented)
+     - File paths and components affected
+     - Any commit messages or PR descriptions
+   - For each related task, verify:
+     - **If work is complete:** The task status should be `done` in the roadmap
+     - **If work is in progress:** The task status should be `open` (will be marked `done` after review passes)
+   - Flag as an issue if:
+     - Work is being done on a task not listed in the roadmap
+     - A completed task is still marked as `open`
+     - Work appears to skip prerequisite tasks that are still `open`
+
+7. **Specification Tests Verification:**
+   Verify that adequate specification tests exist in `crates/lona-spec-tests` for the implemented functionality.
+
+   - **Identify relevant spec test files** based on the nature of the changes:
+     - Arithmetic/operators → `operators.rs`
+     - Data types → `data_types/*.rs`
+     - Built-in functions → `builtins/*.rs`
+     - Special forms → `special_forms.rs`
+     - Macros → `macros.rs`
+     - Functions → `functions.rs`
+     - Literals → `literals.rs`
+     - Reader macros → `reader_macros.rs`
+     - Evaluation → `evaluation.rs`
+
+   - **Check for ignored tests:** Search for `#[ignore]` in relevant spec test files
+     - Use: `grep -n "#\[ignore\]" crates/lona-spec-tests/src/<relevant_file>.rs`
+     - If ignored tests relate to the implemented functionality, they MUST be un-ignored
+     - An ignored test for implemented functionality is a review failure
+
+   - **Verify test coverage completeness:**
+     - Are there tests for the happy path (normal operation)?
+     - Are there tests for edge cases (empty inputs, boundary values, overflow)?
+     - Are there tests for error cases (invalid inputs, type mismatches)?
+     - Are there tests for interaction with other features (composition)?
+     - For numeric operations: test with integers, ratios, mixed types, large values
+     - For collections: test empty, single element, many elements
+     - For functions: test arity variations, special argument patterns
+
+   - **Flag as an issue if:**
+     - Relevant spec tests remain `#[ignore]`d when functionality is implemented
+     - No spec tests exist for newly implemented functionality
+     - Edge cases are not covered (identify which specific edge cases are missing)
+     - The test file exists but has no tests for the specific feature
+
 **Review Dimensions:**
 Evaluate all changes across these critical dimensions:
 
@@ -171,6 +223,8 @@ Evaluate all changes across these critical dimensions:
 - **Security:** Are there potential vulnerabilities, capability leaks, or privilege escalation risks?
 - **Testing:** Are changes adequately tested per the testing strategy? Are edge cases covered?
 - **Regression Tests for Bug Fixes:** If the changes appear to fix a bug (behavior correction, edge case handling, crash prevention), verify that a corresponding regression test exists. Bug fixes WITHOUT regression tests are a review failure.
+- **Roadmap Status:** Does the roadmap correctly reflect the work being done? Is the task documented? Is the status accurate (open for in-progress, done for completed)?
+- **Specification Test Coverage:** Are there adequate specification tests in `lona-spec-tests`? Are all relevant tests un-ignored? Are edge cases covered?
 - **Code Quality:** Is code readable, maintainable, and well-documented?
 - **Documentation Correctness:** Is the documentation in line with the implementation? Is all documentation up-to-date?
 
@@ -198,6 +252,8 @@ After completing all analysis, produce a comprehensive report with:
    - Security Issues
    - Testing Gaps
    - Missing Regression Tests (bug fixes without corresponding tests)
+   - Roadmap Issues (missing tasks, incorrect status, skipped prerequisites)
+   - Specification Test Issues (ignored tests that should be enabled, missing edge case coverage)
    - Documentation Issues (incorrect, inconsistent, or out-of-date documentation)
    Mark any findings that were identified by Gemini and verified by you with "[Gemini-verified]"
 7. **Gemini Cross-Review Summary:** (Include only if Gemini was invoked)

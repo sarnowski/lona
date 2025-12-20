@@ -80,6 +80,10 @@ impl Vm<'_> {
                 // Symbol-based function call (native or builtin)
                 self.call_symbol_function(symbol, base, argc, frame)
             }
+            Value::NativeFunction(symbol) => {
+                // First-class native function call
+                self.call_symbol_function(symbol, base, argc, frame)
+            }
             // All other types are not callable
             Value::Nil
             | Value::Bool(_)
