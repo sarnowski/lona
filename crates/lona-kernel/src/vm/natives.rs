@@ -95,6 +95,8 @@ pub enum NativeError {
         /// Zero-based argument index.
         arg_index: u8,
     },
+    /// Division or modulo by zero.
+    DivisionByZero,
     /// Generic error with message (for cases where structured data isn't available).
     Error(&'static str),
 }
@@ -107,6 +109,7 @@ impl NativeError {
         match *self {
             Self::ArityMismatch { .. } => "ArityMismatch",
             Self::TypeError { .. } => "TypeError",
+            Self::DivisionByZero => "DivisionByZero",
             Self::Error(_) => "Error",
         }
     }
@@ -177,7 +180,7 @@ impl Default for Registry {
 // =============================================================================
 
 /// The names of all arithmetic primitives.
-pub const ARITHMETIC_PRIMITIVE_NAMES: &[&str] = &["+", "-"];
+pub const ARITHMETIC_PRIMITIVE_NAMES: &[&str] = &["+", "-", "*", "/", "mod"];
 
 /// Pre-interns all arithmetic primitive symbols.
 ///
@@ -220,7 +223,7 @@ pub fn lookup_arithmetic_primitives(
 /// - As a `NativeFunction` value in globals (for first-class use)
 #[inline]
 pub fn register_arithmetic_primitives(vm: &mut super::interpreter::Vm<'_>, symbols: &[symbol::Id]) {
-    let funcs: &[NativeFn] = &[native_add, native_sub];
+    let funcs: &[NativeFn] = &[native_add, native_sub, native_mul, native_div, native_mod];
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
         vm.register_native(*sym, *func);
@@ -263,12 +266,24 @@ pub fn native_add(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Nat
             let mut acc = first_arg.clone();
             for (idx, arg) in args.iter().skip(1).enumerate() {
                 acc = numeric::add_values(&acc, arg).map_err(|err| {
-                    // Adjust arg_index for the actual position in the original args
-                    if let NativeError::TypeError { expected, got, .. } = err {
+                    // Adjust arg_index for the actual position in the original args.
+                    // If error.arg_index is 0, the left operand (accumulator) was wrong.
+                    // On first iteration, this means the first argument is wrong (index 0).
+                    // If error.arg_index is 1, the right operand (current arg) was wrong.
+                    if let NativeError::TypeError {
+                        expected,
+                        got,
+                        arg_index: original_index,
+                    } = err
+                    {
                         NativeError::TypeError {
                             expected,
                             got,
-                            arg_index: u8::try_from(idx.saturating_add(1)).unwrap_or(u8::MAX),
+                            arg_index: if original_index == 0 {
+                                0 // Error in first argument
+                            } else {
+                                u8::try_from(idx.saturating_add(1)).unwrap_or(u8::MAX)
+                            },
                         }
                     } else {
                         err
@@ -302,12 +317,24 @@ pub fn native_sub(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Nat
             let mut acc = first_arg.clone();
             for (idx, arg) in args.iter().skip(1).enumerate() {
                 acc = numeric::sub_values(&acc, arg).map_err(|err| {
-                    // Adjust arg_index for the actual position in the original args
-                    if let NativeError::TypeError { expected, got, .. } = err {
+                    // Adjust arg_index for the actual position in the original args.
+                    // If error.arg_index is 0, the left operand (accumulator) was wrong.
+                    // On first iteration, this means the first argument is wrong (index 0).
+                    // If error.arg_index is 1, the right operand (current arg) was wrong.
+                    if let NativeError::TypeError {
+                        expected,
+                        got,
+                        arg_index: original_index,
+                    } = err
+                    {
                         NativeError::TypeError {
                             expected,
                             got,
-                            arg_index: u8::try_from(idx.saturating_add(1)).unwrap_or(u8::MAX),
+                            arg_index: if original_index == 0 {
+                                0 // Error in first argument
+                            } else {
+                                u8::try_from(idx.saturating_add(1)).unwrap_or(u8::MAX)
+                            },
                         }
                     } else {
                         err
@@ -317,6 +344,134 @@ pub fn native_sub(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Nat
             Ok(acc)
         }
     }
+}
+
+/// Native implementation of `*` (multiplication).
+///
+/// Handles all arities:
+/// - `(*)` → 1 (identity for multiplication)
+/// - `(* x)` → x (validates numeric type)
+/// - `(* a b ...)` → product of all arguments
+#[inline]
+pub fn native_mul(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
+    match args.len() {
+        0 => Ok(Value::Integer(Integer::from_i64(1))),
+        1 => {
+            // Validate that the single argument is numeric
+            let arg = args.first().ok_or(NativeError::Error("missing argument"))?;
+            if !arg.kind().is_numeric() {
+                return Err(NativeError::TypeError {
+                    expected: TypeExpectation::Numeric,
+                    got: arg.kind(),
+                    arg_index: 0_u8,
+                });
+            }
+            Ok(arg.clone())
+        }
+        _ => {
+            let first_arg = args.first().ok_or(NativeError::Error("missing argument"))?;
+            let mut acc = first_arg.clone();
+            for (idx, arg) in args.iter().skip(1).enumerate() {
+                acc = numeric::mul_values(&acc, arg).map_err(|err| {
+                    // Adjust arg_index for the actual position in the original args.
+                    // If error.arg_index is 0, the left operand (accumulator) was wrong.
+                    // On first iteration, this means the first argument is wrong (index 0).
+                    // If error.arg_index is 1, the right operand (current arg) was wrong.
+                    if let NativeError::TypeError {
+                        expected,
+                        got,
+                        arg_index: original_index,
+                    } = err
+                    {
+                        NativeError::TypeError {
+                            expected,
+                            got,
+                            arg_index: if original_index == 0 {
+                                0 // Error in first argument
+                            } else {
+                                u8::try_from(idx.saturating_add(1)).unwrap_or(u8::MAX)
+                            },
+                        }
+                    } else {
+                        err
+                    }
+                })?;
+            }
+            Ok(acc)
+        }
+    }
+}
+
+/// Native implementation of `/` (division).
+///
+/// Handles arities:
+/// - `(/)` → Error (requires at least one argument)
+/// - `(/ x)` → 1/x (reciprocal)
+/// - `(/ a b ...)` → a / b / ...
+#[inline]
+pub fn native_div(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
+    match args.len() {
+        0 => Err(NativeError::ArityMismatch {
+            expected: ArityExpectation::AtLeast(1_u8),
+            got: 0_u8,
+        }),
+        1 => {
+            let arg = args.first().ok_or(NativeError::Error("missing argument"))?;
+            numeric::inverse_value(arg)
+        }
+        _ => {
+            let first_arg = args.first().ok_or(NativeError::Error("missing argument"))?;
+            let mut acc = first_arg.clone();
+            for (idx, arg) in args.iter().skip(1).enumerate() {
+                acc = numeric::div_values(&acc, arg).map_err(|err| {
+                    // Adjust arg_index for the actual position in the original args.
+                    // If error.arg_index is 0, the left operand (accumulator) was wrong.
+                    // On first iteration, this means the first argument is wrong (index 0).
+                    // If error.arg_index is 1, the right operand (current arg) was wrong.
+                    if let NativeError::TypeError {
+                        expected,
+                        got,
+                        arg_index: original_index,
+                    } = err
+                    {
+                        NativeError::TypeError {
+                            expected,
+                            got,
+                            arg_index: if original_index == 0 {
+                                0 // Error in first argument
+                            } else {
+                                u8::try_from(idx.saturating_add(1)).unwrap_or(u8::MAX)
+                            },
+                        }
+                    } else {
+                        err
+                    }
+                })?;
+            }
+            Ok(acc)
+        }
+    }
+}
+
+/// Native implementation of `mod` (modulo).
+///
+/// Requires exactly 2 arguments:
+/// - `(mod a b)` → a % b
+#[inline]
+pub fn native_mod(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
+    if args.len() != 2_usize {
+        return Err(NativeError::ArityMismatch {
+            expected: ArityExpectation::Exact(2_u8),
+            got: u8::try_from(args.len()).unwrap_or(u8::MAX),
+        });
+    }
+
+    let left = args.first().ok_or(NativeError::Error("missing argument"))?;
+    let right = args
+        .get(1_usize)
+        .ok_or(NativeError::Error("missing argument"))?;
+
+    numeric::modulo_values(left, right)
 }
 
 #[cfg(test)]
@@ -486,6 +641,7 @@ mod tests {
             .variant_name(),
             "TypeError"
         );
+        assert_eq!(NativeError::DivisionByZero.variant_name(), "DivisionByZero");
         assert_eq!(NativeError::Error("test").variant_name(), "Error");
     }
 }

@@ -251,13 +251,8 @@ impl Compiler<'_, '_, '_> {
             // One arg: (- x) → negation
             (Opcode::Sub, 1_usize) => self.compile_unary_negation(elements, span),
 
-            // One arg: (/ x) → reciprocal (not yet implemented)
-            (Opcode::Div, 1_usize) => Err(Error::new(
-                ErrorKind::NotImplemented {
-                    feature: "reciprocal (1/x)",
-                },
-                self.location(span),
-            )),
+            // One arg: (/ x) → reciprocal via native function call
+            (Opcode::Div, 1_usize) => self.compile_unary_reciprocal(elements, span),
 
             // Two args: standard binary operation
             (_, 2_usize) => self.compile_binary_pair(opcode, elements, span),
@@ -328,6 +323,42 @@ impl Compiler<'_, '_, '_> {
         self.chunk
             .emit(encode_abc(Opcode::Neg, dest, result.register, 0), span);
         Ok(ExprResult { register: dest })
+    }
+
+    /// Compiles unary reciprocal: `(/ x)` → calls native `/` function.
+    ///
+    /// Unlike negation which has a dedicated opcode, reciprocal is implemented
+    /// by calling the native `/` function with a single argument.
+    fn compile_unary_reciprocal(
+        &mut self,
+        elements: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        let arg = elements
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+
+        let base = self.next_register;
+
+        // Load the `/` native function into base register
+        let div_sym = self.interner.intern("/");
+        let dest = self.alloc_register(span)?;
+        let const_idx = self.add_constant(Constant::Symbol(div_sym), span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
+
+        // Compile the argument into the next register
+        let _arg_result = self.compile_expr(arg)?;
+
+        // Emit call instruction with 1 argument
+        self.chunk
+            .emit(encode_abc(Opcode::Call, base, 1_u8, 1_u8), span);
+
+        // Result is left in base register
+        // Free argument registers
+        self.free_registers_to(base.saturating_add(1));
+
+        Ok(ExprResult { register: base })
     }
 
     /// Compiles a binary operation with exactly two arguments.

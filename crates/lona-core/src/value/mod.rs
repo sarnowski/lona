@@ -159,6 +159,15 @@ impl Kind {
         }
     }
 
+    /// Returns true if this is an integer or float (not ratio).
+    ///
+    /// Used for operations like modulo that don't support ratios.
+    #[inline]
+    #[must_use]
+    pub const fn is_integer_or_float(self) -> bool {
+        matches!(self, Self::Integer | Self::Float)
+    }
+
     /// Returns true if this is a sequence type (list, vector, string, or map).
     ///
     /// Maps are sequences of `[key, value]` pairs, following Clojure semantics.

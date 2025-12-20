@@ -168,10 +168,8 @@ fn test_7_1_3_multiplication_ratio() {
 // Reference: docs/lonala.md#714-division-
 // ============================================================================
 
-/// [IGNORED] Spec 7.1.4: "With one argument, returns its reciprocal"
-/// Tracking: N-ary arithmetic not yet implemented
+/// Spec 7.1.4: "With one argument, returns its reciprocal"
 #[test]
-#[ignore]
 fn test_7_1_4_division_reciprocal() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_ratio(
@@ -653,5 +651,213 @@ fn test_7_6_bound_operators_edge_arities() {
         "(do (def minus -) (minus 5))",
         -5,
         &spec_ref("7.6", "First-class", "bound - with one arg negates"),
+    );
+}
+
+/// `*` can be bound to a variable and called
+#[test]
+fn test_7_6_multiplication_as_value() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def times *) (times 2 3))",
+        6,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "* can be bound to variable and called",
+        ),
+    );
+}
+
+/// `*` can be passed to a user-defined higher-order function
+#[test]
+fn test_7_6_multiplication_passed_to_function() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def apply-op (fn [op a b] (op a b)))").unwrap();
+    ctx.assert_int(
+        "(apply-op * 3 4)",
+        12,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "* can be passed as argument to function",
+        ),
+    );
+}
+
+/// Bound * works with edge arities
+#[test]
+fn test_7_6_multiplication_edge_arities() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def times *) (times))",
+        1,
+        &spec_ref("7.6", "First-class", "bound * with zero args returns 1"),
+    );
+    ctx.assert_int(
+        "(do (def times *) (times 42))",
+        42,
+        &spec_ref("7.6", "First-class", "bound * with one arg returns arg"),
+    );
+    ctx.assert_int(
+        "(do (def times *) (times 2 3 4))",
+        24,
+        &spec_ref("7.6", "First-class", "bound * with variadic args"),
+    );
+}
+
+/// `/` can be bound to a variable and called
+#[test]
+fn test_7_6_division_as_value() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def divide /) (divide 10 2))",
+        5,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "/ can be bound to variable and called",
+        ),
+    );
+}
+
+/// Bound / returns reciprocal with one argument
+#[test]
+fn test_7_6_division_reciprocal() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_ratio(
+        "(do (def divide /) (divide 2))",
+        1,
+        2,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "bound / with one arg returns reciprocal",
+        ),
+    );
+    ctx.assert_int(
+        "(do (def divide /) (divide 1))",
+        1,
+        &spec_ref("7.6", "First-class", "bound / of 1 returns 1"),
+    );
+    ctx.assert_int(
+        "(do (def divide /) (divide -1))",
+        -1,
+        &spec_ref("7.6", "First-class", "bound / of -1 returns -1"),
+    );
+}
+
+/// `/` can be passed to a user-defined higher-order function
+#[test]
+fn test_7_6_division_passed_to_function() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def apply-op (fn [op a b] (op a b)))").unwrap();
+    ctx.assert_int(
+        "(apply-op / 12 3)",
+        4,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "/ can be passed as argument to function",
+        ),
+    );
+}
+
+/// Bound / with variadic args
+#[test]
+fn test_7_6_division_variadic() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def divide /) (divide 24 2 3))",
+        4,
+        &spec_ref("7.6", "First-class", "bound / with variadic args"),
+    );
+}
+
+/// `mod` can be bound to a variable and called
+#[test]
+fn test_7_6_modulo_as_value() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def modulo mod) (modulo 10 3))",
+        1,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "mod can be bound to variable and called",
+        ),
+    );
+}
+
+/// `mod` can be passed to a user-defined higher-order function
+#[test]
+fn test_7_6_modulo_passed_to_function() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def apply-op (fn [op a b] (op a b)))").unwrap();
+    ctx.assert_int(
+        "(apply-op mod 10 3)",
+        1,
+        &spec_ref(
+            "7.6",
+            "First-class",
+            "mod can be passed as argument to function",
+        ),
+    );
+}
+
+// ============================================================================
+// Section 7.7: Error Argument Attribution
+// Reference: Type errors in arithmetic operators should correctly identify
+// which argument caused the error.
+// ============================================================================
+
+/// Type error in first argument correctly identifies argument 1
+#[test]
+fn test_7_7_error_attribution_first_arg() {
+    let mut ctx = SpecTestContext::new();
+    // When first argument is wrong, error should have arg_index: 0
+    ctx.assert_error_contains(
+        "(do (def plus +) (plus true 1))",
+        "arg_index: 0",
+        &spec_ref("7.7", "Error", "+ first arg error attribution"),
+    );
+    ctx.assert_error_contains(
+        "(do (def times *) (times true 1))",
+        "arg_index: 0",
+        &spec_ref("7.7", "Error", "* first arg error attribution"),
+    );
+}
+
+/// Type error in second argument correctly identifies argument 2
+#[test]
+fn test_7_7_error_attribution_second_arg() {
+    let mut ctx = SpecTestContext::new();
+    // When second argument is wrong, error should have arg_index: 1
+    ctx.assert_error_contains(
+        "(do (def plus +) (plus 1 true))",
+        "arg_index: 1",
+        &spec_ref("7.7", "Error", "+ second arg error attribution"),
+    );
+    ctx.assert_error_contains(
+        "(do (def times *) (times 1 true))",
+        "arg_index: 1",
+        &spec_ref("7.7", "Error", "* second arg error attribution"),
+    );
+}
+
+/// Type error in third argument correctly identifies argument 3
+#[test]
+fn test_7_7_error_attribution_third_arg() {
+    let mut ctx = SpecTestContext::new();
+    // When third argument is wrong, error should have arg_index: 2
+    ctx.assert_error_contains(
+        "(do (def plus +) (plus 1 2 true))",
+        "arg_index: 2",
+        &spec_ref("7.7", "Error", "+ third arg error attribution"),
+    );
+    ctx.assert_error_contains(
+        "(do (def times *) (times 1 2 true))",
+        "arg_index: 2",
+        &spec_ref("7.7", "Error", "* third arg error attribution"),
     );
 }

@@ -88,9 +88,9 @@ This section provides a complete index of all tasks across all milestones. Use t
 
 | Task | Name | Status |
 |------|------|--------|
-| 1.0.1 | Native Addition and Subtraction | open |
-| 1.0.2 | Native Multiplication and Division | open |
-| 1.0.3 | Modulo | open |
+| 1.0.1 | Native Addition and Subtraction | done |
+| 1.0.2 | Native Multiplication and Division | done |
+| 1.0.3 | Modulo | done |
 | 1.0.4 | Comparison - Equality | open |
 | 1.0.5 | Comparison - Ordering | open |
 

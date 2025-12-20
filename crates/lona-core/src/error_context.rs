@@ -26,6 +26,8 @@ pub enum TypeExpectation {
     Single(value::Kind),
     /// Any numeric type (integer, float, or ratio).
     Numeric,
+    /// Integer or float (not ratio), for operations like modulo.
+    IntegerOrFloat,
     /// Any sequence type (list, vector, or string).
     Sequence,
     /// Any callable type (function or native function).
@@ -46,6 +48,7 @@ impl TypeExpectation {
         match *self {
             Self::Single(kind) => kind.name(),
             Self::Numeric => "numeric type",
+            Self::IntegerOrFloat => "integer or float",
             Self::Sequence => "sequence type",
             Self::Callable => "callable",
             Self::Boolean => "boolean",
@@ -60,6 +63,7 @@ impl TypeExpectation {
         match *self {
             Self::Single(expected) => expected.eq_const(kind),
             Self::Numeric => kind.is_numeric(),
+            Self::IntegerOrFloat => kind.is_integer_or_float(),
             #[cfg(feature = "alloc")]
             Self::Sequence => kind.is_sequence(),
             #[cfg(not(feature = "alloc"))]

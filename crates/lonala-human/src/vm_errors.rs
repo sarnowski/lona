@@ -224,6 +224,7 @@ fn format_native_error(error: &NativeError) -> String {
                 got.name()
             )
         }
+        NativeError::DivisionByZero => String::from("division by zero"),
         NativeError::Error(msg) => {
             format!("native function error: {msg}")
         }
@@ -269,6 +270,9 @@ fn add_native_notes(notes: &mut Vec<Note>, error: &NativeError) {
             notes.push(Note::text(format!(
                 "argument {position} has the wrong type"
             )));
+        }
+        NativeError::DivisionByZero => {
+            notes.push(Note::text_static("division or modulo by zero is undefined"));
         }
         // No extra note needed for Exact arity, generic errors, and future variants
         NativeError::ArityMismatch {
