@@ -28,25 +28,32 @@ Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.2: Var System
+### Task 1.3.2: Var System - Namespace Extension and Var Quote
 
-**Description**: Implement first-class Vars for namespace bindings.
+**Description**: Extend the foundation Var type (from Task 1.1.7) with namespace field and implement `#'symbol` reader syntax.
+
+**Dependencies**: Task 1.1.7 (Metadata System - Compiler Integration, which includes Var Type and Globals Refactor)
 
 **Files to modify**:
-- `crates/lona-core/src/value/mod.rs`
-- `crates/lona-core/src/value/var.rs` (new)
+- `crates/lona-core/src/value/var.rs` (extend)
+- `crates/lonala-parser/src/lexer/mod.rs` (add `#'` reader macro)
+- `crates/lonala-parser/src/parser/mod.rs`
+- `crates/lonala-compiler/src/compiler/mod.rs`
 
 **Requirements**:
-- Var holds: namespace, name, value, metadata
-- `#'symbol` syntax returns Var (not value)
-- `var-get`, `var-set!` for access
-- Vars support metadata (separate from value metadata)
+- Extend `VarData` with `namespace: Option<symbol::Id>` field
+- `#'symbol` reader syntax produces `(var symbol)` form
+- `var` special form returns the Var itself (not its value)
+- `var-get` native: get value from Var
+- `var-set!` native: set value in Var (for dynamic vars)
+- Vars resolve through namespace system when available
 
 **Tests**:
-- Var creation
-- Var get/set
-- Var metadata
-- Var quote reader macro
+- `#'x` returns Var object
+- `(meta #'x)` returns var metadata
+- `(var-get #'x)` returns value
+- `(var-set! #'x new-val)` updates value (dynamic vars only)
+- Var quote with qualified symbol: `#'ns/name`
 
 **Note**: This task enables `defnative` for native function registration with metadata. See [defnative design](../../development/defnative.md).
 

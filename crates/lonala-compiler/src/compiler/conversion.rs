@@ -185,36 +185,12 @@ pub fn value_to_ast(
                 .collect();
             Ast::Set(elements?)
         }
-        Value::Function(ref _func) => {
+        Value::Function(_) | Value::NativeFunction(_) | Value::Binary(_) | Value::Var(_) | _ => {
+            let type_name = value.kind().name();
+            let mut msg = String::from(type_name);
+            msg.push_str(" cannot be converted to AST");
             return Err(Error::new(
-                ErrorKind::InvalidMacroResult {
-                    message: String::from("function values cannot be converted to AST"),
-                },
-                location,
-            ));
-        }
-        Value::NativeFunction(_) => {
-            return Err(Error::new(
-                ErrorKind::InvalidMacroResult {
-                    message: String::from("native function values cannot be converted to AST"),
-                },
-                location,
-            ));
-        }
-        Value::Binary(_) => {
-            return Err(Error::new(
-                ErrorKind::InvalidMacroResult {
-                    message: String::from("binary values cannot be converted to AST"),
-                },
-                location,
-            ));
-        }
-        // Handle future Value variants (Value is non-exhaustive)
-        _ => {
-            return Err(Error::new(
-                ErrorKind::InvalidMacroResult {
-                    message: String::from("unknown value type cannot be converted to AST"),
-                },
+                ErrorKind::InvalidMacroResult { message: msg },
                 location,
             ));
         }

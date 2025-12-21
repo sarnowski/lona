@@ -141,7 +141,7 @@ See the [Installation Guide](installation.md) to get Lona running on your develo
 
 ## Documentation
 
-- [Goals Document](goals.md) — The goals and vision of Lona
+- [Goals Document](goals/index.md) — The goals and vision of Lona
 - [Lonala Language Specification](lonala/index.md) — The Lonala language specification
 - [Minimal Rust Runtime](minimal-rust.md) — Why the Rust runtime must be minimal, with everything possible in Lonala
 - [Development Roadmap](roadmap/index.md) — The full development roadmap until HTTP/2 server

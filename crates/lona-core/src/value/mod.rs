@@ -36,6 +36,8 @@ mod display;
 mod function;
 #[cfg(feature = "alloc")]
 mod symbol_value;
+#[cfg(feature = "alloc")]
+mod var;
 
 #[cfg(test)]
 mod tests;
@@ -46,6 +48,8 @@ pub use display::Displayable;
 pub use function::{Function, FunctionBody};
 #[cfg(feature = "alloc")]
 pub use symbol_value::Symbol;
+#[cfg(feature = "alloc")]
+pub use var::Var;
 
 /// Runtime value type classification.
 ///
@@ -94,6 +98,9 @@ pub enum Kind {
     Function,
     /// Native function type (first-class reference to a native function).
     NativeFunction,
+    /// Var type (mutable binding with metadata).
+    #[cfg(feature = "alloc")]
+    Var,
 }
 
 impl Kind {
@@ -125,6 +132,8 @@ impl Kind {
             #[cfg(feature = "alloc")]
             Self::Function => "function",
             Self::NativeFunction => "native-function",
+            #[cfg(feature = "alloc")]
+            Self::Var => "var",
         }
     }
 
@@ -160,6 +169,7 @@ impl Kind {
                         | (Self::Set, Self::Set)
                         | (Self::Binary, Self::Binary)
                         | (Self::Function, Self::Function)
+                        | (Self::Var, Self::Var)
                 )
             }
             #[cfg(not(feature = "alloc"))]
@@ -185,7 +195,8 @@ impl Kind {
             | Self::Map
             | Self::Set
             | Self::Binary
-            | Self::Function => false,
+            | Self::Function
+            | Self::Var => false,
         }
     }
 
@@ -285,6 +296,12 @@ pub enum Value {
     /// First-class representation of a native function, enabling `+` and `-`
     /// to be passed to higher-order functions like `map` and `reduce`.
     NativeFunction(symbol::Id),
+    /// Mutable binding with metadata (requires `alloc` feature).
+    ///
+    /// Vars are the building blocks of namespaces, providing mutable storage
+    /// for values with associated metadata like docstrings and source locations.
+    #[cfg(feature = "alloc")]
+    Var(Var),
 }
 
 impl Value {
@@ -316,6 +333,8 @@ impl Value {
             #[cfg(feature = "alloc")]
             Self::Function(_) => Kind::Function,
             Self::NativeFunction(_) => Kind::NativeFunction,
+            #[cfg(feature = "alloc")]
+            Self::Var(_) => Kind::Var,
         }
     }
 
@@ -355,7 +374,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -379,7 +399,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -426,7 +447,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -450,7 +472,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -488,7 +511,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -514,7 +538,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -545,7 +570,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -577,7 +603,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -609,7 +636,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -641,7 +669,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -673,7 +702,8 @@ impl Value {
             | Self::Vector(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -705,7 +735,8 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -737,7 +768,8 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
-            | Self::Binary(_) => None,
+            | Self::Binary(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -768,7 +800,8 @@ impl Value {
             | Self::Map(_)
             | Self::Set(_)
             | Self::Binary(_)
-            | Self::Function(_) => None,
+            | Self::Function(_)
+            | Self::Var(_) => None,
         }
     }
 
@@ -800,6 +833,40 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Function(_)
+            | Self::Var(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `Var`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_var(&self) -> bool {
+        matches!(self, Self::Var(_))
+    }
+
+    /// Returns a reference to the contained var if this is a `Var` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_var(&self) -> Option<&Var> {
+        match *self {
+            Self::Var(ref var) => Some(var),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Symbol(_)
+            | Self::Keyword(_)
+            | Self::NativeFunction(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
+            | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -844,6 +911,8 @@ impl PartialEq for Value {
             (&Self::Binary(ref left), &Self::Binary(ref right)) => left == right,
             #[cfg(feature = "alloc")]
             (&Self::Function(ref left), &Self::Function(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
+            (&Self::Var(ref left), &Self::Var(ref right)) => left == right,
             _ => false,
         }
     }
@@ -886,6 +955,8 @@ impl Hash for Value {
             Self::Binary(ref binary) => binary.hash(state),
             #[cfg(feature = "alloc")]
             Self::Function(ref func) => func.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::Var(ref var) => var.hash(state),
         }
     }
 }

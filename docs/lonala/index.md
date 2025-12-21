@@ -61,7 +61,7 @@ Lonala is the programming language for the Lona operating system. It combines Cl
 
 ## References
 
-- [Lona Project Goals](../goals.md) - Vision and design philosophy
+- [Lona Project Goals](../goals/index.md) - Vision and design philosophy
 - [Implementation Roadmap](../roadmap/index.md) - Development roadmap
 - [Clojure Reference](https://clojure.org/reference) - Clojure documentation
 - [Erlang Reference Manual](https://www.erlang.org/doc/system/reference_manual.html) - Erlang documentation

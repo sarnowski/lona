@@ -233,3 +233,5 @@ Binary Ownership Model:
 - Var vs value metadata distinction
 
 **Estimated effort**: 1 context window
+
+**Note**: See `PLAN.md` in the repository root for the detailed implementation plan with phases.

@@ -1,6 +1,6 @@
 ## Phase 1.11: Introspection System
 
-Implement LISP-machine-style introspection and debugging capabilities as described in `goals.md`.
+Implement LISP-machine-style introspection and debugging capabilities as described in the [Goals documentation](../../goals/index.md).
 
 ---
 

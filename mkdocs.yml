@@ -67,7 +67,15 @@ markdown_extensions:
 nav:
     - Project:
           - Home: index.md
-          - Goals: goals.md
+          - Goals:
+                - goals/index.md
+                - "Pillar: seL4": goals/pillar-sel4.md
+                - "Pillar: BEAM/OTP": goals/pillar-beam.md
+                - "Pillar: LISP Machine": goals/pillar-lisp-machine.md
+                - "Pillar: Clojure": goals/pillar-clojure.md
+                - Core Concepts: goals/core-concepts.md
+                - System Design: goals/system-design.md
+                - Non-Goals: goals/non-goals.md
           - LISP Machine: lisp-machine.md
           - Minimal Rust: minimal-rust.md
           - License: license.md

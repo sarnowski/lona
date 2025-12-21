@@ -14,7 +14,7 @@ The runtime is written in Rust (`no_std`) and runs as seL4's root task. Userspac
 ## Required Reading
 
 **Read when planning new features or tasks:**
-- `docs/goals.md` - The complete vision and design philosophy. Consult when making architectural decisions.
+- `docs/goals/index.md` - The complete vision and design philosophy. Consult when making architectural decisions.
 - `docs/roadmap/index.md` - The phased roadmap, component dependencies, and current status.
 - `docs/lonala/index.md` - The Lonala language specification.
 - `docs/minimal-rust.md` - The Lonala-first principle. Consult before adding any native function.
@@ -125,7 +125,16 @@ lona/
 │       └── src/
 │
 ├── docs/
-│   ├── goals.md                  # Project vision and design philosophy
+│   ├── goals/                    # Project vision and design philosophy
+│   │   ├── index.md              # Vision + 4 pillars overview
+│   │   ├── pillar-sel4.md        # seL4 security foundation
+│   │   ├── pillar-beam.md        # BEAM/OTP resilience
+│   │   ├── pillar-lisp-machine.md # LISP machine introspection
+│   │   ├── pillar-clojure.md     # Clojure data philosophy
+│   │   ├── core-concepts.md      # Unified abstractions
+│   │   ├── system-design.md      # Implementation mechanics
+│   │   └── non-goals.md          # What we don't build
+│   │
 │   ├── installation.md           # Installation guide for physical hardware
 │   ├── license.md                # License information (GPL-3.0)
 │   ├── minimal-rust.md           # Lonala-first principle
@@ -265,3 +274,20 @@ The following MCP tools are available for interactive testing in the real seL4 e
 |------|-------------|
 | `mcp__lona-dev-repl__eval` | Evaluate Lonala expressions in the REPL running on seL4 in QEMU. Use this to test language features in the actual runtime environment. The REPL maintains state between calls, so defined functions and variables persist across evaluations. |
 | `mcp__lona-dev-repl__restart` | Rebuild Lona and restart the QEMU instance with a fresh state. Use this after making changes to Rust code (runtime, kernel, or compiler crates) to ensure the newest version is running. Also use before verification to ensure a clean state. |
+
+## External AI CLI Tools
+
+For code review and analysis, these CLI tools are available:
+
+```bash
+# Gemini (multiline via command substitution)
+gemini -m gemini-3-pro-preview "$(cat <<'EOF'
+Your prompt here
+EOF
+)"
+
+# Codex (multiline via stdin, high reasoning)
+cat <<'EOF' | codex exec -m gpt-5.2 -c model_reasoning_effort=high -
+Your prompt here
+EOF
+```

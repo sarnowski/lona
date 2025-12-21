@@ -30,7 +30,7 @@ Before performing ANY review work, you MUST complete these steps in order:
 2. **Read Project Documentation (Conditional on Changed File Types):**
 
    **Always read:**
-   - `docs/goals.md` - The complete project goals document
+   - `docs/goals/index.md` - The complete project goals document
    - `docs/lonala/index.md` - The Lonala language specification
    - `docs/development/testing-strategy.md` - The testing strategy document
    - `docs/roadmap/index.md` - The implementation roadmap with task status
@@ -67,14 +67,14 @@ Before performing ANY review work, you MUST complete these steps in order:
 
    First, prepare the context by gathering:
    - The list of changed files from `git status --porcelain`
-   - The full content of `docs/goals.md`
+   - The full content of `docs/goals/index.md`
    - The full content of `docs/development/testing-strategy.md`
    - **If Rust files changed:** The full content of `docs/development/rust-coding-guidelines.md`
    - **If Lonala files changed:** The full content of `docs/development/lonala-coding-guidelines.md`
 
-   Then invoke Gemini using the Bash tool with a heredoc prompt:
+   Then invoke Gemini using the Bash tool with command substitution (required for multiline):
    ```bash
-   gemini <<'GEMINI_PROMPT'
+   gemini -m gemini-3-pro-preview "$(cat <<'GEMINI_PROMPT'
    You are performing a code review for the Lona project. You are a secondary reviewer providing an independent perspective.
 
    **CRITICAL RESTRICTIONS - YOU MUST OBEY THESE:**
@@ -95,8 +95,8 @@ Before performing ANY review work, you MUST complete these steps in order:
    **PROJECT GUIDELINES:**
    You must evaluate the code against these project standards. Read these documents carefully:
 
-   --- docs/goals.md ---
-   [INSERT FULL CONTENT OF docs/goals.md]
+   --- docs/goals/index.md ---
+   [INSERT FULL CONTENT OF docs/goals/index.md]
 
    --- docs/development/testing-strategy.md ---
    [INSERT FULL CONTENT OF docs/development/testing-strategy.md]
@@ -137,11 +137,12 @@ Before performing ANY review work, you MUST complete these steps in order:
 
    Remember: Be specific with file paths and line numbers so findings can be verified.
    GEMINI_PROMPT
+   )"
    ```
 
-   **Invoke Codex in parallel with a similar prompt:**
+   **Invoke Codex in parallel with a similar prompt (stdin required for multiline):**
    ```bash
-   codex --model o3 <<'CODEX_PROMPT'
+   cat <<'CODEX_PROMPT' | codex exec -m gpt-5.2 -c model_reasoning_effort=high -
    You are performing a code review for the Lona project. You are a secondary reviewer providing an independent perspective.
 
    **CRITICAL RESTRICTIONS - YOU MUST OBEY THESE:**
@@ -162,8 +163,8 @@ Before performing ANY review work, you MUST complete these steps in order:
    **PROJECT GUIDELINES:**
    You must evaluate the code against these project standards. Read these documents carefully:
 
-   --- docs/goals.md ---
-   [INSERT FULL CONTENT OF docs/goals.md]
+   --- docs/goals/index.md ---
+   [INSERT FULL CONTENT OF docs/goals/index.md]
 
    --- docs/development/testing-strategy.md ---
    [INSERT FULL CONTENT OF docs/development/testing-strategy.md]
@@ -208,7 +209,7 @@ Before performing ANY review work, you MUST complete these steps in order:
 
    **IMPORTANT:** Replace the placeholder sections with actual content before invoking both tools:
    - `[INSERT GIT STATUS OUTPUT HERE]` -> output from `git status --porcelain`
-   - `[INSERT FULL CONTENT OF docs/goals.md]` -> actual file content
+   - `[INSERT FULL CONTENT OF docs/goals/index.md]` -> actual file content
    - `[INSERT FULL CONTENT OF docs/development/testing-strategy.md]` -> actual file content
    - Include the appropriate coding guidelines based on changed file types
    - Remove the `[IF ... CHANGED:]` markers and include only relevant sections
@@ -218,9 +219,15 @@ Before performing ANY review work, you MUST complete these steps in order:
    1. Read the file and line number(s) mentioned
    2. Verify the issue actually exists
    3. Check if the claimed guideline violation is accurate
-   4. Only include VERIFIED findings in your final report
+   4. Track whether you independently found the same issue during your own review
+   5. Only include VERIFIED findings in your final report
 
-   Mark verified findings in your report with "[Gemini-verified]" or "[Codex-verified]" so the user knows the source.
+   **Attribution Tracking:**
+   - Keep track of which reviewer(s) found each issue
+   - If you found an issue independently AND Gemini/Codex also found it, mark it with both attributions (e.g., `[claude, gemini]`)
+   - If only Gemini or Codex found an issue (and you verified it), mark it accordingly (e.g., `[gemini]`)
+   - All issues you find independently should be marked `[claude]` (unless also found by others)
+
    Discard any findings that cannot be verified or are incorrect.
 
 6. **Roadmap Status Verification:**
@@ -322,13 +329,26 @@ After completing all analysis, produce a comprehensive report with:
    - Roadmap Issues (missing tasks, incorrect status, skipped prerequisites)
    - Specification Test Issues (ignored tests that should be enabled, missing edge case coverage)
    - Documentation Issues (incorrect, inconsistent, or out-of-date documentation)
-   Mark any findings that were identified by Gemini or Codex and verified by you with "[Gemini-verified]" or "[Codex-verified]"
+
+   **CRITICAL - Issue Attribution:**
+   Every issue MUST clearly indicate who found it using these tags:
+   - `[claude]` - Issue found by you (the primary Claude reviewer)
+   - `[gemini]` - Issue found by Gemini and verified by you
+   - `[codex]` - Issue found by Codex and verified by you
+   - `[claude, gemini]` - Issue independently found by both you and Gemini
+   - `[claude, codex]` - Issue independently found by both you and Codex
+   - `[gemini, codex]` - Issue found by both Gemini and Codex (not by you initially)
+   - `[claude, gemini, codex]` - Issue found by all three reviewers
+
+   Format: `[attribution] File:line - Description`
+   Example: `[claude, gemini] src/vm/mod.rs:42 - Missing bounds check on array access`
 7. **Cross-Review Summary:** (Include only if Gemini or Codex was invoked)
    - State which tools were available (Gemini CLI, Codex CLI, or both)
    - For each available tool:
      - Number of findings reported
      - Number of findings you verified as accurate
      - Number of findings you rejected (with brief reason why each was rejected)
+   - **IMPORTANT:** ALL verified findings from ALL reviewers (claude, gemini, codex) MUST appear in the Detailed Findings section above with proper attribution. This summary is for transparency about the cross-review process, not a separate findings list.
 8. **Positive Observations:** Well-implemented aspects worth noting
 9. **Issue Count:** State the exact number of issues found (e.g., "Total: 3 issues")
 

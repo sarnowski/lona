@@ -67,6 +67,7 @@ impl ValueKey {
             Value::Binary(_) => 12_u8,
             Value::Function(_) => 13_u8,
             Value::NativeFunction(_) => 14_u8,
+            Value::Var(_) => 15_u8,
         }
     }
 }
@@ -120,6 +121,8 @@ impl Ord for ValueKey {
             (&Value::Set(ref left), &Value::Set(ref right)) => {
                 crate::set::compare_sets(left, right)
             }
+            // Vars compare by Rc pointer for consistent ordering with PartialEq/Hash
+            (&Value::Var(ref left), &Value::Var(ref right)) => left.as_ptr().cmp(&right.as_ptr()),
             // Nil and any other same-type comparisons
             _ => Ordering::Equal,
         }

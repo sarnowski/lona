@@ -39,6 +39,8 @@ impl Display for Value {
             Self::Binary(ref binary) => write!(f, "{binary}"),
             #[cfg(feature = "alloc")]
             Self::Function(ref func) => write!(f, "{func}"),
+            #[cfg(feature = "alloc")]
+            Self::Var(ref var) => write!(f, "#<var:{}>", var.name().as_u32()),
         }
     }
 }
@@ -143,6 +145,9 @@ impl Display for Displayable<'_> {
             Value::Set(ref set) => write!(f, "{}", set.display(self.interner)),
             Value::Binary(ref binary) => write!(f, "{binary}"),
             Value::Function(ref func) => write!(f, "{func}"),
+            Value::Var(ref var) => {
+                write!(f, "#<var:{}>", self.interner.resolve(var.name()))
+            }
         }
     }
 }

@@ -2,7 +2,7 @@ We want to implement the next open task from our @docs/roadmap/index.md.
 
 In order for you to understand enough background information to correctly plan the next step, you must read:
 
-  * @docs/goals.md
+  * @docs/goals/index.md
   * @docs/lonala.md
   * @docs/minimal-rust.md
 
