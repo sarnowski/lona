@@ -8,91 +8,143 @@ copyright: Copyright (C) 2025 Tobias Sarnowski - GPL-3.0-or-later
 
 docs_dir: docs
 
+extra:
+    version: !ENV [LONA_VERSION, "dev"]
+
+theme:
+    name: null
+    custom_dir: tools/mkdocs-lona-theme/
+
+plugins:
+    - search:
+          enabled: false
+    - mermaid2:
+          arguments:
+              theme: base
+              themeVariables:
+                  # Backgrounds
+                  background: '#282828'
+                  primaryColor: '#3c3836'
+                  secondaryColor: '#504945'
+                  tertiaryColor: '#32302f'
+                  # Text
+                  primaryTextColor: '#ebdbb2'
+                  secondaryTextColor: '#d5c4a1'
+                  tertiaryTextColor: '#bdae93'
+                  # Borders and lines
+                  primaryBorderColor: '#fe8019'
+                  lineColor: '#a89984'
+                  # Fonts
+                  fontFamily: 'Anybody, system-ui, sans-serif'
+
+markdown_extensions:
+    - pymdownx.highlight:
+          anchor_linenums: true
+          use_pygments: true
+          pygments_lang_class: true
+    - pymdownx.superfences:
+          custom_fences:
+              - name: mermaid
+                class: mermaid
+                format: !!python/name:mermaid2.fence_mermaid
+    - pymdownx.inlinehilite
+    - pymdownx.snippets:
+          auto_append:
+              - docs/includes/glossary.md
+    - abbr
+    - admonition
+    - tables
+    - attr_list
+    - toc:
+          permalink: true
+          toc_depth: 2
+
 nav:
-  - Home: index.md
-  - Goals: goals.md
-  - Installation: installation.md
-  - Minimal Rust: minimal-rust.md
-  - LISP Machine: lisp-machine.md
+    - Project:
+          - Home: index.md
+          - Goals: goals.md
+          - Installation: installation.md
+          - Minimal Rust: minimal-rust.md
+          - LISP Machine: lisp-machine.md
 
-  - Lonala Language:
-    - lonala/index.md
-    - Introduction: lonala/introduction.md
-    - Lexical Structure: lonala/lexical-structure.md
-    - Data Types: lonala/data-types.md
-    - Literals: lonala/literals.md
-    - Evaluation: lonala/evaluation.md
-    - Special Forms: lonala/special-forms.md
-    - Operators: lonala/operators.md
-    - Functions: lonala/functions.md
-    - Reader Macros: lonala/reader-macros.md
-    - Macros: lonala/macros.md
-    - Namespaces: lonala/namespaces.md
-    - Concurrency: lonala/concurrency.md
-    - Error Handling: lonala/error-handling.md
-    - Debugging: lonala/debugging.md
-    - Builtins:
-      - lonala/builtins/index.md
-      - Type Predicates: lonala/builtins/type-predicates.md
-      - Collections: lonala/builtins/collections.md
-      - Sorted Collections: lonala/builtins/sorted-collections.md
-      - Atoms: lonala/builtins/atoms.md
-      - Symbols: lonala/builtins/symbols.md
-      - Binary: lonala/builtins/binary.md
-      - Metadata: lonala/builtins/metadata.md
-      - Error Handling: lonala/builtins/error-handling.md
-      - I/O: lonala/builtins/io.md
-      - Hardware: lonala/builtins/hardware.md
-      - Processes: lonala/builtins/processes.md
-      - Time: lonala/builtins/time.md
-      - Regex: lonala/builtins/regex.md
-      - Standard Library: lonala/builtins/stdlib.md
-    - Appendices:
-      - Grammar: lonala/appendices/grammar.md
-      - Bytecode: lonala/appendices/bytecode.md
-      - Clojure Differences: lonala/appendices/clojure-differences.md
-      - Reserved Words: lonala/appendices/reserved-words.md
-      - Error Idioms: lonala/appendices/error-idioms.md
+    - Lonala Language:
+          - lonala/index.md
+          - Introduction: lonala/introduction.md
+          - Lexical Structure: lonala/lexical-structure.md
+          - Data Types: lonala/data-types.md
+          - Literals: lonala/literals.md
+          - Evaluation: lonala/evaluation.md
+          - Special Forms: lonala/special-forms.md
+          - Operators: lonala/operators.md
+          - Functions: lonala/functions.md
+          - Reader Macros: lonala/reader-macros.md
+          - Macros: lonala/macros.md
+          - Namespaces: lonala/namespaces.md
+          - Concurrency: lonala/concurrency.md
+          - Error Handling: lonala/error-handling.md
+          - Debugging: lonala/debugging.md
+          - Builtins:
+                - lonala/builtins/index.md
+                - Type Predicates: lonala/builtins/type-predicates.md
+                - Collections: lonala/builtins/collections.md
+                - Sorted Collections: lonala/builtins/sorted-collections.md
+                - Atoms: lonala/builtins/atoms.md
+                - Symbols: lonala/builtins/symbols.md
+                - Binary: lonala/builtins/binary.md
+                - Metadata: lonala/builtins/metadata.md
+                - Error Handling: lonala/builtins/error-handling.md
+                - I/O: lonala/builtins/io.md
+                - Hardware: lonala/builtins/hardware.md
+                - Processes: lonala/builtins/processes.md
+                - Time: lonala/builtins/time.md
+                - Regex: lonala/builtins/regex.md
+                - Standard Library: lonala/builtins/stdlib.md
+          - Appendices:
+                - Grammar: lonala/appendices/grammar.md
+                - Bytecode: lonala/appendices/bytecode.md
+                - Clojure Differences: lonala/appendices/clojure-differences.md
+                - Reserved Words: lonala/appendices/reserved-words.md
+                - Error Idioms: lonala/appendices/error-idioms.md
 
-  - Development:
-    - Testing Strategy: development/testing-strategy.md
-    - Lonala Coding Guidelines: development/lonala-coding-guidelines.md
-    - Rust Coding Guidelines: development/rust-coding-guidelines.md
-    - Defining Natives: development/defnative.md
-    - Tail Call Optimization: development/tco.md
-    - Editor Plan: development/editor-plan.md
+    - Development:
+          - Testing Strategy: development/testing-strategy.md
+          - Lonala Coding Guidelines: development/lonala-coding-guidelines.md
+          - Rust Coding Guidelines: development/rust-coding-guidelines.md
+          - Defining Natives: development/defnative.md
+          - Tail Call Optimization: development/tco.md
+          - Editor Plan: development/editor-plan.md
 
-  - Roadmap:
-    - roadmap/index.md
-    - Milestone 1 - Rust Foundation:
-      - roadmap/milestone-01-rust-foundation.md
-      - Arithmetic: roadmap/milestone-01-rust-foundation/00-arithmetic.md
-      - Core Value Types: roadmap/milestone-01-rust-foundation/01-core-value-types.md
-      - Language Features: roadmap/milestone-01-rust-foundation/02-language-features.md
-      - Namespace System: roadmap/milestone-01-rust-foundation/03-namespace-system.md
-      - Process Model: roadmap/milestone-01-rust-foundation/04-process-model.md
-      - Garbage Collection: roadmap/milestone-01-rust-foundation/05-garbage-collection.md
-      - Domain Isolation: roadmap/milestone-01-rust-foundation/06-domain-isolation.md
-      - Fault Tolerance: roadmap/milestone-01-rust-foundation/07-fault-tolerance.md
-      - Native Primitives: roadmap/milestone-01-rust-foundation/08-native-primitives.md
-      - Integration Tests: roadmap/milestone-01-rust-foundation/09-integration-tests.md
-      - Condition/Restart: roadmap/milestone-01-rust-foundation/10-condition-restart.md
-      - Introspection: roadmap/milestone-01-rust-foundation/11-introspection.md
-      - Debug Infrastructure: roadmap/milestone-01-rust-foundation/12-debug-infrastructure.md
-    - "Milestone 2: Lonala Standard Library": roadmap/milestone-02-lonala-standard-library.md
-    - "Milestone 3: UART Driver": roadmap/milestone-03-uart-driver.md
-    - "Milestone 4: Init System": roadmap/milestone-04-init-system.md
-    - "Milestone 5: Lonala REPL": roadmap/milestone-05-lonala-repl.md
-    - "Milestone 6: Block Storage": roadmap/milestone-06-block-storage.md
-    - "Milestone 7: Filesystem": roadmap/milestone-07-filesystem.md
-    - "Milestone 8: Persistent Storage": roadmap/milestone-08-persistent-storage.md
-    - "Milestone 9: Network Driver": roadmap/milestone-09-network-driver.md
-    - "Milestone 10: ARP": roadmap/milestone-10-arp.md
-    - "Milestone 11: IP Stack": roadmap/milestone-11-ip-stack.md
-    - "Milestone 12: Transport Protocols": roadmap/milestone-12-transport-protocols.md
-    - "Milestone 13: Telnet Server": roadmap/milestone-13-telnet-server.md
-    - "Milestone 14: HTTP/1 Server": roadmap/milestone-14-http1-server.md
-    - "Milestone 15: TLS": roadmap/milestone-15-tls.md
-    - "Milestone 16: HTTP/2 with ACME": roadmap/milestone-16-http2-with-acme.md
+    - Roadmap:
+          - roadmap/index.md
+          - Milestone 1 - Rust Foundation:
+                - roadmap/milestone-01-rust-foundation.md
+                - Arithmetic: roadmap/milestone-01-rust-foundation/00-arithmetic.md
+                - Core Value Types: roadmap/milestone-01-rust-foundation/01-core-value-types.md
+                - Language Features: roadmap/milestone-01-rust-foundation/02-language-features.md
+                - Namespace System: roadmap/milestone-01-rust-foundation/03-namespace-system.md
+                - Process Model: roadmap/milestone-01-rust-foundation/04-process-model.md
+                - Garbage Collection: roadmap/milestone-01-rust-foundation/05-garbage-collection.md
+                - Domain Isolation: roadmap/milestone-01-rust-foundation/06-domain-isolation.md
+                - Fault Tolerance: roadmap/milestone-01-rust-foundation/07-fault-tolerance.md
+                - Native Primitives: roadmap/milestone-01-rust-foundation/08-native-primitives.md
+                - Integration Tests: roadmap/milestone-01-rust-foundation/09-integration-tests.md
+                - Condition/Restart: roadmap/milestone-01-rust-foundation/10-condition-restart.md
+                - Introspection: roadmap/milestone-01-rust-foundation/11-introspection.md
+                - Debug Infrastructure: roadmap/milestone-01-rust-foundation/12-debug-infrastructure.md
+          - "Milestone 2: Lonala Standard Library": roadmap/milestone-02-lonala-standard-library.md
+          - "Milestone 3: UART Driver": roadmap/milestone-03-uart-driver.md
+          - "Milestone 4: Init System": roadmap/milestone-04-init-system.md
+          - "Milestone 5: Lonala REPL": roadmap/milestone-05-lonala-repl.md
+          - "Milestone 6: Block Storage": roadmap/milestone-06-block-storage.md
+          - "Milestone 7: Filesystem": roadmap/milestone-07-filesystem.md
+          - "Milestone 8: Persistent Storage": roadmap/milestone-08-persistent-storage.md
+          - "Milestone 9: Network Driver": roadmap/milestone-09-network-driver.md
+          - "Milestone 10: ARP": roadmap/milestone-10-arp.md
+          - "Milestone 11: IP Stack": roadmap/milestone-11-ip-stack.md
+          - "Milestone 12: Transport Protocols": roadmap/milestone-12-transport-protocols.md
+          - "Milestone 13: Telnet Server": roadmap/milestone-13-telnet-server.md
+          - "Milestone 14: HTTP/1 Server": roadmap/milestone-14-http1-server.md
+          - "Milestone 15: TLS": roadmap/milestone-15-tls.md
+          - "Milestone 16: HTTP/2 with ACME": roadmap/milestone-16-http2-with-acme.md
 
-  - License: license.md
+    - License: license.md

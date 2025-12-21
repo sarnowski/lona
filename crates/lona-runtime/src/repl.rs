@@ -416,7 +416,7 @@ mod interactive {
 
         /// Runs the REPL loop forever.
         pub fn run(&mut self) -> ! {
-            self.writeln("Lona REPL v0.1.0");
+            self.io.write_fmt(format_args!("Lona REPL {}\n", env!("LONA_VERSION")));
             self.writeln("Type expressions to evaluate. Ctrl+C to cancel input.");
 
             // Load the core standard library

@@ -1,0 +1,2 @@
+[pygments.lexers]
+lonala = lonala_lexer:LonalaLexer

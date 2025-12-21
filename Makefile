@@ -24,6 +24,14 @@ $(error GNU Make 4.0+ required. On macOS: brew install make && gmake)
 endif
 
 # ==============================================================================
+# Version
+# ==============================================================================
+
+# Canonical version from git: tag-commits-hash[-dirty]
+# Examples: v0.1.0, v0.1.0-12-gabcdef, v0.1.0-12-gabcdef-dirty
+LONA_VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "unknown")
+
+# ==============================================================================
 # Configuration
 # ==============================================================================
 
@@ -114,7 +122,7 @@ run-x86_64: debug-x86_64 ## Interactive x86_64 QEMU session
 
 .PHONY: clean
 clean: ## Remove all build artifacts
-	rm -rf $(BUILD_DIR) target
+	rm -rf $(BUILD_DIR) target site .venv
 	@echo "Build artifacts removed"
 
 # ==============================================================================
@@ -177,8 +185,8 @@ help: ## Show this help
 	@echo "  release-rpi4b-4gb   SD card for Raspberry Pi 4B (4GB)"
 	@echo ""
 	@echo "Documentation targets:"
-	@echo "  docs          Build documentation site"
-	@echo "  docs-serve    Serve documentation locally"
+	@echo "  docs          Build documentation site for deployment"
+	@echo "  docs-local    Serve docs locally with live reload (no search)"
 	@echo ""
 	@echo "Utility targets:"
 	@echo "  docker        Build all Docker images"
@@ -204,12 +212,15 @@ mcp: $(VENV) ## Start Lona dev REPL MCP server
 	$(PYTHON) -m tools.lona_dev_repl
 
 .PHONY: docs
-docs: $(VENV) ## Build documentation site
-	$(VENV)/bin/mkdocs build
+docs: $(VENV) ## Build documentation site for deployment
+	$(PIP) install -q -e tools/pygments-lonala/
+	LONA_VERSION=$(LONA_VERSION) $(VENV)/bin/mkdocs build -d site/
+	npx pagefind --site site/
 
-.PHONY: docs-serve
-docs-serve: $(VENV) ## Serve documentation locally
-	$(VENV)/bin/mkdocs serve -a 0.0.0.0:8000
+.PHONY: docs-local
+docs-local: $(VENV) ## Serve documentation locally with live reload
+	$(PIP) install -q -e tools/pygments-lonala/
+	LONA_VERSION=$(LONA_VERSION) $(VENV)/bin/mkdocs serve -a 0.0.0.0:8000
 
 # ==============================================================================
 # Internal Targets (run inside Docker container)
@@ -275,7 +286,7 @@ _check-x86_64:
 _debug-arm64:
 	@echo "==> Building debug binary (qemu-arm-virt)..."
 	@mkdir -p $(BUILD_DIR)
-	SEL4_PREFIX=$(ARM64_SEL4_PREFIX) cargo build \
+	SEL4_PREFIX=$(ARM64_SEL4_PREFIX) LONA_VERSION=$(LONA_VERSION) cargo build \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
 		-Z unstable-options \
@@ -297,7 +308,7 @@ _debug-x86_64:
 	@mkdir -p $(X86_IMAGE_DIR)/EFI/BOOT
 	@mkdir -p $(X86_IMAGE_DIR)/lona
 
-	SEL4_PREFIX=$(X86_SEL4_PREFIX_DEBUG) cargo build \
+	SEL4_PREFIX=$(X86_SEL4_PREFIX_DEBUG) LONA_VERSION=$(LONA_VERSION) cargo build \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
 		-Z unstable-options \
@@ -327,7 +338,7 @@ _debug-x86_64:
 _build-test-arm64:
 	@echo "==> Building ARM64 test binary (Debug)..."
 	@mkdir -p $(BUILD_DIR)
-	SEL4_PREFIX=$(ARM64_SEL4_PREFIX) cargo build \
+	SEL4_PREFIX=$(ARM64_SEL4_PREFIX) LONA_VERSION=$(LONA_VERSION) cargo build \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
 		-Z unstable-options \
@@ -350,7 +361,7 @@ _build-test-x86_64:
 	@mkdir -p $(BUILD_DIR)/qemu-x86_64-test/EFI/BOOT
 	@mkdir -p $(BUILD_DIR)/qemu-x86_64-test/lona
 
-	SEL4_PREFIX=$(X86_SEL4_PREFIX_DEBUG) cargo build \
+	SEL4_PREFIX=$(X86_SEL4_PREFIX_DEBUG) LONA_VERSION=$(LONA_VERSION) cargo build \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
 		-Z unstable-options \
@@ -417,7 +428,7 @@ _release-x86_64:
 	@mkdir -p $(BUILD_DIR)/release-x86_64/lona
 
 	@echo "==> Compiling root task..."
-	SEL4_PREFIX=$(X86_SEL4_PREFIX_RELEASE) cargo build \
+	SEL4_PREFIX=$(X86_SEL4_PREFIX_RELEASE) LONA_VERSION=$(LONA_VERSION) cargo build \
 		--release \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
@@ -464,7 +475,7 @@ _release-rpi4b:
 	@mkdir -p $(BUILD_DIR)/release-$(RPI4_VARIANT)/overlays
 
 	@echo "==> Compiling root task..."
-	SEL4_PREFIX=$(RPI4_SEL4_PREFIX) cargo build \
+	SEL4_PREFIX=$(RPI4_SEL4_PREFIX) LONA_VERSION=$(LONA_VERSION) cargo build \
 		--release \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \

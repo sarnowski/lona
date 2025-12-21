@@ -1,0 +1,178 @@
+/* Typography for Lona Documentation Theme */
+
+/* Font Face Declarations - Iosevka */
+@font-face {
+    font-family: 'Iosevka';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('../fonts/iosevka/iosevka-regular.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Iosevka';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('../fonts/iosevka/iosevka-medium.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Iosevka';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('../fonts/iosevka/iosevka-semibold.woff2') format('woff2');
+}
+
+/* Font Face Declarations - Anybody */
+@font-face {
+    font-family: 'Anybody';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('../fonts/anybody/anybody-regular.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Anybody';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('../fonts/anybody/anybody-medium.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Anybody';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('../fonts/anybody/anybody-semibold.woff2') format('woff2');
+}
+
+@font-face {
+    font-family: 'Anybody';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('../fonts/anybody/anybody-bold.woff2') format('woff2');
+}
+
+/* Heading Styles */
+.content h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    color: var(--fg0);
+    letter-spacing: -0.5px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.content h1::before {
+    content: '';
+    width: 4px;
+    height: 32px;
+    background: linear-gradient(180deg, var(--orange), var(--yellow));
+}
+
+.content h2 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 40px 0 20px;
+    color: var(--fg0);
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--bg2);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.content h2::before {
+    content: '\00a7'; /* Section sign */
+    color: var(--orange);
+    font-weight: 400;
+}
+
+.content h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 32px 0 16px;
+    color: var(--fg0);
+}
+
+.content h4 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 24px 0 12px;
+    color: var(--fg1);
+}
+
+/* Paragraph and List Styles */
+.content p {
+    margin-bottom: 16px;
+    color: var(--fg2);
+}
+
+.content strong {
+    color: var(--fg0);
+    font-weight: 600;
+}
+
+.content em {
+    font-style: italic;
+}
+
+.content ul, .content ol {
+    margin: 16px 0 16px 24px;
+}
+
+.content li {
+    margin-bottom: 10px;
+    color: var(--fg2);
+}
+
+.content li::marker {
+    color: var(--orange);
+}
+
+/* Page Metadata */
+.page-meta {
+    font-family: 'Iosevka', monospace;
+    font-size: 11px;
+    color: var(--fg4);
+    margin-bottom: 32px;
+    padding-left: 20px;
+}
+
+/* Links */
+.content a {
+    color: var(--blue);
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+.content a:hover {
+    color: var(--aqua);
+}
+
+/* Horizontal Rule */
+.content hr {
+    border: none;
+    border-top: 1px solid var(--bg2);
+    margin: 32px 0;
+}
+
+/* Blockquote */
+.content blockquote {
+    border-left: 3px solid var(--orange);
+    padding-left: 20px;
+    margin: 24px 0;
+    color: var(--fg3);
+    font-style: italic;
+}
+
+.content blockquote p {
+    color: var(--fg3);
+}

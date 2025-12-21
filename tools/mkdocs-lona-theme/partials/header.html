@@ -1,0 +1,100 @@
+<header>
+  <div class="logo">
+    <img src="{{ 'img/logo.svg'|url }}" alt="Lona" width="40" height="40">
+    <span class="logo-text">LONA</span>
+    <span class="logo-version">{{ config.extra.version }}</span>
+  </div>
+
+  <nav class="header-nav">
+    {% for l1_item in nav %}
+      {# Check if this L1 or any child is active #}
+      {% set ns = namespace(l1_is_active=l1_item.active) %}
+      {% if l1_item.children %}
+        {% for child in l1_item.children %}
+          {% if child.active %}{% set ns.l1_is_active = true %}{% endif %}
+          {% if child.children %}
+            {% for grandchild in child.children %}
+              {% if grandchild.active %}{% set ns.l1_is_active = true %}{% endif %}
+              {% if grandchild.children %}
+                {% for greatgrandchild in grandchild.children %}
+                  {% if greatgrandchild.active %}{% set ns.l1_is_active = true %}{% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+        {% endfor %}
+      {% endif %}
+
+      <div class="nav-item">
+        {% if l1_item.children %}
+          {# Find the first linkable page in this section #}
+          {% set ns2 = namespace(first_url=none) %}
+          {% for child in l1_item.children %}
+            {% if ns2.first_url is none %}
+              {% if child.url %}
+                {% set ns2.first_url = child.url %}
+              {% elif child.children %}
+                {% for grandchild in child.children %}
+                  {% if ns2.first_url is none and grandchild.url %}
+                    {% set ns2.first_url = grandchild.url %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+          <a href="{{ (ns2.first_url or '#')|url }}" class="nav-link {% if ns.l1_is_active %}active{% endif %}">
+            {{ l1_item.title }} <span class="arrow">&#9660;</span>
+          </a>
+          <div class="dropdown">
+            {% for l2_item in l1_item.children %}
+              {# Check if this L2 or any child is active #}
+              {% set ns3 = namespace(l2_is_active=l2_item.active) %}
+              {% if l2_item.children %}
+                {% for child in l2_item.children %}
+                  {% if child.active %}{% set ns3.l2_is_active = true %}{% endif %}
+                  {% if child.children %}
+                    {% for grandchild in child.children %}
+                      {% if grandchild.active %}{% set ns3.l2_is_active = true %}{% endif %}
+                    {% endfor %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+
+              {# Find the URL for this L2 item #}
+              {% set ns4 = namespace(l2_url=l2_item.url) %}
+              {% if not ns4.l2_url and l2_item.children %}
+                {% for child in l2_item.children %}
+                  {% if ns4.l2_url is none and child.url %}
+                    {% set ns4.l2_url = child.url %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+
+              <a href="{{ (ns4.l2_url or '#')|url }}" class="dropdown-link {% if ns3.l2_is_active %}active{% endif %}">
+                <span class="icon">&#9672;</span> {{ l2_item.title }}
+              </a>
+            {% endfor %}
+          </div>
+        {% else %}
+          <a href="{{ l1_item.url|url }}" class="nav-link {% if l1_item.active %}active{% endif %}">
+            {{ l1_item.title }}
+          </a>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </nav>
+
+  <div class="header-actions">
+    <button class="theme-toggle" onclick="toggleTheme()">
+      <span class="icon" id="theme-icon">&#9728;</span>
+      <span id="theme-label">Light</span>
+    </button>
+    <div class="search-container">
+      <button class="search-trigger" id="search-trigger" type="button">
+        <span class="search-icon">&#8981;</span>
+        <span class="search-placeholder">Search documentation...</span>
+        <span class="search-kbd">&#8984;K</span>
+      </button>
+    </div>
+  </div>
+</header>

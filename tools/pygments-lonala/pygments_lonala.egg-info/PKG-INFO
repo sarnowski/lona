@@ -1,0 +1,6 @@
+Metadata-Version: 2.4
+Name: pygments-lonala
+Version: 0.1.0
+Summary: Pygments lexer for the Lonala programming language
+Requires-Python: >=3.8
+Requires-Dist: pygments>=2.0

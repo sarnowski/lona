@@ -1,0 +1,41 @@
+<div class="breadcrumb">
+  <a href="{{ config.site_url|default('/', true) }}">docs</a>
+  {# Build breadcrumb by finding the active item in nav hierarchy #}
+  {% for l1 in nav %}
+    {% if l1.active and not l1.children %}
+      {# L1 page is directly active (top-level page like Home, Goals) #}
+    {% elif l1.children %}
+      {% for l2 in l1.children %}
+        {% if l2.active and not l2.children %}
+          {# L2 page is directly active - show L1 as ancestor #}
+          <span class="separator">/</span>
+          {% if l1.url %}<a href="{{ l1.url|url }}">{{ l1.title|lower }}</a>{% else %}<span>{{ l1.title|lower }}</span>{% endif %}
+        {% elif l2.children %}
+          {% for l3 in l2.children %}
+            {% if l3.active and not l3.children %}
+              {# L3 page is directly active - show L1 and L2 as ancestors #}
+              <span class="separator">/</span>
+              {% if l1.url %}<a href="{{ l1.url|url }}">{{ l1.title|lower }}</a>{% else %}<span>{{ l1.title|lower }}</span>{% endif %}
+              <span class="separator">/</span>
+              {% if l2.url %}<a href="{{ l2.url|url }}">{{ l2.title|lower }}</a>{% else %}<span>{{ l2.title|lower }}</span>{% endif %}
+            {% elif l3.children %}
+              {% for l4 in l3.children %}
+                {% if l4.active %}
+                  {# L4 page is directly active - show L1, L2, L3 as ancestors #}
+                  <span class="separator">/</span>
+                  {% if l1.url %}<a href="{{ l1.url|url }}">{{ l1.title|lower }}</a>{% else %}<span>{{ l1.title|lower }}</span>{% endif %}
+                  <span class="separator">/</span>
+                  {% if l2.url %}<a href="{{ l2.url|url }}">{{ l2.title|lower }}</a>{% else %}<span>{{ l2.title|lower }}</span>{% endif %}
+                  <span class="separator">/</span>
+                  {% if l3.url %}<a href="{{ l3.url|url }}">{{ l3.title|lower }}</a>{% else %}<span>{{ l3.title|lower }}</span>{% endif %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+  {% endfor %}
+  <span class="separator">/</span>
+  <span>{{ page.title|lower }}</span>
+</div>

@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+
+[project]
+name = "pygments-lonala"
+version = "0.1.0"
+description = "Pygments lexer for the Lonala programming language"
+requires-python = ">=3.8"
+dependencies = ["pygments>=2.0"]
+
+[project.entry-points."pygments.lexers"]
+lonala = "lonala_lexer:LonalaLexer"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

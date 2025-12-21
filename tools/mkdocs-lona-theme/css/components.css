@@ -1,0 +1,273 @@
+/* Components for Lona Documentation Theme */
+
+/* ===== TABLES ===== */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 24px 0;
+    font-size: 13px;
+}
+
+th {
+    text-align: left;
+    padding: 12px 16px;
+    background: var(--bg-hard);
+    border: 1px solid var(--bg2);
+    color: var(--orange);
+    font-family: 'Iosevka', monospace;
+    font-weight: 500;
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+td {
+    padding: 12px 16px;
+    border: 1px solid var(--bg2);
+    color: var(--fg2);
+}
+
+tr:hover td {
+    background: var(--bg1);
+}
+
+/* ===== INLINE CODE ===== */
+.content code:not(pre code) {
+    background: var(--bg1);
+    color: var(--orange);
+    padding: 2px 8px;
+    font-size: 12px;
+    font-family: 'Iosevka', monospace;
+}
+
+/* Code in headings */
+.content h1 code,
+.content h2 code,
+.content h3 code {
+    font-size: inherit;
+}
+
+/* ===== CALLOUTS / ADMONITIONS ===== */
+/* MkDocs admonition classes */
+.admonition {
+    background: var(--bg-hard);
+    border: 1px solid var(--bg2);
+    padding: 20px 24px;
+    margin: 24px 0;
+    position: relative;
+}
+
+.admonition::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 3px;
+}
+
+/* Note type */
+.admonition.note::before,
+.admonition.info::before,
+.admonition.tip::before,
+.admonition.hint::before {
+    background: var(--blue);
+}
+
+.admonition.note .admonition-title,
+.admonition.info .admonition-title,
+.admonition.tip .admonition-title,
+.admonition.hint .admonition-title {
+    color: var(--blue);
+}
+
+/* Warning type */
+.admonition.warning::before,
+.admonition.caution::before,
+.admonition.attention::before {
+    background: var(--yellow);
+}
+
+.admonition.warning .admonition-title,
+.admonition.caution .admonition-title,
+.admonition.attention .admonition-title {
+    color: var(--yellow);
+}
+
+/* Danger type */
+.admonition.danger::before,
+.admonition.error::before,
+.admonition.failure::before,
+.admonition.bug::before {
+    background: var(--red);
+}
+
+.admonition.danger .admonition-title,
+.admonition.error .admonition-title,
+.admonition.failure .admonition-title,
+.admonition.bug .admonition-title {
+    color: var(--red);
+}
+
+/* Success type */
+.admonition.success::before,
+.admonition.done::before,
+.admonition.check::before {
+    background: var(--green);
+}
+
+.admonition.success .admonition-title,
+.admonition.done .admonition-title,
+.admonition.check .admonition-title {
+    color: var(--green);
+}
+
+/* Example type */
+.admonition.example::before {
+    background: var(--purple);
+}
+
+.admonition.example .admonition-title {
+    color: var(--purple);
+}
+
+/* Quote type */
+.admonition.quote::before,
+.admonition.cite::before {
+    background: var(--fg4);
+}
+
+.admonition.quote .admonition-title,
+.admonition.cite .admonition-title {
+    color: var(--fg4);
+}
+
+/* Admonition title */
+.admonition-title {
+    font-family: 'Iosevka', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.admonition-title::before {
+    content: '\25c8'; /* Diamond symbol */
+}
+
+.admonition p {
+    margin: 0;
+    font-size: 13px;
+}
+
+.admonition p + p {
+    margin-top: 12px;
+}
+
+/* ===== DIAGRAMS ===== */
+.diagram-container {
+    background: var(--bg-hard);
+    border: 1px solid var(--bg2);
+    padding: 32px;
+    margin: 24px 0;
+    position: relative;
+}
+
+.diagram-label {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    font-family: 'Iosevka', monospace;
+    font-size: 10px;
+    color: var(--orange);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+.diagram-content {
+    font-family: 'Iosevka', monospace;
+    font-size: 12px;
+    color: var(--fg3);
+    white-space: pre;
+    line-height: 1.4;
+}
+
+/* ===== DEFINITION LISTS ===== */
+.content dl {
+    margin: 24px 0;
+}
+
+.content dt {
+    font-weight: 600;
+    color: var(--fg0);
+    margin-top: 16px;
+}
+
+.content dd {
+    margin-left: 24px;
+    color: var(--fg2);
+}
+
+/* ===== KEYBOARD SHORTCUTS ===== */
+kbd {
+    font-family: 'Iosevka', monospace;
+    font-size: 11px;
+    color: var(--fg3);
+    background: var(--bg1);
+    padding: 3px 8px;
+    border: 1px solid var(--bg3);
+    border-radius: 3px;
+}
+
+/* ===== FOOTNOTES ===== */
+.footnote {
+    font-size: 12px;
+    color: var(--fg3);
+}
+
+.footnote-ref {
+    color: var(--blue);
+    text-decoration: none;
+    font-size: 11px;
+    vertical-align: super;
+}
+
+/* ===== IMAGES ===== */
+.content img {
+    max-width: 100%;
+    height: auto;
+    margin: 24px 0;
+    border: 1px solid var(--bg2);
+}
+
+/* ===== TASK LISTS ===== */
+.content ul.task-list {
+    list-style: none;
+    margin-left: 0;
+}
+
+.content .task-list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.content .task-list-item input[type="checkbox"] {
+    margin-top: 4px;
+    accent-color: var(--aqua);
+}
+
+/* ===== ABBREVIATIONS ===== */
+abbr {
+    text-decoration: underline dotted var(--fg4);
+    text-underline-offset: 3px;
+    cursor: help;
+}
+
+abbr:hover {
+    text-decoration-color: var(--aqua);
+}

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% if page.title %}{{ page.title }} - {% endif %}{{ config.site_name }}</title>
+
+  <link rel="stylesheet" href="{{ 'css/gruvbox.css'|url }}">
+  <link rel="stylesheet" href="{{ 'css/layout.css'|url }}">
+  <link rel="stylesheet" href="{{ 'css/typography.css'|url }}">
+  <link rel="stylesheet" href="{{ 'css/navigation.css'|url }}">
+  <link rel="stylesheet" href="{{ 'css/code.css'|url }}">
+  <link rel="stylesheet" href="{{ 'css/components.css'|url }}">
+  <link rel="stylesheet" href="{{ 'css/mermaid.css'|url }}">
+  <link rel="stylesheet" href="{{ 'css/search.css'|url }}">
+  <link rel="stylesheet" href="/pagefind/pagefind-ui.css">
+</head>
+<body>
+  <div class="corner-decoration top-left"></div>
+  <div class="corner-decoration bottom-right"></div>
+
+  <div class="layout">
+    {% include "partials/header.html" %}
+
+    <div class="main-container">
+      {% include "partials/sidebar.html" %}
+
+      <main class="content">
+        <div class="content-wrapper">
+          {% include "partials/breadcrumb.html" %}
+          {{ page.content }}
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Search Modal -->
+  <div class="search-modal" id="search-modal" hidden>
+    <div class="search-modal-backdrop"></div>
+    <div class="search-modal-content">
+      <div id="pagefind-container"></div>
+    </div>
+  </div>
+
+  <script src="{{ 'js/theme.js'|url }}"></script>
+  <script src="{{ 'js/navigation.js'|url }}"></script>
+  <script src="/pagefind/pagefind-ui.js"></script>
+  <script src="{{ 'js/search.js'|url }}"></script>
+</body>
+</html>
