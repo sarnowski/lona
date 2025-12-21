@@ -6,6 +6,7 @@
 mod atom_tests;
 mod collection_tests;
 mod full_span_tests;
+mod metadata_tests;
 mod reader_macro_tests;
 
 extern crate alloc;

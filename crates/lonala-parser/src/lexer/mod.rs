@@ -182,6 +182,7 @@ impl<'src> Lexer<'src> {
             '\'' => Ok(self.single_char_token(TokenKind::Quote, start)),
             '`' => Ok(self.single_char_token(TokenKind::SyntaxQuote, start)),
             '~' => Ok(self.tilde_token(start)),
+            '^' => Ok(self.single_char_token(TokenKind::Caret, start)),
 
             // String literal (delegated to strings module)
             '"' => self.string_token(start),
@@ -382,7 +383,7 @@ const fn is_symbol_start(ch: char) -> bool {
     ch.is_ascii_alphabetic()
         || matches!(
             ch,
-            '_' | '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '?' | '&' | '%' | '^' | '.'
+            '_' | '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '?' | '&' | '%' | '.'
         )
 }
 

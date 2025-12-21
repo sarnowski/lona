@@ -65,6 +65,9 @@ impl Diagnostic for Error {
             Kind::ReaderMacroMissingExpr => {
                 String::from("reader macro must be followed by an expression")
             }
+            Kind::InvalidMetadataForm { found } => {
+                format!("metadata must be a map or keyword, found {found}")
+            }
             // Non-exhaustive pattern: future variants
             _ => String::from("parse error"),
         }

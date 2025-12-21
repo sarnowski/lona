@@ -311,6 +311,13 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
             Ast::Map(ref elements) => self.compile_map(elements, expr.span),
             Ast::Set(ref elements) => self.compile_set(elements, expr.span),
 
+            // Metadata (stub for Task 1.1.7: compile inner value without metadata)
+            Ast::WithMeta { ref value, .. } => {
+                // TODO(Task 1.1.7): Implement metadata attachment at runtime.
+                // For now, compile the inner value without metadata.
+                self.compile_expr(value)
+            }
+
             // Handle future Ast variants (Ast is #[non_exhaustive])
             _ => Err(Error::new(
                 ErrorKind::NotImplemented {

@@ -440,6 +440,8 @@ impl Compiler<'_, '_, '_> {
                 },
                 self.location(ast.span),
             )),
+            // Metadata: process the inner value (metadata ignored for now)
+            Ast::WithMeta { ref value, .. } => self.ast_to_constant(value),
             // Ast is non-exhaustive, handle future variants
             _ => Err(Error::new(
                 ErrorKind::NotImplemented {

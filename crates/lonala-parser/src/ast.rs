@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt;
@@ -50,6 +51,17 @@ pub enum Ast {
     Map(Vec<Spanned<Self>>),
     /// Set `#{...}` - unique elements, no duplicates allowed.
     Set(Vec<Spanned<Self>>),
+
+    /// A form with metadata attached.
+    ///
+    /// Created by the `^` reader macro. The metadata is always a map
+    /// (possibly expanded from shorthand like `^:keyword`).
+    WithMeta {
+        /// The metadata map.
+        meta: Box<Spanned<Self>>,
+        /// The form to attach metadata to.
+        value: Box<Spanned<Self>>,
+    },
 }
 
 impl Ast {
@@ -130,6 +142,16 @@ impl Ast {
         Self::Set(elements)
     }
 
+    /// Creates a `WithMeta` node.
+    #[inline]
+    #[must_use]
+    pub fn with_meta(meta: Spanned<Self>, value: Spanned<Self>) -> Self {
+        Self::WithMeta {
+            meta: Box::new(meta),
+            value: Box::new(value),
+        }
+    }
+
     /// Returns a human-readable type name for this AST node.
     #[inline]
     #[must_use]
@@ -146,6 +168,7 @@ impl Ast {
             Self::Vector(_) => "vector",
             Self::Map(_) => "map",
             Self::Set(_) => "set",
+            Self::WithMeta { .. } => "with-meta",
         }
     }
 }
@@ -212,6 +235,15 @@ impl fmt::Display for Ast {
                     write!(f, "{}", elem.node)?;
                 }
                 write!(f, "}}")
+            }
+            Self::WithMeta {
+                ref meta,
+                ref value,
+            } => {
+                write!(f, "^")?;
+                meta.node.fmt(f)?;
+                write!(f, " ")?;
+                value.node.fmt(f)
             }
         }
     }

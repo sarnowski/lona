@@ -130,6 +130,9 @@ impl Compiler<'_, '_, '_> {
             | Ast::Symbol(_)
             | Ast::Keyword(_) => Ok(Self::quote_atom(ast)),
 
+            // Metadata: process the inner value (metadata ignored for now)
+            Ast::WithMeta { ref value, .. } => self.expand_quasiquote(value, depth),
+
             // Handle future AST variants
             _ => Err(Error::new(
                 ErrorKind::NotImplemented {

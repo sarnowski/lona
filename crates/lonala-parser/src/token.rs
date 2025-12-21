@@ -61,6 +61,8 @@ pub enum Kind {
     Unquote,
     /// Unquote-splice `~@`.
     UnquoteSplice,
+    /// Caret `^` for metadata.
+    Caret,
 }
 
 impl Kind {
@@ -88,6 +90,7 @@ impl Kind {
             Self::SyntaxQuote => "syntax quote",
             Self::Unquote => "unquote",
             Self::UnquoteSplice => "unquote-splice",
+            Self::Caret => "caret",
         }
     }
 }

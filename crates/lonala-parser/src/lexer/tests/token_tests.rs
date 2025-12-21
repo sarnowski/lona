@@ -447,3 +447,72 @@ fn peek_at_end_returns_none() {
     let mut lexer = Lexer::new("", TEST_SOURCE_ID);
     assert!(lexer.peek().is_none());
 }
+
+// ==================== Caret (Metadata) Tests ====================
+
+#[test]
+fn caret_alone() {
+    let tokens = lex("^");
+    assert_eq!(tokens.len(), 1_usize);
+    assert_eq!(
+        tokens.first().map(|token| token.kind),
+        Some(TokenKind::Caret)
+    );
+    assert_eq!(tokens.first().map(|token| token.lexeme), Some("^"));
+}
+
+#[test]
+fn caret_before_brace() {
+    let tokens = lex("^{");
+    assert_eq!(tokens.len(), 2_usize);
+    assert_eq!(
+        tokens.first().map(|token| token.kind),
+        Some(TokenKind::Caret)
+    );
+    assert_eq!(
+        tokens.get(1_usize).map(|token| token.kind),
+        Some(TokenKind::LeftBrace)
+    );
+}
+
+#[test]
+fn caret_before_keyword() {
+    let tokens = lex("^:foo");
+    assert_eq!(tokens.len(), 2_usize);
+    assert_eq!(
+        tokens.first().map(|token| token.kind),
+        Some(TokenKind::Caret)
+    );
+    assert_eq!(
+        tokens.get(1_usize).map(|token| token.kind),
+        Some(TokenKind::Keyword)
+    );
+}
+
+#[test]
+fn caret_before_symbol() {
+    let tokens = lex("^x");
+    assert_eq!(tokens.len(), 2_usize);
+    assert_eq!(
+        tokens.first().map(|token| token.kind),
+        Some(TokenKind::Caret)
+    );
+    assert_eq!(
+        tokens.get(1_usize).map(|token| token.kind),
+        Some(TokenKind::Symbol)
+    );
+}
+
+#[test]
+fn multiple_carets() {
+    let tokens = lex("^:a ^:b x");
+    assert_eq!(tokens.len(), 5_usize);
+    assert_eq!(
+        tokens.first().map(|token| token.kind),
+        Some(TokenKind::Caret)
+    );
+    assert_eq!(
+        tokens.get(2_usize).map(|token| token.kind),
+        Some(TokenKind::Caret)
+    );
+}

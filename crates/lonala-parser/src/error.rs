@@ -69,6 +69,14 @@ pub enum Kind {
     DuplicateMapKey,
     /// Reader macro not followed by an expression.
     ReaderMacroMissingExpr,
+    /// Invalid form after metadata `^`.
+    ///
+    /// The `^` reader macro must be followed by a map literal `{...}` or
+    /// a keyword `:name` (which expands to `{:name true}`).
+    InvalidMetadataForm {
+        /// Description of what was found instead.
+        found: &'static str,
+    },
 }
 
 impl Kind {
@@ -91,6 +99,7 @@ impl Kind {
             Self::DuplicateSetElement => "DuplicateSetElement",
             Self::DuplicateMapKey => "DuplicateMapKey",
             Self::ReaderMacroMissingExpr => "ReaderMacroMissingExpr",
+            Self::InvalidMetadataForm { .. } => "InvalidMetadataForm",
         }
     }
 }
@@ -136,6 +145,9 @@ impl fmt::Display for Kind {
             }
             Self::ReaderMacroMissingExpr => {
                 write!(f, "reader macro must be followed by an expression")
+            }
+            Self::InvalidMetadataForm { found } => {
+                write!(f, "metadata must be a map or keyword, found {found}")
             }
         }
     }

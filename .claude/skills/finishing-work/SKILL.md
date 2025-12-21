@@ -65,7 +65,47 @@ After completing manual tests, you MUST present a summary to the user in exactly
 - Provide a copy-paste block with all expressions so the user can reproduce your tests
 - If any test fails unexpectedly, fix the issue and re-run ALL tests before proceeding
 
-### Step 2: Invoke Code Review
+### Step 2: Update Progress Tracking
+
+Before code review, update the roadmap and plan to reflect completed work:
+
+#### 2.1: Identify Completed Tasks
+
+1. **Review what was implemented** by checking `git diff` against the last commit
+2. **Cross-reference with the roadmap** (`docs/roadmap/index.md`) to identify which task(s) were completed
+3. **Verify completion criteria** - ensure all aspects of the task are actually done, not just started
+
+#### 2.2: Update the Roadmap
+
+For each completed task in `docs/roadmap/index.md`:
+
+1. **Find the task row** in the appropriate milestone section
+2. **Change status from `open` to `done`**
+
+Example change:
+```markdown
+# Before
+| 1.1.6 | Metadata System - Reader Syntax | open |
+
+# After
+| 1.1.6 | Metadata System - Reader Syntax | done |
+```
+
+**Rules:**
+- Only mark a task as `done` if ALL acceptance criteria are met
+- If a task is partially complete, leave it as `open` and document what remains
+- If multiple tasks were completed, update all of them
+
+#### 2.3: Update or Archive the Plan
+
+If a `PLAN.md` file exists at the repository root:
+
+1. **If the plan corresponds to completed work**: Delete the file (the plan has served its purpose)
+2. **If the plan covers multiple tasks and some remain**: Update the plan to mark completed sections
+
+**Rationale:** Plans are temporary working documents. Once work is complete, the roadmap serves as the authoritative record.
+
+### Step 3: Invoke Code Review
 
 Use the Task tool to invoke the `lona-code-reviewer` subagent:
 
@@ -74,11 +114,11 @@ subagent_type: lona-code-reviewer
 prompt: Perform a full review of all changes in the current repository.
 ```
 
-### Step 3: Present Findings
+### Step 4: Present Findings
 
 Present ALL findings from the reviewer to the user, regardless of severity.
 
-### Step 4: Resolve All Issues
+### Step 5: Resolve All Issues
 
 **CRITICAL: You MUST resolve EVERY issue before proceeding. No exceptions.**
 
@@ -105,13 +145,32 @@ See **CLAUDE.md Clippy Policy section** for the complete policy. Key points:
 - A pre-tool hook blocks unauthorized suppression directives
 - Approved directives must include `[approved]` in the reason string
 
-### Step 5: Repeat Until Clean
+### Step 6: Repeat Until Clean
 
-After resolving all issues, return to Step 2 and run another code review.
+After resolving all issues, determine whether to re-run the code review:
 
-Continue this loop until the reviewer reports **exactly ZERO issues**.
+#### Documentation-Only Issues
 
-### Step 6: Documentation Verification
+If ALL findings from the review were **documentation issues** (e.g., outdated docs, incorrect examples, missing doc updates), then:
+- Fix the documentation issues
+- **Skip re-running the code reviewer** - proceed directly to Step 7 (Documentation Verification)
+
+Documentation issues include:
+- Outdated or incorrect documentation
+- Missing documentation for new features
+- Inconsistent examples or descriptions
+- Typos or formatting issues in docs
+
+#### Code Issues
+
+If ANY findings involved **code issues** (bugs, style violations, missing tests, architectural concerns, etc.), then:
+- Fix all issues
+- **Return to Step 3** and run another code review
+- Continue this loop until the reviewer reports **exactly ZERO issues**
+
+**Rationale:** Documentation fixes are straightforward and don't introduce new bugs. Code changes require verification to ensure the fix didn't introduce new problems.
+
+### Step 7: Documentation Verification
 
 After the code review passes with zero issues, verify documentation builds cleanly:
 
