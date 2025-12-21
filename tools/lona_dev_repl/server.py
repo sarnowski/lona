@@ -83,7 +83,7 @@ async def restart() -> str:
 
     This tool:
     1. Stops the currently running QEMU instance (if any)
-    2. Runs `make debug-arm64` to rebuild the Lona image
+    2. Runs `make debug-aarch64` to rebuild the Lona image
     3. Starts a fresh QEMU instance with the new image
 
     Use this after making changes to Rust code in the runtime, kernel,

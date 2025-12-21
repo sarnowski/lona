@@ -1,4 +1,4 @@
-# Lona
+<h1><img src="docs/assets/logo.svg" width="32" height="32" align="center" alt=""> Lona</h1>
 
 ## LISP Machines Never Died. They Evolved.
 

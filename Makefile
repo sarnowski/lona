@@ -4,11 +4,11 @@
 # Makefile - Lona build system
 #
 # Development targets:
-#   build-arm64   - Create bootable ARM64 QEMU image
-#   build-x86_64  - Create bootable x86_64 QEMU image
-#   run-arm64     - Interactive ARM64 QEMU session
+#   debug-aarch64 - Create bootable aarch64 QEMU image (Debug)
+#   debug-x86_64  - Create bootable x86_64 QEMU image (Debug)
+#   run-aarch64   - Interactive aarch64 QEMU session
 #   run-x86_64    - Interactive x86_64 QEMU session
-#   test          - Full verification on both ARM64 and x86_64
+#   test          - Full verification on both aarch64 and x86_64
 #   clean         - Remove all build artifacts
 #
 # Release targets:
@@ -39,10 +39,10 @@ BUILD_DIR     := build
 COMPOSE       := docker compose
 DEV_CRATE     := lona-runtime
 
-# ARM64 development platform (qemu-arm-virt) - Debug Kernel
-ARM64_SEL4_PREFIX := /opt/seL4/qemu-arm-virt-debug
-ARM64_TARGET      := support/targets/aarch64-sel4.json
-ARM64_IMAGE       := $(BUILD_DIR)/lona-arm64.elf
+# aarch64 development platform (qemu-arm-virt) - Debug Kernel
+AARCH64_SEL4_PREFIX := /opt/seL4/qemu-arm-virt-debug
+AARCH64_TARGET      := support/targets/aarch64-sel4.json
+AARCH64_IMAGE       := $(BUILD_DIR)/lona-aarch64.elf
 
 # x86_64 development platform (qemu-pc99) - Debug Kernel
 X86_SEL4_PREFIX_DEBUG := /opt/seL4/x86_64-pc99-debug
@@ -57,11 +57,11 @@ RPI4_SEL4_PREFIX_8GB := /opt/seL4/rpi4-8gb
 RPI4_SEL4_PREFIX_4GB := /opt/seL4/rpi4-4gb
 RPI4_TARGET          := support/targets/aarch64-sel4.json
 
-# QEMU ARM64 configuration
-QEMU_ARM64         := qemu-system-aarch64
-QEMU_ARM64_MACHINE := virt,virtualization=on
-QEMU_ARM64_CPU     := cortex-a57
-QEMU_ARM64_MEMORY  := 1G
+# QEMU aarch64 configuration
+QEMU_AARCH64         := qemu-system-aarch64
+QEMU_AARCH64_MACHINE := virt,virtualization=on
+QEMU_AARCH64_CPU     := cortex-a57
+QEMU_AARCH64_MEMORY  := 1G
 
 # QEMU x86_64 configuration
 QEMU_X86           := qemu-system-x86_64
@@ -75,36 +75,33 @@ TEST_IMAGE    := $(BUILD_DIR)/lona-test.elf
 TEST_TIMEOUT  := 10
 
 # Legacy aliases
-IMAGE_FILE    := $(ARM64_IMAGE)
-DEV_SEL4_PREFIX := $(ARM64_SEL4_PREFIX)
-DEV_TARGET      := $(ARM64_TARGET)
+IMAGE_FILE    := $(AARCH64_IMAGE)
+DEV_SEL4_PREFIX := $(AARCH64_SEL4_PREFIX)
+DEV_TARGET      := $(AARCH64_TARGET)
 
 # ==============================================================================
 # Primary Targets
 # ==============================================================================
 
-.DEFAULT_GOAL := debug-arm64
+.DEFAULT_GOAL := debug-aarch64
 
-.PHONY: build
-build: debug-arm64 ## Alias for debug-arm64
-
-.PHONY: debug-arm64
-debug-arm64: ## Create bootable ARM64 QEMU image (Debug)
-	$(COMPOSE) run --rm builder make _debug-arm64
+.PHONY: debug-aarch64
+debug-aarch64: ## Create bootable aarch64 QEMU image (Debug)
+	$(COMPOSE) run --rm builder make _debug-aarch64
 
 .PHONY: debug-x86_64
 debug-x86_64: ## Create bootable x86_64 QEMU image (Debug)
 	$(COMPOSE) run --rm builder-x86_64 make _debug-x86_64
 
 .PHONY: test
-test: ## Full verification on both ARM64 and x86_64
-	$(MAKE) test-arm64 && $(MAKE) test-x86_64
+test: ## Full verification on both aarch64 and x86_64
+	$(MAKE) test-aarch64 && $(MAKE) test-x86_64
 
-.PHONY: test-arm64
-test-arm64: ## Full ARM64 verification: fmt, clippy, unit tests, build, integration tests
+.PHONY: test-aarch64
+test-aarch64: ## Full aarch64 verification: fmt, clippy, unit tests, build, integration tests
 	$(COMPOSE) run --rm builder make _check
-	$(COMPOSE) run --rm builder make _build-test-arm64
-	$(COMPOSE) run --rm tester-arm64
+	$(COMPOSE) run --rm builder make _build-test-aarch64
+	$(COMPOSE) run --rm tester-aarch64
 
 .PHONY: test-x86_64
 test-x86_64: ## Full x86_64 verification: fmt, clippy, unit tests, build, integration tests
@@ -112,9 +109,9 @@ test-x86_64: ## Full x86_64 verification: fmt, clippy, unit tests, build, integr
 	$(COMPOSE) run --rm builder-x86_64 make _build-test-x86_64
 	$(COMPOSE) run --rm tester-x86_64
 
-.PHONY: run-arm64
-run-arm64: debug-arm64 ## Interactive ARM64 QEMU session
-	$(COMPOSE) run --rm runner-arm64
+.PHONY: run-aarch64
+run-aarch64: debug-aarch64 ## Interactive aarch64 QEMU session
+	$(COMPOSE) run --rm runner-aarch64
 
 .PHONY: run-x86_64
 run-x86_64: debug-x86_64 ## Interactive x86_64 QEMU session
@@ -154,8 +151,8 @@ docker: ## Build all Docker images
 	$(COMPOSE) build builder
 	$(COMPOSE) build builder-x86_64
 
-.PHONY: shell
-shell: ## Interactive Docker shell (aarch64)
+.PHONY: shell-aarch64
+shell-aarch64: ## Interactive Docker shell (aarch64)
 	$(COMPOSE) run --rm builder bash
 
 .PHONY: shell-x86_64
@@ -167,17 +164,13 @@ help: ## Show this help
 	@echo "Lona Build System"
 	@echo ""
 	@echo "Development targets:"
-	@echo "  debug-arm64   Create bootable ARM64 QEMU image (Debug)"
-	@echo "  debug-x86_64  Create bootable x86_64 QEMU image (Debug)"
-	@echo "  run-arm64     Interactive ARM64 QEMU session"
-	@echo "  run-x86_64    Interactive x86_64 QEMU session"
-	@echo "  test-arm64    Full ARM64 verification suite"
-	@echo "  test-x86_64   Full x86_64 verification suite"
+	@echo "  debug-aarch64   Create bootable aarch64 QEMU image (Debug)"
+	@echo "  debug-x86_64    Create bootable x86_64 QEMU image (Debug)"
+	@echo "  run-aarch64     Interactive aarch64 QEMU session"
+	@echo "  run-x86_64      Interactive x86_64 QEMU session"
+	@echo "  test-aarch64    Full aarch64 verification suite"
+	@echo "  test-x86_64     Full x86_64 verification suite"
 	@echo "  clean         Remove build artifacts"
-	@echo ""
-	@echo "Aliases:"
-	@echo "  build         Alias for debug-arm64"
-	@echo "  test          Run test-arm64 and test-x86_64"
 	@echo ""
 	@echo "Release targets:"
 	@echo "  release-x86_64      UEFI-bootable x86_64 (PCs/servers)"
@@ -189,10 +182,10 @@ help: ## Show this help
 	@echo "  docs-local    Serve docs locally with live reload (no search)"
 	@echo ""
 	@echo "Utility targets:"
-	@echo "  docker        Build all Docker images"
-	@echo "  shell         Interactive shell (aarch64)"
-	@echo "  shell-x86_64  Interactive shell (x86_64)"
-	@echo "  mcp           Start Lona dev REPL MCP server"
+	@echo "  docker          Build all Docker images"
+	@echo "  shell-aarch64   Interactive shell (aarch64)"
+	@echo "  shell-x86_64    Interactive shell (x86_64)"
+	@echo "  mcp             Start Lona dev REPL MCP server"
 
 # ==============================================================================
 # Python Tooling
@@ -230,19 +223,19 @@ docs-local: $(VENV) ## Serve documentation locally with live reload
 _check:
 	@echo "==> Formatting code..."
 	cargo fmt
-	@echo "==> Compiling runtime (ARM64)..."
-	SEL4_PREFIX=$(ARM64_SEL4_PREFIX) cargo build \
+	@echo "==> Compiling runtime (aarch64)..."
+	SEL4_PREFIX=$(AARCH64_SEL4_PREFIX) cargo build \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
-		--target $(ARM64_TARGET) \
+		--target $(AARCH64_TARGET) \
 		--package $(DEV_CRATE)
 	@echo "==> Running clippy on host-testable crates..."
 	cargo clippy --workspace --exclude $(DEV_CRATE) -- -D warnings
-	@echo "==> Running clippy on runtime (ARM64)..."
-	SEL4_PREFIX=$(ARM64_SEL4_PREFIX) cargo clippy \
+	@echo "==> Running clippy on runtime (aarch64)..."
+	SEL4_PREFIX=$(AARCH64_SEL4_PREFIX) cargo clippy \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
-		--target $(ARM64_TARGET) \
+		--target $(AARCH64_TARGET) \
 		--package $(DEV_CRATE) \
 		-- -D warnings
 	@echo "==> Running unit tests..."
@@ -282,25 +275,25 @@ _check-x86_64:
 	fi
 	@echo "==> All checks passed"
 
-.PHONY: _debug-arm64
-_debug-arm64:
+.PHONY: _debug-aarch64
+_debug-aarch64:
 	@echo "==> Building debug binary (qemu-arm-virt)..."
 	@mkdir -p $(BUILD_DIR)
-	SEL4_PREFIX=$(ARM64_SEL4_PREFIX) LONA_VERSION=$(LONA_VERSION) cargo build \
+	SEL4_PREFIX=$(AARCH64_SEL4_PREFIX) LONA_VERSION=$(LONA_VERSION) cargo build \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
 		-Z unstable-options \
-		--target $(ARM64_TARGET) \
+		--target $(AARCH64_TARGET) \
 		--package $(DEV_CRATE) \
 		--target-dir $(BUILD_DIR)/target \
 		--artifact-dir $(BUILD_DIR)
 	@echo "==> Creating bootable image..."
 	sel4-kernel-loader-add-payload \
-		--loader $(ARM64_SEL4_PREFIX)/bin/sel4-kernel-loader \
-		--sel4-prefix $(ARM64_SEL4_PREFIX) \
+		--loader $(AARCH64_SEL4_PREFIX)/bin/sel4-kernel-loader \
+		--sel4-prefix $(AARCH64_SEL4_PREFIX) \
 		--app $(BUILD_DIR)/$(DEV_CRATE).elf \
-		-o $(ARM64_IMAGE)
-	@echo "==> Image created: $(ARM64_IMAGE)"
+		-o $(AARCH64_IMAGE)
+	@echo "==> Image created: $(AARCH64_IMAGE)"
 
 .PHONY: _debug-x86_64
 _debug-x86_64:
@@ -334,26 +327,26 @@ _debug-x86_64:
 	cp support/boot/grub-x86_64.cfg $(X86_IMAGE_DIR)/lona/grub.cfg
 	@echo "==> Image created: $(X86_IMAGE_DIR)/"
 
-.PHONY: _build-test-arm64
-_build-test-arm64:
-	@echo "==> Building ARM64 test binary (Debug)..."
+.PHONY: _build-test-aarch64
+_build-test-aarch64:
+	@echo "==> Building aarch64 test binary (Debug)..."
 	@mkdir -p $(BUILD_DIR)
-	SEL4_PREFIX=$(ARM64_SEL4_PREFIX) LONA_VERSION=$(LONA_VERSION) cargo build \
+	SEL4_PREFIX=$(AARCH64_SEL4_PREFIX) LONA_VERSION=$(LONA_VERSION) cargo build \
 		-Z build-std=core,alloc \
 		-Z build-std-features=compiler-builtins-mem \
 		-Z unstable-options \
-		--target $(ARM64_TARGET) \
+		--target $(AARCH64_TARGET) \
 		--package $(DEV_CRATE) \
 		--features integration-test \
-		--target-dir $(BUILD_DIR)/target-test-arm64 \
-		--artifact-dir $(BUILD_DIR)/test-artifacts-arm64
-	@echo "==> Creating ARM64 test image..."
+		--target-dir $(BUILD_DIR)/target-test-aarch64 \
+		--artifact-dir $(BUILD_DIR)/test-artifacts-aarch64
+	@echo "==> Creating aarch64 test image..."
 	sel4-kernel-loader-add-payload \
-		--loader $(ARM64_SEL4_PREFIX)/bin/sel4-kernel-loader \
-		--sel4-prefix $(ARM64_SEL4_PREFIX) \
-		--app $(BUILD_DIR)/test-artifacts-arm64/$(DEV_CRATE).elf \
-		-o $(BUILD_DIR)/lona-test-arm64.elf
-	@echo "==> Test image created: $(BUILD_DIR)/lona-test-arm64.elf"
+		--loader $(AARCH64_SEL4_PREFIX)/bin/sel4-kernel-loader \
+		--sel4-prefix $(AARCH64_SEL4_PREFIX) \
+		--app $(BUILD_DIR)/test-artifacts-aarch64/$(DEV_CRATE).elf \
+		-o $(BUILD_DIR)/lona-test-aarch64.elf
+	@echo "==> Test image created: $(BUILD_DIR)/lona-test-aarch64.elf"
 
 .PHONY: _build-test-x86_64
 _build-test-x86_64:
@@ -388,23 +381,23 @@ _build-test-x86_64:
 	cp support/boot/grub-x86_64.cfg $(BUILD_DIR)/qemu-x86_64-test/lona/grub.cfg
 	@echo "==> Test image created: $(BUILD_DIR)/qemu-x86_64-test/"
 
-.PHONY: _test-arm64
-_test-arm64:
-	TIMEOUT=$(TEST_TIMEOUT) ./scripts/run-integration-tests.sh aarch64 $(BUILD_DIR)/lona-test-arm64.elf
+.PHONY: _test-aarch64
+_test-aarch64:
+	TIMEOUT=$(TEST_TIMEOUT) ./scripts/run-integration-tests.sh aarch64 $(BUILD_DIR)/lona-test-aarch64.elf
 
 .PHONY: _test-x86_64
 _test-x86_64:
 	TIMEOUT=$(TEST_TIMEOUT) ./scripts/run-integration-tests.sh x86_64 $(BUILD_DIR)/qemu-x86_64-test
 
-.PHONY: _run-arm64
-_run-arm64:
-	$(QEMU_ARM64) \
-		-machine $(QEMU_ARM64_MACHINE) \
-		-cpu $(QEMU_ARM64_CPU) \
-		-m $(QEMU_ARM64_MEMORY) \
+.PHONY: _run-aarch64
+_run-aarch64:
+	$(QEMU_AARCH64) \
+		-machine $(QEMU_AARCH64_MACHINE) \
+		-cpu $(QEMU_AARCH64_CPU) \
+		-m $(QEMU_AARCH64_MEMORY) \
 		-nographic \
 		-serial mon:stdio \
-		-kernel $(ARM64_IMAGE)
+		-kernel $(AARCH64_IMAGE)
 
 .PHONY: _run-x86_64
 _run-x86_64:

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Root node -->
+  <circle cx="16" cy="5" r="3" fill="#000"/>
+  
+  <!-- Connection to domains -->
+  <line x1="16" y1="8" x2="9" y2="12" stroke="#000" stroke-width="1.5"/>
+  <line x1="16" y1="8" x2="23" y2="12" stroke="#000" stroke-width="1.5"/>
+  
+  <!-- Left security domain box -->
+  <rect x="3" y="11" width="12" height="16" rx="2" ry="2" 
+        fill="none" stroke="#000" stroke-width="1.5"/>
+  <!-- Left subtree -->
+  <circle cx="9" cy="15" r="2" fill="#000"/>
+  <line x1="9" y1="17" x2="6" y2="22" stroke="#000" stroke-width="1"/>
+  <line x1="9" y1="17" x2="12" y2="22" stroke="#000" stroke-width="1"/>
+  <circle cx="6" cy="23" r="1.5" fill="#000"/>
+  <circle cx="12" cy="23" r="1.5" fill="#000"/>
+  
+  <!-- Right security domain box -->
+  <rect x="17" y="11" width="12" height="16" rx="2" ry="2" 
+        fill="none" stroke="#000" stroke-width="1.5"/>
+  <!-- Right subtree -->
+  <circle cx="23" cy="15" r="2" fill="#000"/>
+  <line x1="23" y1="17" x2="20" y2="22" stroke="#000" stroke-width="1"/>
+  <line x1="23" y1="17" x2="26" y2="22" stroke="#000" stroke-width="1"/>
+  <circle cx="20" cy="23" r="1.5" fill="#000"/>
+  <circle cx="26" cy="23" r="1.5" fill="#000"/>
+</svg>

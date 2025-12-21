@@ -363,9 +363,9 @@ This pattern enables testing scheduler logic, process management, and memory alg
 ### Primary Targets
 
 ```bash
-make build    # Create bootable QEMU image
-make test     # Full verification: fmt, clippy, unit tests, build, integration tests
-make run-arm64      # Interactive QEMU session
+make debug-aarch64  # Create bootable aarch64 QEMU image
+make test           # Full verification: fmt, clippy, unit tests, build, integration tests
+make run-aarch64    # Interactive QEMU session
 ```
 
 ### Development Workflow
@@ -379,7 +379,7 @@ make test
 
 ```bash
 # Run specific crate tests (inside Docker shell)
-make shell
+make shell-aarch64
 cargo test -p lonala-parser
 cargo test -p lona-kernel
 

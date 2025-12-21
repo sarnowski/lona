@@ -63,8 +63,8 @@ services:
       - CARGO_HOME=/opt/cargo
       - RUSTUP_HOME=/opt/rustup
 
-  # QEMU ARM64 runner - runs the built Lona image (development)
-  runner-arm64:
+  # QEMU aarch64 runner - runs the built Lona image (development)
+  runner-aarch64:
     image: lona-builder-aarch64:latest
     depends_on:
       - builder
@@ -80,7 +80,7 @@ services:
         -m 1G
         -nographic
         -serial mon:stdio
-        -kernel build/lona-arm64.elf
+        -kernel build/lona-aarch64.elf
 
   # QEMU x86_64 runner - runs the built Lona image (development)
   runner-x86_64:
@@ -102,8 +102,8 @@ services:
         -nographic
         -serial mon:stdio
 
-  # Test runner - runs integration tests in QEMU (ARM64)
-  tester-arm64:
+  # Test runner - runs integration tests in QEMU (aarch64)
+  tester-aarch64:
     image: lona-builder-aarch64:latest
     depends_on:
       - builder
@@ -111,7 +111,7 @@ services:
       - .:/work:ro
     working_dir: /work
     tty: true
-    command: make _test-arm64
+    command: make _test-aarch64
 
   # Test runner - runs integration tests in QEMU (x86_64)
   tester-x86_64:

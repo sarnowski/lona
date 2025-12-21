@@ -4,7 +4,7 @@
 
 This module handles:
 - Starting/stopping QEMU via Docker Compose
-- Building the Lona image via make debug-arm64
+- Building the Lona image via make debug-aarch64
 - Communicating with the Lona REPL over serial console
 - Parsing REPL output and detecting prompts
 """
@@ -108,7 +108,7 @@ class ReplManager:
             "rm",
             "-f",
             "-s",
-            "runner-arm64",
+            "runner-aarch64",
             cwd=self.project_root,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
@@ -116,14 +116,14 @@ class ReplManager:
         await proc.wait()
 
     async def _build(self) -> tuple[bool, str]:
-        """Build the Lona image using make debug-arm64.
+        """Build the Lona image using make debug-aarch64.
 
         Returns:
             Tuple of (success, message)
         """
         proc = await asyncio.create_subprocess_exec(
             "make",
-            "debug-arm64",
+            "debug-aarch64",
             cwd=self.project_root,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -150,7 +150,7 @@ class ReplManager:
             "run",
             "--rm",
             "-T",
-            "runner-arm64",
+            "runner-aarch64",
             cwd=self.project_root,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,

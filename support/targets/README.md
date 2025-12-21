@@ -14,8 +14,8 @@ platform features needed for bare-metal seL4 userspace.
 These targets are used automatically by the Makefile build system:
 
 ```bash
-make build         # Uses aarch64-sel4.json
-make build-x86_64  # Uses x86_64-sel4.json
+make debug-aarch64  # Uses aarch64-sel4.json
+make debug-x86_64   # Uses x86_64-sel4.json
 ```
 
 ## Creating New Targets
