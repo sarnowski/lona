@@ -1,0 +1,47 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud> */
+
+/* ==========================================================================
+   HERO SECTION STYLES
+   For the Lona documentation landing page
+   ========================================================================== */
+
+.lona-hero {
+    text-align: center;
+    padding: 4rem 2rem;
+    position: relative;
+    margin-bottom: 3rem;
+}
+
+.lona-hero__logo {
+    width: clamp(120px, 20vw, 180px);
+    height: auto;
+    margin-bottom: 1.5rem;
+    filter: drop-shadow(0 4px 8px rgba(60, 56, 54, 0.1));
+}
+
+.lona-hero__title {
+    font-family: "Fraunces", Georgia, serif;
+    font-size: clamp(2.5rem, 6vw, 4rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.5rem 0;
+    color: var(--md-default-fg-color, #3c3836);
+}
+
+.lona-hero__tagline {
+    font-family: "Fraunces", Georgia, serif;
+    font-size: clamp(1.125rem, 2.5vw, 1.5rem);
+    font-style: italic;
+    font-weight: 400;
+    color: var(--md-default-fg-color--light, #504945);
+    margin: 0 0 2rem 0;
+}
+
+.lona-hero__description {
+    font-size: 1.125rem;
+    line-height: 1.7;
+    max-width: 50ch;
+    margin: 0 auto;
+    color: var(--md-default-fg-color--light, #504945);
+}

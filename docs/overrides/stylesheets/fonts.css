@@ -1,0 +1,95 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud> */
+
+/* ==========================================================================
+   SELF-HOSTED FONTS
+
+   Font Stack:
+   - Headings: Fraunces (variable font, optical sizing)
+   - Body: Literata (variable font, optimized for reading)
+   - Code: Iosevka (condensed monospace with ligatures)
+
+   Download instructions:
+   - Fraunces: https://fonts.google.com/specimen/Fraunces (download, convert to woff2)
+   - Literata: https://fonts.google.com/specimen/Literata (download, convert to woff2)
+   - Iosevka: https://github.com/be5invis/Iosevka/releases (download webfont package)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   FRAUNCES - Display/Heading font
+   Variable font with optical sizing and weight axes
+   -------------------------------------------------------------------------- */
+
+@font-face {
+    font-family: 'Fraunces';
+    src: url('../../assets/fonts/fraunces/Fraunces-Variable.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Fraunces';
+    src: url('../../assets/fonts/fraunces/Fraunces-Italic-Variable.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: italic;
+    font-display: swap;
+}
+
+/* --------------------------------------------------------------------------
+   LITERATA - Body text font
+   Variable font optimized for extended digital reading
+   -------------------------------------------------------------------------- */
+
+@font-face {
+    font-family: 'Literata';
+    src: url('../../assets/fonts/literata/Literata-Variable.woff2') format('woff2');
+    font-weight: 200 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Literata';
+    src: url('../../assets/fonts/literata/Literata-Italic-Variable.woff2') format('woff2');
+    font-weight: 200 900;
+    font-style: italic;
+    font-display: swap;
+}
+
+/* --------------------------------------------------------------------------
+   IOSEVKA - Code font
+   Condensed monospace with programming ligatures
+   -------------------------------------------------------------------------- */
+
+@font-face {
+    font-family: 'Iosevka';
+    src: url('../../assets/fonts/iosevka/Iosevka-Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Iosevka';
+    src: url('../../assets/fonts/iosevka/Iosevka-Italic.woff2') format('woff2');
+    font-weight: 400;
+    font-style: italic;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Iosevka';
+    src: url('../../assets/fonts/iosevka/Iosevka-Medium.woff2') format('woff2');
+    font-weight: 500;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Iosevka';
+    src: url('../../assets/fonts/iosevka/Iosevka-Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+}

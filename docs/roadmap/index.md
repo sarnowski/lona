@@ -1,4 +1,4 @@
-# Lona Operating System - Comprehensive Implementation Roadmap
+# Lona - Comprehensive Implementation Roadmap
 
 This document provides a detailed, task-level breakdown of the Lona operating system implementation. Each task is scoped to fit within a single agent context window and has clear dependencies.
 

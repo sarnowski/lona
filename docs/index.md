@@ -1,10 +1,9 @@
-# Lona
-
-## LISP Machines Never Died. They Evolved.
-
-Lona (/ˈloːna/) is a next-generation operating system that brings together the best ideas from three revolutionary computing paradigms: the **seL4 microkernel** for verified security, the **LISP machine philosophy** for complete runtime transparency, and the **Erlang/OTP concurrency model** for fault-tolerant distributed computing.
-
-The result is an operating system where you have complete visibility and control over every aspect of the running system, where failures are contained and automatically recovered, and where the full power of modern concurrent programming is available at every level of the stack.
+<div class="lona-hero">
+<img src="assets/logo.svg" alt="Lona" class="lona-hero__logo">
+<h1 class="lona-hero__title">Lona</h1>
+<p class="lona-hero__tagline">LISP Machines Never Died. They Evolved.</p>
+<p class="lona-hero__description">A next-generation operating system combining verified security, complete runtime transparency, and fault-tolerant distributed computing.</p>
+</div>
 
 ---
 

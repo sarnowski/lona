@@ -208,7 +208,6 @@ mcp: $(VENV) ## Start Lona dev REPL MCP server
 docs: $(VENV) ## Build documentation site for deployment
 	$(PIP) install -q -e tools/pygments-lonala/
 	LONA_VERSION=$(LONA_VERSION) $(VENV)/bin/mkdocs build -d site/
-	npx pagefind --site site/
 
 .PHONY: docs-local
 docs-local: $(VENV) ## Serve documentation locally with live reload

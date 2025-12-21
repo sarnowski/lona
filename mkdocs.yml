@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 
-site_name: Lona
+site_name: "Lona — LISP Machines Never Died. They Evolved."
 site_description: LISP Machines Never Died. They Evolved.
 site_author: Tobias Sarnowski
 copyright: Copyright (C) 2025 Tobias Sarnowski - GPL-3.0-or-later
@@ -11,31 +11,31 @@ docs_dir: docs
 extra:
     version: !ENV [LONA_VERSION, "dev"]
 
+extra_css:
+    - overrides/stylesheets/fonts.css
+    - overrides/stylesheets/living-manual.css
+    - overrides/stylesheets/hero.css
+
 theme:
-    name: null
-    custom_dir: tools/mkdocs-lona-theme/
+    name: material
+    custom_dir: docs/overrides
+    logo: assets/logo.svg
+    favicon: assets/favicon.svg
+    palette:
+        scheme: living-manual
+        primary: custom
+        accent: custom
+    features:
+        - navigation.tabs
+        - navigation.sections
+        - navigation.indexes
+        - navigation.top
+        - search.suggest
+        - search.highlight
+        - content.code.copy
 
 plugins:
-    - search:
-          enabled: false
-    - mermaid2:
-          arguments:
-              theme: base
-              themeVariables:
-                  # Backgrounds
-                  background: '#282828'
-                  primaryColor: '#3c3836'
-                  secondaryColor: '#504945'
-                  tertiaryColor: '#32302f'
-                  # Text
-                  primaryTextColor: '#ebdbb2'
-                  secondaryTextColor: '#d5c4a1'
-                  tertiaryTextColor: '#bdae93'
-                  # Borders and lines
-                  primaryBorderColor: '#fe8019'
-                  lineColor: '#a89984'
-                  # Fonts
-                  fontFamily: 'Anybody, system-ui, sans-serif'
+    - search
 
 markdown_extensions:
     - pymdownx.highlight:
@@ -46,15 +46,20 @@ markdown_extensions:
           custom_fences:
               - name: mermaid
                 class: mermaid
-                format: !!python/name:mermaid2.fence_mermaid
+                format: !!python/name:pymdownx.superfences.fence_code_format
     - pymdownx.inlinehilite
     - pymdownx.snippets:
           auto_append:
               - docs/includes/glossary.md
     - abbr
     - admonition
+    - pymdownx.details
     - tables
     - attr_list
+    - md_in_html
+    - pymdownx.emoji:
+          emoji_index: !!python/name:material.extensions.emoji.twemoji
+          emoji_generator: !!python/name:material.extensions.emoji.to_svg
     - toc:
           permalink: true
           toc_depth: 2
@@ -63,9 +68,11 @@ nav:
     - Project:
           - Home: index.md
           - Goals: goals.md
-          - Installation: installation.md
-          - Minimal Rust: minimal-rust.md
           - LISP Machine: lisp-machine.md
+          - Minimal Rust: minimal-rust.md
+          - License: license.md
+
+    - Installation: installation.md
 
     - Lonala Language:
           - lonala/index.md
@@ -146,5 +153,3 @@ nav:
           - "Milestone 14: HTTP/1 Server": roadmap/milestone-14-http1-server.md
           - "Milestone 15: TLS": roadmap/milestone-15-tls.md
           - "Milestone 16: HTTP/2 with ACME": roadmap/milestone-16-http2-with-acme.md
-
-    - License: license.md
