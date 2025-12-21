@@ -14,12 +14,15 @@
 //! nodes along the path to the modification are copied. All other nodes are
 //! shared between the old and new maps, making operations memory-efficient.
 
+use alloc::boxed::Box;
+
 use core::cmp::Ordering;
 use core::fmt::{self, Debug, Display};
 use core::hash::{Hash, Hasher};
 
 use crate::fnv::FnvHasher;
 use crate::hamt::Hamt;
+use crate::meta::Meta;
 use crate::symbol::Interner;
 use crate::value::Value;
 
@@ -31,7 +34,7 @@ mod tests;
 pub use value_key::ValueKey;
 use value_key::compare_maps;
 
-/// An immutable, persistent map.
+/// An immutable, persistent map with optional metadata.
 ///
 /// Internally uses a Hash Array Mapped Trie (HAMT) for efficient operations.
 /// Lookup, insert, and remove operations are O(log32 n), effectively constant
@@ -39,6 +42,8 @@ use value_key::compare_maps;
 ///
 /// Maps are immutable once created; modification operations return new maps
 /// that share structure with the original.
+///
+/// Metadata does not affect equality or hashing, following Clojure semantics.
 ///
 /// # Example
 ///
@@ -51,14 +56,25 @@ use value_key::compare_maps;
 /// assert_eq!(map.len(), 2);
 /// ```
 #[derive(Clone)]
-pub struct Map(Hamt<ValueKey, Value>);
+pub struct Map {
+    /// The underlying HAMT structure.
+    inner: Hamt<ValueKey, Value>,
+    /// Optional metadata map.
+    ///
+    /// Map can contain itself because Hamt uses Rc internally, preventing
+    /// infinite size. This follows Clojure's semantics.
+    meta: Option<Box<Self>>,
+}
 
 impl Map {
     /// Creates an empty map.
     #[inline]
     #[must_use]
     pub const fn empty() -> Self {
-        Self(Hamt::new())
+        Self {
+            inner: Hamt::new(),
+            meta: None,
+        }
     }
 
     /// Creates a map from an iterator of key-value pairs.
@@ -72,65 +88,76 @@ impl Map {
         for (key, val) in pairs {
             hamt = hamt.insert(ValueKey::new(key), val);
         }
-        Self(hamt)
+        Self {
+            inner: hamt,
+            meta: None,
+        }
     }
 
     /// Returns a reference to the value associated with the key, if any.
     #[inline]
     #[must_use]
     pub fn get(&self, key: &Value) -> Option<&Value> {
-        self.0.get(&ValueKey::new(key.clone()))
+        self.inner.get(&ValueKey::new(key.clone()))
     }
 
     /// Returns the number of entries in the map.
     #[inline]
     #[must_use]
     pub const fn len(&self) -> usize {
-        self.0.len()
+        self.inner.len()
     }
 
     /// Returns `true` if the map is empty.
     #[inline]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.inner.is_empty()
     }
 
     /// Returns `true` if the map contains the given key.
     #[inline]
     #[must_use]
     pub fn contains_key(&self, key: &Value) -> bool {
-        self.0.contains_key(&ValueKey::new(key.clone()))
+        self.inner.contains_key(&ValueKey::new(key.clone()))
     }
 
     /// Returns a new map with the key-value pair inserted or updated.
     ///
     /// This operation shares structure with the original map.
+    /// Metadata is preserved.
     #[inline]
     #[must_use]
     pub fn assoc(&self, key: Value, value: Value) -> Self {
-        Self(self.0.insert(ValueKey::new(key), value))
+        Self {
+            inner: self.inner.insert(ValueKey::new(key), value),
+            meta: self.meta.clone(),
+        }
     }
 
     /// Returns a new map with the key removed.
     ///
     /// This operation shares structure with the original map.
+    /// Metadata is preserved.
     #[inline]
     #[must_use]
     pub fn dissoc(&self, key: &Value) -> Self {
-        Self(self.0.remove(&ValueKey::new(key.clone())))
+        Self {
+            inner: self.inner.remove(&ValueKey::new(key.clone())),
+            meta: self.meta.clone(),
+        }
     }
 
     /// Returns an iterator over the keys.
     #[inline]
     pub fn keys(&self) -> impl Iterator<Item = &Value> {
-        self.0.keys().map(ValueKey::value)
+        self.inner.keys().map(ValueKey::value)
     }
 
     /// Returns an iterator over the values.
     #[inline]
     pub fn values(&self) -> impl Iterator<Item = &Value> {
-        self.0.values()
+        self.inner.values()
     }
 
     /// Returns an iterator over key-value pairs.
@@ -139,7 +166,7 @@ impl Map {
     /// For sorted iteration, collect and sort the results.
     #[inline]
     pub fn iter(&self) -> impl Iterator<Item = (&ValueKey, &Value)> {
-        self.0.iter()
+        self.inner.iter()
     }
 
     /// Creates a wrapper for displaying this map with symbol resolution.
@@ -152,6 +179,21 @@ impl Map {
         Displayable {
             map: self,
             interner,
+        }
+    }
+}
+
+impl Meta for Map {
+    #[inline]
+    fn meta(&self) -> Option<&Map> {
+        self.meta.as_deref()
+    }
+
+    #[inline]
+    fn with_meta(self, meta: Option<Map>) -> Self {
+        Self {
+            inner: self.inner,
+            meta: meta.map(Box::new),
         }
     }
 }
@@ -227,10 +269,11 @@ impl Debug for Map {
     }
 }
 
+/// Equality ignores metadata.
 impl PartialEq for Map {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        if self.0.len() != other.0.len() {
+        if self.inner.len() != other.inner.len() {
             return false;
         }
 
@@ -260,10 +303,11 @@ impl Ord for Map {
     }
 }
 
+/// Hash ignores metadata.
 impl Hash for Map {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.len().hash(state);
+        self.inner.len().hash(state);
         // For consistent hashing regardless of iteration order,
         // we XOR together the hashes of all entries
         let mut combined: u64 = 0;

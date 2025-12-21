@@ -361,7 +361,7 @@ impl<'interner> Vm<'interner> {
             Constant::Bool(val) => Value::Bool(val),
             Constant::Integer(num) => Value::Integer(Integer::from_i64(num)),
             Constant::Float(num) => Value::Float(num),
-            Constant::Symbol(id) => Value::Symbol(id),
+            Constant::Symbol(id) => Value::from(id),
             Constant::Keyword(id) => Value::Keyword(id),
             Constant::String(ref text) => {
                 Value::String(lona_core::string::HeapStr::from(text.as_str()))
@@ -420,7 +420,7 @@ impl<'interner> Vm<'interner> {
             Constant::Bool(val) => Value::Bool(val),
             Constant::Integer(num) => Value::Integer(Integer::from_i64(num)),
             Constant::Float(num) => Value::Float(num),
-            Constant::Symbol(id) => Value::Symbol(id),
+            Constant::Symbol(id) => Value::from(id),
             Constant::Keyword(id) => Value::Keyword(id),
             Constant::String(ref text) => {
                 Value::String(lona_core::string::HeapStr::from(text.as_str()))

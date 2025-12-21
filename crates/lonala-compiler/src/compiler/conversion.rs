@@ -47,7 +47,7 @@ pub fn ast_to_value(ast: &Spanned<Ast>, interner: &mut symbol::Interner) -> Valu
         Ast::String(ref text) => Value::String(HeapStr::new(text)),
         Ast::Symbol(ref name) => {
             let id = interner.intern(name);
-            Value::Symbol(id)
+            Value::from(id)
         }
         Ast::Keyword(ref name) => {
             let id = interner.intern(name);
@@ -146,8 +146,8 @@ pub fn value_to_ast(
                 location,
             ));
         }
-        Value::Symbol(id) => {
-            let name = interner.resolve(id);
+        Value::Symbol(ref sym) => {
+            let name = interner.resolve(sym.id());
             Ast::Symbol(String::from(name))
         }
         Value::Keyword(id) => {

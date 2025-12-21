@@ -114,7 +114,7 @@ fn display_float_scientific() {
 fn display_symbol_without_interner() {
     let mut interner = Interner::new();
     let id = interner.intern("foo");
-    let value = Value::Symbol(id);
+    let value = Value::from(id);
     // Without interner, shows raw ID
     assert_eq!(value.to_string(), "#<symbol:0>");
 }
@@ -124,7 +124,7 @@ fn display_symbol_without_interner() {
 fn display_symbol_with_interner() {
     let mut interner = Interner::new();
     let id = interner.intern("my-symbol");
-    let value = Value::Symbol(id);
+    let value = Value::from(id);
     // With interner, shows symbol name
     assert_eq!(value.display(&interner).to_string(), "my-symbol");
 }
@@ -153,9 +153,9 @@ fn display_list_with_symbols_resolves_names() {
 
     // Create list (+ x y)
     let list = List::empty()
-        .cons(Value::Symbol(y_id))
-        .cons(Value::Symbol(x_id))
-        .cons(Value::Symbol(plus_id));
+        .cons(Value::from(y_id))
+        .cons(Value::from(x_id))
+        .cons(Value::from(plus_id));
 
     let value = Value::List(list);
 
@@ -174,8 +174,8 @@ fn display_vector_with_symbols_resolves_names() {
 
     // Create vector [a b]
     let vector = Vector::empty()
-        .push(Value::Symbol(a_id))
-        .push(Value::Symbol(b_id));
+        .push(Value::from(a_id))
+        .push(Value::from(b_id));
 
     let value = Value::Vector(vector);
 
@@ -233,7 +233,7 @@ fn as_float() {
 fn as_symbol() {
     let mut interner = Interner::new();
     let id = interner.intern("test");
-    assert_eq!(Value::Symbol(id).as_symbol(), Some(id));
+    assert_eq!(Value::from(id).as_symbol(), Some(id));
     assert_eq!(Value::Nil.as_symbol(), None);
 }
 
@@ -262,9 +262,10 @@ fn from_f64() {
 #[cfg(feature = "alloc")]
 #[test]
 fn from_symbol_id() {
+    use crate::value::Symbol;
     let mut interner = Interner::new();
     let id = interner.intern("test");
-    assert_eq!(Value::from(id), Value::Symbol(id));
+    assert_eq!(Value::from(id), Value::Symbol(Symbol::new(id)));
 }
 
 #[test]
@@ -622,7 +623,7 @@ fn value_kind_heap_types() {
     let mut interner = Interner::new();
     let id = interner.intern("test");
 
-    assert_eq!(Value::Symbol(id).kind(), Kind::Symbol);
+    assert_eq!(Value::from(id).kind(), Kind::Symbol);
     assert_eq!(Value::Ratio(Ratio::from_i64(1, 2)).kind(), Kind::Ratio);
     assert_eq!(Value::String(HeapStr::new("hello")).kind(), Kind::String);
     assert_eq!(Value::List(List::empty()).kind(), Kind::List);

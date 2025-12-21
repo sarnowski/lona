@@ -65,6 +65,7 @@ impl SpecTestContext {
         let arithmetic_symbols = lona_kernel::vm::intern_arithmetic_primitives(&mut self.interner);
         let comparison_symbols = lona_kernel::vm::intern_comparison_primitives(&mut self.interner);
         let type_predicate_symbols = lona_kernel::vm::intern_type_predicates(&mut self.interner);
+        let metadata_symbols = lona_kernel::vm::intern_metadata_primitives(&mut self.interner);
 
         // Create VM and restore persistent globals
         let mut vm = Vm::new(&self.interner);
@@ -81,6 +82,9 @@ impl SpecTestContext {
 
         // Register type predicate primitives (keyword?, etc.)
         lona_kernel::vm::register_type_predicates(&mut vm, &type_predicate_symbols);
+
+        // Register metadata primitives (meta, with-meta)
+        lona_kernel::vm::register_metadata_primitives(&mut vm, &metadata_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
@@ -203,8 +207,8 @@ impl SpecTestContext {
     /// Asserts that an expression evaluates to a symbol with the expected name.
     pub fn assert_symbol_eq(&mut self, source: &str, expected_name: &str, spec_ref: &str) {
         match self.eval(source) {
-            Ok(Value::Symbol(sym_id)) => {
-                let actual_name = self.interner.resolve(sym_id);
+            Ok(Value::Symbol(sym)) => {
+                let actual_name = self.interner.resolve(sym.id());
                 assert_eq!(
                     actual_name, expected_name,
                     "{spec_ref}: symbol name mismatch"

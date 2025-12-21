@@ -24,6 +24,8 @@ use crate::value;
 pub enum TypeExpectation {
     /// A single specific type is required.
     Single(value::Kind),
+    /// One of two specific types is required.
+    Either(value::Kind, value::Kind),
     /// Any numeric type (integer, float, or ratio).
     Numeric,
     /// Integer or float (not ratio), for operations like modulo.
@@ -41,6 +43,9 @@ pub enum TypeExpectation {
     /// Any collection type that supports `conj` (list, vector, set, or nil).
     #[cfg(feature = "alloc")]
     Collection,
+    /// Any type that supports metadata (symbol, list, vector, map, set).
+    #[cfg(feature = "alloc")]
+    MetaSupporting,
 }
 
 impl TypeExpectation {
@@ -52,6 +57,7 @@ impl TypeExpectation {
     pub const fn description(&self) -> &'static str {
         match *self {
             Self::Single(kind) => kind.name(),
+            Self::Either(_, _) => "one of two types",
             Self::Numeric => "numeric type",
             Self::IntegerOrFloat => "integer or float",
             Self::Sequence => "sequence type",
@@ -61,6 +67,8 @@ impl TypeExpectation {
             Self::Comparable => "comparable type (number or string)",
             #[cfg(feature = "alloc")]
             Self::Collection => "collection (list, vector, set, or nil)",
+            #[cfg(feature = "alloc")]
+            Self::MetaSupporting => "metadata-supporting type (symbol, list, vector, map, or set)",
         }
     }
 
@@ -70,6 +78,7 @@ impl TypeExpectation {
     pub const fn matches(&self, kind: value::Kind) -> bool {
         match *self {
             Self::Single(expected) => expected.eq_const(kind),
+            Self::Either(first, second) => first.eq_const(kind) || second.eq_const(kind),
             Self::Numeric => kind.is_numeric(),
             Self::IntegerOrFloat => kind.is_integer_or_float(),
             #[cfg(feature = "alloc")]
@@ -90,6 +99,15 @@ impl TypeExpectation {
             Self::Collection => matches!(
                 kind,
                 value::Kind::List | value::Kind::Vector | value::Kind::Set | value::Kind::Nil
+            ),
+            #[cfg(feature = "alloc")]
+            Self::MetaSupporting => matches!(
+                kind,
+                value::Kind::Symbol
+                    | value::Kind::List
+                    | value::Kind::Vector
+                    | value::Kind::Map
+                    | value::Kind::Set
             ),
         }
     }

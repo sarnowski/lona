@@ -503,6 +503,10 @@ When a Binary is sent via `(send pid msg)`:
 
 ### Task 1.8.20: `apply` Native Primitive (CRITICAL)
 
+**Unblocks**: This task unblocks the `vary-meta` metadata primitive.
+`vary-meta` requires `apply` for its `(vary-meta obj f & args)` signature.
+After `apply` is implemented, implement `vary-meta` as well.
+
 **Description**: Implement `apply` for calling functions with runtime argument lists.
 
 **Files to modify**:

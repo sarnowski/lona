@@ -106,8 +106,8 @@ fn ast_to_value_symbol() {
     let ast = spanned(Ast::Symbol(String::from("foo")));
     let value = ast_to_value(&ast, &mut interner);
 
-    if let Value::Symbol(id) = value {
-        assert_eq!(interner.resolve(id), "foo");
+    if let Value::Symbol(sym) = value {
+        assert_eq!(interner.resolve(sym.id()), "foo");
     } else {
         panic!("Expected Symbol");
     }
@@ -276,7 +276,7 @@ fn value_to_ast_symbol() {
     let mut interner = symbol::Interner::new();
     let id = interner.intern("foo");
 
-    let value = Value::Symbol(id);
+    let value = Value::from(id);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
 
     assert_eq!(result.node, Ast::Symbol(String::from("foo")));
@@ -340,7 +340,7 @@ fn value_to_ast_map() {
     let key_id = interner.intern(":a");
 
     let map = Map::from_pairs(vec![(
-        Value::Symbol(key_id),
+        Value::from(key_id),
         Value::Integer(Integer::from_i64(1_i64)),
     )]);
     let value = Value::Map(map);

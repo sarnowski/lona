@@ -13,6 +13,8 @@ use core::fmt::{self, Debug, Display};
 use core::hash::{Hash, Hasher};
 use core::iter::FusedIterator;
 
+use crate::map::Map;
+use crate::meta::Meta;
 use crate::symbol::Interner;
 use crate::value::Value;
 
@@ -24,11 +26,13 @@ struct ConsCell {
     tail: List,
 }
 
-/// A persistent, immutable linked list.
+/// A persistent, immutable linked list with optional metadata.
 ///
 /// Lists are built from cons cells, with structural sharing for efficiency.
 /// Operations that prepend elements are O(1), while accessing the tail
 /// is also O(1) through reference counting.
+///
+/// Metadata does not affect equality or hashing, following Clojure semantics.
 ///
 /// # Example
 ///
@@ -43,27 +47,42 @@ struct ConsCell {
 /// assert_eq!(list.len(), 3);
 /// ```
 #[derive(Clone)]
-pub struct List(Option<Rc<ConsCell>>);
+pub struct List {
+    /// The head cons cell, or None for empty list.
+    inner: Option<Rc<ConsCell>>,
+    /// Optional metadata map.
+    meta: Option<Map>,
+}
 
 impl List {
     /// Creates an empty list.
     #[inline]
     #[must_use]
     pub const fn empty() -> Self {
-        Self(None)
+        Self {
+            inner: None,
+            meta: None,
+        }
     }
 
     /// Prepends a value to the front of the list.
     ///
     /// This is an O(1) operation that creates a new cons cell
     /// sharing the tail with the original list.
+    /// Metadata is preserved on the new list.
     #[inline]
     #[must_use]
     pub fn cons(&self, head: Value) -> Self {
-        Self(Some(Rc::new(ConsCell {
-            head,
-            tail: self.clone(),
-        })))
+        Self {
+            inner: Some(Rc::new(ConsCell {
+                head,
+                tail: Self {
+                    inner: self.inner.clone(),
+                    meta: None,
+                },
+            })),
+            meta: self.meta.clone(),
+        }
     }
 
     /// Creates a list from a vector of values.
@@ -72,7 +91,7 @@ impl List {
     #[inline]
     #[must_use]
     pub fn from_vec(values: Vec<Value>) -> Self {
-        let mut list = Self(None);
+        let mut list = Self::empty();
         // Build in reverse so first vec element is at the head
         for value in values.into_iter().rev() {
             list = list.cons(value);
@@ -84,25 +103,26 @@ impl List {
     #[inline]
     #[must_use]
     pub fn first(&self) -> Option<&Value> {
-        self.0.as_ref().map(|cell| &cell.head)
+        self.inner.as_ref().map(|cell| &cell.head)
     }
 
     /// Returns the rest of the list (everything after the first element).
     ///
     /// This is an O(1) operation due to structural sharing.
+    /// Metadata is NOT preserved on the tail (matches Clojure behavior).
     #[inline]
     #[must_use]
     pub fn rest(&self) -> Self {
-        self.0
+        self.inner
             .as_ref()
-            .map_or_else(|| Self(None), |cell| cell.tail.clone())
+            .map_or_else(Self::empty, |cell| cell.tail.clone())
     }
 
     /// Returns `true` if the list is empty.
     #[inline]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.0.is_none()
+        self.inner.is_none()
     }
 
     /// Returns the number of elements in the list.
@@ -113,7 +133,7 @@ impl List {
     pub fn len(&self) -> usize {
         let mut count: usize = 0;
         let mut current = self;
-        while let Some(ref cell) = current.0 {
+        while let Some(ref cell) = current.inner {
             count = count.saturating_add(1);
             current = &cell.tail;
         }
@@ -137,6 +157,21 @@ impl List {
         Displayable {
             list: self,
             interner,
+        }
+    }
+}
+
+impl Meta for List {
+    #[inline]
+    fn meta(&self) -> Option<&Map> {
+        self.meta.as_ref()
+    }
+
+    #[inline]
+    fn with_meta(self, meta: Option<Map>) -> Self {
+        Self {
+            inner: self.inner,
+            meta,
         }
     }
 }
@@ -170,6 +205,37 @@ impl Default for List {
     #[inline]
     fn default() -> Self {
         Self::empty()
+    }
+}
+
+/// Equality ignores metadata.
+impl PartialEq for List {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        let mut left_iter = self.iter();
+        let mut right_iter = other.iter();
+
+        loop {
+            match (left_iter.next(), right_iter.next()) {
+                (None, None) => return true,
+                (Some(left_val), Some(right_val)) if left_val == right_val => {}
+                _ => return false,
+            }
+        }
+    }
+}
+
+impl Eq for List {}
+
+/// Hash ignores metadata.
+impl Hash for List {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash the length first for differentiation
+        self.len().hash(state);
+        for value in self {
+            value.hash(state);
+        }
     }
 }
 
@@ -207,35 +273,6 @@ impl Debug for List {
     }
 }
 
-impl PartialEq for List {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        let mut left_iter = self.iter();
-        let mut right_iter = other.iter();
-
-        loop {
-            match (left_iter.next(), right_iter.next()) {
-                (None, None) => return true,
-                (Some(left_val), Some(right_val)) if left_val == right_val => {}
-                _ => return false,
-            }
-        }
-    }
-}
-
-impl Eq for List {}
-
-impl Hash for List {
-    #[inline]
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        // Hash the length first for differentiation
-        self.len().hash(state);
-        for value in self {
-            value.hash(state);
-        }
-    }
-}
-
 impl<'list> IntoIterator for &'list List {
     type Item = &'list Value;
     type IntoIter = Iter<'list>;
@@ -256,7 +293,7 @@ impl<'list> Iterator for Iter<'list> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        match self.current.0 {
+        match self.current.inner {
             None => None,
             Some(ref cell) => {
                 self.current = &cell.tail;

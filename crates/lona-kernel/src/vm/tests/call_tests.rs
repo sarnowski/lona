@@ -43,7 +43,7 @@ fn execute_native_function() {
     let mut vm = Vm::new(&interner);
     vm.register_native(double_sym, native_double);
     // Register the function as a global
-    vm.set_global(double_sym, Value::Symbol(double_sym));
+    vm.set_global(double_sym, Value::from(double_sym));
 
     let mut chunk = make_chunk();
     // GetGlobal R0, K0 (double symbol)
@@ -81,7 +81,7 @@ fn execute_undefined_function_error() {
     let mut vm = Vm::new(&interner);
     // Register the symbol as a global (so GetGlobal works)
     // but don't register it as a native function
-    vm.set_global(unknown_sym, Value::Symbol(unknown_sym));
+    vm.set_global(unknown_sym, Value::from(unknown_sym));
 
     let mut chunk = make_chunk();
     let k_unknown = chunk.add_constant(Constant::Symbol(unknown_sym)).unwrap();

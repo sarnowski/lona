@@ -45,6 +45,10 @@ pub mod integer;
 pub mod list;
 #[cfg(feature = "alloc")]
 pub mod map;
+#[cfg(feature = "alloc")]
+pub mod meta;
+#[cfg(feature = "alloc")]
+pub use meta::Meta;
 pub mod opcode;
 #[cfg(feature = "alloc")]
 mod pvec;

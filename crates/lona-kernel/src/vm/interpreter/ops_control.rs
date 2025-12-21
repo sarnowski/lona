@@ -76,9 +76,9 @@ impl Vm<'_> {
                 // User-defined function call
                 self.call_user_function(func, base, argc, frame)
             }
-            Value::Symbol(symbol) => {
+            Value::Symbol(ref symbol) => {
                 // Symbol-based function call (native or builtin)
-                self.call_symbol_function(symbol, base, argc, frame)
+                self.call_symbol_function(symbol.id(), base, argc, frame)
             }
             Value::NativeFunction(symbol) => {
                 // First-class native function call

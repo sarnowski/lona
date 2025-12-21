@@ -19,6 +19,9 @@ impl Display for Value {
             Self::Float(value) => format_float(value, f),
             #[cfg(feature = "alloc")]
             Self::Ratio(ref value) => write!(f, "{value}"),
+            #[cfg(feature = "alloc")]
+            Self::Symbol(ref sym) => write!(f, "#<symbol:{}>", sym.id().as_u32()),
+            #[cfg(not(feature = "alloc"))]
             Self::Symbol(id) => write!(f, "#<symbol:{}>", id.as_u32()),
             Self::Keyword(id) => write!(f, "#<keyword:{}>", id.as_u32()),
             Self::NativeFunction(id) => write!(f, "#<native-fn:{}>", id.as_u32()),
@@ -122,7 +125,7 @@ impl Display for Displayable<'_> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self.value {
-            Value::Symbol(id) => write!(f, "{}", self.interner.resolve(id)),
+            Value::Symbol(ref sym) => write!(f, "{}", self.interner.resolve(sym.id())),
             Value::Keyword(id) => write!(f, ":{}", self.interner.resolve(id)),
             Value::NativeFunction(id) => {
                 write!(f, "#<native-fn:{}>", self.interner.resolve(id))

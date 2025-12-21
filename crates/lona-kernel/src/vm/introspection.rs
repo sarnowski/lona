@@ -78,7 +78,7 @@ pub fn native_is_macro(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value,
         got: 0_u8,
     })?;
 
-    let Value::Symbol(sym_id) = *arg else {
+    let Value::Symbol(ref sym) = *arg else {
         return Err(NativeError::TypeError {
             expected: TypeExpectation::Symbol,
             got: arg.kind(),
@@ -91,7 +91,7 @@ pub fn native_is_macro(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value,
         return Ok(Value::Bool(false));
     };
 
-    Ok(Value::Bool(registry.contains(sym_id)))
+    Ok(Value::Bool(registry.contains(sym.id())))
 }
 
 /// Native implementation of `macroexpand-1`.
@@ -151,12 +151,12 @@ fn expand_once_internal(
     }
 
     // First element must be a symbol
-    let Some(&Value::Symbol(sym_id)) = list.first() else {
+    let Some(&Value::Symbol(ref sym)) = list.first() else {
         return Ok(form.clone());
     };
 
     // Look up macro
-    let Some(macro_def) = registry.get(sym_id) else {
+    let Some(macro_def) = registry.get(sym.id()) else {
         return Ok(form.clone()); // Not a macro
     };
 
@@ -250,7 +250,7 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         (&Value::Integer(ref lhs), &Value::Integer(ref rhs)) => lhs == rhs,
         (&Value::Float(lhs), &Value::Float(rhs)) => floats_equal(lhs, rhs),
         (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => lhs == rhs,
-        (&Value::Symbol(lhs), &Value::Symbol(rhs)) => lhs == rhs,
+        (&Value::Symbol(ref lhs), &Value::Symbol(ref rhs)) => lhs == rhs,
         (&Value::String(ref lhs), &Value::String(ref rhs)) => lhs.as_str() == rhs.as_str(),
         (&Value::List(ref lhs), &Value::List(ref rhs)) => {
             lhs.len() == rhs.len()
@@ -304,7 +304,7 @@ pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
         vm.register_native(*sym, *func);
-        vm.set_global(*sym, Value::Symbol(*sym));
+        vm.set_global(*sym, Value::from(*sym));
     }
 }
 

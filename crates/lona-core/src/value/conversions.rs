@@ -83,10 +83,30 @@ impl From<f64> for Value {
     }
 }
 
+/// Converts a symbol ID to a `Value::Symbol` (without metadata).
+#[cfg(feature = "alloc")]
+impl From<symbol::Id> for Value {
+    #[inline]
+    fn from(id: symbol::Id) -> Self {
+        Self::Symbol(super::Symbol::new(id))
+    }
+}
+
+/// Converts a symbol ID to a `Value::Symbol` (no_alloc version).
+#[cfg(not(feature = "alloc"))]
 impl From<symbol::Id> for Value {
     #[inline]
     fn from(id: symbol::Id) -> Self {
         Self::Symbol(id)
+    }
+}
+
+/// Converts a `Symbol` to a `Value::Symbol`.
+#[cfg(feature = "alloc")]
+impl From<super::Symbol> for Value {
+    #[inline]
+    fn from(sym: super::Symbol) -> Self {
+        Self::Symbol(sym)
     }
 }
 

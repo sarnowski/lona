@@ -34,6 +34,8 @@ mod conversions;
 mod display;
 #[cfg(feature = "alloc")]
 mod function;
+#[cfg(feature = "alloc")]
+mod symbol_value;
 
 #[cfg(test)]
 mod tests;
@@ -42,6 +44,8 @@ mod tests;
 pub use display::Displayable;
 #[cfg(feature = "alloc")]
 pub use function::{Function, FunctionBody};
+#[cfg(feature = "alloc")]
+pub use symbol_value::Symbol;
 
 /// Runtime value type classification.
 ///
@@ -247,7 +251,11 @@ pub enum Value {
     /// Exact rational number (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     Ratio(Ratio),
-    /// Interned symbol (identifier).
+    /// Interned symbol with optional metadata (identifier).
+    #[cfg(feature = "alloc")]
+    Symbol(Symbol),
+    /// Interned symbol (identifier) - no metadata support without alloc.
+    #[cfg(not(feature = "alloc"))]
     Symbol(symbol::Id),
     /// Interned keyword (self-evaluating, commonly used as map keys).
     Keyword(symbol::Id),
@@ -454,11 +462,17 @@ impl Value {
         matches!(self, Self::Ratio(_))
     }
 
-    /// Returns the contained symbol ID if this is a `Symbol` variant.
+    /// Returns the symbol ID if this is a `Symbol` variant.
+    ///
+    /// This returns only the ID, not the full Symbol with metadata.
+    /// Use [`as_symbol_ref`] to get a reference to the full Symbol.
     #[inline]
     #[must_use]
     pub const fn as_symbol(&self) -> Option<symbol::Id> {
         match *self {
+            #[cfg(feature = "alloc")]
+            Self::Symbol(ref sym) => Some(sym.id()),
+            #[cfg(not(feature = "alloc"))]
             Self::Symbol(id) => Some(id),
             Self::Nil
             | Self::Bool(_)
@@ -468,6 +482,32 @@ impl Value {
             | Self::NativeFunction(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
+            | Self::Set(_)
+            | Self::Binary(_)
+            | Self::Function(_) => None,
+        }
+    }
+
+    /// Returns a reference to the Symbol if this is a `Symbol` variant.
+    ///
+    /// This includes the symbol ID and any attached metadata.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_symbol_ref(&self) -> Option<&Symbol> {
+        match *self {
+            Self::Symbol(ref sym) => Some(sym),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Keyword(_)
+            | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
@@ -786,6 +826,7 @@ impl PartialEq for Value {
             (&Self::Float(ref left), &Self::Float(ref right)) => left == right,
             #[cfg(feature = "alloc")]
             (&Self::Ratio(ref left), &Self::Ratio(ref right)) => left == right,
+            // Symbol equality compares by ID only (metadata ignored by Symbol's PartialEq)
             (&Self::Symbol(ref left), &Self::Symbol(ref right)) => left == right,
             (&Self::Keyword(ref left), &Self::Keyword(ref right)) => left == right,
             (&Self::NativeFunction(ref left), &Self::NativeFunction(ref right)) => left == right,
@@ -825,6 +866,9 @@ impl Hash for Value {
             }
             #[cfg(feature = "alloc")]
             Self::Ratio(ref value) => value.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::Symbol(ref sym) => sym.hash(state),
+            #[cfg(not(feature = "alloc"))]
             Self::Symbol(id) => id.hash(state),
             Self::Keyword(id) => id.hash(state),
             Self::NativeFunction(id) => id.hash(state),

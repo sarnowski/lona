@@ -37,8 +37,8 @@ use lona_kernel::vm::introspection::{
 };
 use lona_kernel::vm::{
     Globals, MacroExpander, Vm, intern_arithmetic_primitives, intern_comparison_primitives,
-    intern_type_predicates, register_arithmetic_primitives, register_comparison_primitives,
-    register_type_predicates,
+    intern_metadata_primitives, intern_type_predicates, register_arithmetic_primitives,
+    register_comparison_primitives, register_metadata_primitives, register_type_predicates,
 };
 use lonala_compiler::{MacroRegistry, compile_with_expansion};
 use lonala_human::{Config as FormatConfig, render as render_error};
@@ -148,6 +148,7 @@ impl Repl {
         let arithmetic_symbols = intern_arithmetic_primitives(&mut self.interner);
         let comparison_symbols = intern_comparison_primitives(&mut self.interner);
         let type_predicate_symbols = intern_type_predicates(&mut self.interner);
+        let metadata_symbols = intern_metadata_primitives(&mut self.interner);
 
         // Create a VM for core library initialization
         let mut vm = Vm::new(&self.interner);
@@ -167,6 +168,9 @@ impl Repl {
 
         // Register type predicate primitives (keyword?, etc.)
         register_type_predicates(&mut vm, &type_predicate_symbols);
+
+        // Register metadata primitives (meta, with-meta)
+        register_metadata_primitives(&mut vm, &metadata_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
@@ -230,6 +234,7 @@ impl Repl {
         let arithmetic_symbols = intern_arithmetic_primitives(&mut self.interner);
         let comparison_symbols = intern_comparison_primitives(&mut self.interner);
         let type_predicate_symbols = intern_type_predicates(&mut self.interner);
+        let metadata_symbols = intern_metadata_primitives(&mut self.interner);
 
         // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
@@ -251,6 +256,9 @@ impl Repl {
 
         // Register type predicate primitives (keyword?, etc.)
         register_type_predicates(&mut vm, &type_predicate_symbols);
+
+        // Register metadata primitives (meta, with-meta)
+        register_metadata_primitives(&mut vm, &metadata_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);

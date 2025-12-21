@@ -20,11 +20,13 @@ use alloc::vec::Vec;
 use core::fmt::{self, Debug, Display};
 use core::hash::{Hash, Hasher};
 
+use crate::map::Map;
+use crate::meta::Meta;
 use crate::pvec::PersistentVec;
 use crate::symbol::Interner;
 use crate::value::Value;
 
-/// An immutable, persistent vector.
+/// An immutable, persistent vector with optional metadata.
 ///
 /// Internally uses a 32-way branching trie with tail optimization for efficient
 /// operations. Access, update, and push operations are O(log32 n), effectively
@@ -32,6 +34,8 @@ use crate::value::Value;
 ///
 /// Vectors are immutable once created; modification operations return new vectors
 /// that share structure with the original.
+///
+/// Metadata does not affect equality or hashing, following Clojure semantics.
 ///
 /// # Example
 ///
@@ -45,71 +49,94 @@ use crate::value::Value;
 /// assert_eq!(extended.len(), 3);
 /// ```
 #[derive(Clone)]
-pub struct Vector(PersistentVec<Value>);
+pub struct Vector {
+    /// The underlying persistent vector.
+    inner: PersistentVec<Value>,
+    /// Optional metadata map.
+    meta: Option<Map>,
+}
 
 impl Vector {
     /// Creates an empty vector.
     #[inline]
     #[must_use]
     pub fn empty() -> Self {
-        Self(PersistentVec::new())
+        Self {
+            inner: PersistentVec::new(),
+            meta: None,
+        }
     }
 
     /// Creates a vector from a `Vec<Value>`.
     #[inline]
     #[must_use]
     pub fn from_vec(values: Vec<Value>) -> Self {
-        Self(PersistentVec::from_vec(values))
+        Self {
+            inner: PersistentVec::from_vec(values),
+            meta: None,
+        }
     }
 
     /// Returns a reference to the element at the given index, if it exists.
     #[inline]
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&Value> {
-        self.0.get(index)
+        self.inner.get(index)
     }
 
     /// Returns the number of elements in the vector.
     #[inline]
     #[must_use]
     pub const fn len(&self) -> usize {
-        self.0.len()
+        self.inner.len()
     }
 
     /// Returns `true` if the vector is empty.
     #[inline]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.inner.is_empty()
     }
 
     /// Returns a new vector with the element at `index` replaced by `value`.
     ///
     /// Returns `None` if the index is out of bounds.
     /// This operation shares structure with the original vector.
+    /// Metadata is preserved.
     #[inline]
     #[must_use]
     pub fn assoc(&self, index: usize, value: Value) -> Option<Self> {
-        self.0.assoc(index, value).map(Self)
+        self.inner.assoc(index, value).map(|inner| Self {
+            inner,
+            meta: self.meta.clone(),
+        })
     }
 
     /// Returns a new vector with the value appended to the end.
     ///
     /// This operation shares structure with the original vector.
+    /// Metadata is preserved.
     #[inline]
     #[must_use]
     pub fn push(&self, value: Value) -> Self {
-        Self(self.0.push(value))
+        Self {
+            inner: self.inner.push(value),
+            meta: self.meta.clone(),
+        }
     }
 
     /// Returns a new vector with the last element removed.
     ///
     /// Returns `None` if the vector is empty.
     /// This operation shares structure with the original vector.
+    /// Metadata is preserved.
     #[inline]
     #[must_use]
     pub fn pop(&self) -> Option<Self> {
-        self.0.pop().map(Self)
+        self.inner.pop().map(|inner| Self {
+            inner,
+            meta: self.meta.clone(),
+        })
     }
 
     /// Returns an iterator over references to the vector elements.
@@ -117,7 +144,7 @@ impl Vector {
     #[must_use]
     pub const fn iter(&self) -> Iter<'_> {
         Iter {
-            inner: self.0.iter(),
+            inner: self.inner.iter(),
         }
     }
 
@@ -131,6 +158,21 @@ impl Vector {
         Displayable {
             vector: self,
             interner,
+        }
+    }
+}
+
+impl Meta for Vector {
+    #[inline]
+    fn meta(&self) -> Option<&Map> {
+        self.meta.as_ref()
+    }
+
+    #[inline]
+    fn with_meta(self, meta: Option<Map>) -> Self {
+        Self {
+            inner: self.inner,
+            meta,
         }
     }
 }
@@ -201,6 +243,7 @@ impl Debug for Vector {
     }
 }
 
+/// Equality ignores metadata.
 impl PartialEq for Vector {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
@@ -215,6 +258,7 @@ impl PartialEq for Vector {
 
 impl Eq for Vector {}
 
+/// Hash ignores metadata.
 impl Hash for Vector {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {

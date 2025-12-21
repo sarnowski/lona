@@ -115,7 +115,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.1.2 | Set Value Type | done |
 | 1.1.3 | Collection Literal Syntax | done |
 | 1.1.4 | Binary Value Type | done |
-| 1.1.5 | Metadata System - Value Storage | open |
+| 1.1.5 | Metadata System - Value Storage | done |
 | 1.1.6 | Metadata System - Reader Syntax | open |
 | 1.1.7 | Metadata System - Compiler Integration | open |
 

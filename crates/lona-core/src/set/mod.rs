@@ -22,14 +22,15 @@ use alloc::vec::Vec;
 
 use crate::fnv::FnvHasher;
 use crate::hamt::Hamt;
-use crate::map::ValueKey;
+use crate::map::{Map, ValueKey};
+use crate::meta::Meta;
 use crate::symbol::Interner;
 use crate::value::Value;
 
 #[cfg(test)]
 mod tests;
 
-/// An immutable, persistent set.
+/// An immutable, persistent set with optional metadata.
 ///
 /// Internally uses a Hash Array Mapped Trie (HAMT) for efficient operations.
 /// Lookup, insert, and remove operations are O(log32 n), effectively constant
@@ -37,6 +38,8 @@ mod tests;
 ///
 /// Sets are immutable once created; modification operations return new sets
 /// that share structure with the original.
+///
+/// Metadata does not affect equality or hashing, following Clojure semantics.
 ///
 /// # Example
 ///
@@ -49,14 +52,22 @@ mod tests;
 /// assert_eq!(set.len(), 2);
 /// ```
 #[derive(Clone)]
-pub struct Set(Hamt<ValueKey, ()>);
+pub struct Set {
+    /// The underlying HAMT structure.
+    inner: Hamt<ValueKey, ()>,
+    /// Optional metadata map.
+    meta: Option<Map>,
+}
 
 impl Set {
     /// Creates an empty set.
     #[inline]
     #[must_use]
     pub const fn empty() -> Self {
-        Self(Hamt::new())
+        Self {
+            inner: Hamt::new(),
+            meta: None,
+        }
     }
 
     /// Creates a set from an iterator of values.
@@ -70,48 +81,59 @@ impl Set {
         for value in values {
             hamt = hamt.insert(ValueKey::new(value), ());
         }
-        Self(hamt)
+        Self {
+            inner: hamt,
+            meta: None,
+        }
     }
 
     /// Returns the number of elements in the set.
     #[inline]
     #[must_use]
     pub const fn len(&self) -> usize {
-        self.0.len()
+        self.inner.len()
     }
 
     /// Returns `true` if the set is empty.
     #[inline]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.inner.is_empty()
     }
 
     /// Returns `true` if the set contains the given value.
     #[inline]
     #[must_use]
     pub fn contains(&self, value: &Value) -> bool {
-        self.0.contains_key(&ValueKey::new(value.clone()))
+        self.inner.contains_key(&ValueKey::new(value.clone()))
     }
 
     /// Returns a new set with the value inserted.
     ///
     /// If the value is already present, returns a set equal to the original.
     /// This operation shares structure with the original set.
+    /// Metadata is preserved.
     #[inline]
     #[must_use]
     pub fn insert(&self, value: Value) -> Self {
-        Self(self.0.insert(ValueKey::new(value), ()))
+        Self {
+            inner: self.inner.insert(ValueKey::new(value), ()),
+            meta: self.meta.clone(),
+        }
     }
 
     /// Returns a new set with the value removed.
     ///
     /// If the value is not present, returns a set equal to the original.
     /// This operation shares structure with the original set.
+    /// Metadata is preserved.
     #[inline]
     #[must_use]
     pub fn remove(&self, value: &Value) -> Self {
-        Self(self.0.remove(&ValueKey::new(value.clone())))
+        Self {
+            inner: self.inner.remove(&ValueKey::new(value.clone())),
+            meta: self.meta.clone(),
+        }
     }
 
     /// Returns an iterator over the elements.
@@ -120,7 +142,7 @@ impl Set {
     /// For sorted iteration, collect and sort the results.
     #[inline]
     pub fn iter(&self) -> impl Iterator<Item = &ValueKey> {
-        self.0.keys()
+        self.inner.keys()
     }
 
     /// Creates a wrapper for displaying this set with symbol resolution.
@@ -133,6 +155,21 @@ impl Set {
         Displayable {
             set: self,
             interner,
+        }
+    }
+}
+
+impl Meta for Set {
+    #[inline]
+    fn meta(&self) -> Option<&Map> {
+        self.meta.as_ref()
+    }
+
+    #[inline]
+    fn with_meta(self, meta: Option<Map>) -> Self {
+        Self {
+            inner: self.inner,
+            meta,
         }
     }
 }
@@ -203,10 +240,11 @@ impl Debug for Set {
     }
 }
 
+/// Equality ignores metadata.
 impl PartialEq for Set {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        if self.0.len() != other.0.len() {
+        if self.inner.len() != other.inner.len() {
             return false;
         }
 
@@ -235,10 +273,11 @@ impl Ord for Set {
     }
 }
 
+/// Hash ignores metadata.
 impl Hash for Set {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.len().hash(state);
+        self.inner.len().hash(state);
         // For consistent hashing regardless of iteration order,
         // we XOR together the hashes of all elements
         let mut combined: u64 = 0;

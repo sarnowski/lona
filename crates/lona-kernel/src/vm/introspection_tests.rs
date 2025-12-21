@@ -53,7 +53,7 @@ fn is_macro_returns_true_for_registered_macro() {
     registry.register(macro_name, def);
 
     let ctx = ctx_with_macros(&interner, &registry);
-    let args = [Value::Symbol(macro_name)];
+    let args = [Value::from(macro_name)];
     let result = native_is_macro(&args, &ctx).unwrap();
 
     assert_eq!(result, Value::Bool(true));
@@ -66,7 +66,7 @@ fn is_macro_returns_false_for_unknown_symbol() {
 
     let unknown_sym = interner.intern("unknown");
     let ctx = ctx_with_macros(&interner, &registry);
-    let args = [Value::Symbol(unknown_sym)];
+    let args = [Value::from(unknown_sym)];
     let result = native_is_macro(&args, &ctx).unwrap();
 
     assert_eq!(result, Value::Bool(false));
@@ -78,7 +78,7 @@ fn is_macro_returns_false_without_registry() {
 
     let sym = interner.intern("anything");
     let ctx = ctx_without_macros(&interner);
-    let args = [Value::Symbol(sym)];
+    let args = [Value::from(sym)];
     let result = native_is_macro(&args, &ctx).unwrap();
 
     assert_eq!(result, Value::Bool(false));
@@ -112,7 +112,7 @@ fn is_macro_rejects_wrong_arity() {
     let sym1 = interner.intern("foo");
     let sym2 = interner.intern("bar");
     let ctx = ctx_with_macros(&interner, &registry);
-    let args = [Value::Symbol(sym1), Value::Symbol(sym2)];
+    let args = [Value::from(sym1), Value::from(sym2)];
     let result = native_is_macro(&args, &ctx);
     assert!(result.is_err());
 }
@@ -124,10 +124,10 @@ fn expand_once_returns_non_list_unchanged() {
 
     let sym = interner.intern("foo");
     let ctx = ctx_with_macros(&interner, &registry);
-    let args = [Value::Symbol(sym)];
+    let args = [Value::from(sym)];
     let result = native_expand_once(&args, &ctx).unwrap();
 
-    assert_eq!(result, Value::Symbol(sym));
+    assert_eq!(result, Value::from(sym));
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn expand_once_returns_non_macro_list_unchanged() {
 
     let sym = interner.intern("not-a-macro");
     let list = List::from_vec(alloc::vec![
-        Value::Symbol(sym),
+        Value::from(sym),
         Value::Integer(Integer::from_i64(1_i64)),
     ]);
     let ctx = ctx_with_macros(&interner, &registry);
@@ -163,7 +163,7 @@ fn expand_once_expands_macro_call() {
 
     // Create call: (identity 42)
     let list = List::from_vec(alloc::vec![
-        Value::Symbol(macro_name),
+        Value::from(macro_name),
         Value::Integer(Integer::from_i64(42_i64)),
     ]);
     let ctx = ctx_with_macros(&interner, &registry);
@@ -183,10 +183,10 @@ fn expand_fully_stops_when_stable() {
     // A non-macro form should return immediately
     let sym = interner.intern("foo");
     let ctx = ctx_with_macros(&interner, &registry);
-    let args = [Value::Symbol(sym)];
+    let args = [Value::from(sym)];
     let result = native_expand_fully(&args, &ctx).unwrap();
 
-    assert_eq!(result, Value::Symbol(sym));
+    assert_eq!(result, Value::from(sym));
 }
 
 #[test]

@@ -105,8 +105,11 @@ impl Ord for ValueKey {
                 float_total_order(left, right)
             }
             (&Value::Ratio(ref left), &Value::Ratio(ref right)) => left.cmp(right),
-            (&Value::Symbol(left), &Value::Symbol(right))
-            | (&Value::Keyword(left), &Value::Keyword(right)) => left.as_u32().cmp(&right.as_u32()),
+            // Symbol is now a struct with an id() method
+            (&Value::Symbol(ref left), &Value::Symbol(ref right)) => {
+                left.id().as_u32().cmp(&right.id().as_u32())
+            }
+            (&Value::Keyword(left), &Value::Keyword(right)) => left.as_u32().cmp(&right.as_u32()),
             (&Value::NativeFunction(left), &Value::NativeFunction(right)) => {
                 left.as_u32().cmp(&right.as_u32())
             }
