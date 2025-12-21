@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 #
-# docker-compose.yml - Container orchestration for Lona OS build environment
+# docker-compose.yml - Container orchestration for Lona build environment
 
 services:
   # Base image with shared tooling (Rust, Python, CMake)

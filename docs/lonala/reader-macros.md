@@ -180,7 +180,7 @@ Attaches metadata to the following form.
 ^:private ^:dynamic *my-var*
 ```
 
-See [Data Types: Metadata](data-types.md#316-metadata) for details.
+See [Data Types: Metadata](data-types.md#316-metadata-planned) for details.
 
 ---
 

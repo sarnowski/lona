@@ -11,6 +11,7 @@
 //! # Modules
 //!
 //! - [`allocator`] - Memory allocation primitives including a bump allocator
+//! - [`binary`] - Mutable binary buffers with ownership semantics (requires `alloc` feature)
 //! - [`error_context`] - Shared types for structured error messages
 //! - [`integer`] - Hybrid arbitrary-precision integers (requires `alloc` feature)
 //! - [`list`] - Cons-cell linked lists (requires `alloc` feature)
@@ -29,6 +30,8 @@
 extern crate alloc;
 
 pub mod allocator;
+#[cfg(feature = "alloc")]
+pub mod binary;
 #[cfg(feature = "alloc")]
 pub mod chunk;
 pub mod error_context;

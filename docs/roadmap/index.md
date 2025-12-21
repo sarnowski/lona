@@ -55,22 +55,35 @@ This document provides a detailed, task-level breakdown of the Lona operating sy
 
 | # | Milestone | Summary |
 |---|-----------|---------|
-| 1 | [Rust Foundation](milestone-01-rust-foundation.md) | Complete all Rust code for the runtime: VM with processes, garbage collection, domain isolation, condition/restart system, debug infrastructure (Two-Mode Architecture), and all native primitives. After this milestone, no new Rust code should be needed for the runtime. |
-| 2 | [Lonala Standard Library](milestone-02-lonala-standard-library.md) | Implement complete standard library in Lonala: test framework, core functions (map/filter/reduce), control flow macros, collections, protocols, strings, process patterns (GenServer, Supervisor), and lazy sequences. Enables self-hosting via `eval` and `load`. |
-| 3 | [UART Driver](milestone-03-uart-driver.md) | Implement abstract UART driver in Lonala with platform implementations for ARM64 (PL011) and x86_64 (16550). First driver running in isolated domain with capability-controlled MMIO access. |
-| 4 | [Init System](milestone-04-init-system.md) | Implement Lonala init system that bootstraps the OS: platform detection, driver supervision tree, and Rust-to-Lonala handoff. Establishes the root supervision hierarchy for all system services. |
-| 5 | [Lonala REPL](milestone-05-lonala-repl.md) | Replace interim Rust REPL with pure Lonala implementation: line editing, multi-line input, history, and error handling. Removes Rust REPL code, completing the transition to Lonala userspace. |
-| 6 | [Block Storage](milestone-06-block-storage.md) | Implement VirtIO infrastructure (VirtQueue, common layer, device discovery) and VirtIO block driver with async I/O. Provides BlockDevice protocol for filesystem layer. |
-| 7 | [Filesystem](milestone-07-filesystem.md) | Implement VFS abstraction and FAT filesystem (FAT12/16/32) with file handles, path resolution, long filenames, and mount system. Enables reading files and navigating directories. |
-| 8 | [Persistent Storage](milestone-08-persistent-storage.md) | Complete file write support with cluster allocation, directory modification (create/delete/rename), and durability guarantees via fsync/sync. Applications can now persist data to disk. |
-| 9 | [Network Driver](milestone-09-network-driver.md) | Implement VirtIO network driver with frame buffer management, RX/TX virtqueues, and IRQ handling. Provides NetDevice protocol as foundation for network stack. Can run parallel with M6-M8. |
-| 10 | [ARP](milestone-10-arp.md) | Implement Address Resolution Protocol with cache, request/reply handling, timeouts, and GenServer interface. Enables IPv4 address to MAC address resolution for local network communication. |
-| 11 | [IP Stack](milestone-11-ip-stack.md) | Implement IPv4 and IPv6 packet handling, routing tables with longest prefix match, and interface address management. Unified IP server handles protocol demultiplexing and integrates with ARP/NDP. |
-| 12 | [Transport Protocols](milestone-12-transport-protocols.md) | Implement ICMP (v4/v6 echo), UDP with sockets, and complete TCP (state machine, 3-way handshake, flow control, congestion control). Provides socket API for application networking. |
-| 13 | [Telnet Server](milestone-13-telnet-server.md) | Implement telnet daemon connecting remote clients to REPL sessions with per-user domain isolation. Enables remote administration and development over the network. |
-| 14 | [HTTP/1 Server](milestone-14-http1-server.md) | Implement HTTP/1.1 server with request parsing, response generation, static file serving with Content-Type detection, range requests, and keep-alive. Serves web content from filesystem. |
-| 15 | [TLS](milestone-15-tls.md) | Implement cryptographic primitives (SHA-256/384, AES-GCM, ChaCha20-Poly1305, RSA, ECDSA, X25519) and TLS 1.2/1.3 with X.509 certificate handling. Enables encrypted network connections. |
-| 16 | [HTTP/2 with ACME](milestone-16-http2-with-acme.md) | Implement HTTP/2 with binary framing, stream multiplexing, HPACK header compression, and ALPN upgrade from HTTP/1. Includes ACME client for automatic Let's Encrypt certificate provisioning and renewal. |
+| 1 | [Rust Foundation](milestone-01-rust-foundation.md) | Complete all Rust code for the runtime |
+|   | ↳ [1.0 Arithmetic](milestone-01-rust-foundation/00-arithmetic.md) | +, -, *, /, mod, comparisons |
+|   | ↳ [1.1 Core Value Types](milestone-01-rust-foundation/01-core-value-types.md) | Keyword, Set, Binary, Metadata |
+|   | ↳ [1.2 Language Features](milestone-01-rust-foundation/02-language-features.md) | Closures, destructuring, TCO |
+|   | ↳ [1.3 Namespace System](milestone-01-rust-foundation/03-namespace-system.md) | Namespaces, Vars, defnative |
+|   | ↳ [1.4 Process Model](milestone-01-rust-foundation/04-process-model.md) | Scheduler, spawn/send/receive |
+|   | ↳ [1.5 Garbage Collection](milestone-01-rust-foundation/05-garbage-collection.md) | Tri-color, generational GC |
+|   | ↳ [1.6 Domain Isolation](milestone-01-rust-foundation/06-domain-isolation.md) | seL4 VSpace/CSpace, IPC |
+|   | ↳ [1.7 Fault Tolerance](milestone-01-rust-foundation/07-fault-tolerance.md) | Links, monitors, exit signals |
+|   | ↳ [1.8 Native Primitives](milestone-01-rust-foundation/08-native-primitives.md) | Types, bitwise, MMIO/DMA/IRQ |
+|   | ↳ [1.9 Integration Tests](milestone-01-rust-foundation/09-integration-tests.md) | Process, domain, GC tests |
+|   | ↳ [1.10 Condition/Restart](milestone-01-rust-foundation/10-condition-restart.md) | Conditions, handlers, restarts |
+|   | ↳ [1.11 Introspection](milestone-01-rust-foundation/11-introspection.md) | Source, namespace, process |
+|   | ↳ [1.12 Debug Infrastructure](milestone-01-rust-foundation/12-debug-infrastructure.md) | Breakpoints, stepping, REPL |
+| 2 | [Lonala Standard Library](milestone-02-lonala-standard-library.md) | Test framework, core functions, protocols, process patterns |
+| 3 | [UART Driver](milestone-03-uart-driver.md) | ARM64 PL011, x86_64 16550, domain isolation |
+| 4 | [Init System](milestone-04-init-system.md) | Platform detection, driver supervision, Rust handoff |
+| 5 | [Lonala REPL](milestone-05-lonala-repl.md) | Line editing, history, replaces Rust REPL |
+| 6 | [Block Storage](milestone-06-block-storage.md) | VirtIO infrastructure, block driver |
+| 7 | [Filesystem](milestone-07-filesystem.md) | VFS, FAT12/16/32, file handles |
+| 8 | [Persistent Storage](milestone-08-persistent-storage.md) | File writes, directory ops, fsync |
+| 9 | [Network Driver](milestone-09-network-driver.md) | VirtIO net, frame buffers, IRQ |
+| 10 | [ARP](milestone-10-arp.md) | Cache, request/reply, GenServer |
+| 11 | [IP Stack](milestone-11-ip-stack.md) | IPv4/IPv6, routing, ARP integration |
+| 12 | [Transport Protocols](milestone-12-transport-protocols.md) | ICMP, UDP, TCP with flow/congestion |
+| 13 | [Telnet Server](milestone-13-telnet-server.md) | Remote REPL, domain isolation |
+| 14 | [HTTP/1 Server](milestone-14-http1-server.md) | Request parsing, static files, keep-alive |
+| 15 | [TLS](milestone-15-tls.md) | SHA, AES-GCM, RSA, ECDSA, TLS 1.2/1.3 |
+| 16 | [HTTP/2 with ACME](milestone-16-http2-with-acme.md) | Streams, HPACK, Let's Encrypt |
 
 ---
 
@@ -101,7 +114,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.1.1 | Keyword Value Type | done |
 | 1.1.2 | Set Value Type | done |
 | 1.1.3 | Collection Literal Syntax | done |
-| 1.1.4 | Binary Value Type | open |
+| 1.1.4 | Binary Value Type | done |
 | 1.1.5 | Metadata System - Value Storage | open |
 | 1.1.6 | Metadata System - Reader Syntax | open |
 | 1.1.7 | Metadata System - Compiler Integration | open |
@@ -133,9 +146,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.3.5 | Qualified Symbol Resolution | open |
 | 1.3.6 | Private Vars | open |
 | 1.3.7 | Dynamic Var Declaration | open |
-| 1.3.8 | Per-Process Binding Stack | open |
-| 1.3.9 | `binding` Special Form | open |
-| 1.3.10 | `defnative` Special Form | open |
+| 1.3.8 | `defnative` Special Form | open |
 
 #### Phase 1.4: Process Model
 
@@ -155,6 +166,8 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.4.12 | Receive Special Form - Basic | open |
 | 1.4.13 | Receive with Timeout | open |
 | 1.4.14 | Selective Receive | open |
+| 1.4.15 | Per-Process Binding Stack | open |
+| 1.4.16 | `binding` Special Form | open |
 
 #### Phase 1.5: Garbage Collection
 
@@ -200,27 +213,28 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.8.3 | Collection Primitives - nth, count, conj | open |
 | 1.8.4 | Map Operations - get, assoc, dissoc, keys, vals | open |
 | 1.8.5 | Set Operations - disj, contains? | open |
-| 1.8.6 | Binary Operations | open |
-| 1.8.7 | Symbol Operations | open |
-| 1.8.8 | Metadata Operations | open |
-| 1.8.9 | MMIO Primitives | open |
-| 1.8.10 | DMA Primitives | open |
-| 1.8.11 | IRQ Primitives | open |
-| 1.8.12 | Time Primitives | open |
-| 1.8.13 | Atom Primitives | open |
-| 1.8.14 | Sorted Collections - Basic | open |
-| 1.8.15 | Sorted Collections - Custom Comparators | open |
-| 1.8.16 | Regular Expressions - Compilation | open |
-| 1.8.17 | Regular Expressions - Matching | open |
-| 1.8.18 | String Primitive Operations | open |
-| 1.8.19 | `apply` Native Primitive (CRITICAL) | open |
-| 1.8.20 | `type-of` Native Primitive (CRITICAL) | open |
-| 1.8.21 | `identical?` Native Primitive | open |
-| 1.8.22 | `native-print` Bootstrap Primitive (CRITICAL) | open |
-| 1.8.23 | `string-concat` Native Primitive | open |
-| 1.8.24 | `read-string` Native Primitive | open |
-| 1.8.25 | `seq` Native Primitive | open |
-| 1.8.26 | x86 Port I/O Primitives | open |
+| 1.8.6 | Callable Value Types (Keywords and Sets as Functions) | open |
+| 1.8.7 | Binary Operations | open |
+| 1.8.8 | Symbol Operations | open |
+| 1.8.9 | Metadata Operations | open |
+| 1.8.10 | MMIO Primitives | open |
+| 1.8.11 | DMA Primitives | open |
+| 1.8.12 | IRQ Primitives | open |
+| 1.8.13 | Time Primitives | open |
+| 1.8.14 | Atom Primitives | open |
+| 1.8.15 | Sorted Collections - Basic | open |
+| 1.8.16 | Sorted Collections - Custom Comparators | open |
+| 1.8.17 | Regular Expressions - Compilation | open |
+| 1.8.18 | Regular Expressions - Matching | open |
+| 1.8.19 | String Primitive Operations | open |
+| 1.8.20 | `apply` Native Primitive (CRITICAL) | open |
+| 1.8.21 | `type-of` Native Primitive (CRITICAL) | open |
+| 1.8.22 | `identical?` Native Primitive | open |
+| 1.8.23 | `native-print` Bootstrap Primitive (CRITICAL) | open |
+| 1.8.24 | `string-concat` Native Primitive | open |
+| 1.8.25 | `read-string` Native Primitive | open |
+| 1.8.26 | `seq` Native Primitive | open |
+| 1.8.27 | x86 Port I/O Primitives | open |
 
 #### Phase 1.9: Integration & Spec Tests
 

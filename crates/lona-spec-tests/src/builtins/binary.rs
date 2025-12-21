@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 
-//! Tests for Binary Operations (Planned).
+//! Tests for Binary Operations.
 //!
 //! Section 9.4 of the Lonala specification.
+//!
+//! Note: The Binary VALUE TYPE is implemented (Task 1.1.5), but the native
+//! OPERATIONS below are pending (Task 1.8.6).
 
 use crate::{SpecTestContext, spec_ref};
 
@@ -13,7 +16,7 @@ use crate::{SpecTestContext, spec_ref};
 // ============================================================================
 
 /// [IGNORED] Spec 9.4: make-binary allocates zeroed buffer
-/// Tracking: Binary operations not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_9_4_make_binary() {
@@ -25,7 +28,7 @@ fn test_9_4_make_binary() {
 }
 
 /// [IGNORED] Spec 9.4: binary-len returns buffer length
-/// Tracking: Binary operations not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_9_4_binary_len() {
@@ -38,7 +41,7 @@ fn test_9_4_binary_len() {
 }
 
 /// [IGNORED] Spec 9.4: binary-get/binary-set operations
-/// Tracking: Binary operations not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_9_4_binary_get_set() {
@@ -53,7 +56,7 @@ fn test_9_4_binary_get_set() {
 }
 
 /// [IGNORED] Spec 9.4: binary-slice zero-copy view
-/// Tracking: Binary operations not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_9_4_binary_slice() {
@@ -67,7 +70,7 @@ fn test_9_4_binary_slice() {
 }
 
 /// [IGNORED] Spec 9.4: binary-copy! copies bytes
-/// Tracking: Binary operations not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_9_4_binary_copy() {

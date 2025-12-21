@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 
-//! Tests for Binary type (Planned).
+//! Tests for Binary type.
 //!
 //! Section 3.8 of the Lonala specification.
+//!
+//! Note: The Binary VALUE TYPE is implemented (Task 1.1.5), but the native
+//! OPERATIONS (make-binary, binary-get, etc.) are pending (Task 1.8.6).
 
 use crate::{SpecTestContext, spec_ref};
 
@@ -13,7 +16,7 @@ use crate::{SpecTestContext, spec_ref};
 // ============================================================================
 
 /// [IGNORED] Spec 3.8: make-binary allocates zeroed buffer
-/// Tracking: Binary type not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_3_8_make_binary() {
@@ -25,7 +28,7 @@ fn test_3_8_make_binary() {
 }
 
 /// [IGNORED] Spec 3.8: binary-get retrieves byte at index
-/// Tracking: Binary type not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_3_8_binary_get() {
@@ -39,7 +42,7 @@ fn test_3_8_binary_get() {
 }
 
 /// [IGNORED] Spec 3.8: binary-set modifies byte at index
-/// Tracking: Binary type not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_3_8_binary_set() {
@@ -55,7 +58,7 @@ fn test_3_8_binary_set() {
 }
 
 /// [IGNORED] Spec 3.8: binary-len returns buffer length
-/// Tracking: Binary type not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_3_8_binary_len() {
@@ -68,7 +71,7 @@ fn test_3_8_binary_len() {
 }
 
 /// [IGNORED] Spec 3.8: binary-slice creates zero-copy view
-/// Tracking: Binary type not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_3_8_binary_slice() {
@@ -82,7 +85,7 @@ fn test_3_8_binary_slice() {
 }
 
 /// [IGNORED] Spec 3.8: Binary is mutable (unlike other Lonala types)
-/// Tracking: Binary type not yet implemented
+/// Tracking: Native operation pending (Task 1.8.6)
 #[test]
 #[ignore]
 fn test_3_8_binary_mutable() {

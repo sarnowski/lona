@@ -18,7 +18,7 @@ Lonala follows the Lisp tradition of building the entire language from minimal p
 
 Everything else — including collection constructors (`list`, `vector`, `hash-map`), sequence operations (`map`, `filter`, `reduce`), and even the REPL — is implemented in Lonala itself.
 
-See [docs/minimal-rust.md](../../../minimal-rust.md) for the authoritative list of native primitives and rationale.
+See [docs/minimal-rust.md](../../minimal-rust.md) for the authoritative list of native primitives and rationale.
 
 ## Native Functions (Rust)
 

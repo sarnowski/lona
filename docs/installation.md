@@ -1,6 +1,6 @@
-# Installing Lona OS
+# Installing Lona
 
-This guide explains how to install Lona OS on physical hardware. Lona currently supports two platforms out-of-the-box:
+This guide explains how to install Lona on physical hardware. Lona currently supports two platforms out-of-the-box:
 
 - **x86_64**: Standard PCs and servers with UEFI firmware
 - **Raspberry Pi 4B**: 4GB and 8GB RAM variants
@@ -352,7 +352,7 @@ Create `support/boot/your-board-boot.txt`:
 
 ```
 # Boot script for your-board
-echo "Booting Lona OS..."
+echo "Booting Lona..."
 fatload mmc 0 <load-address> lona/lona-your-board.elf
 bootelf <load-address>
 ```

@@ -201,7 +201,15 @@ pub fn value_to_ast(
                 location,
             ));
         }
-        // Handle future Value variants
+        Value::Binary(_) => {
+            return Err(Error::new(
+                ErrorKind::InvalidMacroResult {
+                    message: String::from("binary values cannot be converted to AST"),
+                },
+                location,
+            ));
+        }
+        // Handle future Value variants (Value is non-exhaustive)
         _ => {
             return Err(Error::new(
                 ErrorKind::InvalidMacroResult {

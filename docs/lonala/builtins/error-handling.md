@@ -81,7 +81,7 @@ All functions in this module are pure Lonala, built on `get`, `contains?`, `map?
 ## See Also
 
 - [Data Types: Error Tuples](../data-types.md#317-error-tuples) — The result convention
-- [Macros: Error Handling Macros](../macros.md#114-error-handling-macros) — `with`, `if-ok`, `when-ok`, `ok->`
+- [Macros: Error Handling Macros](../macros.md#114-error-handling-macros-planned) — `with`, `if-ok`, `when-ok`, `ok->`
 - [Appendix F: Error Handling Idioms](../appendices/error-idioms.md) — Practical patterns
 
 ---

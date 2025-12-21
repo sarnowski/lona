@@ -176,6 +176,10 @@ help: ## Show this help
 	@echo "  release-rpi4b       SD card for Raspberry Pi 4B (8GB)"
 	@echo "  release-rpi4b-4gb   SD card for Raspberry Pi 4B (4GB)"
 	@echo ""
+	@echo "Documentation targets:"
+	@echo "  docs          Build documentation site"
+	@echo "  docs-serve    Serve documentation locally"
+	@echo ""
 	@echo "Utility targets:"
 	@echo "  docker        Build all Docker images"
 	@echo "  shell         Interactive shell (aarch64)"
@@ -198,6 +202,14 @@ $(VENV): requirements.txt
 .PHONY: mcp
 mcp: $(VENV) ## Start Lona dev REPL MCP server
 	$(PYTHON) -m tools.lona_dev_repl
+
+.PHONY: docs
+docs: $(VENV) ## Build documentation site
+	$(VENV)/bin/mkdocs build
+
+.PHONY: docs-serve
+docs-serve: $(VENV) ## Serve documentation locally
+	$(VENV)/bin/mkdocs serve -a 0.0.0.0:8000
 
 # ==============================================================================
 # Internal Targets (run inside Docker container)

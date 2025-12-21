@@ -10,6 +10,8 @@
 use core::hash::{Hash, Hasher};
 
 #[cfg(feature = "alloc")]
+use crate::binary::Binary;
+#[cfg(feature = "alloc")]
 use crate::integer::Integer;
 #[cfg(feature = "alloc")]
 use crate::list::List;
@@ -80,6 +82,9 @@ pub enum Kind {
     /// Immutable set type.
     #[cfg(feature = "alloc")]
     Set,
+    /// Mutable binary buffer type.
+    #[cfg(feature = "alloc")]
+    Binary,
     /// Compiled function type.
     #[cfg(feature = "alloc")]
     Function,
@@ -111,6 +116,8 @@ impl Kind {
             Self::Map => "map",
             #[cfg(feature = "alloc")]
             Self::Set => "set",
+            #[cfg(feature = "alloc")]
+            Self::Binary => "binary",
             #[cfg(feature = "alloc")]
             Self::Function => "function",
             Self::NativeFunction => "native-function",
@@ -147,6 +154,7 @@ impl Kind {
                         | (Self::Vector, Self::Vector)
                         | (Self::Map, Self::Map)
                         | (Self::Set, Self::Set)
+                        | (Self::Binary, Self::Binary)
                         | (Self::Function, Self::Function)
                 )
             }
@@ -167,9 +175,13 @@ impl Kind {
             Self::Ratio => true,
             Self::Nil | Self::Bool | Self::Symbol | Self::Keyword | Self::NativeFunction => false,
             #[cfg(feature = "alloc")]
-            Self::String | Self::List | Self::Vector | Self::Map | Self::Set | Self::Function => {
-                false
-            }
+            Self::String
+            | Self::List
+            | Self::Vector
+            | Self::Map
+            | Self::Set
+            | Self::Binary
+            | Self::Function => false,
         }
     }
 
@@ -254,6 +266,9 @@ pub enum Value {
     /// Immutable set (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     Set(Set),
+    /// Mutable binary buffer (requires `alloc` feature).
+    #[cfg(feature = "alloc")]
+    Binary(Binary),
     /// Compiled function (requires `alloc` feature).
     #[cfg(feature = "alloc")]
     Function(Function),
@@ -288,6 +303,8 @@ impl Value {
             Self::Map(_) => Kind::Map,
             #[cfg(feature = "alloc")]
             Self::Set(_) => Kind::Set,
+            #[cfg(feature = "alloc")]
+            Self::Binary(_) => Kind::Binary,
             #[cfg(feature = "alloc")]
             Self::Function(_) => Kind::Function,
             Self::NativeFunction(_) => Kind::NativeFunction,
@@ -329,6 +346,7 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -352,6 +370,7 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -398,6 +417,7 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -421,6 +441,7 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -452,6 +473,7 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -482,6 +504,7 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -513,6 +536,7 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -544,6 +568,7 @@ impl Value {
             | Self::Vector(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -575,6 +600,7 @@ impl Value {
             | Self::List(_)
             | Self::Map(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -606,6 +632,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Set(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -637,6 +664,7 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
+            | Self::Binary(_)
             | Self::Function(_) => None,
         }
     }
@@ -668,7 +696,8 @@ impl Value {
             | Self::List(_)
             | Self::Vector(_)
             | Self::Map(_)
-            | Self::Set(_) => None,
+            | Self::Set(_)
+            | Self::Binary(_) => None,
         }
     }
 
@@ -693,6 +722,39 @@ impl Value {
             | Self::Keyword(_) => None,
             #[cfg(feature = "alloc")]
             Self::Ratio(_)
+            | Self::String(_)
+            | Self::List(_)
+            | Self::Vector(_)
+            | Self::Map(_)
+            | Self::Set(_)
+            | Self::Binary(_)
+            | Self::Function(_) => None,
+        }
+    }
+
+    /// Returns `true` if this value is a `Binary`.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn is_binary(&self) -> bool {
+        matches!(self, Self::Binary(_))
+    }
+
+    /// Returns a reference to the contained binary if this is a `Binary` variant.
+    #[cfg(feature = "alloc")]
+    #[inline]
+    #[must_use]
+    pub const fn as_binary(&self) -> Option<&Binary> {
+        match *self {
+            Self::Binary(ref binary) => Some(binary),
+            Self::Nil
+            | Self::Bool(_)
+            | Self::Integer(_)
+            | Self::Float(_)
+            | Self::Ratio(_)
+            | Self::Symbol(_)
+            | Self::Keyword(_)
+            | Self::NativeFunction(_)
             | Self::String(_)
             | Self::List(_)
             | Self::Vector(_)
@@ -738,6 +800,8 @@ impl PartialEq for Value {
             #[cfg(feature = "alloc")]
             (&Self::Set(ref left), &Self::Set(ref right)) => left == right,
             #[cfg(feature = "alloc")]
+            (&Self::Binary(ref left), &Self::Binary(ref right)) => left == right,
+            #[cfg(feature = "alloc")]
             (&Self::Function(ref left), &Self::Function(ref right)) => left == right,
             _ => false,
         }
@@ -774,6 +838,8 @@ impl Hash for Value {
             Self::Map(ref map) => map.hash(state),
             #[cfg(feature = "alloc")]
             Self::Set(ref set) => set.hash(state),
+            #[cfg(feature = "alloc")]
+            Self::Binary(ref binary) => binary.hash(state),
             #[cfg(feature = "alloc")]
             Self::Function(ref func) => func.hash(state),
         }

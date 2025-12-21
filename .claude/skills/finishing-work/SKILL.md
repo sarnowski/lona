@@ -111,4 +111,18 @@ After resolving all issues, return to Step 2 and run another code review.
 
 Continue this loop until the reviewer reports **exactly ZERO issues**.
 
-Only when the issue count is zero is the work considered complete.
+### Step 6: Documentation Verification
+
+After the code review passes with zero issues, verify documentation builds cleanly:
+
+1. **Run `make docs`** to build the documentation
+2. **Check for warnings** - the build must complete with **zero warnings**
+3. **Fix any warnings** before proceeding:
+   - Broken links
+   - Missing files
+   - Invalid markdown syntax
+   - Any other documentation issues
+
+If warnings are found, fix them and re-run `make docs` until clean.
+
+Only when both the code review AND documentation build pass with zero issues is the work considered complete.

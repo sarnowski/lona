@@ -41,7 +41,7 @@ Operations for reading and attaching metadata to values.
 
 **Primitives and scalars (nil, booleans, numbers, strings, binaries) do NOT support metadata.**
 
-See [Data Types: Metadata](../data-types.md#316-metadata) for full documentation.
+See [Data Types: Metadata](../data-types.md#316-metadata-planned) for full documentation.
 
 ---
 

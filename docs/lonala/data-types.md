@@ -152,29 +152,240 @@ Immutable sequences of UTF-8 encoded characters.
 | `\r` | Carriage return |
 | `\t` | Tab |
 
-## 3.8 Binary *(Planned)*
+## 3.8 Binary
 
-Raw byte buffers for efficient binary data handling. Used for network packets, file I/O, and DMA buffers.
+Raw byte buffers for efficient binary data handling. Binary is the **only mutable type** in Lonala, designed for high-performance device drivers, network stacks, and DMA operations.
 
-```clojure
-(make-binary 1024)        ; allocate 1024-byte buffer (zeroed)
-(binary-get buf 0)        ; get byte at index 0
-(binary-set buf 0 0xFF)   ; set byte at index 0
-(binary-slice buf 10 20)  ; zero-copy view of bytes 10-19
-(binary-len buf)          ; => 1024
+### 3.8.1 Ownership Model
+
+Binary implements an ownership system to enable safe concurrent access without locking overhead:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ BinaryBuffer (shared, reference-counted)                        │
+│ ├── data: bytes           # The actual byte buffer              │
+│ └── phys_addr: address    # Physical address (for DMA)          │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                    ▲
+         │ Owned              │ View (read-only)
+         │                    │
+┌────────┴────────┐   ┌───────┴────────┐
+│ Binary (owner)  │   │ Binary (view)  │
+│ - can read      │   │ - can read     │
+│ - can write     │   │ - cannot write │
+│ - can transfer  │   │ - cannot xfer  │
+└─────────────────┘   └────────────────┘
 ```
 
-**Characteristics**:
-- **Mutable**: Unlike other Lonala types, binaries can be modified in place for efficiency
-- **Raw bytes**: Each element is an unsigned 8-bit integer (0-255)
-- **Zero-copy slicing**: Slices share underlying memory
-- **DMA-capable**: Can be allocated for hardware DMA with physical address access
+**Access Modes**:
 
-**Use cases**:
-- Network packet parsing and construction
-- Device driver buffers
-- Binary file I/O
-- Memory-mapped I/O data
+| Mode | Read | Write | Create View | Transfer |
+|------|:----:|:-----:|:-----------:|:--------:|
+| **Owned** | ✓ | ✓ | ✓ | ✓* |
+| **View** | ✓ | ✗ | ✓ | ✗ |
+
+*Transfer only succeeds if no other references exist.
+
+### 3.8.2 Creating Binaries
+
+```clojure
+;; Create a new binary - caller becomes owner
+(def buf (make-binary 1024))  ; 1024 zeroed bytes, Owned
+
+;; Check ownership
+(binary-owner? buf)           ; => true
+```
+
+Only `make-binary` and receiving a `binary-transfer!` create Owned binaries.
+
+### 3.8.3 Reading and Writing
+
+```clojure
+;; Read a byte (works for Owned or View)
+(binary-get buf 0)            ; => 0 (byte at index 0)
+
+;; Write a byte (Owned only)
+(binary-set buf 0 0xFF)       ; sets byte at index 0 to 255
+
+;; Get length
+(binary-len buf)              ; => 1024
+
+;; Write to a View - ERROR
+(def view (binary-view buf))
+(binary-set view 0 0xFF)      ; => {:error :read-only}
+```
+
+### 3.8.4 Slicing and Views
+
+Slicing creates zero-copy views into the same underlying buffer:
+
+```clojure
+;; Create a slice - inherits access mode
+(def slice (binary-slice buf 10 100))  ; bytes 10-109, Owned
+(binary-set slice 0 0xAB)              ; OK - modifies buf[10]
+
+;; Create explicit read-only view
+(def view (binary-view buf))           ; View
+(binary-set view 0 1)                  ; ERROR: :read-only
+
+;; View of a slice
+(def view-slice (binary-slice view 0 50))  ; View (inherits from view)
+```
+
+**Slicing semantics**:
+- `binary-slice` of Owned → Owned (can write to slice, affects parent)
+- `binary-slice` of View → View
+- `binary-view` always creates View regardless of source
+
+### 3.8.5 Cloning Behavior
+
+When a Binary is cloned (copied within a process), **the clone is always a View**:
+
+```clojure
+(def buf (make-binary 100))   ; Owned
+(let [local buf]              ; 'local' is a View of same buffer
+  (binary-set local 0 1))     ; ERROR: :read-only
+```
+
+This prevents accidental dual ownership within a process.
+
+### 3.8.6 Ownership Transfer
+
+To transfer ownership to another process, use explicit transfer:
+
+```clojure
+;; Transfer ownership - buf becomes invalid
+(binary-transfer! other-pid buf)
+
+;; buf is now in "zombie" state - any operation errors
+(binary-len buf)              ; => {:error :transferred}
+
+;; other-pid receives message: {:binary-transfer <owned-binary>}
+```
+
+**Transfer requirements**:
+- Binary must be Owned
+- No other references can exist (no views, no clones)
+- After transfer, the original binary enters "zombie" state
+
+**Transfer failure cases**:
+```clojure
+;; Trying to transfer a View
+(def view (binary-view buf))
+(binary-transfer! pid view)   ; => {:error :not-owner}
+
+;; Trying to transfer with outstanding references
+(def buf (make-binary 100))
+(def view (binary-view buf))  ; Creates another reference
+(binary-transfer! pid buf)    ; => {:error :references-exist}
+```
+
+### 3.8.7 Message Passing Semantics
+
+When a Binary is sent in a message (not transferred), it becomes a View:
+
+```clojure
+;; Sending in a message - automatic View conversion
+(send other-pid {:data buf})
+;; other-pid receives {:data <view-of-buf>}
+;; buf remains Owned in sender
+```
+
+For explicit ownership transfer, use `binary-transfer!`.
+
+### 3.8.8 Copying Bytes
+
+```clojure
+;; Copy bytes between binaries
+(binary-copy! dst dst-offset src src-offset length)
+
+;; dst must be Owned, src can be Owned or View
+(def dst (make-binary 100))
+(def src (make-binary 50))
+(binary-copy! dst 10 src 0 50)  ; Copy all of src to dst[10..60]
+```
+
+### 3.8.9 Concurrent Access
+
+Binary provides **no locking or synchronization**. This is intentional for maximum performance in device drivers.
+
+**Programmer responsibility**:
+- Don't write to a buffer while another process is reading
+- Use message passing to coordinate access
+- For shared buffers, establish clear ownership protocols
+
+**Safe patterns**:
+```clojure
+;; Pattern 1: Sequential handoff
+(defn producer []
+  (let [buf (make-binary 1024)]
+    (fill-buffer buf)
+    (binary-transfer! consumer-pid buf)))  ; Consumer now owns it
+
+;; Pattern 2: Read-only sharing
+(defn share-data []
+  (let [buf (make-binary 1024)]
+    (fill-buffer buf)
+    (send reader1 {:data buf})    ; Gets View
+    (send reader2 {:data buf})    ; Gets View
+    ;; Don't write to buf while readers are using it!
+    ))
+
+;; Pattern 3: Explicit coordination
+(defn coordinated-access []
+  (let [buf (make-binary 1024)]
+    (fill-buffer buf)
+    (send worker {:data buf :reply-to (self)})
+    (receive
+      {:done _} (continue-writing buf))))
+```
+
+### 3.8.10 DMA Buffers
+
+For device drivers requiring DMA-capable memory:
+
+```clojure
+;; Allocate DMA-capable buffer (physical address tracked)
+(def dma-buf (dma-alloc 4096))
+
+;; Get physical address for hardware
+(phys-addr dma-buf)           ; => physical memory address
+
+;; Use memory barrier for DMA coherency
+(memory-barrier)
+```
+
+DMA buffers are fixed-size and cannot be resized (reallocation would invalidate the physical address).
+
+### 3.8.11 Characteristics Summary
+
+| Property | Value |
+|----------|-------|
+| **Mutability** | Mutable (only mutable type in Lonala) |
+| **Elements** | Unsigned 8-bit integers (0-255) |
+| **Size** | Fixed at creation (no resize) |
+| **Slicing** | Zero-copy, shares underlying buffer |
+| **Ownership** | Owned (read/write) or View (read-only) |
+| **Cloning** | Always produces View |
+| **Equality** | Content-based (if not zombie) |
+| **Hashing** | Not supported (mutable types shouldn't be map keys) |
+| **Concurrency** | No locking (programmer responsibility) |
+
+### 3.8.12 Operations Summary
+
+| Operation | Description | Owned | View |
+|-----------|-------------|:-----:|:----:|
+| `(make-binary size)` | Create zeroed buffer | returns Owned | - |
+| `(binary-len buf)` | Get length in bytes | ✓ | ✓ |
+| `(binary-get buf idx)` | Get byte at index | ✓ | ✓ |
+| `(binary-set buf idx val)` | Set byte at index | ✓ | error |
+| `(binary-slice buf start len)` | Zero-copy slice | → Owned | → View |
+| `(binary-view buf)` | Create read-only view | → View | → View |
+| `(binary-copy! dst do src so len)` | Copy bytes | ✓ (dst) | error (dst) |
+| `(binary-owner? buf)` | Check if Owned | ✓ | ✓ |
+| `(binary-transfer! pid buf)` | Transfer ownership | ✓* | error |
+
+*Only if no other references exist.
 
 ## 3.9 List
 
@@ -472,7 +683,6 @@ Lonala deliberately omits exception-based error handling (`try`/`catch`/`throw`)
 4. **BEAM alignment**: Matches Erlang/Elixir idioms and "let it crash" philosophy
 5. **Performance**: No stack unwinding machinery in the VM
 
-For truly unrecoverable errors, see [Process Termination](special-forms.md#68-process-termination).
+For truly unrecoverable errors, see [Process Termination](special-forms.md#69-process-termination-planned).
 
 ---
-

@@ -4,3 +4,4 @@
 # Python dependencies for Lona development tools
 
 mcp>=1.0.0
+mkdocs>=1.6.0

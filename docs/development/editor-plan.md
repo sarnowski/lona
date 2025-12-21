@@ -17,17 +17,9 @@ This document defines the roadmap for implementing Language Server Protocol (LSP
 5. [Milestone 0: Foundation Infrastructure](#5-milestone-0-foundation-infrastructure)
 6. [Milestone 1: LSP with Semantic Tokens](#6-milestone-1-lsp-with-semantic-tokens)
 7. [Milestone 2: Tree-sitter Grammar](#7-milestone-2-tree-sitter-grammar)
-8. [Milestone 3: Zed Editor Extension](#8-milestone-3-zed-editor-extension)
-9. [Milestone 4: VS Code Extension](#9-milestone-4-vs-code-extension)
-10. [Milestone 5: Neovim/Vim Support](#10-milestone-5-neovimvim-support)
-11. [Milestone 6: LSP Diagnostics](#11-milestone-6-lsp-diagnostics)
-12. [Milestone 7: Hover and Documentation](#12-milestone-7-hover-and-documentation)
-13. [Milestone 8: Go to Definition and References](#13-milestone-8-go-to-definition-and-references)
-14. [Milestone 9: Document Symbols and Outline](#14-milestone-9-document-symbols-and-outline)
-15. [Milestone 10: Code Completion](#15-milestone-10-code-completion)
-16. [Milestone 11: Advanced Features](#16-milestone-11-advanced-features)
-17. [Build Infrastructure](#17-build-infrastructure)
-18. [Testing Strategy](#18-testing-strategy)
+8. [Milestones 3-11: Remaining Milestones](#8-16-remaining-milestones)
+9. [Build Infrastructure](#17-build-infrastructure)
+10. [Testing Strategy](#18-testing-strategy)
 
 ---
 

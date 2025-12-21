@@ -20,9 +20,10 @@ use super::Map;
 /// A wrapper around `Value` that implements `Ord` for use as map keys.
 ///
 /// The ordering is defined as:
-/// `Nil < Bool < Integer < Float < Ratio < Symbol < Keyword < String < List < Vector < Map < Set`
+/// `Nil < Bool < Integer < Float < Ratio < Symbol < Keyword < String < List < Vector < Map < Set < Binary < Function < NativeFunction`
 ///
-/// Within each type, natural ordering is used.
+/// Within each type, natural ordering is used. Note that Binary should not
+/// be used as a map key (its Hash impl panics) since it's a mutable type.
 #[derive(Clone, Debug)]
 pub struct ValueKey(Value);
 
@@ -51,20 +52,21 @@ impl ValueKey {
     /// Returns the type discriminant for ordering.
     const fn type_order(&self) -> u8 {
         match self.0 {
-            Value::Nil => 0,
-            Value::Bool(_) => 1,
-            Value::Integer(_) => 2,
-            Value::Float(_) => 3,
-            Value::Ratio(_) => 4,
-            Value::Symbol(_) => 5,
-            Value::Keyword(_) => 6,
-            Value::String(_) => 7,
-            Value::List(_) => 8,
-            Value::Vector(_) => 9,
-            Value::Map(_) => 10,
-            Value::Set(_) => 11,
-            Value::Function(_) => 12,
-            Value::NativeFunction(_) => 13,
+            Value::Nil => 0_u8,
+            Value::Bool(_) => 1_u8,
+            Value::Integer(_) => 2_u8,
+            Value::Float(_) => 3_u8,
+            Value::Ratio(_) => 4_u8,
+            Value::Symbol(_) => 5_u8,
+            Value::Keyword(_) => 6_u8,
+            Value::String(_) => 7_u8,
+            Value::List(_) => 8_u8,
+            Value::Vector(_) => 9_u8,
+            Value::Map(_) => 10_u8,
+            Value::Set(_) => 11_u8,
+            Value::Binary(_) => 12_u8,
+            Value::Function(_) => 13_u8,
+            Value::NativeFunction(_) => 14_u8,
         }
     }
 }

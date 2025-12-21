@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 #
-# Lona OS U-Boot Boot Script for Raspberry Pi 4B
+# Lona U-Boot Boot Script for Raspberry Pi 4B
 #
 # This script is compiled to boot.scr using mkimage
 
-echo "Booting Lona OS..."
+echo "Booting Lona..."
 fatload mmc 0 0x10000000 lona/lona-rpi4b.elf
 bootelf 0x10000000
