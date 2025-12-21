@@ -14,10 +14,11 @@ The runtime is written in Rust (`no_std`) and runs as seL4's root task. Userspac
 ## Required Reading
 
 **Read when planning new features or tasks:**
+- `docs/development/principles.md` - The governing development principles. Consult for all decisions.
 - `docs/goals/index.md` - The complete vision and design philosophy. Consult when making architectural decisions.
 - `docs/roadmap/index.md` - The phased roadmap, component dependencies, and current status.
 - `docs/lonala/index.md` - The Lonala language specification.
-- `docs/minimal-rust.md` - The Lonala-first principle. Consult before adding any native function.
+- `docs/development/minimal-rust.md` - The Lonala-first principle. Consult before adding any native function.
 
 ## Required Principle
 
@@ -137,9 +138,11 @@ lona/
 │   │
 │   ├── installation.md           # Installation guide for physical hardware
 │   ├── license.md                # License information (GPL-3.0)
-│   ├── minimal-rust.md           # Lonala-first principle
 │   │
 │   ├── development/              # Development guidelines
+│   │   ├── principles.md         # Governing development principles
+│   │   ├── lisp-machine.md       # LISP machine philosophy
+│   │   ├── minimal-rust.md       # Lonala-first principle
 │   │   ├── rust-coding-guidelines.md
 │   │   ├── lonala-coding-guidelines.md
 │   │   └── testing-strategy.md

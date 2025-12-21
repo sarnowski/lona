@@ -114,4 +114,81 @@ impl Vm<'_> {
         self.globals.set(symbol, value);
         Ok(())
     }
+
+    /// `SetGlobalMeta`: `globals[K[Bx]].merge_meta(R[A])`
+    ///
+    /// Merges the metadata map in `R[A]` into the Var's existing metadata.
+    /// If `R[A]` is nil, this is a no-op.
+    pub(super) fn op_set_global_meta(
+        &mut self,
+        instruction: u32,
+        frame: &Frame<'_>,
+    ) -> Result<(), Error> {
+        let meta_reg = decode_a(instruction);
+        let const_idx = decode_bx(instruction);
+
+        let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
+        let meta_value = self.get_register(meta_reg, frame)?;
+
+        // Extract Map from Value, or skip if nil
+        match meta_value {
+            Value::Map(map) => {
+                self.globals.merge_meta(symbol, map);
+                Ok(())
+            }
+            Value::Nil => Ok(()), // No metadata to merge
+            // All other types are invalid for metadata
+            // Value is #[non_exhaustive], so we list known variants and use _ for future ones
+            Value::Bool(_)
+            | Value::Integer(_)
+            | Value::Float(_)
+            | Value::Ratio(_)
+            | Value::Symbol(_)
+            | Value::Keyword(_)
+            | Value::String(_)
+            | Value::List(_)
+            | Value::Vector(_)
+            | Value::Set(_)
+            | Value::Binary(_)
+            | Value::Function(_)
+            | Value::NativeFunction(_)
+            | Value::Var(_)
+            | _ => Err(Error::new(
+                ErrorKind::TypeError {
+                    operation: "set-global-meta",
+                    expected: lona_core::error_context::TypeExpectation::Single(
+                        lona_core::value::Kind::Map,
+                    ),
+                    got: meta_value.kind(),
+                    operand: None,
+                },
+                frame.current_location(),
+            )),
+        }
+    }
+
+    /// `GetGlobalVar`: `R[A] = globals.get_var(K[Bx])`
+    ///
+    /// Returns the Var itself (not its value), for metadata access.
+    pub(super) fn op_get_global_var(
+        &mut self,
+        instruction: u32,
+        frame: &Frame<'_>,
+    ) -> Result<(), Error> {
+        let dest = decode_a(instruction);
+        let const_idx = decode_bx(instruction);
+
+        let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
+        let var = self.globals.get_var(symbol).ok_or_else(|| {
+            Error::new(
+                ErrorKind::UndefinedGlobal {
+                    symbol,
+                    suggestion: None,
+                },
+                frame.current_location(),
+            )
+        })?;
+        self.set_register(dest, Value::Var(var.clone()), frame)?;
+        Ok(())
+    }
 }

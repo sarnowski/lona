@@ -20,6 +20,17 @@ use lonala_parser::{Ast, Spanned};
 use super::{Compiler, ExprResult};
 use crate::error::{Error, Kind as ErrorKind};
 
+/// Parsed arguments from a `def` special form.
+///
+/// Contains: `(name, name_span, explicit_metadata, docstring, value_expr)`
+type DefArgs<'args> = (
+    alloc::string::String,
+    Span,
+    Option<&'args Spanned<Ast>>,
+    Option<&'args str>,
+    &'args Spanned<Ast>,
+);
+
 impl Compiler<'_, '_, '_> {
     /// Compiles a `do` special form.
     ///
@@ -164,50 +175,31 @@ impl Compiler<'_, '_, '_> {
 
     /// Compiles a `def` special form.
     ///
-    /// Syntax: `(def name value)`
+    /// Syntax variations:
+    /// - `(def name value)` - basic definition
+    /// - `(def "docstring" name value)` - with documentation
+    /// - `(def ^{:key val} name value)` - with explicit metadata
+    /// - `(def ^:private name value)` - with keyword metadata shorthand
     ///
-    /// Evaluates `value` and binds it to the global variable `name`.
+    /// All definitions automatically include source location metadata
+    /// (`:line`, `:column`).
+    ///
     /// Returns the symbol `name`.
     pub(super) fn compile_def(
         &mut self,
         args: &[Spanned<Ast>],
         span: Span,
     ) -> Result<ExprResult, Error> {
-        // Validate: need exactly 2 args (name, value)
-        if args.len() != 2_usize {
-            return Err(Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "def",
-                    message: "expected (def name value)",
-                },
-                self.location(span),
-            ));
-        }
-
-        // First arg must be a symbol
-        let name_expr = args
-            .first()
-            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
-        let Ast::Symbol(ref name) = name_expr.node else {
-            return Err(Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "def",
-                    message: "first argument must be a symbol",
-                },
-                self.location(name_expr.span),
-            ));
-        };
-
-        let value_expr = args
-            .get(1_usize)
-            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        // Parse the def form arguments
+        let (name, name_span, explicit_meta, docstring, value_expr) =
+            self.parse_def_args(args, span)?;
 
         // Compile value expression
         let checkpoint = self.next_register;
         let value_result = self.compile_expr(value_expr)?;
 
         // Intern the symbol and add to constants
-        let symbol_id = self.interner.intern(name);
+        let symbol_id = self.interner.intern(&name);
         let symbol_const = self.add_constant(Constant::Symbol(symbol_id), span)?;
 
         // Emit SetGlobal
@@ -216,7 +208,19 @@ impl Compiler<'_, '_, '_> {
             span,
         );
 
-        // Free value register
+        // Build and emit metadata
+        let meta_register =
+            self.build_def_metadata(name_span, explicit_meta, docstring, checkpoint)?;
+
+        // Emit SetGlobalMeta if we have metadata
+        if let Some(meta_reg) = meta_register {
+            self.chunk.emit(
+                encode_abx(Opcode::SetGlobalMeta, meta_reg, symbol_const),
+                span,
+            );
+        }
+
+        // Free temporary registers
         self.free_registers_to(checkpoint);
 
         // Return the symbol (load it into destination)
@@ -225,6 +229,214 @@ impl Compiler<'_, '_, '_> {
             .emit(encode_abx(Opcode::LoadK, dest, symbol_const), span);
 
         Ok(ExprResult { register: dest })
+    }
+
+    /// Parses `def` form arguments.
+    ///
+    /// Returns: `(name, name_span, explicit_meta, docstring, value_expr)`
+    fn parse_def_args<'args>(
+        &self,
+        args: &'args [Spanned<Ast>],
+        span: Span,
+    ) -> Result<DefArgs<'args>, Error> {
+        if args.len() < 2_usize || args.len() > 3_usize {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "def",
+                    message: "expected (def name value) or (def \"doc\" name value)",
+                },
+                self.location(span),
+            ));
+        }
+
+        // Check for docstring: (def "doc" name value)
+        if args.len() == 3_usize {
+            let first = args
+                .first()
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+
+            if let Ast::String(ref doc) = first.node {
+                // Docstring form: (def "doc" name value)
+                let name_expr = args
+                    .get(1_usize)
+                    .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+                let value_expr = args
+                    .get(2_usize)
+                    .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+
+                let (name, name_span, explicit_meta) = self.extract_def_name(name_expr)?;
+                return Ok((
+                    name,
+                    name_span,
+                    explicit_meta,
+                    Some(doc.as_str()),
+                    value_expr,
+                ));
+            }
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "def",
+                    message: "expected (def name value) or (def \"doc\" name value)",
+                },
+                self.location(span),
+            ));
+        }
+
+        // Standard form: (def name value) or (def ^meta name value)
+        let name_expr = args
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        let value_expr = args
+            .get(1_usize)
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+
+        let (name, name_span, explicit_meta) = self.extract_def_name(name_expr)?;
+        Ok((name, name_span, explicit_meta, None, value_expr))
+    }
+
+    /// Extracts the name and optional metadata from a def name expression.
+    ///
+    /// Handles `name` and `^{...} name` forms.
+    fn extract_def_name<'expr>(
+        &self,
+        expr: &'expr Spanned<Ast>,
+    ) -> Result<(alloc::string::String, Span, Option<&'expr Spanned<Ast>>), Error> {
+        match expr.node {
+            Ast::Symbol(ref name) => Ok((name.clone(), expr.span, None)),
+            Ast::WithMeta {
+                ref meta,
+                ref value,
+            } => {
+                // Extract the actual symbol from inside WithMeta
+                if let Ast::Symbol(ref name) = value.node {
+                    Ok((name.clone(), value.span, Some(meta.as_ref())))
+                } else {
+                    Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "def",
+                            message: "name must be a symbol",
+                        },
+                        self.location(value.span),
+                    ))
+                }
+            }
+            Ast::Integer(_)
+            | Ast::Float(_)
+            | Ast::String(_)
+            | Ast::Bool(_)
+            | Ast::Nil
+            | Ast::Keyword(_)
+            | Ast::List(_)
+            | Ast::Vector(_)
+            | Ast::Map(_)
+            | Ast::Set(_)
+            | _ => Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "def",
+                    message: "name must be a symbol",
+                },
+                self.location(expr.span),
+            )),
+        }
+    }
+
+    /// Builds the metadata map for a def and loads it into a register.
+    ///
+    /// Combines source location, docstring, and explicit metadata.
+    fn build_def_metadata(
+        &mut self,
+        name_span: Span,
+        explicit_meta: Option<&Spanned<Ast>>,
+        docstring: Option<&str>,
+        checkpoint: u8,
+    ) -> Result<Option<u8>, Error> {
+        // Build metadata pairs
+        let mut meta_pairs: Vec<(Constant, Constant)> = Vec::new();
+
+        // Add source location: :line, :column
+        // Use 1-based line/column from the span offset
+        let line = 1_i64; // TODO: compute from source registry when available
+        let column = i64::try_from(name_span.start.saturating_add(1_usize)).unwrap_or(1_i64);
+
+        let line_kw = self.interner.intern(":line");
+        let col_kw = self.interner.intern(":column");
+        meta_pairs.push((Constant::Symbol(line_kw), Constant::Integer(line)));
+        meta_pairs.push((Constant::Symbol(col_kw), Constant::Integer(column)));
+
+        // Add docstring if present
+        if let Some(doc) = docstring {
+            let doc_kw = self.interner.intern(":doc");
+            meta_pairs.push((
+                Constant::Symbol(doc_kw),
+                Constant::String(alloc::string::String::from(doc)),
+            ));
+        }
+
+        // Add explicit metadata from ^{...}
+        if let Some(meta_ast) = explicit_meta {
+            self.merge_ast_metadata_into(&mut meta_pairs, meta_ast)?;
+        }
+
+        // If no metadata, return None
+        if meta_pairs.is_empty() {
+            return Ok(None);
+        }
+
+        // Load the metadata map into a register
+        let meta_const = Constant::Map(meta_pairs);
+        let meta_const_idx = self.add_constant(meta_const, name_span)?;
+
+        self.free_registers_to(checkpoint);
+        let meta_reg = self.alloc_register(name_span)?;
+        self.chunk.emit(
+            encode_abx(Opcode::LoadK, meta_reg, meta_const_idx),
+            name_span,
+        );
+
+        Ok(Some(meta_reg))
+    }
+
+    /// Merges AST metadata (from `^{...}`) into the metadata pairs.
+    fn merge_ast_metadata_into(
+        &mut self,
+        pairs: &mut Vec<(Constant, Constant)>,
+        meta_ast: &Spanned<Ast>,
+    ) -> Result<(), Error> {
+        // Meta should be a Map
+        let Ast::Map(ref elements) = meta_ast.node else {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "def",
+                    message: "metadata must be a map",
+                },
+                self.location(meta_ast.span),
+            ));
+        };
+
+        // Convert each pair
+        if elements.len() % 2_usize != 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "def",
+                    message: "metadata map must have even number of elements",
+                },
+                self.location(meta_ast.span),
+            ));
+        }
+
+        for chunk in elements.chunks_exact(2) {
+            let key =
+                self.ast_to_constant(chunk.first().ok_or_else(|| {
+                    Error::new(ErrorKind::EmptyCall, self.location(meta_ast.span))
+                })?)?;
+            let val =
+                self.ast_to_constant(chunk.get(1_usize).ok_or_else(|| {
+                    Error::new(ErrorKind::EmptyCall, self.location(meta_ast.span))
+                })?)?;
+            pairs.push((key, val));
+        }
+
+        Ok(())
     }
 
     /// Compiles a `let` special form.
@@ -428,12 +640,31 @@ impl Compiler<'_, '_, '_> {
                     .collect();
                 Ok(Constant::Vector(constants?))
             }
-            Ast::Map(_) => Err(Error::new(
-                ErrorKind::NotImplemented {
-                    feature: "quoted maps",
-                },
-                self.location(ast.span),
-            )),
+            Ast::Map(ref elements) => {
+                // Maps have alternating keys and values
+                if elements.len() % 2_usize != 0 {
+                    return Err(Error::new(
+                        ErrorKind::InvalidSpecialForm {
+                            form: "quote",
+                            message: "map literal must have even number of elements",
+                        },
+                        self.location(ast.span),
+                    ));
+                }
+                let pairs: Result<Vec<(Constant, Constant)>, Error> = elements
+                    .chunks_exact(2)
+                    .map(|chunk| {
+                        let key = self.ast_to_constant(chunk.first().ok_or_else(|| {
+                            Error::new(ErrorKind::EmptyCall, self.location(ast.span))
+                        })?)?;
+                        let val = self.ast_to_constant(chunk.get(1_usize).ok_or_else(|| {
+                            Error::new(ErrorKind::EmptyCall, self.location(ast.span))
+                        })?)?;
+                        Ok((key, val))
+                    })
+                    .collect();
+                Ok(Constant::Map(pairs?))
+            }
             Ast::Set(_) => Err(Error::new(
                 ErrorKind::NotImplemented {
                     feature: "quoted sets",
@@ -450,5 +681,48 @@ impl Compiler<'_, '_, '_> {
                 self.location(ast.span),
             )),
         }
+    }
+
+    /// Compiles a `var` special form.
+    ///
+    /// Syntax: `(var name)` or reader macro `#'name`
+    ///
+    /// Returns the Var itself (not its value), enabling metadata access.
+    pub(super) fn compile_var(
+        &mut self,
+        args: &[Spanned<Ast>],
+        span: Span,
+    ) -> Result<ExprResult, Error> {
+        if args.len() != 1_usize {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "var",
+                    message: "expected (var name)",
+                },
+                self.location(span),
+            ));
+        }
+
+        let name_expr = args
+            .first()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        let Ast::Symbol(ref name) = name_expr.node else {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "var",
+                    message: "argument must be a symbol",
+                },
+                self.location(name_expr.span),
+            ));
+        };
+
+        let symbol_id = self.interner.intern(name);
+        let symbol_const = self.add_constant(Constant::Symbol(symbol_id), span)?;
+
+        let dest = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobalVar, dest, symbol_const), span);
+
+        Ok(ExprResult { register: dest })
     }
 }

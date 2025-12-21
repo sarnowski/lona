@@ -576,12 +576,63 @@ impl Compiler<'_, '_, '_> {
             }
         };
 
-        self.registry
-            .register(name_id, MacroDefinition::new(macro_bodies, name));
-        let const_idx = self.add_constant(Constant::Symbol(name_id), span)?;
+        self.registry.register(
+            name_id,
+            MacroDefinition::new(macro_bodies.clone(), name.clone()),
+        );
+
+        // Also create a Var so metadata can be accessed via (meta (var macro-name))
+        // Convert MacroBody to FunctionBodyData for storage
+        let fn_bodies: Vec<FunctionBodyData> = macro_bodies
+            .iter()
+            .map(|mb| FunctionBodyData::new(Box::new((*mb.chunk).clone()), mb.arity, mb.has_rest))
+            .collect();
+
+        // Create function constant and load it
+        let fn_const = Constant::Function {
+            bodies: fn_bodies,
+            name: Some(name.clone()),
+        };
+        let fn_const_idx = self.add_constant(fn_const, span)?;
+        let fn_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, fn_reg, fn_const_idx), span);
+
+        // Emit SetGlobal to store the macro function
+        let symbol_const = self.add_constant(Constant::Symbol(name_id), span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::SetGlobal, fn_reg, symbol_const), span);
+
+        // Build metadata with :macro true and source location
+        let mut meta_pairs: Vec<(Constant, Constant)> = Vec::new();
+
+        // :macro true
+        let macro_kw = self.interner.intern(":macro");
+        meta_pairs.push((Constant::Symbol(macro_kw), Constant::Bool(true)));
+
+        // Source location: :line, :column
+        let line = 1_i64; // TODO: compute from source registry when available
+        let column = i64::try_from(name_ast.span.start.saturating_add(1_usize)).unwrap_or(1_i64);
+        let line_kw = self.interner.intern(":line");
+        let col_kw = self.interner.intern(":column");
+        meta_pairs.push((Constant::Symbol(line_kw), Constant::Integer(line)));
+        meta_pairs.push((Constant::Symbol(col_kw), Constant::Integer(column)));
+
+        // Load metadata and emit SetGlobalMeta
+        let meta_const = Constant::Map(meta_pairs);
+        let meta_const_idx = self.add_constant(meta_const, span)?;
+        let meta_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, meta_reg, meta_const_idx), span);
+        self.chunk.emit(
+            encode_abx(Opcode::SetGlobalMeta, meta_reg, symbol_const),
+            span,
+        );
+
+        // Return the symbol
         let dest = self.alloc_register(span)?;
         self.chunk
-            .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
+            .emit(encode_abx(Opcode::LoadK, dest, symbol_const), span);
         Ok(ExprResult { register: dest })
     }
 

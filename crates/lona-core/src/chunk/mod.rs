@@ -97,6 +97,10 @@ pub enum Constant {
     List(Vec<Self>),
     /// A vector of constants (for quoted vectors).
     Vector(Vec<Self>),
+    /// A map of key-value pairs (for quoted maps and metadata).
+    ///
+    /// Each pair is (key, value). Keys and values can be any constant type.
+    Map(Vec<(Self, Self)>),
     /// A compiled function.
     ///
     /// Contains all arity bodies for this function. Single-arity functions
@@ -140,6 +144,16 @@ impl fmt::Display for Constant {
                     write!(f, "{elem}")?;
                 }
                 write!(f, "]")
+            }
+            Self::Map(ref pairs) => {
+                write!(f, "{{")?;
+                for (idx, &(ref key, ref val)) in pairs.iter().enumerate() {
+                    if idx > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{key} {val}")?;
+                }
+                write!(f, "}}")
             }
             Self::Function {
                 ref bodies,
@@ -505,11 +519,26 @@ impl Chunk {
                 let _result = write!(output, "R{reg_a}");
             }
 
-            // iABx format
+            // iABx format - regular global access
             Opcode::LoadK | Opcode::GetGlobal | Opcode::SetGlobal => {
                 let _result = write!(output, "R{reg_a}, K{bx}");
                 if let Some(constant) = self.get_constant(bx) {
                     let _result = write!(output, "        ; {constant}");
+                }
+            }
+
+            // iABx format - var and metadata operations
+            Opcode::SetGlobalMeta => {
+                let _result = write!(output, "R{reg_a}, K{bx}");
+                if let Some(constant) = self.get_constant(bx) {
+                    let _result = write!(output, "        ; meta for {constant}");
+                }
+            }
+
+            Opcode::GetGlobalVar => {
+                let _result = write!(output, "R{reg_a}, K{bx}");
+                if let Some(constant) = self.get_constant(bx) {
+                    let _result = write!(output, "        ; var {constant}");
                 }
             }
 

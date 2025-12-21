@@ -4,7 +4,7 @@ In order for you to understand enough background information to correctly plan t
 
   * @docs/goals/index.md
   * @docs/lonala.md
-  * @docs/minimal-rust.md
+  * @docs/development/minimal-rust.md
 
 Pick the next open task in the roadmap and read the respective milestone document completely. Then check possible relevant existing code.
 

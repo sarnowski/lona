@@ -14,11 +14,14 @@ fn opcode_from_u8_valid() {
     assert_eq!(Opcode::from_u8(0), Some(Opcode::Move));
     assert_eq!(Opcode::from_u8(1), Some(Opcode::LoadK));
     assert_eq!(Opcode::from_u8(24), Some(Opcode::Return));
+    assert_eq!(Opcode::from_u8(25), Some(Opcode::SetGlobalMeta));
+    assert_eq!(Opcode::from_u8(26), Some(Opcode::GetGlobalVar));
 }
 
 #[test]
 fn opcode_from_u8_invalid() {
-    assert_eq!(Opcode::from_u8(25), None);
+    // First invalid opcode is one past MAX
+    assert_eq!(Opcode::from_u8(Opcode::MAX.saturating_add(1)), None);
     assert_eq!(Opcode::from_u8(100), None);
     assert_eq!(Opcode::from_u8(255), None);
 }
@@ -29,6 +32,8 @@ fn opcode_name() {
     assert_eq!(Opcode::LoadK.name(), "LoadK");
     assert_eq!(Opcode::Add.name(), "Add");
     assert_eq!(Opcode::Return.name(), "Return");
+    assert_eq!(Opcode::SetGlobalMeta.name(), "SetGlobalMeta");
+    assert_eq!(Opcode::GetGlobalVar.name(), "GetGlobalVar");
 }
 
 #[test]

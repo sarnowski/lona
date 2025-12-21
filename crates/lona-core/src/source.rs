@@ -90,6 +90,42 @@ impl Entry {
     pub const fn new(name: String, content: String) -> Self {
         Self { name, content }
     }
+
+    /// Computes the 1-indexed line and column for a byte offset.
+    ///
+    /// Returns `(line, column)` where both are 1-indexed. If the offset is
+    /// beyond the end of the content, returns the position at EOF.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use lona_core::source::Entry;
+    ///
+    /// let entry = Entry::new("test".into(), "abc\ndef".into());
+    /// assert_eq!(entry.line_col(0), (1, 1));  // 'a'
+    /// assert_eq!(entry.line_col(3), (1, 4));  // '\n'
+    /// assert_eq!(entry.line_col(4), (2, 1));  // 'd'
+    /// ```
+    #[inline]
+    #[must_use]
+    pub fn line_col(&self, offset: usize) -> (u32, u32) {
+        let mut line = 1_u32;
+        let mut col = 1_u32;
+
+        for (idx, ch) in self.content.char_indices() {
+            if idx >= offset {
+                break;
+            }
+            if ch == '\n' {
+                line = line.saturating_add(1);
+                col = 1;
+            } else {
+                col = col.saturating_add(1);
+            }
+        }
+
+        (line, col)
+    }
 }
 
 /// Registry of all sources.
@@ -238,5 +274,57 @@ mod tests {
     fn registry_default() {
         let registry = Registry::default();
         assert!(registry.is_empty());
+    }
+
+    #[test]
+    fn line_col_first_character() {
+        let entry = Entry::new("test".to_string(), "abc\ndef".to_string());
+        assert_eq!(entry.line_col(0_usize), (1_u32, 1_u32));
+    }
+
+    #[test]
+    fn line_col_same_line() {
+        let entry = Entry::new("test".to_string(), "abc\ndef".to_string());
+        assert_eq!(entry.line_col(1_usize), (1_u32, 2_u32)); // 'b'
+        assert_eq!(entry.line_col(2_usize), (1_u32, 3_u32)); // 'c'
+    }
+
+    #[test]
+    fn line_col_newline_char() {
+        let entry = Entry::new("test".to_string(), "abc\ndef".to_string());
+        // The newline at index 3 is at line 1, column 4
+        assert_eq!(entry.line_col(3_usize), (1_u32, 4_u32));
+    }
+
+    #[test]
+    fn line_col_second_line() {
+        let entry = Entry::new("test".to_string(), "abc\ndef".to_string());
+        assert_eq!(entry.line_col(4_usize), (2_u32, 1_u32)); // 'd'
+        assert_eq!(entry.line_col(5_usize), (2_u32, 2_u32)); // 'e'
+        assert_eq!(entry.line_col(6_usize), (2_u32, 3_u32)); // 'f'
+    }
+
+    #[test]
+    fn line_col_multiple_lines() {
+        let entry = Entry::new("test".to_string(), "a\nb\nc".to_string());
+        assert_eq!(entry.line_col(0_usize), (1_u32, 1_u32)); // 'a'
+        assert_eq!(entry.line_col(2_usize), (2_u32, 1_u32)); // 'b'
+        assert_eq!(entry.line_col(4_usize), (3_u32, 1_u32)); // 'c'
+    }
+
+    #[test]
+    fn line_col_empty_content() {
+        let entry = Entry::new("test".to_string(), String::new());
+        // Beyond end of content, returns initial position
+        assert_eq!(entry.line_col(0_usize), (1_u32, 1_u32));
+    }
+
+    #[test]
+    fn line_col_beyond_content() {
+        let entry = Entry::new("test".to_string(), "abc".to_string());
+        // At end of content
+        assert_eq!(entry.line_col(3_usize), (1_u32, 4_u32));
+        // Beyond end - still reports position at end
+        assert_eq!(entry.line_col(100_usize), (1_u32, 4_u32));
     }
 }

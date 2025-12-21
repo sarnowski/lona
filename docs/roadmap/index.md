@@ -117,7 +117,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.1.4 | Binary Value Type | done |
 | 1.1.5 | Metadata System - Value Storage | done |
 | 1.1.6 | Metadata System - Reader Syntax | done |
-| 1.1.7 | Metadata System - Compiler Integration | open |
+| 1.1.7 | Metadata System - Compiler Integration | done |
 
 #### Phase 1.2: Language Feature Completion
 

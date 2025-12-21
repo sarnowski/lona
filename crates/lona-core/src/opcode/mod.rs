@@ -180,11 +180,34 @@ pub enum Opcode {
     /// - A: first return value register
     /// - B: return value count (0 = return to top of stack)
     Return = 24,
+
+    // =========================================================================
+    // Var and Metadata Operations
+    // =========================================================================
+    /// Set global metadata: `globals[K[Bx]].merge_meta(R[A])`
+    ///
+    /// Format: iABx
+    /// - A: register containing metadata Map
+    /// - Bx: constant index of target Symbol
+    ///
+    /// Merges the metadata map in `R[A]` into the existing Var's metadata.
+    /// If `R[A]` is nil, this is a no-op.
+    SetGlobalMeta = 25,
+
+    /// Get global var (not value): `R[A] = globals.get_var(K[Bx])`
+    ///
+    /// Format: iABx
+    /// - A: destination register for the Var
+    /// - Bx: constant index of Symbol
+    ///
+    /// Unlike `GetGlobal` which returns the Var's value, this returns the
+    /// Var itself. Used for `(var x)` and `#'x` syntax to access metadata.
+    GetGlobalVar = 26,
 }
 
 impl Opcode {
     /// Maximum valid opcode value.
-    pub const MAX: u8 = 24;
+    pub const MAX: u8 = 26;
 
     /// Converts a byte to an opcode, returning `None` for invalid values.
     #[inline]
@@ -216,6 +239,8 @@ impl Opcode {
             22 => Some(Self::Call),
             23 => Some(Self::TailCall),
             24 => Some(Self::Return),
+            25 => Some(Self::SetGlobalMeta),
+            26 => Some(Self::GetGlobalVar),
             _ => None,
         }
     }
@@ -250,6 +275,8 @@ impl Opcode {
             Self::Call => "Call",
             Self::TailCall => "TailCall",
             Self::Return => "Return",
+            Self::SetGlobalMeta => "SetGlobalMeta",
+            Self::GetGlobalVar => "GetGlobalVar",
         }
     }
 }

@@ -76,8 +76,6 @@ nav:
                 - Core Concepts: goals/core-concepts.md
                 - System Design: goals/system-design.md
                 - Non-Goals: goals/non-goals.md
-          - LISP Machine: lisp-machine.md
-          - Minimal Rust: minimal-rust.md
           - License: license.md
 
     - Installation: installation.md
@@ -122,6 +120,9 @@ nav:
                 - Error Idioms: lonala/appendices/error-idioms.md
 
     - Development:
+          - Development Principles: development/principles.md
+          - LISP Machine Philosophy: development/lisp-machine.md
+          - Minimal Rust Runtime: development/minimal-rust.md
           - Testing Strategy: development/testing-strategy.md
           - Lonala Coding Guidelines: development/lonala-coding-guidelines.md
           - Rust Coding Guidelines: development/rust-coding-guidelines.md

@@ -23,9 +23,11 @@ fn compile_def_simple() {
 
     // LoadK R0, K0 (42)
     // SetGlobal R0, K1 (x)
+    // LoadK R1, K2 (metadata map)
+    // SetGlobalMeta R1, K1 (x)
     // LoadK R0, K1 (x) - return the symbol
     // Return R0, 1
-    assert_eq!(code.len(), 4);
+    assert_eq!(code.len(), 6);
 
     // First instruction loads the value
     let instr0 = *code.get(0_usize).unwrap();
@@ -46,9 +48,17 @@ fn compile_def_simple() {
         panic!("expected Symbol constant for def name");
     }
 
-    // Third instruction loads the symbol to return it
+    // Third instruction loads the metadata map
     let instr2 = *code.get(2_usize).unwrap();
     assert_eq!(decode_op(instr2), Some(Opcode::LoadK));
+
+    // Fourth instruction is SetGlobalMeta
+    let instr3 = *code.get(3_usize).unwrap();
+    assert_eq!(decode_op(instr3), Some(Opcode::SetGlobalMeta));
+
+    // Fifth instruction loads the symbol to return it
+    let instr4 = *code.get(4_usize).unwrap();
+    assert_eq!(decode_op(instr4), Some(Opcode::LoadK));
 }
 
 #[test]
@@ -58,9 +68,11 @@ fn compile_def_with_expression() {
 
     // Add R0, K0, K1 (1 + 2)
     // SetGlobal R0, K2 (y)
+    // LoadK R1, K3 (metadata map)
+    // SetGlobalMeta R1, K2 (y)
     // LoadK R0, K2 (y) - return the symbol
     // Return R0, 1
-    assert_eq!(code.len(), 4);
+    assert_eq!(code.len(), 6);
 
     // First instruction should be Add
     let instr0 = *code.get(0_usize).unwrap();
@@ -81,13 +93,15 @@ fn compile_def_then_use() {
 
     // LoadK R0, K0 (10)
     // SetGlobal R0, K1 (x)
+    // LoadK R1, K2 (metadata map)
+    // SetGlobalMeta R1, K1 (x)
     // LoadK R0, K1 (x) - return from def (discarded by do)
     // GetGlobal R0, K1 (x) - lookup x
     // Return R0, 1
-    assert_eq!(code.len(), 5);
+    assert_eq!(code.len(), 7);
 
-    // Last instruction before Return should be GetGlobal
-    let get_global = *code.get(3_usize).unwrap();
+    // Instruction before Return should be GetGlobal (at index 5)
+    let get_global = *code.get(5_usize).unwrap();
     assert_eq!(decode_op(get_global), Some(Opcode::GetGlobal));
 
     let sym_const = decode_bx(get_global);

@@ -820,6 +820,7 @@ pub fn native_meta(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, Na
         Value::Map(ref map) => map.meta().cloned(),
         Value::Set(ref set) => set.meta().cloned(),
         Value::Symbol(ref sym) => sym.meta().cloned(),
+        Value::Var(ref var) => var.meta(),
         // Types that don't support metadata return nil (wildcard covers future variants)
         Value::Nil
         | Value::Bool(_)

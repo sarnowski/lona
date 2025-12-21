@@ -331,7 +331,9 @@ fn test_10_6_anonymous_fn_rest() {
 // ============================================================================
 
 /// [IGNORED] Spec 10.7: #'symbol returns the var
-/// Tracking: Var quote reader macro not yet implemented
+/// Tracking: The (var name) special form is implemented, but the #' reader
+/// macro syntax is not yet implemented in the lexer. Currently #'x gives
+/// "unexpected character '#'" error.
 #[test]
 #[ignore]
 fn test_10_7_var_quote() {

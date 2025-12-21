@@ -32,6 +32,14 @@ pub(super) const MAX_CALL_DEPTH: usize = 256;
 /// Default register file size.
 const DEFAULT_REGISTER_COUNT: usize = 256;
 
+/// Result of dispatching a single opcode.
+enum DispatchResult {
+    /// Continue to the next instruction.
+    Continue,
+    /// Return from the current function with a value.
+    Return(Value),
+}
+
 /// The Lonala virtual machine.
 ///
 /// Executes compiled bytecode from `Chunk` objects. Register-based design
@@ -228,66 +236,83 @@ impl<'interner> Vm<'interner> {
                 ));
             };
 
-            match opcode {
-                // Data Movement
-                Opcode::Move => self.op_move(instruction, frame)?,
-                Opcode::LoadK => self.op_load_k(instruction, frame)?,
-                Opcode::LoadNil => self.op_load_nil(instruction, frame),
-                Opcode::LoadTrue => self.op_load_true(instruction, frame)?,
-                Opcode::LoadFalse => self.op_load_false(instruction, frame)?,
-
-                // Globals
-                Opcode::GetGlobal => self.op_get_global(instruction, frame)?,
-                Opcode::SetGlobal => self.op_set_global(instruction, frame)?,
-
-                // Arithmetic
-                Opcode::Add => self.op_add(instruction, frame)?,
-                Opcode::Sub => self.op_sub(instruction, frame)?,
-                Opcode::Mul => self.op_mul(instruction, frame)?,
-                Opcode::Div => self.op_div(instruction, frame)?,
-                Opcode::Mod => self.op_mod(instruction, frame)?,
-                Opcode::Neg => self.op_neg(instruction, frame)?,
-
-                // Comparison
-                Opcode::Eq => self.op_eq(instruction, frame)?,
-                Opcode::Lt => self.op_lt(instruction, frame)?,
-                Opcode::Le => self.op_le(instruction, frame)?,
-                Opcode::Gt => self.op_gt(instruction, frame)?,
-                Opcode::Ge => self.op_ge(instruction, frame)?,
-                Opcode::Not => self.op_not(instruction, frame)?,
-
-                // Control Flow
-                Opcode::Jump => Self::op_jump(instruction, frame),
-                Opcode::JumpIf => self.op_jump_if(instruction, frame)?,
-                Opcode::JumpIfNot => self.op_jump_if_not(instruction, frame)?,
-
-                // Function Calls
-                Opcode::Call => {
-                    self.op_call(instruction, frame)?;
-                }
-                Opcode::TailCall => {
-                    // TailCall will be fully implemented in Phase 4
-                    // For now, treat as regular call
-                    self.op_call(instruction, frame)?;
-                }
-                Opcode::Return => {
-                    let dest = decode_a(instruction);
-                    let count = decode_b(instruction);
-                    return self.op_return(dest, count, frame);
-                }
-
-                // Handle future Opcode variants (Opcode is #[non_exhaustive])
-                _ => {
-                    return Err(Error::new(
-                        ErrorKind::InvalidOpcode {
-                            byte: decode_opcode_byte(instruction),
-                            pc: frame.pc().saturating_sub(1),
-                        },
-                        frame.current_location(),
-                    ));
-                }
+            match self.dispatch(opcode, instruction, frame)? {
+                DispatchResult::Continue => {}
+                DispatchResult::Return(value) => return Ok(value),
             }
         }
+    }
+
+    /// Dispatches a single opcode and returns the result.
+    fn dispatch(
+        &mut self,
+        opcode: Opcode,
+        instruction: u32,
+        frame: &mut Frame<'_>,
+    ) -> Result<DispatchResult, Error> {
+        match opcode {
+            // Data Movement
+            Opcode::Move => self.op_move(instruction, frame)?,
+            Opcode::LoadK => self.op_load_k(instruction, frame)?,
+            Opcode::LoadNil => self.op_load_nil(instruction, frame),
+            Opcode::LoadTrue => self.op_load_true(instruction, frame)?,
+            Opcode::LoadFalse => self.op_load_false(instruction, frame)?,
+
+            // Globals
+            Opcode::GetGlobal => self.op_get_global(instruction, frame)?,
+            Opcode::SetGlobal => self.op_set_global(instruction, frame)?,
+            Opcode::SetGlobalMeta => self.op_set_global_meta(instruction, frame)?,
+            Opcode::GetGlobalVar => self.op_get_global_var(instruction, frame)?,
+
+            // Arithmetic
+            Opcode::Add => self.op_add(instruction, frame)?,
+            Opcode::Sub => self.op_sub(instruction, frame)?,
+            Opcode::Mul => self.op_mul(instruction, frame)?,
+            Opcode::Div => self.op_div(instruction, frame)?,
+            Opcode::Mod => self.op_mod(instruction, frame)?,
+            Opcode::Neg => self.op_neg(instruction, frame)?,
+
+            // Comparison
+            Opcode::Eq => self.op_eq(instruction, frame)?,
+            Opcode::Lt => self.op_lt(instruction, frame)?,
+            Opcode::Le => self.op_le(instruction, frame)?,
+            Opcode::Gt => self.op_gt(instruction, frame)?,
+            Opcode::Ge => self.op_ge(instruction, frame)?,
+            Opcode::Not => self.op_not(instruction, frame)?,
+
+            // Control Flow
+            Opcode::Jump => Self::op_jump(instruction, frame),
+            Opcode::JumpIf => self.op_jump_if(instruction, frame)?,
+            Opcode::JumpIfNot => self.op_jump_if_not(instruction, frame)?,
+
+            // Function Calls
+            Opcode::Call => {
+                self.op_call(instruction, frame)?;
+            }
+            Opcode::TailCall => {
+                // TailCall will be fully implemented in Phase 4
+                // For now, treat as regular call
+                self.op_call(instruction, frame)?;
+            }
+            Opcode::Return => {
+                let dest = decode_a(instruction);
+                let count = decode_b(instruction);
+                return Ok(DispatchResult::Return(self.op_return(dest, count, frame)?));
+            }
+
+            // Handle future Opcode variants (Opcode is #[non_exhaustive])
+            _ => {
+                return Err(Error::new(
+                    ErrorKind::InvalidOpcode {
+                        byte: decode_opcode_byte(instruction),
+                        pc: frame.pc().saturating_sub(1),
+                    },
+                    frame.current_location(),
+                ));
+            }
+        }
+
+        Ok(DispatchResult::Continue)
     }
 
     // =========================================================================
@@ -376,6 +401,17 @@ impl<'interner> Vm<'interner> {
                     elements.iter().map(Self::convert_constant).collect();
                 Value::Vector(lona_core::vector::Vector::from_vec(values?))
             }
+            Constant::Map(ref pairs) => {
+                let converted_pairs: Result<alloc::vec::Vec<(Value, Value)>, Error> = pairs
+                    .iter()
+                    .map(|&(ref key, ref val)| {
+                        let key_val = Self::convert_constant(key)?;
+                        let val_val = Self::convert_constant(val)?;
+                        Ok((key_val, val_val))
+                    })
+                    .collect();
+                Value::Map(lona_core::map::Map::from_pairs(converted_pairs?))
+            }
             Constant::Function {
                 ref bodies,
                 ref name,
@@ -435,6 +471,17 @@ impl<'interner> Vm<'interner> {
                     elements.iter().map(Self::convert_simple_constant).collect();
                 Value::Vector(lona_core::vector::Vector::from_vec(values?))
             }
+            Constant::Map(ref pairs) => {
+                let converted_pairs: Result<alloc::vec::Vec<(Value, Value)>, Error> = pairs
+                    .iter()
+                    .map(|&(ref key, ref val)| {
+                        let key_val = Self::convert_simple_constant(key)?;
+                        let val_val = Self::convert_simple_constant(val)?;
+                        Ok((key_val, val_val))
+                    })
+                    .collect();
+                Value::Map(lona_core::map::Map::from_pairs(converted_pairs?))
+            }
             // Handle Nil, Function, and future Constant variants
             Constant::Nil | Constant::Function { .. } | _ => Value::Nil,
         })
@@ -488,6 +535,7 @@ const fn constant_type_name_to_kind(constant: &Constant) -> value::Kind {
         Constant::Keyword(_) => value::Kind::Keyword,
         Constant::List(_) => value::Kind::List,
         Constant::Vector(_) => value::Kind::Vector,
+        Constant::Map(_) => value::Kind::Map,
         Constant::Function { .. } | _ => value::Kind::Function,
     }
 }

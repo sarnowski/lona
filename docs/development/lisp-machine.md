@@ -103,7 +103,7 @@ The condition/restart system (inspired by Common Lisp) provides the unified API 
 - In production: default handler invokes `:abort` → crash → supervisor restarts
 - In debug: default handler invokes debugger → shows options → user chooses
 
-See [Debugging](lonala/debugging.md) for complete specification.
+See [Debugging](../lonala/debugging.md) for complete specification.
 
 ## The Lona REPL
 

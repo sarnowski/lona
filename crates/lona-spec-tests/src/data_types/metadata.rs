@@ -110,7 +110,9 @@ fn test_3_16_metadata_hash() {
 }
 
 /// [IGNORED] Spec 3.16: Reader metadata syntax ^{:key val}
-/// Tracking: Metadata reader syntax not yet implemented
+/// Tracking: Metadata on collections (^{...} before vector/list/map) not yet
+/// implemented. This requires the compiler to emit `with-meta` calls.
+/// Task 1.1.7 deferred this as "can be a follow-up task".
 #[test]
 #[ignore]
 fn test_3_16_reader_metadata_full() {
@@ -122,7 +124,9 @@ fn test_3_16_reader_metadata_full() {
 }
 
 /// [IGNORED] Spec 3.16: Reader metadata shorthand ^:keyword
-/// Tracking: Metadata reader syntax not yet implemented
+/// Tracking: Metadata on symbols (^:key before 'symbol) not yet implemented.
+/// This requires the compiler to emit `with-meta` calls for quoted symbols.
+/// Task 1.1.7 deferred this as "can be a follow-up task".
 #[test]
 #[ignore]
 fn test_3_16_reader_metadata_shorthand() {
