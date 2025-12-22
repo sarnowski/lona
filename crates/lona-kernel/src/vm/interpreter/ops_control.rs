@@ -3,6 +3,7 @@
 
 //! Control flow and function call operations.
 
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use lona_core::error_context::ArityExpectation;
@@ -204,10 +205,15 @@ impl Vm<'_> {
             }
         }
 
-        // Create new frame and execute
+        // Create new frame and execute with the closure's upvalues
         // Use the same source ID as the current frame for now
         // (TODO: functions could have their own source ID in the future)
-        let mut fn_frame = Frame::new(fn_chunk, new_base, frame.source());
+        let mut fn_frame = Frame::with_upvalues(
+            fn_chunk,
+            new_base,
+            frame.source(),
+            Arc::clone(func.upvalues_arc()),
+        );
         self.call_depth = self.call_depth.saturating_add(1);
         let result = self.run(&mut fn_frame);
         self.call_depth = self.call_depth.saturating_sub(1);

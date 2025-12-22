@@ -185,8 +185,8 @@ fn test_8_5_functions_as_args() {
 #[test]
 fn test_8_5_functions_as_return() {
     let mut ctx = SpecTestContext::new();
-    // Note: This requires closures which may not be fully implemented
-    // Using a simpler example that doesn't require closure capture
+    // This example returns a function that doesn't capture variables,
+    // so it works without closure VM support
     let _res = ctx
         .eval("(def get-adder (fn [] (fn [x y] (+ x y))))")
         .unwrap();
@@ -198,10 +198,8 @@ fn test_8_5_functions_as_return() {
     );
 }
 
-/// [IGNORED] Spec 8.5: Closures capture lexical environment
-/// Tracking: Closures planned for Phase 5.2
+/// Spec 8.5: Closures capture lexical environment
 #[test]
-#[ignore]
 fn test_8_5_closures() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx
@@ -212,6 +210,118 @@ fn test_8_5_closures() {
         "(add-5 10)",
         15,
         &spec_ref("8.5", "Higher-Order", "closure captures n"),
+    );
+}
+
+/// Spec 8.5: Closure captures multiple variables
+#[test]
+fn test_8_5_closure_multiple_captures() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx
+        .eval("(def make-fn (fn [a b] (fn [x] (+ x a b))))")
+        .unwrap();
+    let _res = ctx.eval("(def f (make-fn 10 20))").unwrap();
+    ctx.assert_int(
+        "(f 5)",
+        35,
+        &spec_ref("8.5", "Higher-Order", "closure captures multiple vars"),
+    );
+}
+
+/// Spec 8.5: Nested closure (grandparent capture)
+#[test]
+fn test_8_5_closure_nested_transitive() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def outer (fn [a] (fn [] (fn [] a))))").unwrap();
+    let _res = ctx.eval("(def middle (outer 42))").unwrap();
+    let _res = ctx.eval("(def inner (middle))").unwrap();
+    ctx.assert_int(
+        "(inner)",
+        42,
+        &spec_ref(
+            "8.5",
+            "Higher-Order",
+            "transitive capture through middle fn",
+        ),
+    );
+}
+
+/// Spec 8.5: Closure captures value at creation time (copy semantics)
+#[test]
+fn test_8_5_closure_copy_semantics() {
+    let mut ctx = SpecTestContext::new();
+    // Using let shadowing to verify copy-at-creation
+    let _res = ctx
+        .eval("(def result (let [x 1 f (fn [] x) x 2] (f)))")
+        .unwrap();
+    ctx.assert_int(
+        "result",
+        1,
+        &spec_ref("8.5", "Higher-Order", "closure captures value, not binding"),
+    );
+}
+
+/// Spec 8.5: Multi-arity closure shares captured values
+#[test]
+fn test_8_5_closure_multi_arity() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx
+        .eval("(def make-fn (fn [x] (fn ([a] (+ a x)) ([a b] (+ a b x)))))")
+        .unwrap();
+    let _res = ctx.eval("(def f (make-fn 100))").unwrap();
+    ctx.assert_int(
+        "(f 1)",
+        101,
+        &spec_ref("8.5", "Higher-Order", "1-arity uses capture"),
+    );
+    ctx.assert_int(
+        "(f 1 2)",
+        103,
+        &spec_ref("8.5", "Higher-Order", "2-arity uses same capture"),
+    );
+}
+
+/// Spec 8.5: Closure returned from function (counter factory)
+#[test]
+fn test_8_5_closure_counter_factory() {
+    let mut ctx = SpecTestContext::new();
+    // Each call to make-counter creates independent closure
+    let _res = ctx
+        .eval("(def make-counter (fn [start] (fn [inc] (+ start inc))))")
+        .unwrap();
+    let _res = ctx.eval("(def counter-10 (make-counter 10))").unwrap();
+    let _res = ctx.eval("(def counter-100 (make-counter 100))").unwrap();
+    ctx.assert_int(
+        "(counter-10 5)",
+        15,
+        &spec_ref("8.5", "Higher-Order", "first counter"),
+    );
+    ctx.assert_int(
+        "(counter-100 5)",
+        105,
+        &spec_ref("8.5", "Higher-Order", "second counter independent"),
+    );
+}
+
+/// Spec 8.5: Closure equality is identity-based
+#[test]
+fn test_8_5_closure_identity_equality() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx
+        .eval("(def make-adder (fn [n] (fn [x] (+ x n))))")
+        .unwrap();
+    // Same code, same captured value, but different closure instances
+    ctx.assert_bool(
+        "(= (make-adder 5) (make-adder 5))",
+        false,
+        &spec_ref("8.5", "Higher-Order", "different closures are not equal"),
+    );
+    // Same closure instance
+    let _res = ctx.eval("(def f (make-adder 5))").unwrap();
+    ctx.assert_bool(
+        "(= f f)",
+        true,
+        &spec_ref("8.5", "Higher-Order", "same closure is equal to itself"),
     );
 }
 

@@ -107,6 +107,14 @@ pub enum Kind {
         /// Actual number of arguments provided.
         got: u8,
     },
+
+    /// Attempted to access an upvalue index that doesn't exist.
+    InvalidUpvalue {
+        /// The requested upvalue index.
+        index: u8,
+        /// How many upvalues the closure actually has.
+        available: usize,
+    },
 }
 
 impl Kind {
@@ -128,6 +136,7 @@ impl Kind {
             Self::InvalidRegister { .. } => "InvalidRegister",
             Self::Native { .. } => "NativeError",
             Self::ArityMismatch { .. } => "ArityMismatch",
+            Self::InvalidUpvalue { .. } => "InvalidUpvalue",
         }
     }
 }

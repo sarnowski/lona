@@ -19,17 +19,18 @@
             "mcp__lona-dev-repl__eval",
             "mcp__lona-dev-repl__restart",
 
-            "Skill(develop-runtime)",
+            "Skill(develop-rust)",
+            "Skill(develop-lonala)",
             "Skill(finishing-work)",
 
-            "Bash(docker:*)",
+            "Bash(timeout 900 claude:*)",
+            "Bash(timeout 900 gemini:*)",
+            "Bash(timeout 900 codex:*)",
 
             "Bash(make:*)",
             "Bash(gmake:*)",
 
-            "Bash(rustup:*)",
-            "Bash(cargo:*)",
-            "Bash(rustc:*)",
+            "Bash(docker:*)",
 
             "Bash(git add:*)",
             "Bash(git status:*)",
@@ -40,6 +41,8 @@
             "Bash(wc:*)",
             "Bash(grep:*)",
             "Bash(tee:*)",
+            "Bash(find:*)",
+            "Bash(tree:*)",
 
             "WebSearch",
             "WebFetch(domain:wiki.osdev.org)",
@@ -51,7 +54,13 @@
             "WebFetch(domain:blog.stenmans.org)",
             "WebFetch(domain:www.erlang.org)",
             "WebFetch(domain:dl.acm.org)",
-            "WebFetch(domain:www.lua.org)"
+            "WebFetch(domain:www.lua.org)",
+            "WebFetch(domain:clojure.org)",
+            "WebFetch(domain:clojuredocs.org)",
+            "WebFetch(domain:guide.clojure.style)",
+            "WebFetch(domain:clojure-doc.org)",
+            "WebFetch(domain:hexdocs.pm)",
+            "WebFetch(domain:learnyousomeerlang.com)"
         ],
         "ask": ["Bash(git commit:*)", "Bash(git push:*)"]
     },

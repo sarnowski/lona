@@ -222,6 +222,8 @@ docs-local: $(VENV) ## Serve documentation locally with live reload
 _check:
 	@echo "==> Formatting code..."
 	cargo fmt
+	@echo "==> Checking documentation..."
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude $(DEV_CRATE) --no-deps
 	@echo "==> Compiling runtime (aarch64)..."
 	SEL4_PREFIX=$(AARCH64_SEL4_PREFIX) cargo build \
 		-Z build-std=core,alloc \
@@ -250,6 +252,8 @@ _check:
 _check-x86_64:
 	@echo "==> Formatting code..."
 	cargo fmt
+	@echo "==> Checking documentation..."
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --exclude $(DEV_CRATE) --no-deps
 	@echo "==> Compiling runtime (x86_64)..."
 	SEL4_PREFIX=$(X86_SEL4_PREFIX_DEBUG) cargo build \
 		-Z build-std=core,alloc \

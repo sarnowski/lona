@@ -12,13 +12,13 @@ use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use lona_core::chunk::{Chunk, Constant, FunctionBodyData};
+use lona_core::chunk::{Chunk, Constant, FunctionBodyData, UpvalueSource};
 use lona_core::opcode::{Opcode, encode_abc, encode_abx};
 use lona_core::span::Span;
 use lonala_parser::{Ast, Spanned};
 
 use super::macros::{MacroBody, MacroDefinition};
-use super::{Compiler, ExprResult};
+use super::{CaptureContext, Compiler, ExprResult};
 use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 
 /// Parsed parameter information from a parameter vector.
@@ -63,8 +63,9 @@ impl Compiler<'_, '_, '_> {
     /// function's scope. Each arity body is compiled into a separate chunk.
     /// Supports rest parameters: `(fn [a b & rest] ...)`.
     ///
-    /// Note: In Phase 3.3, closures are not supported - functions cannot
-    /// reference variables from enclosing scopes.
+    /// Closures are supported: nested functions can capture variables from
+    /// enclosing scopes. Captured values are copied at closure creation time
+    /// (copy semantics, not reference semantics).
     pub(super) fn compile_fn(
         &mut self,
         args: &[Spanned<Ast>],
@@ -80,15 +81,27 @@ impl Compiler<'_, '_, '_> {
                 self.emit_function(alloc::vec![body_data], name, span)
             }
             FnForm::MultiArity { name, bodies } => {
-                // Compile each arity body
+                // Build shared capture context for all bodies
+                let shared_context = self.build_capture_context();
+
+                // Compile each arity body with shared context
                 let mut body_datas = Vec::with_capacity(bodies.len());
                 for body_ast in bodies {
                     let (params, body) =
                         Self::parse_arity_body(body_ast, self.location(body_ast.span))?;
-                    let body_data =
-                        self.compile_fn_body(name.as_deref(), params, body, body_ast.span)?;
+                    let body_data = self.compile_fn_body_with_context(
+                        name.as_deref(),
+                        params,
+                        body,
+                        body_ast.span,
+                        Some(&shared_context),
+                    )?;
                     body_datas.push(body_data);
                 }
+
+                // Unify upvalue sources across all bodies
+                Self::unify_multi_arity_upvalues(&mut body_datas);
+
                 // Validate arities
                 Self::validate_arities(&body_datas, location)?;
                 self.emit_function(body_datas, name, span)
@@ -255,12 +268,33 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Compiles a single function body (params + body expressions) into a `FunctionBodyData`.
+    ///
+    /// For closures, this method:
+    /// 1. Builds a capture context from the parent compiler's state
+    /// 2. Passes it to the child compiler so symbols can be resolved as upvalues
+    /// 3. Collects the upvalue sources after compilation
     fn compile_fn_body(
         &mut self,
         name: Option<&str>,
         params_ast: &Spanned<Ast>,
         body: &[Spanned<Ast>],
         span: Span,
+    ) -> Result<FunctionBodyData, Error> {
+        self.compile_fn_body_with_context(name, params_ast, body, span, None)
+    }
+
+    /// Compiles a function body with an optional shared capture context.
+    ///
+    /// When `shared_context` is provided, uses that context instead of building
+    /// a new one. This is used for multi-arity functions where all bodies must
+    /// share the same upvalue array.
+    fn compile_fn_body_with_context(
+        &mut self,
+        name: Option<&str>,
+        params_ast: &Spanned<Ast>,
+        body: &[Spanned<Ast>],
+        span: Span,
+        shared_context: Option<&CaptureContext>,
     ) -> Result<FunctionBodyData, Error> {
         let location = self.location(span);
 
@@ -270,8 +304,15 @@ impl Compiler<'_, '_, '_> {
             .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
         let has_rest = parsed_params.rest.is_some();
 
+        // Build capture context from parent (or use shared context for multi-arity)
+        let capture_context = shared_context
+            .cloned()
+            .unwrap_or_else(|| self.build_capture_context());
+
         // Create a new compiler for the function body
         let mut fn_compiler = Compiler::new(self.interner, self.registry, self.source_id);
+        fn_compiler.set_capture_context(capture_context);
+
         let fn_name_str = name.map_or_else(|| String::from("lambda"), String::from);
         fn_compiler.chunk = Chunk::with_name(fn_name_str);
         fn_compiler.chunk.set_arity(arity);
@@ -311,10 +352,14 @@ impl Compiler<'_, '_, '_> {
             .chunk
             .set_max_registers(fn_compiler.max_register.saturating_add(1));
 
+        // Collect upvalue sources from the child compiler
+        let upvalue_sources = fn_compiler.take_upvalue_sources();
+
         Ok(FunctionBodyData::new(
             Box::new(fn_compiler.chunk),
             arity,
             has_rest,
+            upvalue_sources,
         ))
     }
 
@@ -374,17 +419,112 @@ impl Compiler<'_, '_, '_> {
         Ok(())
     }
 
+    /// Unifies upvalue sources across all bodies of a multi-arity function.
+    ///
+    /// Each body may have discovered upvalues in a different order. This function:
+    /// 1. Builds a unified upvalue list (preserving first-occurrence order)
+    /// 2. Remaps each body's `GetUpvalue` indices to the unified list
+    /// 3. Sets the unified `upvalue_sources` on all bodies
+    ///
+    /// This ensures all arity bodies share the same upvalue array at runtime.
+    fn unify_multi_arity_upvalues(bodies: &mut [FunctionBodyData]) {
+        // If no bodies or none have upvalues, nothing to do
+        if bodies.is_empty() {
+            return;
+        }
+
+        // Build unified upvalue list (first occurrence order across all bodies)
+        let mut unified_sources: Vec<UpvalueSource> = Vec::new();
+        for body in bodies.iter() {
+            for &source in &body.upvalue_sources {
+                if !unified_sources.contains(&source) {
+                    unified_sources.push(source);
+                }
+            }
+        }
+
+        // If no upvalues, nothing to remap
+        if unified_sources.is_empty() {
+            return;
+        }
+
+        // For each body, remap its GetUpvalue indices
+        for body in bodies.iter_mut() {
+            if body.upvalue_sources.is_empty() {
+                // Body has no upvalues; set unified list for consistency
+                body.upvalue_sources.clone_from(&unified_sources);
+                continue;
+            }
+
+            // Build remapping: old_index -> new_index
+            let mut remap: Vec<u8> = Vec::with_capacity(body.upvalue_sources.len());
+            for source in &body.upvalue_sources {
+                // Find position in unified list
+                if let Some(new_idx) = unified_sources.iter().position(|src| src == source)
+                    && let Ok(idx_u8) = u8::try_from(new_idx)
+                {
+                    remap.push(idx_u8);
+                }
+            }
+
+            // Patch bytecode: update GetUpvalue instructions
+            Self::remap_upvalue_indices(&mut body.chunk, &remap);
+
+            // Set unified upvalue sources
+            body.upvalue_sources.clone_from(&unified_sources);
+        }
+    }
+
+    /// Remaps `GetUpvalue` instruction indices in a chunk.
+    ///
+    /// For each `GetUpvalue` instruction, updates the B operand using the remap table.
+    fn remap_upvalue_indices(chunk: &mut Chunk, remap: &[u8]) {
+        use lona_core::opcode::{decode_a, decode_b, decode_op, encode_abc};
+
+        // We need to iterate over the bytecode and patch GetUpvalue instructions
+        let code_len = chunk.code().len();
+        for idx in 0..code_len {
+            let instruction = chunk.code().get(idx).copied().unwrap_or(0);
+            if decode_op(instruction) == Some(Opcode::GetUpvalue) {
+                let reg_a = decode_a(instruction);
+                let old_idx = decode_b(instruction);
+
+                // Look up new index in remap table
+                if let Some(&new_idx) = remap.get(usize::from(old_idx)) {
+                    // Encode new instruction with remapped index
+                    let new_instruction = encode_abc(Opcode::GetUpvalue, reg_a, new_idx, 0);
+                    chunk.patch(idx, new_instruction);
+                }
+            }
+        }
+    }
+
     /// Emits the function constant and loads it into a register.
+    ///
+    /// For closures (functions with upvalues), emits a `Closure` instruction
+    /// that captures values at runtime. For non-closures, emits a simple `LoadK`.
     fn emit_function(
         &mut self,
         bodies: Vec<FunctionBodyData>,
         name: Option<String>,
         span: Span,
     ) -> Result<ExprResult, Error> {
+        // Check if any body has upvalues (making this a closure)
+        let has_upvalues = bodies.iter().any(|body| !body.upvalue_sources.is_empty());
+
         let const_idx = self.add_constant(Constant::Function { bodies, name }, span)?;
         let dest = self.alloc_register(span)?;
-        self.chunk
-            .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
+
+        if has_upvalues {
+            // Closure creation - VM will capture values at runtime
+            self.chunk
+                .emit(encode_abx(Opcode::Closure, dest, const_idx), span);
+        } else {
+            // Simple function - no captures needed
+            self.chunk
+                .emit(encode_abx(Opcode::LoadK, dest, const_idx), span);
+        }
+
         Ok(ExprResult { register: dest })
     }
 
@@ -585,7 +725,14 @@ impl Compiler<'_, '_, '_> {
         // Convert MacroBody to FunctionBodyData for storage
         let fn_bodies: Vec<FunctionBodyData> = macro_bodies
             .iter()
-            .map(|mb| FunctionBodyData::new(Box::new((*mb.chunk).clone()), mb.arity, mb.has_rest))
+            .map(|mb| {
+                FunctionBodyData::new(
+                    Box::new((*mb.chunk).clone()),
+                    mb.arity,
+                    mb.has_rest,
+                    Vec::new(),
+                )
+            })
             .collect();
 
         // Create function constant and load it
@@ -667,7 +814,14 @@ impl Compiler<'_, '_, '_> {
         }
         let body_datas: Vec<FunctionBodyData> = macro_bodies
             .iter()
-            .map(|mb| FunctionBodyData::new(Box::new((*mb.chunk).clone()), mb.arity, mb.has_rest))
+            .map(|mb| {
+                FunctionBodyData::new(
+                    Box::new((*mb.chunk).clone()),
+                    mb.arity,
+                    mb.has_rest,
+                    Vec::new(),
+                )
+            })
             .collect();
         Self::validate_arities(&body_datas, location)?;
         Ok(macro_bodies)

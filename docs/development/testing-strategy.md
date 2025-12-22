@@ -1,536 +1,241 @@
 # Testing Strategy
 
-This document defines the testing strategy for Lona, optimizing for both high code coverage and fast feedback cycles.
+This document defines how we test Lona for fast feedback and high confidence.
 
-## Overview
+## Goals (Non-Negotiable)
 
-Testing bare-metal seL4 applications presents unique challenges: standard Rust tests cannot run because the code targets a custom platform (`aarch64-sel4`) that doesn't exist on the development machine. The solution is a **three-tier testing pyramid** that maximizes host-based testing for speed while using QEMU-based tests only where necessary.
+- Prefer fast tests: unit > integration.
+- Every feature gets happy-path + edge-case coverage.
+- Every bug fix starts with a regression test (test-first).
+- Speed budgets:
+  - Tier 1 (host) suites complete in **< 5s**.
+  - Tier 2/3 (QEMU) suites complete in **< 30s**.
 
-### The Testing Pyramid
+## Test Types
 
-```
-                    ┌─────────────────┐
-                    │   QEMU Tests    │  ← Slowest (seconds per test)
-                    │  (Integration)  │     System-level validation
-                    └────────┬────────┘
-                             │
-                 ┌───────────┴───────────┐
-                 │   On-Target Tests     │  ← Medium (QEMU boot overhead)
-                 │  (Kernel components)  │     seL4/hardware interaction
-                 └───────────┬───────────┘
-                             │
-        ┌────────────────────┴────────────────────┐
-        │            Host Tests                   │  ← Fastest (milliseconds)
-        │   (Pure logic: parser, data structures) │     Standard cargo test
-        └─────────────────────────────────────────┘
-```
+### Current (Rust-based)
 
-**Key insight**: Code architecture determines testability. The multi-crate workspace structure separates hardware-independent logic (testable on host) from seL4-specific code (requires QEMU).
+| Type | Environment | Purpose | Example |
+|------|-------------|---------|---------|
+| **Rust unit** | Host | Pure logic, single component | Parser, compiler, data structures, VM opcodes |
+| **Rust integration (spec)** | Host | Full VM pipeline (parser → compiler → VM) | Language semantics, built-ins, special forms |
+| **Rust integration (seL4)** | QEMU + seL4 | seL4 primitives, boot, memory | Capability operations, IPC, memory mapping |
 
-## Tier 1: Host Tests (Pure Logic)
+### Future (Lonala-based)
 
-### What
+Once the VM is complete, we will implement a Lonala test framework:
 
-Standard Rust `#[test]` functions running on the development machine using `cargo test`.
+| Type | Environment | Purpose |
+|------|-------------|---------|
+| **Lonala unit** | QEMU + seL4 | Test Lonala functions written in Lonala |
+| **Lonala integration** | QEMU + seL4 | Drivers, process supervision, message passing |
 
-### Scope
+**Rule:** Write the *lowest tier* test that can prove the behavior.
 
-- Lonala lexer and parser
-- Bytecode compiler and code generation
-- Data structures (process queues, capability tables, ring buffers)
-- Algorithms (scheduling policies, memory allocation strategies)
-- Serialization and deserialization
-- State machines and protocol handlers
-- Utility functions (bit manipulation, string processing)
-
-### Requirements
-
-Crates eligible for host testing must be:
-
-1. `#![no_std]` - No standard library dependency
-2. **NOT** `#![no_main]` - Must have a standard entry point for tests
-3. Free of seL4-specific imports - No `sel4` or `sel4-root-task` dependencies
-
-### Example
-
-```rust
-// In crates/lonala-parser/src/lib.rs
-#![no_std]
-extern crate alloc;
-
-use alloc::vec::Vec;
-
-pub struct Token { /* ... */ }
-
-pub fn tokenize(input: &str) -> Result<Vec<Token>, LexError> {
-    // Pure logic - no hardware dependencies
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tokenize_simple_expression() {
-        let tokens = tokenize("(+ 1 2)").unwrap();
-        assert_eq!(tokens.len(), 5);
-    }
-
-    #[test]
-    fn tokenize_nested_list() {
-        let tokens = tokenize("(def x (+ 1 2))").unwrap();
-        assert_eq!(tokens.len(), 9);
-    }
-}
-```
-
-### Execution
-
-Host tests run as part of `make test`, which executes `cargo test --workspace --exclude lona-runtime` - testing all crates except the seL4-specific runtime.
-
-### Speed Target
-
-**< 5 seconds** for the entire host test suite.
-
-## Tier 2: On-Target Tests (Kernel Components)
-
-### What
-
-Tests that require seL4 primitives or simulated hardware, running inside QEMU with a custom test harness.
-
-### Scope
-
-- seL4 capability operations (creating, copying, revoking)
-- IPC mechanisms (endpoint send/receive, notifications)
-- Memory mapping and page table operations
-- Exception and interrupt handling
-- Timer operations and scheduling with real time
-- Device driver interactions
-
-### Approach
-
-Use Rust's custom test framework feature to build test binaries that run in QEMU:
-
-```rust
-// In crates/lona-runtime/tests/ipc_test.rs
-#![no_std]
-#![no_main]
-#![feature(custom_test_frameworks)]
-#![test_runner(lona_test::runner)]
-#![reexport_test_harness_main = "test_main"]
-
-use lona_test::{exit_qemu, QemuExitCode};
-
-#[test_case]
-fn test_endpoint_send_receive() {
-    // Create an endpoint using seL4 syscalls
-    // Send a message
-    // Verify receipt
-    // This runs in actual seL4 on QEMU
-}
-```
-
-### Test Harness Implementation
-
-The test harness reports results via serial output and exits QEMU with appropriate codes:
-
-```rust
-// In crates/lona-test/src/lib.rs
-#![no_std]
-
-pub trait Testable {
-    fn run(&self);
-}
-
-impl<T: Fn()> Testable for T {
-    fn run(&self) {
-        serial_print!("{}...\t", core::any::type_name::<T>());
-        self();
-        serial_println!("[ok]");
-    }
-}
-
-pub fn runner(tests: &[&dyn Testable]) {
-    serial_println!("Running {} tests", tests.len());
-    for test in tests {
-        test.run();
-    }
-    exit_qemu(QemuExitCode::Success);
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(u32)]
-pub enum QemuExitCode {
-    Success = 0x10,
-    Failed = 0x11,
-}
-
-pub fn exit_qemu(code: QemuExitCode) -> ! {
-    // Implementation depends on QEMU exit device configuration
-    // For ARM, typically use semihosting or custom MMIO
-}
-```
-
-### Execution
-
-On-target tests run as part of `make test`. Each test binary boots QEMU, runs tests, and exits.
-
-### Speed Target
-
-**< 30 seconds** for all on-target tests.
-
-## Tier 3: Integration Tests (Full System)
-
-### What
-
-End-to-end tests validating complete system workflows in QEMU.
-
-### Scope
-
-- Boot sequence completes successfully
-- Lonala programs execute and produce correct output
-- Process creation, communication, and lifecycle
-- Domain isolation and capability enforcement
-- Hot-patching scenarios
-- Fault tolerance and recovery
-
-### Approach
-
-Each integration test is a separate QEMU instance running a complete scenario. Tests communicate expected outcomes via serial output, which the test harness parses.
-
-```rust
-// In tests/integration/boot_test.rs
-#![no_std]
-#![no_main]
-
-// This becomes the root task for this test scenario
-#[root_task]
-fn main(bootinfo: &sel4::BootInfoPtr) -> sel4::Result<Never> {
-    // Verify boot info is valid
-    assert!(bootinfo.untyped_list().len() > 0);
-
-    // Verify memory regions are accessible
-    // ...
-
-    serial_println!("TEST_PASSED: boot_test");
-    exit_qemu(QemuExitCode::Success);
-}
-```
-
-### Execution
-
-Integration tests run as part of `make test`.
-
-### Speed Target
-
-**< 5 minutes** for full integration suite.
-
-## Workspace Structure
-
-The multi-crate workspace enables the tiered testing strategy:
-
-```
-lona/
-├── Cargo.toml                    # Workspace root
-├── crates/
-│   ├── lona-core/                # Pure types and traits (Tier 1)
-│   │   ├── Cargo.toml            # no_std, testable on host
-│   │   └── src/lib.rs
-│   │
-│   ├── lonala-parser/            # Lexer and parser (Tier 1)
-│   │   ├── Cargo.toml            # no_std, testable on host
-│   │   └── src/lib.rs
-│   │
-│   ├── lonala-compiler/          # Bytecode compiler (Tier 1)
-│   │   ├── Cargo.toml            # no_std, testable on host
-│   │   └── src/lib.rs
-│   │
-│   ├── lona-kernel/              # Kernel abstractions (Tier 1 + mocks)
-│   │   ├── Cargo.toml            # no_std, partially testable
-│   │   └── src/lib.rs            # VM bytecode tests (opcode-level)
-│   │
-│   ├── lona-spec-tests/          # Language specification tests (Tier 1)
-│   │   ├── Cargo.toml            # no_std, testable on host
-│   │   └── src/
-│   │       ├── lib.rs            # Test infrastructure
-│   │       ├── context.rs        # SpecTestContext for evaluating Lonala
-│   │       ├── data_types.rs     # Section 3: Data Types
-│   │       ├── literals.rs       # Section 4: Literals
-│   │       ├── evaluation.rs     # Section 5: Symbols and Evaluation
-│   │       ├── special_forms.rs  # Section 6: Special Forms
-│   │       ├── operators.rs      # Section 7: Operators
-│   │       ├── functions.rs      # Section 8: Functions
-│   │       ├── builtins.rs       # Section 9: Built-in Functions
-│   │       ├── reader_macros.rs  # Section 10: Reader Macros
-│   │       └── macros.rs         # Section 11: Macros
-│   │
-│   ├── lona-test/                # Test harness for QEMU tests
-│   │   ├── Cargo.toml
-│   │   └── src/lib.rs
-│   │
-│   └── lona-runtime/             # seL4 root task (Tier 2/3 only)
-│       ├── Cargo.toml            # no_std + no_main, requires QEMU
-│       ├── src/main.rs
-│       └── tests/                # On-target tests
-│           └── basic.rs
-│
-└── tests/                        # Integration tests (Tier 3)
-    └── integration/
-        └── boot_test.rs
-```
-
-### Language Specification Tests
-
-The `lona-spec-tests` crate provides end-to-end tests for the Lonala language against its specification (`docs/lonala.md`). These tests:
-
-- **Compile and execute** actual Lonala source code through the full pipeline
-- **Test spec compliance** by verifying behavior matches documented semantics
-- **Include spec references** in assertion messages: `[Spec X.Y Topic] description`
-- **Organize by spec section** with one test file per major section
-
-Test naming convention: `test_<section>_<subsection>_<description>`
-
-Examples:
-- `test_3_2_nil_is_falsy`
-- `test_6_3_if_no_else_returns_nil`
-- `test_7_1_1_addition_mixed_types`
-
-### Crate Dependencies
-
-```
-lona-runtime
-    ├── lona-kernel
-    │   └── lona-core
-    ├── lonala-compiler
-    │   ├── lonala-parser
-    │   │   └── lona-core
-    │   └── lona-core
-    └── sel4, sel4-root-task (external)
-```
-
-Only `lona-runtime` depends on seL4 crates. All other crates are host-testable.
-
-## Mocking Strategy
-
-For code that needs seL4 primitives but should be testable on host, use trait-based abstraction:
-
-```rust
-// In crates/lona-kernel/src/memory.rs
-
-/// Trait for page allocation - can be implemented by real or mock allocator
-pub trait PageAllocator {
-    type Error;
-    fn allocate(&mut self) -> Result<PhysAddr, Self::Error>;
-    fn deallocate(&mut self, addr: PhysAddr) -> Result<(), Self::Error>;
-}
-
-/// Real implementation using seL4 untypeds (in lona-runtime)
-#[cfg(not(test))]
-pub struct Sel4PageAllocator {
-    untypeds: /* seL4 untyped capabilities */,
-}
-
-/// Mock for host testing
-#[cfg(test)]
-pub struct MockPageAllocator {
-    allocated: alloc::vec::Vec<u64>,
-    next_addr: u64,
-}
-
-#[cfg(test)]
-impl PageAllocator for MockPageAllocator {
-    type Error = AllocError;
-
-    fn allocate(&mut self) -> Result<PhysAddr, Self::Error> {
-        let addr = self.next_addr;
-        self.next_addr = self.next_addr.checked_add(4096)
-            .ok_or(AllocError::OutOfMemory)?;
-        self.allocated.push(addr);
-        Ok(PhysAddr(addr))
-    }
-
-    fn deallocate(&mut self, addr: PhysAddr) -> Result<(), Self::Error> {
-        self.allocated.retain(|&a| a != addr.0);
-        Ok(())
-    }
-}
-```
-
-This pattern enables testing scheduler logic, process management, and memory algorithms without running on seL4.
-
-## Test Execution Commands
-
-### Primary Targets
+## Running Tests
 
 ```bash
-make debug-aarch64  # Create bootable aarch64 QEMU image
-make test           # Full verification: fmt, clippy, unit tests, build, integration tests
-make run-aarch64    # Interactive QEMU session
-```
-
-### Development Workflow
-
-```bash
-# Full validation (run before committing)
 make test
 ```
 
-### Individual Crate Tests
+**This is the single command for ALL quality checks.** It must pass with ZERO issues.
 
-```bash
-# Run specific crate tests (inside Docker shell)
-make shell-aarch64
-cargo test -p lonala-parser
-cargo test -p lona-kernel
+`make test` runs the complete verification suite on **both aarch64 and x86_64**:
 
-# Run with output visible
-cargo test -p lonala-parser -- --nocapture
+| Check | What It Does |
+|-------|--------------|
+| Formatting | Ensures consistent code style |
+| Documentation | Fails on broken doc links |
+| Compilation | Builds runtime for target architecture |
+| Clippy (host) | All lints on host-testable crates |
+| Clippy (target) | All lints on runtime with target flags |
+| Unit tests | All `#[test]` functions |
+| Integration tests | Full system tests in QEMU |
 
-# Run specific test
-cargo test -p lonala-parser test_tokenize_string
-```
+## 1. Rust Unit Tests (Host)
 
-## Coverage Goals
+**Location:** `crates/<crate>/src/**/tests/*.rs` or inline `#[cfg(test)]` modules
 
-| Component | Target | Test Tier | Notes |
-|-----------|--------|-----------|-------|
-| Lonala lexer | 95%+ | Host | Critical for language correctness |
-| Lonala parser | 90%+ | Host | High coverage, many edge cases |
-| Lonala compiler | 85%+ | Host | Complex but deterministic |
-| Data structures | 90%+ | Host | Foundation for everything |
-| Scheduler logic | 85%+ | Host + Mock | Use mock allocators |
-| Memory management | 70%+ | QEMU | Requires real page tables |
-| IPC primitives | 70%+ | QEMU | Requires seL4 syscalls |
-| Device drivers | 60%+ | QEMU | Hardware-dependent |
-| Boot sequence | Smoke | Integration | Verify it works |
-| E2E scenarios | Key paths | Integration | Critical user journeys |
-
-## Writing Testable Code
-
-### Separation of Concerns
-
-Extract pure logic from hardware interaction:
+**Naming:** `test_<behavior>_<case>()`
 
 ```rust
-// BAD: Logic mixed with hardware access
-pub fn configure_uart(baud: u32) {
-    let divisor = CLOCK_FREQ / baud;  // Pure logic
-    unsafe { write_volatile(UART_DLH, (divisor >> 8) as u8) };  // Hardware
-    unsafe { write_volatile(UART_DLL, divisor as u8) };
+// crates/lonala-parser/src/parser/tests/atom_tests.rs
+#[test]
+fn parse_integer_literal() {
+    let ast = parse_ast("42");
+    assert!(matches!(ast, Ast::Integer(n) if n == 42));
 }
 
-// GOOD: Pure logic extracted
-pub fn calculate_divisor(clock: u32, baud: u32) -> Option<u16> {
-    clock.checked_div(baud).map(|d| d as u16)
+#[test]
+fn parse_nested_list() {
+    let asts = parse_asts("(+ 1 (* 2 3))");
+    assert_eq!(asts.len(), 1);
+    // Verify structure...
+}
+```
+
+## 2. Rust Integration Tests - Spec (Host)
+
+Spec tests evaluate Lonala expressions through the full pipeline (parser → compiler → VM) to verify language semantics.
+
+**Location:** `crates/lona-spec-tests/src/` (one file per spec section)
+
+**Naming:** `test_<section>_<subsection>_<description>()`
+
+**Assertions:** Use `spec_ref()` to tie tests to the language spec.
+
+```rust
+// crates/lona-spec-tests/src/data_types/primitives.rs
+use crate::{spec_ref, SpecTestContext};
+
+#[test]
+fn test_3_2_nil_is_falsy() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(if nil 1 2)",
+        2,
+        &spec_ref("3.2", "Nil", "nil is falsy in boolean context"),
+    );
 }
 
-pub fn configure_uart(baud: u32) {
-    let divisor = calculate_divisor(CLOCK_FREQ, baud)
-        .expect("baud rate cannot be zero");
-    unsafe { write_volatile(UART_DLH, (divisor >> 8) as u8) };
-    unsafe { write_volatile(UART_DLL, divisor as u8) };
+#[test]
+fn test_6_1_def_creates_global() {
+    let mut ctx = SpecTestContext::new();
+    ctx.eval("(def x 42)").unwrap();
+    ctx.assert_int("x", 42, &spec_ref("6.1", "def", "creates global binding"));
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[test]
+fn test_6_1_def_undefined_errors() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_error(
+        "undefined_symbol",
+        &spec_ref("6.1", "def", "undefined symbols produce errors"),
+    );
+}
+```
+
+### SpecTestContext Quick Reference
+
+| Method | Use for |
+|--------|---------|
+| `eval(source) -> Result<Value, String>` | Execute and get result |
+| `assert_int(source, expected, spec_ref)` | Integer result |
+| `assert_bool(source, expected, spec_ref)` | Boolean result |
+| `assert_nil(source, spec_ref)` | Nil result |
+| `assert_float(source, expected, spec_ref)` | Float result |
+| `assert_ratio(source, numer, denom, spec_ref)` | Ratio result |
+| `assert_string(source, expected, spec_ref)` | String result |
+| `assert_symbol_eq(source, expected_name, spec_ref)` | Symbol with name |
+| `assert_keyword_eq(source, expected_name, spec_ref)` | Keyword with name |
+| `assert_list_eq(source, expected_source, spec_ref)` | List equality |
+| `assert_vector_eq(source, expected_source, spec_ref)` | Vector equality |
+| `assert_map_eq(source, expected_source, spec_ref)` | Map equality |
+| `assert_list_len(source, expected_len, spec_ref)` | List length |
+| `assert_vector_len(source, expected_len, spec_ref)` | Vector length |
+| `assert_map_len(source, expected_len, spec_ref)` | Map length |
+| `assert_set_len(source, expected_len, spec_ref)` | Set length |
+| `assert_function(source, spec_ref)` | Function type |
+| `assert_error(source, spec_ref)` | Expects any error |
+| `assert_error_contains(source, contains, spec_ref)` | Error with substring |
+
+## 3. Rust Integration Tests - seL4 (QEMU)
+
+**Location:** `crates/lona-runtime/src/integration_tests.rs`
+
+**Naming:** Return `lona_test::Status::Pass` or `Status::Fail`
+
+```rust
+// crates/lona-runtime/src/integration_tests.rs
+fn test_boot() -> Status {
+    // If we're executing, boot succeeded
+    Status::Pass
+}
+
+fn test_arithmetic() -> Status {
+    let mut interner = Interner::new();
+    let chunk = compile("(+ 1 2)", TEST_SOURCE_ID, &mut interner).ok()?;
+    let mut vm = Vm::new(&interner);
+    match vm.execute(&chunk) {
+        Ok(Value::Integer(n)) if n == Integer::from_i64(3) => Status::Pass,
+        _ => Status::Fail,
+    }
+}
+
+// Register in run_integration_tests():
+let tests = [
+    Test::new("boot", test_boot),
+    Test::new("arithmetic", test_arithmetic),
+];
+```
+
+## Test-First Bug Fix Workflow (Mandatory)
+
+1. **Reproduce** at the lowest tier that can show the bug (prefer host tests).
+2. **Write a failing test** (smallest repro; include the triggering edge case).
+3. **Verify it fails** with the current (buggy) code.
+4. **Fix the bug.**
+5. **Verify the test passes.**
+6. **Keep the test forever** as a regression guard.
+
+```rust
+// Example: Parser was crashing on empty lists
+#[test]
+fn test_parser_handles_empty_list() {
+    // This crashed before the fix
+    let ast = parse_ast("()");
+    assert!(matches!(ast, Ast::List(items) if items.is_empty()));
+}
+```
+
+If the bug only manifests in QEMU, still try to extract a host-level test for the pure logic part, then keep the QEMU test as end-to-end regression.
+
+## Coverage Expectations
+
+| Component | Target | Notes |
+|-----------|--------|-------|
+| Parser, Compiler | 90%+ | Critical for correctness |
+| Data structures | 90%+ | Foundation for everything |
+| VM interpreter | 85%+ | Complex but deterministic |
+| Spec tests | 100% of spec sections | Language contract |
+| seL4 integration | 70%+ | Hardware-dependent |
+| Drivers | 60%+ | External dependencies |
+
+Every feature adds tests for: happy path + at least one edge case + at least one failure case (when applicable).
+
+## Guidelines
+
+1. **Isolation:** Tests must not depend on order or shared state.
+2. **Determinism:** No flaky tests. Seed randomness if needed.
+3. **Speed:** Unit tests should be < 10ms each.
+4. **Clarity:** Use descriptive assertions; include spec references.
+5. **Minimal repro:** Use the smallest expression that proves the behavior.
+
+## Property-Based Testing (proptest)
+
+Use `proptest` for testing invariants with random inputs. Available in `lona-core`.
+
+```rust
+use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn hamt_insert_get_roundtrip(key: u64, value: i32) {
+        let map = Map::new().insert(key, value);
+        prop_assert_eq!(map.get(&key), Some(&value));
+    }
 
     #[test]
-    fn divisor_calculation() {
-        assert_eq!(calculate_divisor(115200, 9600), Some(12));
-        assert_eq!(calculate_divisor(115200, 115200), Some(1));
-        assert_eq!(calculate_divisor(115200, 0), None);
+    fn integer_addition_commutative(a: i64, b: i64) {
+        let x = Integer::from(a);
+        let y = Integer::from(b);
+        prop_assert_eq!(&x + &y, &y + &x);
     }
 }
 ```
 
-### Dependency Injection
+Property tests run as part of `make test`. Use for:
 
-Use generics and traits to enable mocking:
-
-```rust
-// BAD: Hard-coded dependency
-pub struct Scheduler {
-    allocator: Sel4Allocator,  // Can't test without seL4
-}
-
-// GOOD: Injectable dependency
-pub struct Scheduler<A: Allocator> {
-    allocator: A,
-}
-
-impl<A: Allocator> Scheduler<A> {
-    pub fn new(allocator: A) -> Self {
-        Self { allocator }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct MockAllocator;
-    impl Allocator for MockAllocator { /* ... */ }
-
-    #[test]
-    fn scheduler_round_robin() {
-        let scheduler = Scheduler::new(MockAllocator);
-        // Test scheduling logic without seL4
-    }
-}
-```
-
-## Panic Handling in Tests
-
-### Host Tests
-
-Standard Rust test behavior - panics are caught and reported as failures.
-
-### QEMU Tests
-
-Implement a custom panic handler that reports to serial and exits:
-
-```rust
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    serial_println!("PANIC: {}", info);
-    exit_qemu(QemuExitCode::Failed);
-}
-```
-
-### Assertions
-
-Use standard `assert!`, `assert_eq!`, `assert_ne!` macros. In QEMU tests, these will trigger the panic handler on failure.
-
-## Test Organization Guidelines
-
-1. **One test file per module**: `parser.rs` has tests in `parser.rs` or `parser/tests.rs`
-2. **Descriptive test names**: `test_tokenize_unclosed_string_returns_error`
-3. **Arrange-Act-Assert pattern**: Clear setup, action, and verification
-4. **No test interdependence**: Each test runs in isolation
-5. **Fast tests first**: Put quick sanity checks before slow property tests
-
-## References
-
-### Rust OS Testing
-
-- [Testing | Writing an OS in Rust](https://os.phil-opp.com/testing/) - Custom test frameworks for bare-metal
-- [Integration Tests | Writing an OS in Rust](https://os.phil-opp.com/integration-tests/) - Separate executable tests
-
-### Embedded Rust Testing
-
-- [Testing an Embedded Application - Ferrous Systems](https://ferrous-systems.com/blog/test-embedded-app/) - Three-tier testing approach
-- [Testing a Hardware Abstraction Layer - Ferrous Systems](https://ferrous-systems.com/blog/defmt-test-hal/) - Mocking strategies
-- [Testing a Driver Crate - Ferrous Systems](https://ferrous-systems.com/blog/test-driver-crate/) - On-target testing
-
-### seL4 Testing
-
-- [seL4Test | seL4 docs](https://docs.sel4.systems/projects/sel4test/) - Official seL4 test framework
-- [rust-sel4 Repository](https://github.com/seL4/rust-sel4) - Rust bindings with test examples
-
-### Tools
-
-- [embedded-hal-mock](https://crates.io/crates/embedded-hal-mock) - Mock HAL traits
-- [defmt-test](https://crates.io/crates/defmt-test) - On-target test harness
-- [embedded-test](https://crates.io/crates/embedded-test) - Test harness for embedded devices
-- [QEMU ARM Virtual Platform | seL4 docs](https://docs.sel4.systems/Hardware/qemu-arm-virt.html) - QEMU configuration
+- Data structure invariants (HAMT, pvec, Integer, Ratio)
+- Arithmetic properties (commutativity, associativity)
+- Round-trip serialization/parsing

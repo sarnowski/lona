@@ -16,7 +16,7 @@
 //! # Modules
 //!
 //! - [`opcode`] - Opcode enum and instruction encoding/decoding (re-exported from lona-core)
-//! - [`chunk`] - Bytecode chunk and constant pool structures (re-exported from lona-core)
+//! - `chunk` - Bytecode chunk and constant pool structures (re-exported from lona-core)
 //! - [`error`] - Compilation error types
 //! - [`compiler`] - AST to bytecode compiler
 //!

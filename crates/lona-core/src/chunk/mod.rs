@@ -24,6 +24,23 @@ use crate::symbol;
 #[cfg(test)]
 mod tests;
 
+/// Describes how to capture a single upvalue at closure creation time.
+///
+/// When a closure is instantiated, the VM reads values from the parent
+/// scope according to these descriptors and copies them into the new
+/// closure's upvalue array.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum UpvalueSource {
+    /// Capture from a local variable register in the immediately enclosing scope.
+    /// The `u8` is the register index in the parent frame.
+    Local(u8),
+    /// Capture from an upvalue in the immediately enclosing scope.
+    /// The `u8` is the upvalue index in the parent's upvalue array.
+    /// Used for nested closures capturing from grandparent+ scopes.
+    ParentUpvalue(u8),
+}
+
 /// Error when the constant pool exceeds its maximum size.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -46,8 +63,8 @@ impl Display for ConstantPoolFullError {
 /// Compile-time representation of a single function arity body.
 ///
 /// Each body represents one arity variant of a (potentially multi-arity)
-/// function. Contains the compiled bytecode, fixed parameter count, and
-/// whether this arity accepts rest arguments.
+/// function. Contains the compiled bytecode, fixed parameter count,
+/// whether this arity accepts rest arguments, and upvalue sources for closures.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct FunctionBodyData {
@@ -57,17 +74,26 @@ pub struct FunctionBodyData {
     pub arity: u8,
     /// Whether this arity accepts rest arguments.
     pub has_rest: bool,
+    /// Describes how to capture each upvalue when creating a closure.
+    /// Empty for functions that don't close over any variables.
+    pub upvalue_sources: Vec<UpvalueSource>,
 }
 
 impl FunctionBodyData {
     /// Creates a new function body data.
     #[inline]
     #[must_use]
-    pub const fn new(chunk: Box<Chunk>, arity: u8, has_rest: bool) -> Self {
+    pub const fn new(
+        chunk: Box<Chunk>,
+        arity: u8,
+        has_rest: bool,
+        upvalue_sources: Vec<UpvalueSource>,
+    ) -> Self {
         Self {
             chunk,
             arity,
             has_rest,
+            upvalue_sources,
         }
     }
 }
@@ -519,8 +545,8 @@ impl Chunk {
                 let _result = write!(output, "R{reg_a}");
             }
 
-            // iABx format - regular global access
-            Opcode::LoadK | Opcode::GetGlobal | Opcode::SetGlobal => {
+            // iABx format - regular global access and closures
+            Opcode::LoadK | Opcode::GetGlobal | Opcode::SetGlobal | Opcode::Closure => {
                 let _result = write!(output, "R{reg_a}, K{bx}");
                 if let Some(constant) = self.get_constant(bx) {
                     let _result = write!(output, "        ; {constant}");
@@ -588,6 +614,12 @@ impl Chunk {
                 } else {
                     let _result = write!(output, "        ; return {reg_b} values");
                 }
+            }
+
+            // Closure operations
+            Opcode::GetUpvalue => {
+                let _result = write!(output, "R{reg_a}, U{reg_b}");
+                let _result = write!(output, "        ; upvalue[{reg_b}]");
             }
         }
     }

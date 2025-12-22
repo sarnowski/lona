@@ -54,7 +54,7 @@ ENV PATH="${CARGO_HOME}/bin:${PATH}"
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- -y --default-toolchain ${RUST_CHANNEL} --profile minimal && \
-    rustup component add rust-src rustfmt clippy llvm-tools-preview
+    rustup component add rust-src rustfmt clippy llvm-tools-preview miri
 
 # Create Python virtual environment and install seL4 tools
 RUN python3 -m venv /opt/seL4-venv && \

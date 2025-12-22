@@ -488,7 +488,7 @@ impl Value {
     /// Returns the symbol ID if this is a `Symbol` variant.
     ///
     /// This returns only the ID, not the full Symbol with metadata.
-    /// Use [`as_symbol_ref`] to get a reference to the full Symbol.
+    /// Use [`Self::as_symbol_ref`] to get a reference to the full Symbol.
     #[inline]
     #[must_use]
     pub const fn as_symbol(&self) -> Option<symbol::Id> {

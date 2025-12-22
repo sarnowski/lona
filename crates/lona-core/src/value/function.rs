@@ -10,6 +10,7 @@ use core::fmt::{self, Display};
 use core::hash::{Hash, Hasher};
 
 use crate::chunk::Chunk;
+use crate::value::Value;
 
 /// Runtime representation of a single function arity body.
 ///
@@ -70,11 +71,8 @@ impl FunctionBody {
 /// A compiled function value.
 ///
 /// Functions are first-class values in Lonala. Each function stores one or
-/// more arity bodies (for multi-arity functions) and an optional name for
-/// debugging.
-///
-/// Note: In Phase 3.3, closures are not supported - functions cannot capture
-/// variables from enclosing scopes.
+/// more arity bodies (for multi-arity functions), an optional name for
+/// debugging, and captured values from enclosing scopes (for closures).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Function {
@@ -82,14 +80,36 @@ pub struct Function {
     bodies: Vec<FunctionBody>,
     /// Optional function name for debugging and error messages.
     name: Option<String>,
+    /// Captured values from enclosing scopes.
+    /// Shared by all arity bodies. Empty for non-closures.
+    upvalues: Arc<[Value]>,
 }
 
 impl Function {
-    /// Creates a new function value from bodies.
+    /// Creates a new function value from bodies with captured upvalues.
     #[inline]
     #[must_use]
-    pub const fn new(bodies: Vec<FunctionBody>, name: Option<String>) -> Self {
-        Self { bodies, name }
+    pub const fn new(
+        bodies: Vec<FunctionBody>,
+        name: Option<String>,
+        upvalues: Arc<[Value]>,
+    ) -> Self {
+        Self {
+            bodies,
+            name,
+            upvalues,
+        }
+    }
+
+    /// Creates a new function value without upvalues (non-closure).
+    #[inline]
+    #[must_use]
+    pub fn new_simple(bodies: Vec<FunctionBody>, name: Option<String>) -> Self {
+        Self {
+            bodies,
+            name,
+            upvalues: Arc::from([]),
+        }
     }
 
     /// Creates a single-arity function (convenience constructor).
@@ -105,7 +125,22 @@ impl Function {
         Self {
             bodies: alloc::vec![body],
             name,
+            upvalues: Arc::from([]),
         }
+    }
+
+    /// Returns the captured upvalues for this closure.
+    #[inline]
+    #[must_use]
+    pub fn upvalues(&self) -> &[Value] {
+        &self.upvalues
+    }
+
+    /// Returns the Arc containing the upvalues (for cloning into frames).
+    #[inline]
+    #[must_use]
+    pub const fn upvalues_arc(&self) -> &Arc<[Value]> {
+        &self.upvalues
     }
 
     /// Returns all arity bodies for this function.
@@ -155,15 +190,32 @@ impl Function {
 }
 
 impl PartialEq for Function {
-    /// Two functions are equal if they have the same first body's chunk (by Arc pointer equality).
+    /// Two functions are equal if they have the same code AND same upvalue allocation.
+    ///
+    /// This implements Clojure-style identity equality for closures: two closures
+    /// are equal only if they share the same code (first body's chunk) AND the
+    /// same upvalue allocation (by pointer identity, not contents).
+    ///
+    /// For non-closures (functions with no captured values), only code identity
+    /// matters since there are no upvalues to compare.
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        // Compare by first body's chunk pointer (if both have bodies)
-        match (self.bodies.first(), other.bodies.first()) {
+        // Same code (first body's chunk pointer)
+        let same_code = match (self.bodies.first(), other.bodies.first()) {
             (Some(self_body), Some(other_body)) => Arc::ptr_eq(&self_body.chunk, &other_body.chunk),
             (None, None) => true,
             _ => false,
-        }
+        };
+
+        // For closures (non-empty upvalues), require same allocation.
+        // For non-closures (empty upvalues), upvalues are trivially equal.
+        let same_upvalues = if self.upvalues.is_empty() && other.upvalues.is_empty() {
+            true // Both are non-closures, no upvalues to compare
+        } else {
+            Arc::ptr_eq(&self.upvalues, &other.upvalues)
+        };
+
+        same_code && same_upvalues
     }
 }
 
@@ -175,6 +227,11 @@ impl Hash for Function {
         // Hash by first body's pointer address for consistency with PartialEq
         if let Some(body) = self.bodies.first() {
             Arc::as_ptr(&body.chunk).hash(state);
+        }
+        // Only include upvalues pointer for closures (non-empty upvalues)
+        // For non-closures, upvalues are trivially equal so don't affect hash
+        if !self.upvalues.is_empty() {
+            Arc::as_ptr(&self.upvalues).hash(state);
         }
     }
 }

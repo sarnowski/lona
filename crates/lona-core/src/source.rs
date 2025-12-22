@@ -77,7 +77,7 @@ impl Location {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct Entry {
-    /// Human-readable name: "<repl>", "<repl:3>", "main.lona", etc.
+    /// Human-readable name: `<repl>`, `<repl:3>`, `main.lona`, etc.
     pub name: String,
     /// The actual source text.
     pub content: String,

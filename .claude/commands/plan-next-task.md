@@ -1,17 +1,48 @@
-We want to implement the next open task from our @docs/roadmap/index.md.
+Select and plan the next open task from the roadmap.
 
-In order for you to understand enough background information to correctly plan the next step, you must read:
+## Step 1: Read Roadmap
 
-  * @docs/goals/index.md
-  * @docs/lonala.md
-  * @docs/development/minimal-rust.md
+Read `docs/roadmap/index.md` completely to understand:
+- Current project state (what's done vs open)
+- Task dependencies
+- The next logical task to implement
 
-Pick the next open task in the roadmap and read the respective milestone document completely. Then check possible relevant existing code.
+## Step 2: Select Next Task
 
-Consider the existing code base and state of implementation as well as the future target picture. Tell me if you see inconsistencies, or issues with the current plan and next steps. Also ask me questions if you need my input to better understand the goals and next steps and design decision. Our goal is to have CORRECT solutions and not hacks or quick fixes. We do NOT want to defer any code or feature. We want the best and most correct solution. You can always do some research in the Internet to also strengthen your understanding of the possible solution space and seek best practices from others.
+Identify the next open task by:
+1. Finding the first `open` task in the roadmap
+2. Verifying its dependencies are `done`
+3. Reading the relevant milestone document for full task details
 
-After you got to a full understanding of the next task with all necessary information, create a plan for yourself. Do NOT keep any backwards compatibility. We strive for the optimal solution and expect refactoring to adopt the code base to new functions and patterns.
+If dependencies are incomplete, flag this and select the appropriate dependency instead.
 
-Then call both Gemini (CLI) and Codex (CLI) in parallel to create plans (don't give them your plan). Ask each to also do all the background research necessary (such as reading our docs and code as well as doing Internet research) and receive a plan back from each. Both should run with the best available model. Think about their plans and compare them with yours. Challenge your own plan with Gemini's and Codex's plans and think about the learnings that you can derive from them. Then review your own plan and check how to improve it in order to achieve optimal results by incorporating insights from all sources.
+## Step 3: Confirm Selection
 
-Finally I want you to think about how to most effectively implement the next task. If the task is too big for one context window, then split this up into multiple tasks. Present me your final plan for the next roadmap task.
+Present the selected task to the user:
+
+```
+Next task: {Task ID} - {Task Name}
+
+From: {Milestone Name}
+
+Description: {Brief description from milestone doc}
+
+Dependencies: {List any, or "None"}
+```
+
+Ask if the user wants to proceed with planning this task.
+
+## Step 4: Invoke Plan Feature Skill
+
+Once confirmed, invoke the `plan-feature` skill with the selected task as the feature to plan.
+
+The skill will:
+- Read all required project documents
+- Research existing code
+- Get independent plans from Gemini and Codex
+- Synthesize insights
+- Write a phased plan to PLAN.md
+
+## Done
+
+Selection is complete when the user confirms the task and `plan-feature` is invoked.

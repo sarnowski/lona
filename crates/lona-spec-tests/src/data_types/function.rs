@@ -69,10 +69,8 @@ fn test_3_13_function_identity_comparison() {
     );
 }
 
-/// [IGNORED] Spec 3.13: Same function value is equal to itself
-/// Tracking: Function identity equality not yet implemented
+/// Spec 3.13: Same function value is equal to itself
 #[test]
-#[ignore]
 fn test_3_13_function_same_reference() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def f (fn [x] x))").unwrap();
@@ -95,7 +93,7 @@ fn test_3_13_named_function() {
 }
 
 /// [IGNORED] Spec 3.13: Closures capture lexical environment
-/// Tracking: Closures planned for Phase 5.2
+/// Tracking: Task 1.2.2 - Compiler complete (Phase 2), VM pending (Phase 3)
 #[test]
 #[ignore]
 fn test_3_13_closure() {

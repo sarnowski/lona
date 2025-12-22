@@ -203,11 +203,35 @@ pub enum Opcode {
     /// Unlike `GetGlobal` which returns the Var's value, this returns the
     /// Var itself. Used for `(var x)` and `#'x` syntax to access metadata.
     GetGlobalVar = 26,
+
+    // =========================================================================
+    // Closure Operations
+    // =========================================================================
+    /// Get upvalue: `R[A] = Upvalues[B]`
+    ///
+    /// Format: iABC (C unused)
+    /// - A: destination register
+    /// - B: upvalue index
+    ///
+    /// Reads a captured value from the current closure's upvalue array.
+    GetUpvalue = 27,
+
+    /// Create closure: `R[A] = closure(K[Bx])`
+    ///
+    /// Format: iABx
+    /// - A: destination register
+    /// - Bx: constant index of function template
+    ///
+    /// Creates a closure by:
+    /// 1. Loading the function template from K\[Bx\]
+    /// 2. Copying captured values according to `upvalue_sources`
+    /// 3. Storing the new Function in R\[A\]
+    Closure = 28,
 }
 
 impl Opcode {
     /// Maximum valid opcode value.
-    pub const MAX: u8 = 26;
+    pub const MAX: u8 = 28;
 
     /// Converts a byte to an opcode, returning `None` for invalid values.
     #[inline]
@@ -241,6 +265,8 @@ impl Opcode {
             24 => Some(Self::Return),
             25 => Some(Self::SetGlobalMeta),
             26 => Some(Self::GetGlobalVar),
+            27 => Some(Self::GetUpvalue),
+            28 => Some(Self::Closure),
             _ => None,
         }
     }
@@ -277,6 +303,8 @@ impl Opcode {
             Self::Return => "Return",
             Self::SetGlobalMeta => "SetGlobalMeta",
             Self::GetGlobalVar => "GetGlobalVar",
+            Self::GetUpvalue => "GetUpvalue",
+            Self::Closure => "Closure",
         }
     }
 }

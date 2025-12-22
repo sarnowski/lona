@@ -11,7 +11,7 @@ use lona_core::chunk::Constant;
 use lona_core::opcode::{Opcode, encode_abc, encode_abx};
 use lona_core::span::Span;
 
-use super::{Compiler, ExprResult};
+use super::{Compiler, ExprResult, SymbolResolution};
 use crate::error::Error;
 
 impl Compiler<'_, '_, '_> {
@@ -208,29 +208,40 @@ impl Compiler<'_, '_, '_> {
     // Symbol Compilation
     // =========================================================================
 
-    /// Compiles a symbol as a local or global variable lookup.
+    /// Compiles a symbol as a local, upvalue, or global variable lookup.
     ///
-    /// First checks local scopes (for `let` bindings and function parameters),
-    /// falling back to global lookup if not found locally.
+    /// Resolution order:
+    /// 1. Local variables in the current function (`Move` instruction)
+    /// 2. Captured upvalues (`GetUpvalue` instruction)
+    /// 3. Global lookup (`GetGlobal` instruction)
     pub(super) fn compile_symbol(&mut self, name: &str, span: Span) -> Result<ExprResult, Error> {
         let sym_id = self.interner.intern(name);
 
-        // First, check local variables
-        if let Some(local_reg) = self.locals.lookup(sym_id) {
-            // Local variable - copy from its register to dest if needed
-            let dest = self.alloc_register(span)?;
-            if local_reg != dest {
-                self.chunk
-                    .emit(encode_abc(Opcode::Move, dest, local_reg, 0), span);
+        match self.resolve_symbol(sym_id) {
+            SymbolResolution::Local(local_reg) => {
+                // Local variable - copy from its register to dest if needed
+                let dest = self.alloc_register(span)?;
+                if local_reg != dest {
+                    self.chunk
+                        .emit(encode_abc(Opcode::Move, dest, local_reg, 0), span);
+                }
+                Ok(ExprResult { register: dest })
             }
-            return Ok(ExprResult { register: dest });
+            SymbolResolution::Upvalue(upvalue_idx) => {
+                // Captured upvalue - load from upvalue array
+                let dest = self.alloc_register(span)?;
+                self.chunk
+                    .emit(encode_abc(Opcode::GetUpvalue, dest, upvalue_idx, 0), span);
+                Ok(ExprResult { register: dest })
+            }
+            SymbolResolution::Global => {
+                // Global variable lookup
+                let dest = self.alloc_register(span)?;
+                let const_idx = self.add_constant(Constant::Symbol(sym_id), span)?;
+                self.chunk
+                    .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
+                Ok(ExprResult { register: dest })
+            }
         }
-
-        // Not a local, fall back to global lookup
-        let dest = self.alloc_register(span)?;
-        let const_idx = self.add_constant(Constant::Symbol(sym_id), span)?;
-        self.chunk
-            .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
-        Ok(ExprResult { register: dest })
     }
 }

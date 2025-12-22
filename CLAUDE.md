@@ -1,45 +1,23 @@
-# CLAUDE.md
+# Agent Instructions
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents such as Claude Code, Gemini and Codex when working with code in this repository.
 
 ## Project Overview
 
-Lona is a general-purpose operating system combining:
-- **seL4 microkernel** - formally verified, capability-based security
-- **LISP machine philosophy** - runtime introspection, hot-patching
-- **Erlang/OTP concurrency model** - lightweight processes, supervision trees, "let it crash"
+Lona is an operating system for developers who want full transparency and control over their computing stack. It unifies the strong security of the **seL4 microkernel** with the introspective power of a **LISP machine** and the fault-tolerant concurrency of **Erlang/OTP**. Programmed entirely in **Lonala**, a Clojure-inspired language, Lona lets you inspect, debug, and live-patch every layer of the system—from drivers to applications—without reboots, without opaque binaries, and without sacrificing security.
 
-The runtime is written in Rust (`no_std`) and runs as seL4's root task. Userspace will be programmed in Lonala, a custom Clojure/Erlang-inspired language.
+The runtime is written in Rust (`no_std`) and runs as seL4's root task.
 
-## Required Reading
+## Mandatory Reading
 
-**Read when planning new features or tasks:**
-- `docs/development/principles.md` - The governing development principles. Consult for all decisions.
-- `docs/goals/index.md` - The complete vision and design philosophy. Consult when making architectural decisions.
-- `docs/roadmap/index.md` - The phased roadmap, component dependencies, and current status.
-- `docs/lonala/index.md` - The Lonala language specification.
-- `docs/development/minimal-rust.md` - The Lonala-first principle. Consult before adding any native function.
+**You MUST read these files before doing ANY work in this codebase:**
 
-## Required Principle
+1. @docs/goals/index.md - The complete vision and design philosophy
+2. @docs/development/principles.md - The governing development principles
+3. @docs/roadmap/index.md - The phased roadmap and current status
+4. @docs/lonala/index.md - The Lonala language specification
 
-Always aim for the correct solution. Never take a shortcut, workaround, hack or defer a solution. We always favor the correct solution, even if it is more effort.
-
-## Lonala-First Principle
-
-**Everything achievable in Lonala MUST be implemented in Lonala, not Rust.**
-
-The Rust runtime exists solely to provide the minimal foundation that Lonala cannot provide for itself. This follows the LISP tradition where the entire language is built from a handful of primitives.
-
-### Review Checklist
-
-Before adding ANY native function, ask:
-
-1. Can this be implemented using existing primitives? → **Implement in Lonala**
-2. Does this require hardware access? → Native is acceptable
-3. Does this require inspecting runtime type tags? → Native is acceptable
-4. Is this purely for efficiency? → **Implement in Lonala first**, optimize later only if profiling proves necessary
-
-**When in doubt: Lonala.**
+These four documents provide essential context for understanding the project. Other files linked from these should be read on demand as needed.
 
 ## Directory Structure
 
@@ -47,26 +25,42 @@ Before adding ANY native function, ask:
 lona/
 ├── Cargo.toml                    # Workspace root
 ├── Makefile                      # Build orchestration (docker, check, build, run, test)
-├── CLAUDE.md                     # AI assistant instructions (this file)
+├── CLAUDE.md                     # AI agent instructions (this file)
+├── AGENTS.md                     # Symlink to CLAUDE.md (for other agents)
+├── README.md                     # Project README
+├── PLAN.md                       # Current development plan
+├── mkdocs.yml                    # Documentation site configuration
+├── docker-compose.yml            # Docker Compose configuration
+├── rust-toolchain.toml           # Rust toolchain specification
+├── requirements.txt              # Python dependencies (for tools)
 │
 ├── crates/
 │   ├── lona-core/                # Foundational types (100% host-testable)
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── allocator.rs      # Bump allocator traits
+│   │       ├── allocator_tests.rs
+│   │       ├── binary.rs         # Binary data handling
 │   │       ├── chunk/            # Bytecode chunk format
+│   │       ├── error_context.rs  # Error context tracking
+│   │       ├── fnv.rs            # FNV hash algorithm
 │   │       ├── hamt/             # Hash Array Mapped Trie (persistent maps)
 │   │       ├── integer/          # Arbitrary-precision integers
 │   │       ├── list.rs           # Cons cell lists
+│   │       ├── list_tests.rs
 │   │       ├── map/              # Persistent hash maps
+│   │       ├── meta.rs           # Metadata handling
 │   │       ├── opcode/           # VM instruction encoding
 │   │       ├── pvec/             # Persistent vectors
 │   │       ├── ratio/            # Arbitrary-precision ratios
+│   │       ├── set/              # Persistent sets
 │   │       ├── source.rs         # Source tracking
+│   │       ├── span.rs           # Source spans
 │   │       ├── string.rs         # Immutable string type
 │   │       ├── symbol.rs         # Interned symbols
 │   │       ├── value/            # Core value types
-│   │       └── vector.rs         # Vector utilities
+│   │       ├── vector.rs         # Vector utilities
+│   │       └── vector_tests.rs
 │   │
 │   ├── lona-kernel/              # VM and runtime abstractions (host-testable)
 │   │   └── src/
@@ -126,6 +120,21 @@ lona/
 │       └── src/
 │
 ├── docs/
+│   ├── index.md                  # Documentation homepage
+│   ├── installation.md           # Installation guide for physical hardware
+│   ├── license.md                # License information (GPL-3.0)
+│   │
+│   ├── assets/                   # Static assets
+│   │   ├── fonts/                # Web fonts
+│   │   ├── favicon.svg           # Site favicon
+│   │   └── logo.svg              # Lona logo
+│   │
+│   ├── includes/                 # MkDocs includes
+│   │   └── glossary.md           # Shared glossary
+│   │
+│   ├── overrides/                # MkDocs theme overrides
+│   │   └── stylesheets/          # Custom CSS
+│   │
 │   ├── goals/                    # Project vision and design philosophy
 │   │   ├── index.md              # Vision + 4 pillars overview
 │   │   ├── pillar-sel4.md        # seL4 security foundation
@@ -136,15 +145,15 @@ lona/
 │   │   ├── system-design.md      # Implementation mechanics
 │   │   └── non-goals.md          # What we don't build
 │   │
-│   ├── installation.md           # Installation guide for physical hardware
-│   ├── license.md                # License information (GPL-3.0)
-│   │
 │   ├── development/              # Development guidelines
 │   │   ├── principles.md         # Governing development principles
+│   │   ├── defnative.md          # Native function guidelines
+│   │   ├── editor-plan.md        # Editor integration plan
 │   │   ├── lisp-machine.md       # LISP machine philosophy
+│   │   ├── lonala-coding-guidelines.md
 │   │   ├── minimal-rust.md       # Lonala-first principle
 │   │   ├── rust-coding-guidelines.md
-│   │   ├── lonala-coding-guidelines.md
+│   │   ├── tco.md                # Tail call optimization design
 │   │   └── testing-strategy.md
 │   │
 │   ├── lonala/                   # Lonala language specification
@@ -169,92 +178,48 @@ lona/
 │       └── milestone-*.md        # Individual milestone details
 │
 ├── docker/
-│   └── Dockerfile                # Development environment with seL4 SDK
+│   ├── Dockerfile.base           # Base image with seL4 SDK
+│   ├── Dockerfile.aarch64        # ARM64 build environment
+│   ├── Dockerfile.x86_64         # x86_64 build environment
+│   └── Makefile                  # Docker build helpers
+│
+├── scripts/
+│   └── run-integration-tests.sh  # Integration test runner
 │
 ├── support/
-│   └── targets/
-│       └── aarch64-sel4.json     # Custom Rust target for seL4
+│   ├── boot/                     # Boot configuration files
+│   │   ├── grub-x86_64.cfg       # GRUB config for x86_64
+│   │   ├── rpi4b-boot.txt        # Raspberry Pi 4 boot script
+│   │   └── rpi4b-config.txt      # Raspberry Pi 4 config
+│   │
+│   └── targets/                  # Rust target specifications
+│       ├── README.md             # Target documentation
+│       ├── aarch64-sel4.json     # ARM64 Rust target for seL4
+│       └── x86_64-sel4.json      # x86_64 Rust target for seL4
+│
+├── tools/
+│   ├── lona_dev_repl/            # MCP server for REPL access
+│   │   ├── __init__.py
+│   │   ├── __main__.py
+│   │   ├── repl_manager.py       # QEMU/REPL management
+│   │   └── server.py             # MCP server implementation
+│   │
+│   └── pygments-lonala/          # Syntax highlighter for Lonala
+│       └── pyproject.toml
 │
 ├── lona/                         # Lonala standard library
 │   └── core.lona                 # Core macros (defn, when, etc.)
 │
 └── .claude/                      # Claude Code configuration
-    ├── commands/                 # Custom slash commands (git-commit)
-    ├── agents/                   # Custom agents (lona-code-reviewer)
-    └── skills/                   # Workflow skills (develop-runtime, develop-lona, finishing-work)
+    ├── commands/                 # Custom slash commands (git-commit, plan-next-task)
+    └── skills/                   # Workflow skills (develop-rust, develop-lonala, finishing-work)
 ```
 
 ## Workflows
 
-- **Before writing any Rust code**: Load the `develop-runtime` skill and follow its instructions
-- **Before writing any Lonala code**: Load the `develop-lona` skill and follow its instructions
+- **Before writing any Rust code**: Load the `develop-rust` skill and follow its instructions
+- **Before writing any Lonala code**: Load the `develop-lonala` skill and follow its instructions
 - **When finishing all work**: Load the `finishing-work` skill and follow its instructions
-
-## Test-First Bug Fixing (MANDATORY)
-
-**CRITICAL: ALL bug fixes MUST follow a test-first approach. No exceptions.**
-
-When you encounter a bug—whether reported by the user OR discovered during development—you MUST:
-
-1. **Write a failing test FIRST** that demonstrates the bug
-2. **Verify the test fails** against the current (buggy) code
-3. **Then fix the bug** to make the test pass
-4. **Keep the test** as a permanent regression test
-
-### Why This Matters
-
-- Tests prove the bug exists and is reproducible
-- Tests document the expected behavior
-- Tests prevent the same bug from recurring
-- Tests serve as living documentation of edge cases
-
-### Workflow
-
-The `develop-runtime` skill contains the detailed Bug Fix Workflow (Steps B1-B6). Load it before starting any bug fix work.
-
-### Examples of When This Applies
-
-- User reports: "The parser crashes on empty input" → Write test first
-- You notice: "This function doesn't handle negative numbers" → Write test first
-- CI reveals: "Test flakes under high load" → Write test first
-- Code review finds: "Edge case not handled" → Write test first
-
-### What Counts as a Bug
-
-- Incorrect behavior (code does the wrong thing)
-- Missing behavior (code doesn't handle a valid case)
-- Crashes or panics on valid input
-- Performance regressions (if measurable via tests)
-- Security issues (if demonstrable via tests)
-
-**Remember: If you're about to fix something, write a test for it first.**
-
-## Clippy Policy
-
-**CRITICAL: You MUST NOT disable any clippy check at any level (file, module, crate, or workspace).**
-
-A pre-tool hook (`.claude/hooks/check-clippy-directives.py`) automatically blocks any attempt to add `#[allow(...)]` or `#[expect(...)]` directives without proper approval.
-
-When encountering clippy warnings or errors:
-1. **Always attempt to fix the issue correctly first**
-2. **If the issue cannot be correctly resolved**:
-   - Explain the issue to the user in detail
-   - Provide your recommendation for how to handle it
-   - Wait for the user's EXPLICIT approval before taking any action
-3. **Never use `#[allow(...)]`, `#[expect(...)]`, `#[cfg_attr(..., allow(...))]`, `#[cfg_attr(..., expect(...))]`, or clippy.toml to suppress warnings without explicit user approval**
-4. **Never add `#![allow(clippy::...)]` or `#![expect(clippy::...)]` to any file**
-
-The user MUST give explicit approval for ANY exception to clippy rules. Do not assume approval.
-
-### Approved Directive Format
-
-When the user explicitly approves a suppression, include the `[approved]` marker in the directive's reason:
-
-```rust
-#[expect(clippy::lint_name, reason = "[approved] explanation of why this is needed")]
-```
-
-The hook checks for `[approved]` (case-insensitive) in the reason string. Without this marker, the hook will block the operation.
 
 ## Build Commands
 
@@ -283,14 +248,13 @@ The following MCP tools are available for interactive testing in the real seL4 e
 For code review and analysis, these CLI tools are available:
 
 ```bash
-# Gemini (multiline via command substitution)
-gemini -m gemini-3-pro-preview "$(cat <<'EOF'
-Your prompt here
-EOF
-)"
+# Gemini
+timeout 900 gemini -m gemini-3-pro-preview -s "PROMPT"
 
-# Codex (multiline via stdin, high reasoning)
-cat <<'EOF' | codex exec -m gpt-5.2 -c model_reasoning_effort=high -
-Your prompt here
-EOF
+# Codex
+timeout 900 codex exec -m gpt-5.2 -c model_reasoning_effort=medium "PROMPT"
 ```
+
+Both accept prompts as positional arguments. For multiline prompts, use proper shell quoting.
+
+**Important:** When crafting prompts, include references to relevant files (e.g., `docs/goals/index.md`, `docs/development/principles.md`) so the agent knows which documents to read for context.

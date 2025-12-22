@@ -185,7 +185,7 @@ impl<'interner> Vm<'interner> {
 
     /// Executes a chunk of bytecode with initial argument values.
     ///
-    /// The arguments are placed in registers R[0], R[1], ..., R[n-1] before
+    /// The arguments are placed in registers R\[0\], R\[1\], ..., R\[n-1\] before
     /// execution begins. This is used for macro expansion where the macro
     /// transformer receives its arguments as register values.
     ///
@@ -299,6 +299,10 @@ impl<'interner> Vm<'interner> {
                 let count = decode_b(instruction);
                 return Ok(DispatchResult::Return(self.op_return(dest, count, frame)?));
             }
+
+            // Closure Operations
+            Opcode::GetUpvalue => self.op_get_upvalue(instruction, frame)?,
+            Opcode::Closure => self.op_closure(instruction, frame)?,
 
             // Handle future Opcode variants (Opcode is #[non_exhaustive])
             _ => {
@@ -425,7 +429,7 @@ impl<'interner> Vm<'interner> {
                         FunctionBody::new(chunk_arc, body.arity, body.has_rest)
                     })
                     .collect();
-                Value::Function(Function::new(fn_bodies, name.clone()))
+                Value::Function(Function::new_simple(fn_bodies, name.clone()))
             }
             // Handle Nil and future Constant variants (Constant is #[non_exhaustive])
             Constant::Nil | _ => Value::Nil,

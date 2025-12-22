@@ -120,6 +120,9 @@ pub fn values_equal(left: &Value, right: &Value) -> bool {
         // Set equality (order-independent, semantic value comparison)
         (&Value::Set(ref left_set), &Value::Set(ref right_set)) => sets_equal(left_set, right_set),
 
+        // Function equality (identity-based via PartialEq)
+        (&Value::Function(ref left_fn), &Value::Function(ref right_fn)) => left_fn == right_fn,
+
         // Different types are not equal
         _ => false,
     }

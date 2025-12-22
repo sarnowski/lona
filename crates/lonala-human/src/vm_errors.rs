@@ -95,6 +95,11 @@ impl Diagnostic for Error {
                     },
                 )
             }
+            Kind::InvalidUpvalue { index, available } => {
+                format!(
+                    "closure captured variable out of bounds (index {index}, closure has {available} captured values)"
+                )
+            }
             // Non-exhaustive pattern: future variants
             _ => String::from("runtime error"),
         }
@@ -107,7 +112,8 @@ impl Diagnostic for Error {
         match self.kind {
             Kind::InvalidOpcode { .. }
             | Kind::InvalidConstant { .. }
-            | Kind::InvalidRegister { .. } => {
+            | Kind::InvalidRegister { .. }
+            | Kind::InvalidUpvalue { .. } => {
                 notes.push(Note::text_static(
                     "this may indicate a corrupted bytecode chunk",
                 ));

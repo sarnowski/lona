@@ -3,16 +3,19 @@
 
 //! Call frame for tracking execution state within a function.
 
+use alloc::sync::Arc;
+
 use lona_core::chunk::Chunk;
 use lona_core::source::{self, Location as SourceLocation};
 use lona_core::span::Span;
+use lona_core::value::Value;
 
 /// A call frame representing execution state within a single function.
 ///
 /// Each function call creates a new frame on the call stack. The frame
 /// tracks the bytecode being executed, the program counter, the base
-/// register for this function's local variables, and the source ID for
-/// error reporting.
+/// register for this function's local variables, the source ID for
+/// error reporting, and captured values for closures.
 #[derive(Debug)]
 pub struct Frame<'chunk> {
     /// The bytecode chunk being executed.
@@ -23,10 +26,12 @@ pub struct Frame<'chunk> {
     base: usize,
     /// Source ID for error reporting.
     source: source::Id,
+    /// Captured values for this closure. Empty for non-closures.
+    upvalues: Arc<[Value]>,
 }
 
 impl<'chunk> Frame<'chunk> {
-    /// Creates a new call frame.
+    /// Creates a new call frame without upvalues (for top-level code).
     ///
     /// # Parameters
     /// - `chunk`: The bytecode to execute
@@ -34,12 +39,37 @@ impl<'chunk> Frame<'chunk> {
     /// - `source`: The source ID for error reporting
     #[inline]
     #[must_use]
-    pub const fn new(chunk: &'chunk Chunk, base: usize, source: source::Id) -> Self {
+    pub fn new(chunk: &'chunk Chunk, base: usize, source: source::Id) -> Self {
         Self {
             chunk,
             pc: 0,
             base,
             source,
+            upvalues: Arc::from([]),
+        }
+    }
+
+    /// Creates a new call frame with captured upvalues (for closures).
+    ///
+    /// # Parameters
+    /// - `chunk`: The bytecode to execute
+    /// - `base`: The base register index for this frame's locals
+    /// - `source`: The source ID for error reporting
+    /// - `upvalues`: Captured values from enclosing scopes
+    #[inline]
+    #[must_use]
+    pub const fn with_upvalues(
+        chunk: &'chunk Chunk,
+        base: usize,
+        source: source::Id,
+        upvalues: Arc<[Value]>,
+    ) -> Self {
+        Self {
+            chunk,
+            pc: 0,
+            base,
+            source,
+            upvalues,
         }
     }
 
@@ -69,6 +99,20 @@ impl<'chunk> Frame<'chunk> {
     #[must_use]
     pub const fn source(&self) -> source::Id {
         self.source
+    }
+
+    /// Returns the captured upvalues for this closure.
+    #[inline]
+    #[must_use]
+    pub fn upvalues(&self) -> &[Value] {
+        &self.upvalues
+    }
+
+    /// Returns the Arc containing the upvalues (for cloning into child frames).
+    #[inline]
+    #[must_use]
+    pub const fn upvalues_arc(&self) -> &Arc<[Value]> {
+        &self.upvalues
     }
 
     /// Fetches the next instruction and advances the program counter.
@@ -343,5 +387,38 @@ mod tests {
         let loc1 = frame.location_at(1);
         assert_eq!(loc1.source, source_id);
         assert_eq!(loc1.span, span2);
+    }
+
+    #[test]
+    fn new_frame_has_empty_upvalues() {
+        let chunk = make_chunk(&[(
+            encode_abc(Opcode::Return, 0, 0, 0),
+            Span::new(0_usize, 1_usize),
+        )]);
+        let frame = Frame::new(&chunk, 0, test_source());
+        assert!(frame.upvalues().is_empty());
+    }
+
+    #[test]
+    fn frame_with_upvalues_stores_values() {
+        use lona_core::integer::Integer;
+
+        let chunk = make_chunk(&[(
+            encode_abc(Opcode::Return, 0, 0, 0),
+            Span::new(0_usize, 1_usize),
+        )]);
+        let upvalues: Arc<[Value]> = Arc::from([
+            Value::Integer(Integer::from_i64(42)),
+            Value::Bool(true),
+            Value::Nil,
+        ]);
+        let frame = Frame::with_upvalues(&chunk, 0, test_source(), upvalues.clone());
+
+        assert_eq!(frame.upvalues().len(), 3);
+        assert_eq!(
+            frame.upvalues().first(),
+            Some(&Value::Integer(Integer::from_i64(42)))
+        );
+        assert!(Arc::ptr_eq(frame.upvalues_arc(), &upvalues));
     }
 }

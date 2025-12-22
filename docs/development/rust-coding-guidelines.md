@@ -1,278 +1,299 @@
 # Rust Coding Guidelines for Lona
 
-This document defines coding guidelines and best practices for developing Lona's runtime in Rust on seL4. These guidelines complement the testing strategy and focus on patterns that are unusual or especially important for bare-metal seL4 development.
+Coding guidelines for Lona's `no_std` Rust runtime on seL4.
 
 ---
 
-## Overview
+## Quick Reference
 
-Developing Rust for seL4 differs from typical Rust applications in several ways:
-
-| Aspect | Normal Rust | seL4 Rust |
-|--------|-------------|-----------|
-| Standard library | Full `std` | `no_std` + `alloc` |
-| Memory allocation | System allocator | Custom `GlobalAlloc` on seL4 untypeds |
-| Panic handling | Unwind by default | Abort only, custom handler |
-| Error trait | `std::error::Error` | Not available in `core` (as of Rust 1.81, moved to core) |
-| Concurrency | OS threads | seL4 TCBs + green threads |
-| I/O | File descriptors | Capabilities + MMIO |
+| Pattern | Correct | Wrong |
+|---------|---------|-------|
+| Arithmetic | `x.checked_add(1)?` | `x + 1` |
+| Indexing | `slice.get(i)?` | `slice[i]` |
+| Type conversion | `u16::try_from(x)?` | `x as u16` |
+| Widening | `u32::from(byte)` | `byte as u32` |
+| Integer literals | `42_u32`, `0_usize` | `42`, `0` |
+| Unsafe blocks | One operation per block | Multiple operations |
+| Variable names | `index`, `count` | `i`, `n` |
+| Module types | `uart::Driver` | `uart::UartDriver` |
 
 ---
 
-## Code Organization
-
-### Layered Architecture
-
-Structure code to maximize host-testability by separating hardware-independent logic:
+## Crate Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  lona-runtime (seL4-specific, QEMU-tested only)         │
-│  - Root task entry point                                │
-│  - seL4 system calls                                    │
-│  - Hardware interaction                                 │
-├─────────────────────────────────────────────────────────┤
-│  lona-kernel (abstractions, mostly host-testable)       │
-│  - Traits for hardware abstraction                      │
-│  - Domain/Process logic with mock implementations       │
-├─────────────────────────────────────────────────────────┤
-│  lonala-compiler, lonala-parser (pure logic)            │
-│  - Zero seL4 dependencies                               │
-│  - 100% host-testable                                   │
-├─────────────────────────────────────────────────────────┤
-│  lona-core (foundational types)                         │
-│  - Value types, traits, errors                          │
-│  - 100% host-testable                                   │
-└─────────────────────────────────────────────────────────┘
+lona-runtime    (seL4-specific, QEMU-tested only)
+    ↓
+lona-kernel     (abstractions, mostly host-testable)
+    ↓
+lonala-compiler, lonala-parser  (pure logic, 100% host-testable)
+    ↓
+lona-core       (foundational types, 100% host-testable)
 ```
 
-### Crate Design Principles
-
-1. **Minimize seL4 dependencies**: Only `lona-runtime` should depend on `sel4` and `sel4-root-task`
-2. **Use traits for hardware abstraction**: Enable mocking in tests
-3. **Prefer `core` over `alloc`**: Use `alloc` only when heap is necessary
-4. **Feature-gate allocator-dependent code**: Allow crates to be used without allocation
-
-```rust
-// In Cargo.toml
-[features]
-default = ["alloc"]
-alloc = []
-
-// In lib.rs
-#![no_std]
-
-#[cfg(feature = "alloc")]
-extern crate alloc;
-
-#[cfg(feature = "alloc")]
-use alloc::vec::Vec;
-```
+**Principles:**
+- Only `lona-runtime` depends on `sel4` crates
+- Use traits for hardware abstraction (enables mocking)
+- Prefer `core` over `alloc`; feature-gate allocation-dependent code
 
 ---
 
 ## `no_std` Patterns
 
-### Available vs Unavailable
+### Available Types
 
-| Available in `core` | Available in `alloc` | Not available |
-|---------------------|----------------------|---------------|
-| `Option`, `Result` | `Vec`, `String` | `std::io` |
-| `Iterator` | `Box`, `Rc`, `Arc` | `std::fs` |
-| Primitives, slices | `BTreeMap`, `BTreeSet` | `HashMap`, `HashSet`* |
-| `core::fmt` | `format!` macro | `std::net` |
-| Atomics, SIMD | `Cow`, `ToOwned` | `std::thread` |
+| `core` | `alloc` | Unavailable |
+|--------|---------|-------------|
+| `Option`, `Result`, `Iterator` | `Vec`, `String`, `Box` | `HashMap`*, `std::io` |
+| Primitives, slices, atomics | `BTreeMap`, `Rc`, `Arc` | `std::fs`, `std::net` |
 
-*`HashMap`/`HashSet` require random seeds from OS; use `BTreeMap`/`BTreeSet` or provide custom hasher.
+*Use `BTreeMap` instead (no random seed required).
 
-### Import Conventions
-
-Use explicit paths from `core` and `alloc`:
+### Imports
 
 ```rust
-// Good: explicit about no_std
 use core::fmt::{self, Display};
 use core::result::Result;
 
 #[cfg(feature = "alloc")]
 use alloc::{string::String, vec::Vec};
-
-// Bad: assumes prelude availability
-use std::fmt::Display;
 ```
 
 ### Fallible Allocation
 
-Standard `alloc` assumes infallible allocation. For memory-constrained environments, use fallible APIs:
-
 ```rust
-// Preferred: fallible allocation
+// Preferred: fallible
 let mut vec = Vec::new();
 vec.try_reserve(100)?;
 
-// Or use try_* methods where available
-let boxed = Box::try_new(value)?;
-
 // Avoid: panics on OOM
 let vec = Vec::with_capacity(100);
-let boxed = Box::new(value);
 ```
 
 ---
 
-## Unsafe Code Guidelines
+## Numeric Safety
 
-### The SAFETY Comment Convention
+The workspace enforces `clippy::arithmetic_side_effects`, `clippy::indexing_slicing`, `clippy::as_conversions`, and `clippy::default_numeric_fallback`.
 
-Every `unsafe` block must have a preceding `// SAFETY:` comment explaining why the code is sound:
+### Arithmetic
+
+Never use raw `+`, `-`, `*`, `/`, `%`, `<<`, `>>`:
 
 ```rust
-// SAFETY: `ptr` is valid because:
-// 1. It was obtained from `Box::into_raw()` in `new()`
-// 2. No other code has access to this pointer
-// 3. The pointer is properly aligned for `T`
-unsafe {
-    Box::from_raw(ptr)
-}
+// Use checked_* when overflow is an error
+let size = count.checked_mul(FRAME_SIZE).ok_or(Error::SizeOverflow)?;
+
+// Use saturating_* for counters that shouldn't wrap
+self.retry_count = self.retry_count.saturating_add(1);
+
+// Use wrapping_* when wrap semantics are intentional
+self.sequence = self.sequence.wrapping_add(1);
 ```
 
-### Safety Documentation for Functions
+### Integer Literals
 
-Unsafe functions must document their preconditions under a `# Safety` section:
+Always add explicit type suffixes:
 
 ```rust
-/// Writes a byte to the UART transmit register.
-///
-/// # Safety
-///
-/// - `base_addr` must point to a valid UART MMIO region
-/// - The UART must be initialized before calling this function
-/// - The caller must have exclusive access to the UART
-pub unsafe fn uart_write_byte(base_addr: *mut u8, byte: u8) {
-    // SAFETY: Caller guarantees base_addr is valid UART MMIO
-    unsafe {
-        core::ptr::write_volatile(base_addr.add(TX_OFFSET), byte);
-    }
-}
+for _ in 0_u32..4_u32 { }
+let count: usize = 0;
 ```
 
-### Safe Abstraction Pattern
+### Type Conversions
 
-Encapsulate unsafe operations behind safe APIs:
+Never use `as` for numeric conversions:
 
 ```rust
-/// A UART driver with ownership-based safety.
+// Fallible narrowing
+let small = u8::try_from(large_value)?;
+
+// Infallible widening
+let wider = u32::from(byte_value);
+```
+
+For unavoidable pointer casts (MMIO, allocators), use local `#[expect]`:
+
+```rust
+#[expect(clippy::as_conversions, reason = "[approved] MMIO base address")]
+let base = region.starting_address as usize;
+```
+
+### Indexing
+
+Never use `[]` indexing:
+
+```rust
+let item = slice.get(index).ok_or(Error::OutOfBounds)?;
+let range = data.get(start..end).ok_or(Error::InvalidRange)?;
+```
+
+---
+
+## Unsafe Code
+
+### SAFETY Comments
+
+Every `unsafe` block requires a preceding `// SAFETY:` comment:
+
+```rust
+// SAFETY: ptr is valid from Box::into_raw(), aligned, and exclusively owned
+unsafe { Box::from_raw(ptr) }
+```
+
+### One Operation Per Block
+
+Each `unsafe` block contains **exactly one** unsafe operation:
+
+```rust
+// SAFETY: allocator is initialized
+let ptr = unsafe { allocate_page() };
+
+let frame = Frame::new(ptr);
+
+// SAFETY: frame is valid, vaddr is unmapped
+unsafe { map_frame(frame, vaddr) };
+```
+
+### Safe Abstractions
+
+Encapsulate unsafe behind safe APIs:
+
+```rust
 pub struct Uart {
-    base: *mut u8,
+    base: *mut u32,
 }
 
 impl Uart {
-    /// Creates a new UART driver.
-    ///
     /// # Safety
-    ///
-    /// - `base` must point to valid UART MMIO memory
-    /// - Only one `Uart` instance may exist per physical UART
-    pub unsafe fn new(base: *mut u8) -> Self {
+    /// - `base` must point to valid UART MMIO
+    /// - Only one instance per physical UART
+    pub unsafe fn new(base: *mut u32) -> Self {
         Self { base }
     }
 
-    /// Writes a byte (safe because we own the UART).
+    /// Safe because constructor guarantees validity, `&mut self` guarantees exclusivity.
     pub fn write_byte(&mut self, byte: u8) {
-        // SAFETY: Constructor guarantees base is valid, &mut self
-        // guarantees exclusive access
+        // SAFETY: constructor guarantees base is valid MMIO
         unsafe {
-            core::ptr::write_volatile(self.base.add(TX_OFFSET), byte);
+            core::ptr::write_volatile(self.base, u32::from(byte));
         }
     }
 }
 ```
 
-### Minimizing Unsafe Scope
+### Manual Send/Sync
 
-Each `unsafe` block must contain **exactly one** unsafe operation. This makes it clear which operation requires the safety justification:
-
-```rust
-// Bad: multiple unsafe operations in one block
-unsafe {
-    let ptr = allocate_page();
-    let page_num = ptr as usize / PAGE_SIZE;
-    let frame = Frame::new(page_num);
-    map_frame(frame, vaddr);
-    initialize_page(ptr);
-}
-
-// Good: one unsafe operation per block, pure logic outside
-// SAFETY: allocator is initialized and has available pages
-let ptr = unsafe { allocate_page() };
-
-let page_num = ptr as usize / PAGE_SIZE;
-let frame = Frame::new(page_num);
-
-// SAFETY: frame is valid and vaddr is unmapped
-unsafe { map_frame(frame, vaddr) };
-
-// SAFETY: ptr points to newly allocated, mapped memory
-unsafe { initialize_page(ptr) };
-```
-
-### Manual Send/Sync Implementations
-
-When implementing `Send` or `Sync` manually for types with interior mutability (e.g., `UnsafeCell`), document why it's safe and use `#[expect]` to acknowledge the lint:
+Use `#[expect]` with full safety documentation:
 
 ```rust
-pub struct PageProvider {
-    state: UnsafeCell<ProviderState>,
-}
-
-// SAFETY: PageProvider is only used in seL4's single-threaded root task.
-// The UnsafeCell provides interior mutability for the allocator state,
-// but no concurrent access is possible in this execution model.
-#[expect(clippy::non_send_fields_in_send_ty, reason = "single-threaded root task")]
+// SAFETY: Single-threaded seL4 root task - no concurrent access.
+#[expect(clippy::non_send_fields_in_send_ty, reason = "[approved] single-threaded root task")]
 unsafe impl Send for PageProvider {}
-
-// SAFETY: Same rationale - no concurrent access possible.
 unsafe impl Sync for PageProvider {}
 ```
 
-Only use manual `Send`/`Sync` when absolutely necessary. Prefer designs that don't require them.
+### Typestate for Initialization
+
+Prevent "used before init" at compile time:
+
+```rust
+pub struct Uart<State> {
+    base: *mut u32,
+    _state: PhantomData<State>,
+}
+
+pub struct Uninit;
+pub struct Ready;
+
+impl Uart<Uninit> {
+    pub unsafe fn new(base: *mut u32) -> Self { /* ... */ }
+    pub fn init(self) -> Uart<Ready> { /* ... */ }
+}
+
+impl Uart<Ready> {
+    pub fn write(&mut self, byte: u8) { /* ... */ }
+}
+```
+
+---
+
+## Memory Ordering & Atomics
+
+### Volatile vs Atomic
+
+**Volatile** (`read_volatile`/`write_volatile`): Prevents compiler reordering, required for MMIO.
+
+**Atomic** (`AtomicU32`, etc.): Prevents CPU reordering, provides synchronization between threads.
+
+Volatile is **not** synchronization. For concurrent MMIO access, enforce exclusion via `&mut self` or locks.
+
+### Barriers
+
+```rust
+use core::sync::atomic::{compiler_fence, fence, Ordering};
+
+// Compiler fence: prevents compiler reordering only
+compiler_fence(Ordering::SeqCst);
+
+// Memory fence: prevents CPU reordering (hardware barrier)
+fence(Ordering::SeqCst);
+
+// Architecture-specific (AArch64)
+// Use after DMA setup, before device doorbell
+core::arch::asm!("dsb sy");
+core::arch::asm!("isb");
+```
+
+### Interrupt Safety
+
+`RefCell` is **not** interrupt-safe. For data shared with interrupt handlers:
+
+```rust
+// Good: Cell for Copy types
+static COUNTER: Cell<u32> = Cell::new(0);
+
+// Good: Atomics
+static FLAGS: AtomicU32 = AtomicU32::new(0);
+
+// Bad: RefCell panics if ISR borrows while main holds borrow
+static STATE: RefCell<...>  // DON'T use with interrupts
+```
 
 ---
 
 ## Error Handling
 
-This section covers both general error handling patterns and the standardized error structure used for user-facing errors in the compiler pipeline (parser, compiler, VM).
+### Kind + Error Pattern
 
-### Error Types in `no_std`
-
-The `Error` trait is in `core` as of Rust 1.81. For earlier versions or maximum compatibility, define error enums:
+User-facing errors use structured data, not strings:
 
 ```rust
-/// Errors that can occur during memory allocation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AllocError {
-    /// No more untyped memory available
-    OutOfMemory,
-    /// Requested alignment is invalid
-    InvalidAlignment,
-    /// Requested size is too large
-    SizeTooLarge,
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Kind {
+    UndefinedSymbol {
+        symbol: symbol::Id,
+        suggestion: Option<symbol::Id>,
+    },
+    TypeError {
+        operation: &'static str,
+        expected: TypeExpectation,
+        got: value::Kind,
+    },
 }
 
-impl fmt::Display for AllocError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::OutOfMemory => write!(f, "out of memory"),
-            Self::InvalidAlignment => write!(f, "invalid alignment"),
-            Self::SizeTooLarge => write!(f, "size too large"),
-        }
-    }
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Error {
+    pub kind: Kind,
+    pub location: SourceLocation,
 }
+
+// NOTE: No Display impl - formatting is in lonala-human crate
 ```
 
 ### Result-Based APIs
-
-Prefer `Result` over panicking:
 
 ```rust
 // Good: fallible
@@ -286,1347 +307,258 @@ pub fn allocate_frame(&mut self) -> Frame {
 }
 ```
 
-### Error Conversion
-
-Use `From` implementations for error conversion:
-
-```rust
-#[derive(Debug)]
-pub enum RuntimeError {
-    Alloc(AllocError),
-    Capability(CapError),
-    Parse(ParseError),
-}
-
-impl From<AllocError> for RuntimeError {
-    fn from(e: AllocError) -> Self {
-        Self::Alloc(e)
-    }
-}
-
-// Now ? works automatically
-fn do_something() -> Result<(), RuntimeError> {
-    let frame = allocator.allocate_frame()?; // AllocError -> RuntimeError
-    Ok(())
-}
-```
-
 ### Error Parameter Naming
 
-Always name error parameters in `map_err()` closures—never use bare `|_|`:
+Never use bare `|_|` in `map_err`:
 
 ```rust
-// Bad: ignores error completely
+// Bad
 .map_err(|_| MyError::Failed)
 
-// Good: names the error (minimum requirement)
+// Good
 .map_err(|_err| MyError::Failed)
 
-// Better: uses the error for context
-.map_err(|e| MyError::Failed { cause: e })
-
-// Best: logs or wraps with context
-.map_err(|e| {
-    log::warn!("operation failed: {e}");
-    MyError::OperationFailed
-})
-```
-
-### Discarding Values
-
-Never use `drop()` on Copy types—use `let _ =` instead:
-
-```rust
-// Bad: drop() on Copy type (Result<(), E> where E: Copy)
-drop(send_message(msg));
-
-// Good: explicit discard with let binding
-let _ = send_message(msg);
-
-// Better: handle the error or explicitly check
-if send_message(msg).is_err() {
-    // Intentionally ignoring error
-}
+// Better
+.map_err(|err| MyError::Failed { cause: err })
 ```
 
 ---
 
-## Standardized User-Facing Errors
+## Style & Naming
 
-The compiler pipeline (parser, compiler, VM) uses a standardized error structure that enables high-quality, Rust-style error messages. This section defines the patterns and requirements for these errors.
-
-**Reference**: See `docs/development/PLAN.md` for the full implementation plan.
-
-### Design Principles
-
-1. **Structured data, not strings**: Errors carry typed data; formatting happens in `lonala-human`
-2. **Symbol IDs, not names**: Store `symbol::Id`, resolve to names during formatting
-3. **Typed context, not static strings**: Use enums like `ValueType` instead of `&'static str`
-4. **Variant names as identifiers**: The variant name (e.g., `UndefinedSymbol`) serves as the error identifier
-5. **Source locations always**: Every error includes `SourceLocation` (source ID + byte span)
-
-### Error Structure Pattern
-
-User-facing errors follow a `Kind` + `Error` pattern:
+### File Headers
 
 ```rust
-/// Error kinds for [component].
-///
-/// Each variant captures the specific nature of the error with all
-/// context needed for formatting. NO human-readable strings here.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Kind {
-    /// Document what this error means.
-    VariantName {
-        /// Document each field's purpose.
-        field: Type,
-    },
-}
-
-impl Kind {
-    /// Returns the variant name for error identification.
-    pub const fn variant_name(&self) -> &'static str {
-        match self {
-            Self::VariantName { .. } => "VariantName",
-            // ... other variants
-        }
-    }
-}
-
-/// An error with its source location.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Error {
-    pub kind: Kind,
-    pub location: SourceLocation,
-}
-
-impl Error {
-    pub const fn new(kind: Kind, location: SourceLocation) -> Self {
-        Self { kind, location }
-    }
-}
-
-// NOTE: Do NOT implement Display on Error - formatting is done by lonala-human
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 ```
 
-### No Display Implementation
-
-**CRITICAL**: User-facing error types (parser, compiler, VM) do NOT implement `Display`. All human-readable formatting is centralized in `lonala-human`. This ensures:
-
-- Consistent formatting across REPL and future LSP
-- Single point of maintenance for message quality
-- Ability to resolve symbol IDs to names via the Interner
-- Access to source registry for context lines
+### Crate Documentation
 
 ```rust
-// Bad: formatting in error type
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "undefined symbol '{}'", self.name)  // NO!
-    }
-}
-
-// Good: formatting happens in lonala-human
-// Error type has no Display impl
-// REPL calls: lonala_human::format_error(&error, &registry, &interner, &config)
+//! Memory allocator for the Lona runtime.
+//!
+//! Provides heap allocation on top of seL4's untyped memory capabilities.
 ```
 
-### Structured Context Requirements
+### Naming Conventions
 
-#### Use Symbol IDs, Not Names
+| Convention | Example |
+|------------|---------|
+| Don't repeat module name | `uart::Driver` not `uart::UartDriver` |
+| Descriptive identifiers | `index`, `count` not `i`, `n` |
+| No underscore prefix on used items | `print_fmt` not `_print` |
+
+### Variable Shadowing
+
+Avoid shadowing (both `shadow_reuse` and `shadow_same` are denied):
 
 ```rust
-// Bad: stores string name
-UndefinedSymbol { name: String }
+// Bad
+let uart = Uart::new(base);
+let uart = uart.init()?;
 
-// Good: stores symbol ID, resolved during formatting
-UndefinedSymbol {
-    symbol: symbol::Id,
-    suggestion: Option<symbol::Id>,
-}
+// Good
+let uart = Uart::new(base);
+let ready_uart = uart.init()?;
 ```
 
-#### Use Type Enums, Not Strings
+### Documentation
+
+Document **why**, not **what**:
 
 ```rust
-// Bad: type as string
-TypeError { expected: "integer", got: "string" }
+// Good: explains purpose
+/// Finds the next runnable process for fair scheduling.
 
-// Good: typed enums
-TypeError {
-    expected: TypeExpectation::Numeric,
-    got: ValueType::String,
-}
+// Bad: restates implementation
+/// Iterates through the run queue starting at current_index...
 ```
 
-#### Capture Related Locations
+Wrap code references in backticks:
 
 ```rust
-// Bad: only error location
-UnmatchedDelimiter { expected: char, found: char }
-
-// Good: includes opener location for "to match ( at line 5"
-UnmatchedDelimiter {
-    opener: char,
-    opener_location: SourceLocation,
-    expected: char,
-    found: char,
-}
+/// Calls `process_message` to handle the `Message`.
 ```
 
-#### Include Suggestions Where Possible
+---
+
+## Testing
+
+### Requirements
+
+- Every feature: happy path + edge case + failure case
+- Every bug fix: failing test **first**, then fix
+- Coverage targets: 90%+ (parser, compiler, data structures), 85%+ (VM)
+- Speed: host tests < 5s, QEMU tests < 30s
+
+### Test Types
+
+| Type | Location | Purpose |
+|------|----------|---------|
+| Unit | `crates/<crate>/src/**/tests/*.rs` | Single component |
+| Spec | `crates/lona-spec-tests/` | Full VM pipeline |
+| Integration | `crates/lona-runtime/src/integration_tests.rs` | seL4 primitives |
+
+### Naming
 
 ```rust
-// Good: typo correction
-UndefinedSymbol {
-    symbol: symbol::Id,
-    suggestion: Option<symbol::Id>,  // For "did you mean 'foo'?"
-}
+#[test]
+fn test_<behavior>_<case>() { }
 
-// Good: arity information
-ArityMismatch {
-    callable: symbol::Id,
-    expected: ArityExpectation,  // Exact(2), AtLeast(1), Range { min: 1, max: 3 }
-    got: usize,
-}
+#[test]
+fn parse_integer_literal() { }
+
+#[test]
+fn allocate_returns_error_on_exhaustion() { }
 ```
 
-### Adding New Error Variants
+### Running Tests
 
-When adding a new error variant, follow this checklist:
-
-- [ ] **Specific variant name**: Use descriptive names (`UndefinedSymbol`, not `NotFound`)
-- [ ] **All context captured**: Include everything needed for a helpful message
-- [ ] **Symbol IDs not strings**: Store `symbol::Id` for any symbol references
-- [ ] **Typed values**: Use `ValueType`, `TypeExpectation`, etc. instead of strings
-- [ ] **Related locations**: Include secondary locations (opener, definition site)
-- [ ] **Suggestion field**: Add `Option<...>` for "did you mean" hints where applicable
-- [ ] **Document each field**: Explain what the field contains and why
-- [ ] **Update variant_name()**: Add the new variant to the match
-- [ ] **Implement Diagnostic**: Add formatting in `lonala-human`
-- [ ] **Add tests**: Verify the formatted output is helpful
-
-### Example: Good Error Definition
-
-```rust
-/// Error kinds for the bytecode compiler.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Kind {
-    /// Reference to an undefined symbol.
-    UndefinedSymbol {
-        /// The symbol that was not found.
-        symbol: symbol::Id,
-        /// A similar symbol that might be what was intended.
-        suggestion: Option<symbol::Id>,
-    },
-
-    /// Type mismatch in an operation.
-    TypeError {
-        /// The operation being performed ("+", "if", etc.).
-        operation: &'static str,
-        /// The type(s) that were expected.
-        expected: TypeExpectation,
-        /// The type that was actually found.
-        got: ValueType,
-        /// Which operand had the wrong type (for multi-argument ops).
-        operand: Option<usize>,
-    },
-
-    /// Special form used with invalid syntax.
-    InvalidSpecialForm {
-        /// The special form name ("if", "let", "fn", etc.).
-        form: &'static str,
-        /// Which syntax rule was violated.
-        violation: SpecialFormViolation,
-    },
-}
-
-/// What went wrong with a special form.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SpecialFormViolation {
-    /// Missing required clause (e.g., no 'then' in 'if').
-    MissingClause { clause: &'static str },
-    /// Wrong number of clauses.
-    WrongClauseCount { expected: ArityExpectation, got: usize },
-    /// Invalid binding form (e.g., non-symbol in let binding).
-    InvalidBinding,
-}
+```bash
+make test
 ```
 
-### Example: Bad Error Definition
+**This is the single command for ALL quality checks.** It must pass with ZERO issues.
+
+`make test` runs the complete verification suite on **both aarch64 and x86_64**:
+
+| Check | Description |
+|-------|-------------|
+| **Formatting** | `cargo fmt` - consistent code style |
+| **Documentation** | Broken doc links fail the build |
+| **Compilation** | Builds runtime for target architecture |
+| **Clippy (host)** | All lints on host-testable crates |
+| **Clippy (target)** | All lints on runtime with target flags |
+| **Unit tests** | All `#[test]` functions on host |
+| **Integration tests** | Full system tests in QEMU |
+
+Every check must pass. Any failure blocks the build.
+
+### Property-Based Testing
+
+Use `proptest` for data structure invariants (available in `lona-core`):
 
 ```rust
-// Bad: vague, string-based, missing context
-#[derive(Debug)]
-pub enum Error {
-    // Too vague - what wasn't found?
-    NotFound(String),
+use proptest::prelude::*;
 
-    // String message - should be structured
-    InvalidSyntax { message: String },
-
-    // Missing location context
-    TypeError { expected: &'static str, got: &'static str },
-
-    // Catch-all - provides no useful information
-    Failed,
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Bad: formatting in error type
-        match self {
-            Self::NotFound(name) => write!(f, "not found: {name}"),
-            // ...
-        }
+proptest! {
+    #[test]
+    fn integer_add_commutative(a: i64, b: i64) {
+        let x = Integer::from(a);
+        let y = Integer::from(b);
+        prop_assert_eq!(&x + &y, &y + &x);
     }
 }
 ```
 
-### Error Quality Checklist
+Property tests run as part of `make test`.
 
-Before committing an error type, verify:
+---
 
-| Requirement | Check |
-|-------------|-------|
-| Specific variant name | Does the name clearly describe what went wrong? |
-| Structured data | Are all values typed (no bare strings for types/symbols)? |
-| Source location | Does every error path include `SourceLocation`? |
-| Related locations | Are secondary locations captured (opener, definition)? |
-| Suggestions | Is there a field for "did you mean" hints? |
-| No Display impl | Is formatting done exclusively in `lonala-human`? |
-| Documented | Are all fields documented? |
-| Tested | Is there a test verifying the formatted output? |
+## Clippy Configuration
+
+The workspace uses **all clippy categories at deny level**, including `restriction` and `nursery`.
+
+### Key Enforced Lints
+
+| Lint | Enforcement |
+|------|-------------|
+| `arithmetic_side_effects` | Use `checked_*`, `saturating_*`, `wrapping_*` |
+| `indexing_slicing` | Use `.get()` instead of `[]` |
+| `as_conversions` | Use `try_from()`, `from()` |
+| `default_numeric_fallback` | Add type suffixes to literals |
+| `undocumented_unsafe_blocks` | Require `// SAFETY:` |
+| `multiple_unsafe_ops_per_block` | One unsafe op per block |
+| `module_name_repetitions` | Don't repeat module in names |
+| `shadow_reuse`, `shadow_same` | Avoid variable shadowing |
+| `min_ident_chars` | Use descriptive names |
+
+### Suppressing Lints
+
+**CRITICAL: You MUST NOT suppress any clippy lint without EXPLICIT user approval.**
+
+When encountering a clippy error:
+
+1. **Always fix the issue correctly first** - Most lints have proper solutions
+2. **If truly unfixable**, explain the issue and wait for explicit approval
+3. **Never add `#[allow]`, `#[expect]`, or `clippy.toml` overrides without approval**
+
+Only after receiving explicit approval, use `#[expect]` with `[approved]` marker:
+
+```rust
+#[expect(clippy::as_conversions, reason = "[approved] MMIO pointer conversion")]
+let base = addr as *mut u32;
+```
+
+The `[approved]` marker is enforced by a pre-commit hook. Without it, the commit will be rejected.
+
+Remove `#[expect]` when the lint no longer triggers.
 
 ---
 
 ## Panic Handling
 
-### Panic Strategy
-
-Use `panic = "abort"` in release builds (already configured in `Cargo.toml`):
+### Configuration
 
 ```toml
 [profile.release]
 panic = "abort"
 ```
 
-### Custom Panic Handler
-
-Implement a panic handler that outputs diagnostics and halts:
+### Custom Handler
 
 ```rust
-use core::panic::PanicInfo;
-
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    // Output to UART for debugging
     if let Some(location) = info.location() {
-        serial_println!(
-            "PANIC at {}:{}:{}",
-            location.file(),
-            location.line(),
-            location.column()
-        );
+        serial_println!("PANIC at {}:{}:{}", location.file(), location.line(), location.column());
     }
-
-    if let Some(message) = info.message() {
-        serial_println!("  {}", message);
-    }
-
-    // Halt the system
-    loop {
-        core::hint::spin_loop();
-    }
+    loop { core::hint::spin_loop(); }
 }
 ```
 
 ### Avoiding Panics
 
-Minimize panic paths in production code:
-
 ```rust
-// Avoid: panics on None
+// Avoid
 let value = map.get(&key).unwrap();
 
-// Better: handle missing values
+// Prefer
 let value = map.get(&key).ok_or(Error::KeyNotFound)?;
-
-// Avoid: panics on index out of bounds
-let item = slice[index];
-
-// Better: bounds-checked access
-let item = slice.get(index).ok_or(Error::IndexOutOfBounds)?;
 ```
 
 ---
 
-## Arithmetic & Type Safety
+## Stack Discipline
 
-Kernel code must be bulletproof against arithmetic errors. Our clippy configuration enforces these rules at compile time.
+In kernel code, stack overflow is often silent corruption.
 
-### Checked Arithmetic
-
-Never use raw arithmetic operators (`+`, `-`, `*`, `/`, `%`, `<<`, `>>`). Always use explicit overflow handling:
-
-```rust
-// Bad: can overflow silently in release, UB in debug
-self.index += 1;
-let size = count * FRAME_SIZE;
-
-// Good: explicit overflow handling
-self.index = self.index.checked_add(1).expect("index overflow");
-let size = count.checked_mul(FRAME_SIZE).ok_or(Error::SizeOverflow)?;
-
-// Good: when wrapping is intentional
-self.sequence = self.sequence.wrapping_add(1);
-
-// Good: when capping at max is acceptable
-self.retry_count = self.retry_count.saturating_add(1);
-```
-
-Choose the appropriate method based on semantics:
-- `.checked_*()` — Returns `Option`, use when overflow is an error
-- `.saturating_*()` — Clamps at min/max, use for counters that shouldn't wrap
-- `.wrapping_*()` — Wraps around, use when wrap semantics are intentional
-
-### Numeric Literals
-
-Always add explicit type suffixes to integer literals:
-
-```rust
-// Bad: relies on type inference (defaults to i32)
-for _ in 0..4 { }
-let values = vec![1, 2, 3];
-
-// Good: explicit types
-for _ in 0_u32..4_u32 { }
-let values: Vec<i32> = vec![1_i32, 2_i32, 3_i32];
-
-// Good: type annotation on binding also works
-let count: usize = 0;
-```
-
-### Type Conversions
-
-Never use `as` for numeric conversions—it silently truncates or changes sign:
-
-```rust
-// Bad: silently truncates (256_u16 as u8 == 0)
-let small = large_value as u8;
-
-// Bad: sign change (-1_i32 as u32 == 4294967295)
-let unsigned = signed_value as u32;
-
-// Good: fallible conversion
-let small = u8::try_from(large_value).expect("value too large");
-let unsigned = u32::try_from(signed_value)?;
-
-// Good: infallible widening (u8 -> u16 always succeeds)
-let wider = u16::from(byte_value);
-```
-
-For pointer casts (MMIO, FFI), use a local `#[expect]` with justification:
-
-```rust
-#[expect(clippy::as_conversions, reason = "MMIO base address conversion")]
-let base = region.starting_address as usize;
-```
-
-### Pointer Alignment
-
-When casting pointers, ensure proper alignment:
-
-```rust
-// Bad: u8 pointer for 32-bit register access
-let base: *mut u8 = mmio_region;
-let value = unsafe { *(base.add(offset) as *mut u32) };  // alignment violation!
-
-// Good: use properly aligned pointer type
-let base: *mut u32 = mmio_region.cast();
-let value = unsafe { base.add(offset / 4).read_volatile() };
-```
-
-### Safe Indexing
-
-Never use `[]` indexing—it panics on out-of-bounds:
-
-```rust
-// Bad: panics if index >= len
-let item = slice[index];
-let range = data[start..end];
-
-// Good: returns Option
-let item = slice.get(index).ok_or(Error::IndexOutOfBounds)?;
-let range = data.get(start..end).ok_or(Error::InvalidRange)?;
-
-// Good: for mutable access
-let item = slice.get_mut(index).ok_or(Error::IndexOutOfBounds)?;
-```
-
-### Numeric Comparisons
-
-Use standard library methods instead of manual comparisons:
-
-```rust
-// Bad: manual modulo check
-if address % PAGE_SIZE != 0 {
-    return Err(Error::Misaligned);
-}
-
-// Good: semantic method
-if !address.is_multiple_of(PAGE_SIZE) {
-    return Err(Error::Misaligned);
-}
-```
+**Rules:**
+- Avoid recursion in runtime paths; use iterative algorithms
+- No large stack buffers; use heap or fixed-size `heapless` collections
+- The VM uses explicit `Vec<Frame>` call stack, not Rust recursion
 
 ---
 
-## Function Design
+## Binary Data
 
-### Const Functions
-
-Make functions `const fn` when they don't perform heap allocation, I/O, or other non-const operations. This enables compile-time evaluation and communicates that the function has no side effects:
+Never use `transmute` or pointer casts for parsing binary data:
 
 ```rust
-// Good: pure computation, should be const
-const fn is_printable_ascii(byte: u8) -> bool {
-    byte >= 0x20 && byte < 0x7F
-}
-
-// Good: constructor with no side effects
-const fn new() -> Self {
-    Self { buffer: Vec::new() }
-}
-
-// Cannot be const: performs I/O
-fn read_byte() -> Option<u8> {
-    uart::read_byte()
-}
-
-// Cannot be const: allocates (in non-const context)
-fn with_capacity(cap: usize) -> Self {
-    Self { data: Vec::with_capacity(cap) }
-}
-```
-
-### Methods vs Associated Functions
-
-Before writing a method with `&self` or `&mut self`, verify the function actually uses `self`. If not, make it an associated function:
-
-```rust
-// Bad: takes &self but never uses it (triggers clippy::unused_self)
-impl Parser {
-    fn read_line(&self) -> String {
-        let mut buffer = String::new();
-        // ... reads from global UART, never touches self
-        buffer
-    }
-}
-
-// Good: associated function since self isn't used
-impl Parser {
-    fn read_line() -> String {
-        let mut buffer = String::new();
-        // ... reads from global UART
-        buffer
-    }
-}
-
-// Good: method that actually uses self
-impl Parser {
-    fn parse(&self, input: &str) -> Result<Ast, Error> {
-        // Uses self.interner, self.options, etc.
-    }
-}
-```
-
-### Mutable References
-
-Use `&self` unless mutation is actually required. Don't speculatively use `&mut self` for "future flexibility":
-
-```rust
-// Bad: takes &mut self but doesn't mutate (triggers clippy::needless_pass_by_ref_mut)
-impl Evaluator {
-    fn execute(&mut self, chunk: &Chunk) -> Result<Value, Error> {
-        let vm = Vm::new(&self.interner);  // Only reads self.interner
-        vm.run(chunk)
-    }
-}
-
-// Good: use &self when only reading
-impl Evaluator {
-    fn execute(&self, chunk: &Chunk) -> Result<Value, Error> {
-        let vm = Vm::new(&self.interner);
-        vm.run(chunk)
-    }
-}
-
-// Good: &mut self when mutation is needed
-impl Evaluator {
-    fn define(&mut self, name: &str, value: Value) {
-        self.globals.insert(name.to_string(), value);  // Mutates self
-    }
-}
-```
-
-### Test-Only Code
-
-Mark methods that are only used in tests with `#[cfg(test)]` to avoid dead code warnings in production builds:
-
-```rust
-impl LineBuffer {
-    /// Creates a new buffer.
-    const fn new() -> Self {
-        Self { buffer: Vec::new() }
-    }
-
-    /// Adds a byte to the buffer.
-    fn push(&mut self, byte: u8) {
-        self.buffer.push(byte);
-    }
-
-    /// Clears the buffer (only used in tests).
-    #[cfg(test)]
-    fn clear(&mut self) {
-        self.buffer.clear();
-    }
-
-    /// Returns true if empty (only used in tests).
-    #[cfg(test)]
-    fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
-    }
-}
-```
-
----
-
-## Memory Management
-
-### GlobalAlloc Implementation
-
-Implement `GlobalAlloc` for seL4 untyped memory:
-
-```rust
-use core::alloc::{GlobalAlloc, Layout};
-
-pub struct Sel4Allocator {
-    // Internal state
-}
-
-unsafe impl GlobalAlloc for Sel4Allocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // SAFETY: Layout is guaranteed valid by caller
-        // Implementation allocates from seL4 untypeds
-        self.inner_alloc(layout)
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        // SAFETY: ptr was allocated by this allocator with this layout
-        self.inner_dealloc(ptr, layout)
-    }
-}
-
-#[global_allocator]
-static ALLOCATOR: Sel4Allocator = Sel4Allocator::new();
-```
-
-### Allocation Initialization Order
-
-The allocator must be initialized before any allocation occurs:
-
-```rust
-#[no_mangle]
-pub extern "C" fn _start(bootinfo: &sel4::BootInfo) -> ! {
-    // 1. Initialize allocator FIRST (no allocations before this)
-    unsafe {
-        ALLOCATOR.init(bootinfo.untyped_list());
-    }
-
-    // 2. Now heap allocation is available
-    let config = parse_bootinfo(bootinfo);
-
-    // 3. Continue initialization
-    main(config)
-}
-```
-
-### Heapless Alternatives
-
-Consider `heapless` collections for fixed-size data:
-
-```rust
-use heapless::Vec;
-
-// Fixed capacity, no heap allocation
-let mut buffer: Vec<u8, 64> = Vec::new();
-buffer.push(0x42)?; // Returns Err if full
-```
-
----
-
-## Capability Patterns
-
-### Rust Ownership as Capability
-
-Leverage Rust's ownership system to model capability semantics:
-
-```rust
-/// A capability to a seL4 endpoint (owned, unforgeable).
-pub struct EndpointCap {
-    cptr: sel4::CPtr,
-}
-
-impl EndpointCap {
-    /// Sends a message (requires ownership or mutable borrow).
-    pub fn send(&mut self, msg: &Message) -> Result<(), IpcError> {
-        // Only holder of capability can send
-        unsafe { sel4::sys::seL4_Send(self.cptr, msg.into()) }
-    }
-
-    /// Creates a derived capability with reduced rights.
-    pub fn mint_read_only(&self) -> Result<EndpointCap, CapError> {
-        // Mint new cap with reduced rights
-        let new_cptr = mint_capability(self.cptr, Rights::READ_ONLY)?;
-        Ok(EndpointCap { cptr: new_cptr })
-    }
-}
-
-// Capability cannot be copied (no Clone)
-// Capability cannot be forged (private field, controlled construction)
-// Capability can be moved (transferred)
-```
-
-### Capability Delegation
-
-Model capability delegation with move semantics:
-
-```rust
-/// Spawns a process in a new domain, transferring capabilities.
-pub fn spawn_isolated(
-    entry: fn(),
-    capabilities: Vec<Box<dyn Capability>>, // Ownership transferred
-) -> Result<ProcessId, SpawnError> {
-    // Capabilities are moved into the new domain
-    // Caller no longer has access
-    create_domain_with_caps(entry, capabilities)
-}
-```
-
-### Read-Only vs Read-Write
-
-Use Rust's borrow system to enforce access levels:
-
-```rust
-/// A shared memory region.
-pub struct SharedRegion {
-    base: *mut u8,
-    len: usize,
-}
-
-impl SharedRegion {
-    /// Read-only access.
-    pub fn as_slice(&self) -> &[u8] {
-        // SAFETY: region is valid for len bytes
-        unsafe { core::slice::from_raw_parts(self.base, self.len) }
-    }
-
-    /// Read-write access (requires mutable borrow).
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
-        // SAFETY: region is valid, &mut self ensures exclusivity
-        unsafe { core::slice::from_raw_parts_mut(self.base, self.len) }
-    }
-}
-```
-
----
-
-## Concurrency Patterns
-
-### Green Thread State
-
-Design process state for cooperative/preemptive scheduling:
-
-```rust
-pub struct Process {
-    pid: ProcessId,
-    status: ProcessStatus,
-    stack: Stack,
-    heap: ProcessHeap,
-    mailbox: Mailbox,
-    reduction_count: u32,
-    context: SavedContext,
-}
-
-pub enum ProcessStatus {
-    Running,
-    Ready,
-    Waiting(WaitReason),
-    Suspended,
-    Terminated(ExitReason),
-}
-
-pub enum WaitReason {
-    Message,
-    Timeout { deadline: Instant },
-    Join { target: ProcessId },
-}
-```
-
-### Yield Points
-
-Insert yield points in long-running operations:
-
-```rust
-impl Vm {
-    pub fn execute(&mut self, process: &mut Process) -> ExecuteResult {
-        loop {
-            let instruction = self.fetch(process)?;
-
-            // Reduction counting for preemption
-            process.reduction_count += instruction.cost();
-
-            if process.reduction_count >= REDUCTION_LIMIT {
-                process.reduction_count = 0;
-                return ExecuteResult::Yield;
-            }
-
-            match self.execute_instruction(instruction, process)? {
-                InstrResult::Continue => {}
-                InstrResult::Yield => return ExecuteResult::Yield,
-                InstrResult::Exit(reason) => return ExecuteResult::Exit(reason),
-            }
-        }
-    }
-}
-```
-
-### Message Passing
-
-Design mailboxes for BEAM-style messaging:
-
-```rust
-pub struct Mailbox {
-    messages: VecDeque<Message>,
-    save_queue: VecDeque<Message>, // For selective receive
-}
-
-impl Mailbox {
-    /// Adds a message to the mailbox.
-    pub fn deliver(&mut self, msg: Message) {
-        self.messages.push_back(msg);
-    }
-
-    /// Attempts to receive a message matching the pattern.
-    pub fn receive(&mut self, pattern: &Pattern) -> Option<Message> {
-        // Check messages in order
-        let pos = self.messages.iter().position(|m| pattern.matches(m))?;
-        Some(self.messages.remove(pos).unwrap())
-    }
-}
-```
-
----
-
-## Hardware Abstraction
-
-### Trait-Based Abstraction
-
-Define traits for hardware interfaces to enable mocking:
-
-```rust
-/// Serial port interface.
-pub trait Serial {
-    type Error;
-
-    fn write_byte(&mut self, byte: u8) -> Result<(), Self::Error>;
-    fn read_byte(&mut self) -> Result<u8, Self::Error>;
-    fn write_bytes(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
-        for &byte in bytes {
-            self.write_byte(byte)?;
-        }
-        Ok(())
-    }
-}
-
-// Real implementation
-pub struct Pl011Uart { /* ... */ }
-
-impl Serial for Pl011Uart {
-    type Error = UartError;
-
-    fn write_byte(&mut self, byte: u8) -> Result<(), Self::Error> {
-        // Actual hardware access
-    }
-
-    fn read_byte(&mut self) -> Result<u8, Self::Error> {
-        // Actual hardware access
-    }
-}
-
-// Mock for testing
-#[cfg(test)]
-pub struct MockSerial {
-    pub written: Vec<u8>,
-    pub to_read: VecDeque<u8>,
-}
-
-#[cfg(test)]
-impl Serial for MockSerial {
-    type Error = core::convert::Infallible;
-
-    fn write_byte(&mut self, byte: u8) -> Result<(), Self::Error> {
-        self.written.push(byte);
-        Ok(())
-    }
-
-    fn read_byte(&mut self) -> Result<u8, Self::Error> {
-        Ok(self.to_read.pop_front().unwrap_or(0))
-    }
-}
-```
-
-### MMIO Access
-
-Use volatile operations for memory-mapped I/O:
-
-```rust
-use core::ptr::{read_volatile, write_volatile};
-
-/// Memory-mapped register access.
-pub struct MmioRegion {
-    base: *mut u8,
-}
-
-impl MmioRegion {
-    /// Reads a 32-bit register.
-    ///
-    /// # Safety
-    ///
-    /// - `offset` must be within the MMIO region
-    /// - The register at `offset` must be readable
-    pub unsafe fn read_u32(&self, offset: usize) -> u32 {
-        let ptr = self.base.add(offset) as *const u32;
-        // SAFETY: Caller guarantees offset is valid
-        unsafe { read_volatile(ptr) }
-    }
-
-    /// Writes a 32-bit register.
-    ///
-    /// # Safety
-    ///
-    /// - `offset` must be within the MMIO region
-    /// - The register at `offset` must be writable
-    pub unsafe fn write_u32(&mut self, offset: usize, value: u32) {
-        let ptr = self.base.add(offset) as *mut u32;
-        // SAFETY: Caller guarantees offset is valid
-        unsafe { write_volatile(ptr, value) }
-    }
-}
-```
-
----
-
-## Style and Conventions
-
-### Naming Conventions
-
-Follow standard Rust conventions with adjustments for seL4 concepts:
-
-| Rust Convention | seL4/Lona Mapping |
-|-----------------|-------------------|
-| `snake_case` functions | `create_domain`, `send_message` |
-| `CamelCase` types | `ProcessId`, `CapabilitySlot` |
-| `SCREAMING_CASE` constants | `PAGE_SIZE`, `MAX_PROCESSES` |
-| Avoid abbreviations | `capability` not `cap` in public APIs |
-
-#### Module Name Repetition
-
-Never repeat the module name in type or function names—the module path provides context:
-
-```rust
-// Bad: redundant module name in identifier
-mod uart {
-    pub struct UartDriver { }      // "uart" repeated
-    pub struct UartError { }       // "uart" repeated
-    pub fn init_uart() { }         // "uart" repeated
-}
-
-// Good: module path provides context
-mod uart {
-    pub struct Driver { }          // uart::Driver
-    pub struct Error { }           // uart::Error
-    pub fn init() { }              // uart::init()
-}
-
-// Same for nested modules
-mod fdt {
-    pub enum FdtError { }          // Bad: fdt::FdtError
-    pub enum Error { }             // Good: fdt::Error
-}
-```
-
-#### Underscore Prefix Convention
-
-Only use `_` prefix for truly unused items that would otherwise trigger warnings:
-
-```rust
-// Good: underscore for unused loop variable
-for _ in 0_u32..10_u32 { }
-
-// Good: underscore for intentionally unused binding
-let _unused = compute_side_effect();
-
-// Bad: underscore on a function that IS called
-fn _print(args: Arguments) { }     // Will trigger clippy::used_underscore_items
-
-// Good: use descriptive name for used items
-fn print_fmt(args: Arguments) { }
-```
-
-#### Identifier Length
-
-Avoid single-character identifiers except for well-established conventions. Use descriptive names that convey meaning:
-
-```rust
-// Bad: single-character identifiers (triggers clippy::min_ident_chars)
-Value::Float(f) => println!("{f}"),
-Value::Bool(b) => println!("{b}"),
-source.get(start..).and_then(|s| s.find('\n'))
-
-// Good: descriptive identifiers
-Value::Float(float_val) => println!("{float_val}"),
-Value::Bool(bool_val) => println!("{bool_val}"),
-source.get(start..).and_then(|rest| rest.find('\n'))
-
-// Acceptable: well-established loop conventions
-for i in 0_usize..len { }           // Index variable
-for (i, item) in items.iter().enumerate() { }
-```
-
-### File Headers
-
-Every source file must begin with the SPDX license header:
-
-```rust
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
-```
-
-### Documentation Philosophy
-
-Documentation explains **why** code exists, not **what** it does. The code itself should be self-explanatory through descriptive names. This prevents documentation from becoming outdated.
-
-| Do | Don't |
-|----|-------|
-| Explain the purpose/goal | Rephrase the implementation logic |
-| Describe architectural context | Describe step-by-step what happens |
-| Keep under 10 lines | Write exhaustive documentation |
-| Use descriptive names | Compensate for bad names with docs |
-
-#### Code References in Documentation
-
-Wrap all code references in backticks—function names, type names, field names, parameters:
-
-```rust
-// Bad: missing backticks triggers clippy::doc_markdown
-/// Calls process_message to handle the Message.
-
-// Good: backticks around code references
-/// Calls `process_message` to handle the `Message`.
-
-/// Returns the `ProcessId` of the current process.
-///
-/// Uses the `scheduler` to look up the running process in the `run_queue`.
-```
-
-### Documentation Coverage
-
-**Document all functions, types, and constants** — both public and private. The more self-explanatory the item, the shorter the doc can be:
-
-```rust
-/// Returns the number of processes in the run queue.
-fn len(&self) -> usize {
-    self.queue.len()
-}
-
-/// Selects the next process for execution.
-///
-/// Implements fair round-robin scheduling, cycling through processes
-/// while respecting priority levels within each cycle.
-fn select_next_process(&mut self) -> Option<&mut Process> {
-    // ...
-}
-```
-
-### Crate Documentation
-
-Each crate's `lib.rs` or `main.rs` must have a `//!` module doc explaining the crate's role:
-
-```rust
-// SPDX-License-Identifier: GPL-3.0-or-later
-// Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
-
-//! Memory allocator for the Lona runtime.
-//!
-//! Provides heap allocation on top of seL4's untyped memory capabilities.
-//! Each Lona process gets an independent heap to enable per-process
-//! garbage collection without global pauses.
-```
-
-### Function Documentation
-
-Document the **purpose**, not the **implementation**:
-
-```rust
-// Good: explains why this exists
-/// Finds the next runnable process for scheduling.
-///
-/// Implements fair scheduling by cycling through processes in round-robin
-/// order, respecting priority levels within each cycle.
-fn select_next_process(&mut self) -> Option<&mut Process> {
-    // Implementation is self-explanatory from the code
-}
-
-// Bad: restates what the code does (will become outdated)
-/// Iterates through the run queue starting at current_index,
-/// wrapping around if necessary, and returns the first process
-/// with status == Ready, or None if the queue is empty.
-fn select_next_process(&mut self) -> Option<&mut Process> {
-    // Now docs must be updated whenever implementation changes
-}
-```
-
-### Type Documentation
-
-For structs and enums, explain their role in the system:
-
-```rust
-/// A lightweight execution context within a Domain.
-///
-/// Inspired by Erlang/BEAM processes: isolated heap, message-based
-/// communication, independent garbage collection.
-pub struct Process {
-    pid: ProcessId,
-    status: ProcessStatus,
-    // Field names are self-explanatory
-}
-```
-
-### Comments vs Documentation
-
-| Syntax | Use For |
-|--------|---------|
-| `//!` | Crate/module-level docs (at top of file) |
-| `///` | Item docs (functions, types, constants) |
-| `//` | Implementation notes, SAFETY comments |
-
-Regular `//` comments explain tricky implementation details or non-obvious decisions:
-
-```rust
-fn allocate_frame(&mut self) -> Result<Frame, AllocError> {
-    // Prefer larger untypeds first to reduce fragmentation
-    self.untypeds.sort_by_key(|u| core::cmp::Reverse(u.size()));
-
-    // ... rest of implementation
-}
-```
-
-### Variable Shadowing
-
-Avoid shadowing variables. This includes both rebinding with transformation (`shadow_reuse`) and using the same name in nested scopes (`shadow_same`).
-
-#### Shadowing with Transformation
-
-Use distinct names that reflect the variable's new state or role:
-
-```rust
-// Bad: uart shadows uart (triggers clippy::shadow_reuse)
-let uart = Uart::new(base);
-let uart = uart.init()?;
-let uart = uart.configure(config)?;
-
-// Good: names reflect state progression
-let uart = Uart::new(base);
-let initialized = uart.init()?;
-let driver = initialized.configure(config)?;
-
-// Also good: single transformation with clear naming
-let builder = Config::builder();
-let config = builder.build()?;  // Different type, different name
-```
-
-#### Shadowing in Nested Scopes
-
-Avoid using the same variable name in match arms, closures, or inner blocks when an outer binding exists:
-
-```rust
-// Bad: byte shadows outer byte (triggers clippy::shadow_same)
-let Some(byte) = uart::read_byte() else { continue };
-match byte {
-    byte if is_printable(byte) => { }  // shadows outer byte
-    _ => { }
-}
-
-// Good: use distinct names in nested scopes
-let Some(input_byte) = uart::read_byte() else { continue };
-match input_byte {
-    ch if is_printable(ch) => { }  // different name, no shadowing
-    _ => { }
-}
-```
-
-### Trait Implementations
-
-When implementing traits, you don't need to override optional methods if the default implementation is correct. The `missing_trait_methods` lint is globally allowed in the workspace configuration since default trait implementations in the standard library are generally correct.
-
-```rust
-impl fmt::Write for UartWriter {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        for byte in s.bytes() {
-            self.write_byte(byte);
-        }
-        Ok(())
-    }
-    // write_char not overridden - default impl calls write_str
-}
-```
-
-### Conditional Logic
-
-Avoid deeply nested conditional logic. Extract helper functions or use early returns:
-
-```rust
-// Bad: nested if-let chains (triggers clippy::collapsible_if)
-if let Some(region) = regions.next() {
-    if let Some(addr) = region.address() {
-        if addr.is_aligned() {
-            // ...
-        }
-    }
-}
-
-// Good: extract to helper or use guard clauses
-let region = regions.next()?;
-let addr = region.address()?;
-if !addr.is_aligned() {
-    return Err(Error::Misaligned);
-}
-// ...
-
-// Also good: combine with and_then
-regions.next()
-    .and_then(|r| r.address())
-    .filter(|a| a.is_aligned())
-    .ok_or(Error::NoValidRegion)?
-```
-
-### Module Organization
-
-Use `mod.rs` style with clear module hierarchies:
-
-```
-src/
-├── lib.rs              # Crate root, re-exports
-├── engine/
-│   ├── mod.rs          # Module declarations
-│   ├── value.rs        # Value types
-│   ├── vm.rs           # Virtual machine
-│   └── gc.rs           # Garbage collector
-└── platform/
-    ├── mod.rs
-    ├── sel4.rs         # seL4 bindings
-    └── uart.rs         # UART driver
-```
-
----
-
-## Lints and Checks
-
-The workspace `Cargo.toml` configures extremely strict linting. This is intentional for kernel code.
-
-### Required Lints
-
-- `warnings = "deny"` — No warnings in committed code
-- **All** clippy categories at `deny` level, including `nursery` and `restriction`
-- `unsafe_op_in_unsafe_fn = "deny"` — Must use `unsafe` block inside unsafe functions
-
-This strict configuration enforces:
-
-| Lint | Enforcement |
-|------|-------------|
-| `arithmetic_side_effects` | Must use `checked_*()`, `saturating_*()`, or `wrapping_*()` |
-| `indexing_slicing` | Must use `.get()` instead of `[]` |
-| `as_conversions` | Must use `try_from()` / `from()` for numerics |
-| `default_numeric_fallback` | Must add type suffixes to integer literals |
-| `undocumented_unsafe_blocks` | Must have `// SAFETY:` comment |
-| `multiple_unsafe_ops_per_block` | One unsafe operation per block |
-| `module_name_repetitions` | Don't repeat module name in identifiers |
-
-### Running Checks
-
-```bash
-make test
-```
-
-This runs the full verification suite: formatting, compilation, clippy, unit tests, and integration tests.
-
-### Suppressing Lints
-
-Use `#[expect(...)]` over `#[allow(...)]` when suppression is necessary. Always include a reason:
-
-```rust
-// Good: will warn if the lint no longer triggers, documents why
-#[expect(clippy::too_many_arguments, reason = "seL4 syscall ABI requires all parameters")]
-fn sel4_call(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) { }
-
-// Bad: silently continues even if suppression becomes unnecessary
-#[allow(clippy::too_many_arguments)]
-fn sel4_call(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) { }
-
-// Bad: no reason provided
-#[expect(clippy::too_many_arguments)]
-fn sel4_call(a: u64, b: u64, c: u64, d: u64, e: u64, f: u64) { }
-```
-
-### Stale Lint Suppressions
-
-Remove `#[expect]` attributes when the lint no longer triggers. The `unfulfilled_lint_expectations` lint will warn you:
-
-```rust
-// This will warn if the function no longer has too many arguments
-#[expect(clippy::too_many_arguments, reason = "...")]
-fn refactored_call(params: CallParams) { }  // Warning: unfulfilled expectation
+// Bad: undefined behavior, endianness issues
+let value: u32 = unsafe { *(data.as_ptr() as *const u32) };
+
+// Good: explicit endianness, alignment-safe
+let bytes = data.get(0..4).ok_or(Error::TooShort)?;
+let value = u32::from_le_bytes(bytes.try_into().unwrap());
 ```
 
 ---
 
 ## References
 
-### Official Documentation
-
 - [The Embedded Rust Book](https://docs.rust-embedded.org/book/)
-- [no_std chapter](https://docs.rust-embedded.org/book/intro/no-std.html)
-- [Linux Kernel Rust Coding Guidelines](https://docs.kernel.org/rust/coding-guidelines.html)
+- [Writing an OS in Rust](https://os.phil-opp.com/)
 - [seL4 Rust Support](https://docs.sel4.systems/projects/rust/)
-- [rust-sel4 Repository](https://github.com/seL4/rust-sel4)
-
-### Embedded Rust Patterns
-
-- [Concurrency Patterns in Embedded Rust](https://ferrous-systems.com/blog/embedded-concurrency-patterns/)
-- [Effective Rust - no_std](https://www.lurklurk.org/effective-rust/no-std.html)
-- [Heap Allocation | Writing an OS in Rust](https://os.phil-opp.com/heap-allocation/)
-
-### Capability-Based Security
-
-- [Capability-Security Model in Rust](https://softwarepatternslexicon.com/patterns-rust/24/16/)
-- [Object-capability model](https://en.wikipedia.org/wiki/Object-capability_model)
-
-### seL4 Integration
-
-- [Strengthen Your seL4 Userspace Code with Rust](https://www.dornerworks.com/blog/strengthen-your-sel4-userspace-code-with-rust/)
-- [seL4 Summit 2024 Rust Presentation](https://sel4.systems/Foundation/Summit/2024/slides/rust-support.pdf)
+- [Linux Kernel Rust Guidelines](https://docs.kernel.org/rust/coding-guidelines.html)

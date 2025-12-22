@@ -123,8 +123,8 @@ This section provides a complete index of all tasks across all milestones. Use t
 
 | Task | Name | Status |
 |------|------|--------|
-| 1.2.1 | Multi-Arity Function Support | open |
-| 1.2.2 | Closure Implementation | open |
+| 1.2.1 | Multi-Arity Function Support | done |
+| 1.2.2 | Closure Implementation | done |
 | 1.2.3 | Sequential Destructuring | open |
 | 1.2.4 | Associative Destructuring | open |
 | 1.2.5 | Nested Destructuring | open |
