@@ -218,3 +218,55 @@
 
 ---
 
+### Phase 12.6: DNS Client
+
+#### Task 12.6.1: DNS Resolver
+
+**Description**: Implement DNS client for hostname resolution.
+
+**Files to create**:
+- `lona/net/dns.lona`
+
+**Requirements**:
+- `(dns-resolve hostname)` - resolve hostname to IP address(es)
+- `(dns-resolve-all hostname)` - return all A/AAAA records
+- DNS query packet construction
+- DNS response parsing
+- Support for A (IPv4) and AAAA (IPv6) records
+- Configurable DNS server(s)
+- Query timeout and retry logic
+
+**Design Note**: Required for ACME (Milestone 16) to connect to Certificate Authority. Also needed for any client connecting to remote hosts by name.
+
+**Tests**:
+- Query construction
+- Response parsing
+- Timeout handling
+- Multiple record handling
+
+**Estimated effort**: 2-3 context windows
+
+---
+
+#### Task 12.6.2: DNS Caching
+
+**Description**: Implement DNS response caching.
+
+**Files to modify**:
+- `lona/net/dns.lona`
+
+**Requirements**:
+- Cache resolved records with TTL
+- Automatic expiration
+- Cache size limits
+- Negative caching (NXDOMAIN)
+
+**Tests**:
+- Cache hit/miss behavior
+- TTL expiration
+- Cache eviction
+
+**Estimated effort**: 1 context window
+
+---
+

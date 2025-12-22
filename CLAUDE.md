@@ -234,6 +234,8 @@ make clean           # Remove build artifacts
 make shell-aarch64   # Interactive Docker shell for debugging
 ```
 
+**IMPORTANT: To check code quality or whether tests run successful, ALWAYS run `make test`!**
+
 ## MCP Tools
 
 The following MCP tools are available for interactive testing in the real seL4 environment:
@@ -251,10 +253,10 @@ For code review and analysis, these CLI tools are available:
 # Gemini
 timeout 900 gemini -m gemini-3-pro-preview -s "PROMPT"
 
-# Codex
-timeout 900 codex exec -m gpt-5.2 -c model_reasoning_effort=medium "PROMPT"
+# Codex (add "-c model_reasoning_effort=LEVEL" where LEVEL is minimal/low/medium/high/xhigh - defaults to medium)
+timeout 900 codex exec -m gpt-5.2 -c hide_agent_reasoning=true "PROMPT" 2>/dev/null
 ```
 
-Both accept prompts as positional arguments. For multiline prompts, use proper shell quoting.
+Both accept prompts as positional arguments. For multiline prompts, use proper shell quoting. Always run with the `timeout 900` to give them sufficient time!
 
 **Important:** When crafting prompts, include references to relevant files (e.g., `docs/goals/index.md`, `docs/development/principles.md`) so the agent knows which documents to read for context.

@@ -19,6 +19,7 @@
             "mcp__lona-dev-repl__eval",
             "mcp__lona-dev-repl__restart",
 
+            "Skill(plan-feature)",
             "Skill(develop-rust)",
             "Skill(develop-lonala)",
             "Skill(finishing-work)",
@@ -68,5 +69,8 @@
     "attribution": {
         "commit": "",
         "pr": ""
-    }
+    },
+
+    "enableAllProjectMcpServers": true,
+    "enabledMcpjsonServers": ["lona-dev-repl"]
 }

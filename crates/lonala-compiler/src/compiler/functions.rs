@@ -17,9 +17,28 @@ use lona_core::opcode::{Opcode, encode_abc, encode_abx};
 use lona_core::span::Span;
 use lonala_parser::{Ast, Spanned};
 
+use super::destructure;
 use super::macros::{MacroBody, MacroDefinition};
 use super::{CaptureContext, Compiler, ExprResult};
 use crate::error::{Error, Kind as ErrorKind, SourceLocation};
+
+/// A parsed binding target in a function parameter list.
+///
+/// Represents a single parameter position, which can be a simple symbol,
+/// an ignored position, or a destructuring pattern.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub(super) enum ParsedBinding {
+    /// A simple symbol binding: `x` in `[x y z]`.
+    Symbol(String),
+
+    /// An ignored position: `_` in `[x _ z]`.
+    Ignore,
+
+    /// A destructuring pattern: `[a b]` in `[[a b] c]`.
+    /// Stores the original AST for later parsing by the destructure module.
+    Pattern(Spanned<Ast>),
+}
 
 /// Parsed parameter information from a parameter vector.
 ///
@@ -27,9 +46,122 @@ use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 #[derive(Debug)]
 pub(super) struct ParsedParams {
     /// Fixed (required) parameters.
-    pub fixed: Vec<String>,
+    pub fixed: Vec<ParsedBinding>,
     /// Optional rest parameter that collects remaining arguments.
-    pub rest: Option<String>,
+    pub rest: Option<ParsedBinding>,
+}
+
+/// State machine for parsing function parameters.
+///
+/// Tracks position in parameter list and whether `&` has been seen.
+struct ParamParseState {
+    fixed: Vec<ParsedBinding>,
+    rest: Option<ParsedBinding>,
+    found_ampersand: bool,
+    ampersand_span: Option<Span>,
+}
+
+impl ParamParseState {
+    /// Creates a new parameter parse state.
+    #[inline]
+    const fn new() -> Self {
+        Self {
+            fixed: Vec::new(),
+            rest: None,
+            found_ampersand: false,
+            ampersand_span: None,
+        }
+    }
+
+    /// Handles the `&` marker.
+    #[inline]
+    const fn handle_ampersand(&mut self, location: SourceLocation) -> Result<(), Error> {
+        if self.found_ampersand {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "multiple & in parameter list",
+                },
+                location,
+            ));
+        }
+        self.found_ampersand = true;
+        self.ampersand_span = Some(location.span);
+        Ok(())
+    }
+
+    /// Handles an ignored parameter `_`.
+    #[inline]
+    fn handle_ignore(&mut self, location: SourceLocation) -> Result<(), Error> {
+        if self.found_ampersand {
+            self.set_rest(ParsedBinding::Ignore, location)
+        } else {
+            self.fixed.push(ParsedBinding::Ignore);
+            Ok(())
+        }
+    }
+
+    /// Handles a symbol parameter.
+    #[inline]
+    fn handle_symbol(&mut self, name: &str, location: SourceLocation) -> Result<(), Error> {
+        if self.found_ampersand {
+            self.set_rest(ParsedBinding::Symbol(String::from(name)), location)
+        } else {
+            self.fixed.push(ParsedBinding::Symbol(String::from(name)));
+            Ok(())
+        }
+    }
+
+    /// Handles a vector (destructuring) parameter.
+    #[inline]
+    fn handle_vector(
+        &mut self,
+        param: &Spanned<Ast>,
+        location: SourceLocation,
+    ) -> Result<(), Error> {
+        if self.found_ampersand {
+            self.set_rest(ParsedBinding::Pattern(param.clone()), location)
+        } else {
+            self.fixed.push(ParsedBinding::Pattern(param.clone()));
+            Ok(())
+        }
+    }
+
+    /// Sets the rest parameter, erroring if already set.
+    fn set_rest(&mut self, binding: ParsedBinding, location: SourceLocation) -> Result<(), Error> {
+        if self.rest.is_some() {
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "only one parameter allowed after &",
+                },
+                location,
+            ));
+        }
+        self.rest = Some(binding);
+        Ok(())
+    }
+
+    /// Finalizes parsing and returns the result.
+    #[inline]
+    fn finalize(self, fallback_location: SourceLocation) -> Result<ParsedParams, Error> {
+        if self.found_ampersand && self.rest.is_none() {
+            let location = self.ampersand_span.map_or(fallback_location, |span| {
+                SourceLocation::new(fallback_location.source, span)
+            });
+            return Err(Error::new(
+                ErrorKind::InvalidSpecialForm {
+                    form: "fn",
+                    message: "& must be followed by a rest parameter",
+                },
+                location,
+            ));
+        }
+        Ok(ParsedParams {
+            fixed: self.fixed,
+            rest: self.rest,
+        })
+    }
 }
 
 /// Result of parsing an `fn` special form.
@@ -100,7 +232,7 @@ impl Compiler<'_, '_, '_> {
                 }
 
                 // Unify upvalue sources across all bodies
-                Self::unify_multi_arity_upvalues(&mut body_datas);
+                Self::unify_multi_arity_upvalues(&mut body_datas, location)?;
 
                 // Validate arities
                 Self::validate_arities(&body_datas, location)?;
@@ -427,10 +559,17 @@ impl Compiler<'_, '_, '_> {
     /// 3. Sets the unified `upvalue_sources` on all bodies
     ///
     /// This ensures all arity bodies share the same upvalue array at runtime.
-    fn unify_multi_arity_upvalues(bodies: &mut [FunctionBodyData]) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the unified upvalue list exceeds 256 entries.
+    fn unify_multi_arity_upvalues(
+        bodies: &mut [FunctionBodyData],
+        location: SourceLocation,
+    ) -> Result<(), Error> {
         // If no bodies or none have upvalues, nothing to do
         if bodies.is_empty() {
-            return;
+            return Ok(());
         }
 
         // Build unified upvalue list (first occurrence order across all bodies)
@@ -445,7 +584,7 @@ impl Compiler<'_, '_, '_> {
 
         // If no upvalues, nothing to remap
         if unified_sources.is_empty() {
-            return;
+            return Ok(());
         }
 
         // For each body, remap its GetUpvalue indices
@@ -459,12 +598,19 @@ impl Compiler<'_, '_, '_> {
             // Build remapping: old_index -> new_index
             let mut remap: Vec<u8> = Vec::with_capacity(body.upvalue_sources.len());
             for source in &body.upvalue_sources {
-                // Find position in unified list
-                if let Some(new_idx) = unified_sources.iter().position(|src| src == source)
-                    && let Ok(idx_u8) = u8::try_from(new_idx)
-                {
-                    remap.push(idx_u8);
-                }
+                // Find position in unified list (must exist since we built it from all sources)
+                let Some(new_idx) = unified_sources.iter().position(|src| src == source) else {
+                    return Err(Error::new(
+                        ErrorKind::InternalError {
+                            message: "upvalue source missing from unified list",
+                        },
+                        location,
+                    ));
+                };
+                // Convert to u8, failing if too many upvalues
+                let idx_u8 = u8::try_from(new_idx)
+                    .map_err(|_overflow| Error::new(ErrorKind::TooManyRegisters, location))?;
+                remap.push(idx_u8);
             }
 
             // Patch bytecode: update GetUpvalue instructions
@@ -473,6 +619,8 @@ impl Compiler<'_, '_, '_> {
             // Set unified upvalue sources
             body.upvalue_sources.clone_from(&unified_sources);
         }
+
+        Ok(())
     }
 
     /// Remaps `GetUpvalue` instruction indices in a chunk.
@@ -528,81 +676,74 @@ impl Compiler<'_, '_, '_> {
         Ok(ExprResult { register: dest })
     }
 
-    /// Extracts parameter names from a parameter vector AST.
+    /// Extracts parameter bindings from a parameter vector AST.
     ///
     /// Handles rest parameters using `&` syntax:
     /// - `[a b]` - two fixed parameters
     /// - `[a & rest]` - one fixed, rest collects remaining
     /// - `[& rest]` - zero fixed, rest collects all
+    ///
+    /// Also supports destructuring patterns and ignored parameters:
+    /// - `[[a b] c]` - first param is destructured, second is simple
+    /// - `[_ x]` - first param is ignored, second is bound
     pub(super) fn extract_params(&self, params_ast: &Spanned<Ast>) -> Result<ParsedParams, Error> {
         let Ast::Vector(ref params_vec) = params_ast.node else {
-            return Err(Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "fn",
-                    message: "parameters must be a vector",
-                },
+            return Err(Self::fn_error(
+                "parameters must be a vector",
                 self.location(params_ast.span),
             ));
         };
 
-        let mut fixed = Vec::new();
-        let mut rest = None;
-        let mut found_ampersand = false;
-        let mut ampersand_span = None;
+        let mut state = ParamParseState::new();
 
         for param in params_vec {
-            let Ast::Symbol(ref name) = param.node else {
-                return Err(Error::new(
-                    ErrorKind::InvalidSpecialForm {
-                        form: "fn",
-                        message: "parameter must be a symbol",
-                    },
-                    self.location(param.span),
-                ));
-            };
+            self.process_param(param, &mut state)?;
+        }
 
-            if name == "&" {
-                if found_ampersand {
-                    return Err(Error::new(
-                        ErrorKind::InvalidSpecialForm {
-                            form: "fn",
-                            message: "multiple & in parameter list",
-                        },
-                        self.location(param.span),
-                    ));
-                }
-                found_ampersand = true;
-                ampersand_span = Some(param.span);
-            } else if found_ampersand {
-                // This symbol follows &, so it's the rest parameter
-                if rest.is_some() {
-                    return Err(Error::new(
-                        ErrorKind::InvalidSpecialForm {
-                            form: "fn",
-                            message: "only one parameter allowed after &",
-                        },
-                        self.location(param.span),
-                    ));
-                }
-                rest = Some(name.clone());
-            } else {
-                // Regular fixed parameter
-                fixed.push(name.clone());
+        state.finalize(self.location(params_ast.span))
+    }
+
+    /// Processes a single parameter in the parameter list.
+    fn process_param(
+        &self,
+        param: &Spanned<Ast>,
+        state: &mut ParamParseState,
+    ) -> Result<(), Error> {
+        match param.node {
+            Ast::Symbol(ref name) if name == "&" => {
+                state.handle_ampersand(self.location(param.span))
             }
+            Ast::Symbol(ref name) if name == "_" => state.handle_ignore(self.location(param.span)),
+            Ast::Symbol(ref name) => state.handle_symbol(name, self.location(param.span)),
+            Ast::Vector(_) => state.handle_vector(param, self.location(param.span)),
+            // All other AST types are invalid parameter bindings
+            Ast::Integer(_)
+            | Ast::Float(_)
+            | Ast::String(_)
+            | Ast::Bool(_)
+            | Ast::Nil
+            | Ast::Keyword(_)
+            | Ast::List(_)
+            | Ast::Map(_)
+            | Ast::Set(_)
+            | Ast::WithMeta { .. }
+            | _ => Err(Self::fn_error(
+                "parameter must be a symbol, _, or vector pattern",
+                self.location(param.span),
+            )),
         }
+    }
 
-        // Check that & was followed by a parameter
-        if found_ampersand && rest.is_none() {
-            return Err(Error::new(
-                ErrorKind::InvalidSpecialForm {
-                    form: "fn",
-                    message: "& must be followed by a rest parameter name",
-                },
-                self.location(ampersand_span.unwrap_or(params_ast.span)),
-            ));
-        }
-
-        Ok(ParsedParams { fixed, rest })
+    /// Helper to create `fn` form errors.
+    #[inline]
+    const fn fn_error(message: &'static str, location: SourceLocation) -> Error {
+        Error::new(
+            ErrorKind::InvalidSpecialForm {
+                form: "fn",
+                message,
+            },
+            location,
+        )
     }
 
     /// Sets up parameters as local variables on a child compiler.
@@ -610,6 +751,16 @@ impl Compiler<'_, '_, '_> {
     /// This helper is used by both `compile_fn` and `compile_defmacro` to set up
     /// the parameter locals. Fixed parameters are placed in R[0..arity], and if
     /// a rest parameter exists, it is placed in R[arity].
+    ///
+    /// Supports destructuring patterns: when a parameter is a vector pattern,
+    /// the argument value is destructured using the pattern, creating multiple
+    /// local bindings from the single argument.
+    ///
+    /// # Register Layout
+    ///
+    /// Arguments occupy registers `R[0..total_params]` where `total_params` includes
+    /// both fixed params and the rest param (if any). Destructuring patterns
+    /// allocate temporary registers AFTER the argument region.
     fn setup_params_on_compiler(
         child: &mut Compiler<'_, '_, '_>,
         parsed: &ParsedParams,
@@ -618,27 +769,60 @@ impl Compiler<'_, '_, '_> {
     ) -> Result<(), Error> {
         child.locals.push_scope();
 
-        // Fixed parameters: R[0], R[1], ..., R[arity-1]
+        // Calculate total parameter slots (fixed + optional rest)
+        let total_param_slots = if parsed.rest.is_some() {
+            arity.saturating_add(1)
+        } else {
+            arity
+        };
+
+        // Reserve registers R[0..total_param_slots] for arguments.
+        // Destructuring will allocate temporaries starting at R[total_param_slots].
+        child.next_register = total_param_slots;
+        child.max_register = total_param_slots.saturating_sub(1);
+
+        // Phase 1: Bind simple symbol parameters directly to their arg registers
+        // (no bytecode needed, these are already in place)
         for (idx, param) in parsed.fixed.iter().enumerate() {
-            let symbol_id = child.interner.intern(param);
-            let reg = u8::try_from(idx)
+            let arg_reg = u8::try_from(idx)
                 .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
-            child.locals.define(symbol_id, reg);
-            child.next_register = reg.saturating_add(1);
-            if reg > child.max_register {
-                child.max_register = reg;
+
+            if let ParsedBinding::Symbol(ref name) = *param {
+                let symbol_id = child.interner.intern(name);
+                child.locals.define(symbol_id, arg_reg);
             }
         }
 
-        // Rest parameter: R[arity] (if present)
-        if let Some(ref rest_name) = parsed.rest {
-            let symbol_id = child.interner.intern(rest_name);
-            let reg = arity; // Rest param is at R[arity]
-            child.locals.define(symbol_id, reg);
-            child.next_register = reg.saturating_add(1);
-            if reg > child.max_register {
-                child.max_register = reg;
+        // Bind rest parameter if it's a simple symbol
+        if let Some(ParsedBinding::Symbol(ref name)) = parsed.rest {
+            let symbol_id = child.interner.intern(name);
+            child.locals.define(symbol_id, arity);
+        }
+
+        // Phase 2: Compile destructuring patterns (allocates temps after arg region)
+        for (idx, param) in parsed.fixed.iter().enumerate() {
+            let arg_reg = u8::try_from(idx)
+                .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, location))?;
+
+            if let ParsedBinding::Pattern(ref pattern_ast) = *param {
+                let pattern = destructure::parse_sequential_pattern(
+                    child.interner,
+                    pattern_ast,
+                    child.source_id,
+                )?;
+                child.compile_sequential_binding(&pattern, arg_reg, pattern_ast.span)?;
             }
+            // Ignore bindings need no action
+        }
+
+        // Compile rest parameter destructuring if it's a pattern
+        if let Some(ParsedBinding::Pattern(ref pattern_ast)) = parsed.rest {
+            let pattern = destructure::parse_sequential_pattern(
+                child.interner,
+                pattern_ast,
+                child.source_id,
+            )?;
+            child.compile_sequential_binding(&pattern, arity, pattern_ast.span)?;
         }
 
         Ok(())

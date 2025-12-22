@@ -22,6 +22,14 @@ This document provides a detailed, task-level breakdown of the Lona operating sy
 4. **BEAM-Style Concurrency**: Lightweight processes, message passing, supervision trees
 5. **seL4 Security**: Capability-based isolation at domain boundaries
 
+### Open Design Decisions
+
+> **IMPORTANT**: These are major architectural decisions requiring dedicated design sessions before implementation.
+
+| Decision | Status | Affects | Notes |
+|----------|--------|---------|-------|
+| **Cross-Domain Zero-Copy IPC** | 🔴 OPEN | Task 1.6.5-1.6.7 | Goals promise "zero-copy via capabilities" for immutable data. Current Task 1.6.7 describes serialize/deserialize which is copy-based. Need to evaluate: (1) shared-heap allocation for persistent structures, (2) cross-domain GC coordination, (3) hybrid approach for small vs large messages. Since we use persistent data structures, true zero-copy should be achievable. |
+
 ### Architecture Layers
 
 ```
@@ -125,7 +133,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 |------|------|--------|
 | 1.2.1 | Multi-Arity Function Support | done |
 | 1.2.2 | Closure Implementation | done |
-| 1.2.3 | Sequential Destructuring | open |
+| 1.2.3 | Sequential Destructuring | done |
 | 1.2.4 | Associative Destructuring | open |
 | 1.2.5 | Nested Destructuring | open |
 | 1.2.6 | [Proper Tail Calls - Compiler](../development/tco.md) | open |
@@ -134,6 +142,9 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.9 | Pattern Matching - Core Infrastructure | open |
 | 1.2.10 | Case Special Form | open |
 | 1.2.11 | Gensym Implementation | open |
+| 1.2.12 | Anonymous Function Reader Macro (`#()`) | open |
+| 1.2.13 | Discard Reader Macro (`#_`) | open |
+| 1.2.14 | Regex Literal Syntax (`#""`) | open |
 
 #### Phase 1.3: Namespace System
 
@@ -184,13 +195,14 @@ This section provides a complete index of all tasks across all milestones. Use t
 
 | Task | Name | Status |
 |------|------|--------|
+| 1.6.0 | Capability Value Type | open |
 | 1.6.1 | VSpace Manager | open |
-| 1.6.2 | CSpace Manager | open |
+| 1.6.2 | CSpace Manager (with Revocation) | open |
 | 1.6.3 | Domain Data Structure | open |
 | 1.6.4 | Domain Creation Primitive | open |
 | 1.6.5 | Shared Memory Regions | open |
 | 1.6.6 | Inter-Domain IPC - Notification | open |
-| 1.6.7 | Inter-Domain IPC - Message Passing | open |
+| 1.6.7 | Inter-Domain IPC - Message Passing ⚠️ | open |
 | 1.6.8 | Capability Transfer | open |
 | 1.6.9 | Code Sharing Between Domains | open |
 
@@ -235,6 +247,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.8.25 | `read-string` Native Primitive | open |
 | 1.8.26 | `seq` Native Primitive | open |
 | 1.8.27 | x86 Port I/O Primitives | open |
+| 1.8.28 | Bundled Source Loading | open |
 
 #### Phase 1.9: Integration & Spec Tests
 
@@ -328,9 +341,9 @@ This section provides a complete index of all tasks across all milestones. Use t
 
 | Task | Name | Status |
 |------|------|--------|
-| 2.4.0 | Collection Constructors (`list`, `vector`, `hash-map`, `hash-set`) | open |
+| 2.4.0 | Collection Transformation (`into`, `empty`, `vec`, `set`) | open |
 | 2.4.1 | Collection Predicates | open |
-| 2.4.2 | Collection Transformation | open |
+| 2.4.2 | Collection Constructors (`list`, `vector`, `hash-map`, `hash-set`) | open |
 | 2.4.3 | Collection Analysis | open |
 | 2.4.4 | Map Functions | open |
 | 2.4.5 | Set Functions | open |
@@ -658,6 +671,13 @@ This section provides a complete index of all tasks across all milestones. Use t
 |------|------|--------|
 | 12.5.1 | Transport Tests | open |
 
+#### Phase 12.6: DNS Client
+
+| Task | Name | Status |
+|------|------|--------|
+| 12.6.1 | DNS Resolver | open |
+| 12.6.2 | DNS Caching | open |
+
 ---
 
 ### Milestone 13: Telnet Server
@@ -711,6 +731,13 @@ This section provides a complete index of all tasks across all milestones. Use t
 ---
 
 ### Milestone 15: TLS
+
+#### Phase 15.0: TLS Prerequisites
+
+| Task | Name | Status |
+|------|------|--------|
+| 15.0.1 | Cryptographic Random Number Generator | open |
+| 15.0.2 | Real-Time Clock Access | open |
 
 #### Phase 15.1: Cryptographic Primitives
 

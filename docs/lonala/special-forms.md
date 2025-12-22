@@ -61,6 +61,40 @@ Creates local bindings for a body of expressions.
     x))             ; => 2
 ```
 
+### Sequential Destructuring
+
+Bindings support vector patterns for extracting values from collections:
+
+```clojure
+; Basic destructuring
+(let [[a b] [1 2]]
+  (+ a b))           ; => 3
+
+; Rest binding with &
+(let [[first & rest] [1 2 3 4]]
+  rest)              ; => (2 3 4)
+
+; :as binding to keep whole collection
+(let [[a b :as all] [1 2 3]]
+  all)               ; => [1 2 3]
+
+; Ignoring elements with _
+(let [[a _ c] [1 2 3]]
+  c)                 ; => 3
+
+; Nested destructuring
+(let [[[x y] z] [[1 2] 3]]
+  (+ x y z))         ; => 6
+
+; Missing elements bind to nil
+(let [[a b] [1]]
+  b)                 ; => nil
+
+; Destructuring nil
+(let [[a] nil]
+  a)                 ; => nil
+```
+
 ## 6.3 `if`
 
 Conditional branching.
@@ -162,6 +196,47 @@ Creates a function.
 (square 5)                 ; => 25
 ```
 
+### Parameter Destructuring
+
+Parameters support sequential destructuring patterns, allowing direct extraction of values from collections:
+
+```clojure
+; Basic destructuring - extracts first two elements
+((fn [[a b]] (+ a b)) [1 2])        ; => 3
+
+; With rest binding - collects remaining elements
+((fn [[x & xs]] xs) [1 2 3 4])      ; => (2 3 4)
+
+; With :as binding - binds whole collection
+((fn [[a :as all]] all) [1 2 3])    ; => [1 2 3]
+
+; Ignoring elements with _
+((fn [[a _ c]] c) [1 2 3])          ; => 3
+
+; Nested destructuring
+((fn [[[x y] z]] (+ x y z)) [[1 2] 3])  ; => 6
+```
+
+**Mixed parameters** - destructuring and simple params:
+
+```clojure
+((fn [[a b] c] (+ a b c)) [1 2] 3)  ; => 6
+```
+
+**Ignored parameters** - use `_` to ignore arguments:
+
+```clojure
+((fn [_ x] x) 1 2)          ; => 2
+((fn [x & _] x) 1 2 3 4)    ; => 1
+```
+
+**Missing elements** bind to `nil`:
+
+```clojure
+((fn [[a b]] b) [1])        ; => nil
+((fn [[a]] a) nil)          ; => nil
+```
+
 ## 6.6 `quote`
 
 Returns its argument unevaluated.
@@ -228,10 +303,14 @@ Signals a condition without unwinding the stack.
 - Searches for a handler established by `handler-bind`
 - If handler found, calls it with the condition
 - Handler can invoke a restart, re-signal, or return
-- If no handler or handler returns, execution continues
+- If no handler or handler returns, `signal` returns `nil` (non-fatal)
+
+> **Note**: `signal` is for **non-fatal notifications** (warnings, info). For fatal errors,
+> use `panic!` which terminates the process in production mode. See [Error Handling](error-handling.md)
+> for the full distinction between `signal` and `panic!`.
 
 ```clojure
-;; Signal a condition
+;; Signal a non-fatal condition (returns nil if unhandled)
 (signal :file-not-found {:path "/etc/config"})
 
 ;; Signal with rich context

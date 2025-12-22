@@ -550,3 +550,216 @@ fn test_8_7_empty_fn_error() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_error("(fn)", &spec_ref("8.7", "Multi-arity", "empty fn is error"));
 }
+
+// ============================================================================
+// Section 8.8: Parameter Destructuring
+// Reference: docs/lonala/special-forms.md#fn
+// ============================================================================
+
+/// Spec 8.8: Destructuring parameter - basic fixed elements
+#[test]
+fn test_8_8_destructuring_basic() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [[a b]] (+ a b)) [1 2])",
+        3,
+        &spec_ref("8.8", "Destructuring", "basic [a b] extracts elements"),
+    );
+}
+
+/// Spec 8.8: Destructuring parameter - three elements
+#[test]
+fn test_8_8_destructuring_three_elements() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [[a b c]] (+ a b c)) [1 2 3])",
+        6,
+        &spec_ref("8.8", "Destructuring", "[a b c] extracts three elements"),
+    );
+}
+
+/// Spec 8.8: Destructuring parameter - with rest binding
+#[test]
+fn test_8_8_destructuring_with_rest() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_list_eq(
+        "((fn [[a & r]] r) [1 2 3])",
+        "(list 2 3)",
+        &spec_ref("8.8", "Destructuring", "rest binding collects remainder"),
+    );
+}
+
+/// Spec 8.8: Destructuring parameter - rest binding empty
+#[test]
+fn test_8_8_destructuring_rest_empty() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_list_len(
+        "((fn [[a & r]] r) [1])",
+        0,
+        &spec_ref(
+            "8.8",
+            "Destructuring",
+            "rest binding empty when no remainder",
+        ),
+    );
+}
+
+/// Spec 8.8: Destructuring parameter - with ignore
+#[test]
+fn test_8_8_destructuring_with_ignore() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [[a _ c]] c) [1 2 3])",
+        3,
+        &spec_ref("8.8", "Destructuring", "_ ignores middle element"),
+    );
+}
+
+/// Spec 8.8: Destructuring parameter - with :as binding
+#[test]
+fn test_8_8_destructuring_with_as() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_vector_eq(
+        "((fn [[a :as all]] all) [1 2 3])",
+        "[1 2 3]",
+        &spec_ref("8.8", "Destructuring", ":as binds whole collection"),
+    );
+}
+
+/// Spec 8.8: Destructuring parameter - nested pattern
+#[test]
+fn test_8_8_destructuring_nested() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [[[x y] z]] (+ x y z)) [[1 2] 3])",
+        6,
+        &spec_ref("8.8", "Destructuring", "nested pattern extracts deeply"),
+    );
+}
+
+/// Spec 8.8: Multiple parameters with some destructured
+#[test]
+fn test_8_8_mixed_params() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [[a b] c] (+ a b c)) [1 2] 3)",
+        6,
+        &spec_ref(
+            "8.8",
+            "Destructuring",
+            "mixed destructured and simple params",
+        ),
+    );
+}
+
+/// Spec 8.8: Destructuring in multi-arity function
+#[test]
+fn test_8_8_multi_arity_destructuring() {
+    let mut ctx = SpecTestContext::new();
+    // 1-arity takes a vector, 2-arity takes a vector plus a number
+    let _res = ctx
+        .eval("(def f (fn ([[a b]] (+ a b)) ([[a b] c] (+ a b c))))")
+        .unwrap();
+    ctx.assert_int(
+        "(f [10 20])",
+        30,
+        &spec_ref("8.8", "Destructuring", "1-arity destructuring"),
+    );
+    ctx.assert_int(
+        "(f [10 20] 5)",
+        35,
+        &spec_ref(
+            "8.8",
+            "Destructuring",
+            "2-arity destructuring with extra param",
+        ),
+    );
+}
+
+/// Spec 8.8: Destructuring with short collection binds nil
+#[test]
+fn test_8_8_short_collection() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_nil(
+        "((fn [[a b]] b) [1])",
+        &spec_ref("8.8", "Destructuring", "missing element binds to nil"),
+    );
+}
+
+/// Spec 8.8: Destructuring nil behaves like empty collection
+#[test]
+fn test_8_8_nil_input() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_nil(
+        "((fn [[a]] a) nil)",
+        &spec_ref("8.8", "Destructuring", "nil input binds elements to nil"),
+    );
+}
+
+/// Spec 8.8: Ignored parameter `_`
+#[test]
+fn test_8_8_ignored_param() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [_ x] x) 1 2)",
+        2,
+        &spec_ref("8.8", "Destructuring", "_ ignores first parameter"),
+    );
+}
+
+/// Spec 8.8: Ignored rest parameter `& _`
+#[test]
+fn test_8_8_ignored_rest_param() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [x & _] x) 1 2 3 4)",
+        1,
+        &spec_ref("8.8", "Destructuring", "& _ ignores all rest arguments"),
+    );
+}
+
+/// Spec 8.8: Destructuring with closure capture in multi-arity
+#[test]
+fn test_8_8_closure_destructuring_multi_arity() {
+    let mut ctx = SpecTestContext::new();
+    // Multi-arity function: 1-arity destructures, 2-arity destructures + extra param
+    // Both capture 'x' from outer scope
+    let _res = ctx
+        .eval("(def make-fn (fn [x] (fn ([[a b]] (+ x a b)) ([[a b] c] (+ x a b c)))))")
+        .unwrap();
+    let _res = ctx.eval("(def f (make-fn 100))").unwrap();
+    ctx.assert_int(
+        "(f [1 2])",
+        103,
+        &spec_ref("8.8", "Destructuring", "1-arity with capture"),
+    );
+    ctx.assert_int(
+        "(f [1 2] 10)",
+        113,
+        &spec_ref("8.8", "Destructuring", "2-arity with same capture"),
+    );
+}
+
+/// Spec 8.8: Destructuring pattern as rest parameter
+#[test]
+fn test_8_8_rest_destructuring() {
+    let mut ctx = SpecTestContext::new();
+    // Note: The rest parameter collects remaining args as a list.
+    // Destructuring [a b] extracts from that list.
+    ctx.assert_int(
+        "((fn [x & [a b]] (+ x a b)) 1 2 3)",
+        6,
+        &spec_ref("8.8", "Destructuring", "rest param with destructuring"),
+    );
+}
+
+/// Spec 8.8: Destructuring rest parameter with :as
+#[test]
+fn test_8_8_rest_destructuring_with_as() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_list_eq(
+        "((fn [x & [a :as all]] all) 1 2 3 4)",
+        "(list 2 3 4)",
+        &spec_ref("8.8", "Destructuring", "rest destructuring with :as"),
+    );
+}

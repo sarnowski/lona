@@ -28,7 +28,7 @@ See [docs/development/minimal-rust.md](../../development/minimal-rust.md) for th
 | [Collections](collections.md) | `cons`, `first`, `rest`, `conj`, `assoc`, etc. | Partial |
 | [Binary Operations](binary.md) | Raw byte buffer operations | *(Planned)* |
 | [Symbols](symbols.md) | `symbol`, `gensym` | *(Planned)* |
-| [Metadata](metadata.md) | `meta`, `with-meta`, `vary-meta` | *(Planned)* |
+| [Metadata](metadata.md) | `meta`, `with-meta`, `vary-meta` | Partial (`meta`/`with-meta` done) |
 | [Sorted Collections](sorted-collections.md) | `sorted-map`, `sorted-set` | *(Planned)* |
 | [Hardware Access](hardware.md) | MMIO, DMA, IRQ primitives | *(Planned)* |
 | [Time](time.md) | `now-ms`, `send-after` | *(Planned)* |

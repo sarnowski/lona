@@ -44,6 +44,13 @@ def get_manager() -> ReplManager:
     return _manager
 
 
+def _format_result(result: str, started_at: str | None) -> str:
+    """Format a result with the QEMU start timestamp."""
+    if started_at:
+        return f"{result}\n\n[REPL was built with code from: {started_at}]"
+    return result
+
+
 @mcp.tool()
 async def eval(expression: str) -> str:
     """Evaluate a Lonala expression in the REPL.
@@ -69,12 +76,13 @@ async def eval(expression: str) -> str:
     """
     manager = get_manager()
     success, result = await manager.eval(expression)
+    started_at = manager.get_started_at_iso()
 
     if success:
         if result:
-            return result
-        return "(nil)"
-    return f"Error: {result}"
+            return _format_result(result, started_at)
+        return _format_result("nil", started_at)
+    return _format_result(f"Error: {result}", started_at)
 
 
 @mcp.tool()
@@ -94,10 +102,11 @@ async def restart() -> str:
     """
     manager = get_manager()
     success, message = await manager.restart()
+    started_at = manager.get_started_at_iso()
 
     if success:
-        return f"Success: {message}"
-    return f"Error: {message}"
+        return _format_result(f"Success: {message}", started_at)
+    return _format_result(f"Error: {message}", started_at)
 
 
 async def cleanup() -> None:

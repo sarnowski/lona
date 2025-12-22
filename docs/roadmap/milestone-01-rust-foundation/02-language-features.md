@@ -73,7 +73,7 @@ Complete core language features required for idiomatic Lonala.
 - `[a b & rest]` binds first two, rest to remaining
 - `[a _ c]` skips element with `_`
 - `:as name` binds entire collection
-- Works in `let`, `fn` params, `loop`
+- Works in `let` and `fn` params
 
 **Tests**:
 - Basic vector destructuring
@@ -283,5 +283,82 @@ Complete core language features required for idiomatic Lonala.
 - Prefix gensym
 - Sequential calls produce different symbols
 - Interning works correctly
+
+**Estimated effort**: 0.5 context windows
+
+---
+
+### Task 1.2.12: Anonymous Function Reader Macro
+
+**Description**: Implement `#()` reader macro for anonymous functions.
+
+**Files to modify**:
+- `crates/lonala-parser/src/lexer/mod.rs`
+- `crates/lonala-parser/src/parser/mod.rs`
+
+**Requirements**:
+- `#(+ %1 %2)` expands to `(fn [%1 %2] (+ %1 %2))`
+- `%` or `%1` refers to first argument
+- `%2`, `%3`, ... refer to subsequent arguments
+- `%&` captures rest arguments
+- Highest numbered arg determines arity
+- Nested `#()` is an error (unlike Clojure)
+
+**Tests**:
+- Basic anonymous function
+- Multiple arguments
+- Rest arguments with `%&`
+- Arity detection
+- Nested `#()` error
+
+**Estimated effort**: 1 context window
+
+---
+
+### Task 1.2.13: Discard Reader Macro
+
+**Description**: Implement `#_` reader macro for discarding forms.
+
+**Files to modify**:
+- `crates/lonala-parser/src/lexer/mod.rs`
+- `crates/lonala-parser/src/parser/mod.rs`
+
+**Requirements**:
+- `#_expr` reads and discards `expr`
+- Next form after `#_expr` is returned
+- Useful for commenting out forms in data
+- Works with any expression (lists, vectors, maps)
+- Multiple `#_` can be chained: `#_#_a b c` returns `c`
+
+**Tests**:
+- Discard symbol
+- Discard list
+- Discard in vector literal
+- Chained discards
+
+**Estimated effort**: 0.5 context windows
+
+---
+
+### Task 1.2.14: Regex Literal Syntax
+
+**Description**: Implement `#"pattern"` reader macro for regex literals.
+
+**Files to modify**:
+- `crates/lonala-parser/src/lexer/mod.rs`
+- `crates/lonala-parser/src/parser/mod.rs`
+
+**Requirements**:
+- `#"pattern"` creates a compiled regex value
+- Standard regex syntax (like Rust `regex` crate)
+- Regex is compiled at read time
+- Invalid regex patterns are read-time errors
+
+**Dependencies**: Requires regex primitives (Task 1.8.17) for the compiled type.
+
+**Tests**:
+- Simple regex literal
+- Regex with escapes
+- Invalid regex error at read time
 
 **Estimated effort**: 0.5 context windows

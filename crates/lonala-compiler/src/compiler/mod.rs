@@ -21,6 +21,7 @@ use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 // Submodules containing the actual compilation logic
 mod calls;
 pub mod conversion;
+pub mod destructure;
 mod expressions;
 mod functions;
 pub mod macros;

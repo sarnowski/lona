@@ -280,13 +280,23 @@ When a Binary is sent via `(send pid msg)`:
 - `crates/lona-runtime/src/platform/mmio.rs` (new)
 
 **Requirements**:
-- `peek-u8/u16/u32/u64` - read from address
-- `poke-u8/u16/u32/u64` - write to address
-- Requires capability to access address range
+- `(mmio-read-u8 cap offset)` - read u8 at offset within capability range
+- `(mmio-read-u16 cap offset)` - read u16 at offset within capability range
+- `(mmio-read-u32 cap offset)` - read u32 at offset within capability range
+- `(mmio-read-u64 cap offset)` - read u64 at offset within capability range
+- `(mmio-write-u8 cap offset val)` - write u8 at offset within capability range
+- `(mmio-write-u16 cap offset val)` - write u16 at offset within capability range
+- `(mmio-write-u32 cap offset val)` - write u32 at offset within capability range
+- `(mmio-write-u64 cap offset val)` - write u64 at offset within capability range
+- Capability is an explicit first argument (no ambient authority)
+- Offset is validated against capability's address range
+
+**Design Note**: Following "No Ambient Authority" principle from `docs/development/principles.md`. Capabilities are explicit inputs, not implicit domain permissions.
 
 **Tests**:
 - Read/write operations (mock)
-- Capability enforcement
+- Capability enforcement (invalid cap rejected)
+- Offset bounds checking
 
 **Estimated effort**: 1-2 context windows
 
@@ -301,12 +311,17 @@ When a Binary is sent via `(send pid msg)`:
 - `crates/lona-runtime/src/platform/dma.rs` (new)
 
 **Requirements**:
-- `(dma-alloc size)` - allocate DMA-capable buffer
-- `(phys-addr binary)` - get physical address
-- `(memory-barrier)` - ensure ordering
+- `(dma-alloc dma-cap size)` - allocate DMA-capable buffer using DMA pool capability
+- `(dma-free dma-cap buffer)` - free DMA buffer
+- `(phys-addr buffer)` - get physical address of DMA buffer
+- `(memory-barrier)` - ensure ordering (no capability needed, CPU-local operation)
+- DMA allocation requires explicit DMA pool capability
+
+**Design Note**: Following "No Ambient Authority" principle. Domain must hold DMA pool capability to allocate DMA buffers.
 
 **Tests**:
-- Allocation
+- Allocation with valid capability
+- Rejection without DMA capability
 - Physical address retrieval
 - Barrier execution
 
@@ -693,19 +708,46 @@ After `apply` is implemented, implement `vary-meta` as well.
 - `crates/lona-runtime/src/platform/port_io.rs` (new)
 
 **Requirements**:
-- `(port-in-u8 port)` - read byte from I/O port
-- `(port-in-u16 port)` - read 16-bit from I/O port
-- `(port-in-u32 port)` - read 32-bit from I/O port
-- `(port-out-u8 port val)` - write byte to I/O port
-- `(port-out-u16 port val)` - write 16-bit to I/O port
-- `(port-out-u32 port val)` - write 32-bit to I/O port
+- `(port-in-u8 cap port)` - read byte from I/O port using capability
+- `(port-in-u16 cap port)` - read 16-bit from I/O port
+- `(port-in-u32 cap port)` - read 32-bit from I/O port
+- `(port-out-u8 cap port val)` - write byte to I/O port
+- `(port-out-u16 cap port val)` - write 16-bit to I/O port
+- `(port-out-u32 cap port val)` - write 32-bit to I/O port
 - Uses x86 `in`/`out` instructions
-- Requires I/O port capability (domain must have permission)
+- Capability is explicit first argument; port validated against capability range
 
 > **Platform-specific**: Only available on x86/x86_64. ARM uses MMIO exclusively.
+
+**Design Note**: Following "No Ambient Authority" principle - I/O port capability is explicit.
 
 **Tests**:
 - Port read/write operations (mock on non-x86)
 - Capability enforcement
+
+**Estimated effort**: 1 context window
+
+---
+
+### Task 1.8.28: Bundled Source Loading
+
+**Description**: Implement primitives for loading Lonala source bundled with the runtime image.
+
+**Files to modify**:
+- `crates/lona-kernel/src/vm/natives.rs`
+- `crates/lona-runtime/src/bundled.rs` (new)
+
+**Requirements**:
+- `(bundled-sources)` - return list of bundled source file names
+- `(bundled-read name)` - read bundled source as string
+- Bundled sources compiled into runtime at build time
+- Used by `load` function before filesystem is available (Milestone 7)
+
+**Design Note**: Enables Milestone 2's `load` function to work before filesystem. Standard library sources are bundled into the runtime image.
+
+**Tests**:
+- List bundled sources
+- Read known bundled source
+- Error on unknown name
 
 **Estimated effort**: 1 context window

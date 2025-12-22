@@ -102,6 +102,27 @@ pub enum Kind {
         /// The depth at which expansion was stopped.
         depth: usize,
     },
+
+    // ========== Destructuring errors ==========
+    /// Invalid destructuring pattern syntax.
+    ///
+    /// Indicates that a destructuring pattern (like `[a b & rest]`)
+    /// has invalid syntax.
+    InvalidDestructuringPattern {
+        /// Description of what went wrong.
+        message: &'static str,
+    },
+
+    // ========== Internal errors ==========
+    /// Internal compiler error.
+    ///
+    /// Indicates a bug in the compiler - a condition that should never
+    /// occur if the compiler logic is correct. This is used for invariant
+    /// violations rather than user errors.
+    InternalError {
+        /// Description of the internal error.
+        message: &'static str,
+    },
 }
 
 impl Kind {
@@ -121,6 +142,8 @@ impl Kind {
             Self::InvalidMacroResult { .. } => "InvalidMacroResult",
             Self::MacroExpansionFailed { .. } => "MacroExpansionFailed",
             Self::MacroExpansionDepthExceeded { .. } => "MacroExpansionDepthExceeded",
+            Self::InvalidDestructuringPattern { .. } => "InvalidDestructuringPattern",
+            Self::InternalError { .. } => "InternalError",
         }
     }
 }
@@ -155,6 +178,12 @@ impl fmt::Display for Kind {
             }
             Self::MacroExpansionDepthExceeded { depth } => {
                 write!(f, "macro expansion exceeded maximum depth ({depth})")
+            }
+            Self::InvalidDestructuringPattern { message } => {
+                write!(f, "invalid destructuring pattern: {message}")
+            }
+            Self::InternalError { message } => {
+                write!(f, "internal compiler error: {message}")
             }
         }
     }
@@ -284,6 +313,15 @@ mod tests {
             format!("{}", Kind::MacroExpansionDepthExceeded { depth: 256_usize }),
             "macro expansion exceeded maximum depth (256)"
         );
+        assert_eq!(
+            format!(
+                "{}",
+                Kind::InvalidDestructuringPattern {
+                    message: "test error"
+                }
+            ),
+            "invalid destructuring pattern: test error"
+        );
     }
 
     // ==================== Kind variant_name() Tests ====================
@@ -323,6 +361,10 @@ mod tests {
         assert_eq!(
             Kind::MacroExpansionDepthExceeded { depth: 256_usize }.variant_name(),
             "MacroExpansionDepthExceeded"
+        );
+        assert_eq!(
+            Kind::InvalidDestructuringPattern { message: "test" }.variant_name(),
+            "InvalidDestructuringPattern"
         );
     }
 
@@ -401,6 +443,14 @@ mod tests {
         assert_eq!(
             Error::new(
                 Kind::MacroExpansionDepthExceeded { depth: 256_usize },
+                location
+            )
+            .span(),
+            location.span
+        );
+        assert_eq!(
+            Error::new(
+                Kind::InvalidDestructuringPattern { message: "test" },
                 location
             )
             .span(),

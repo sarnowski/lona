@@ -4,7 +4,7 @@
 
 **Prerequisite**: Milestone 1 complete
 
-> **Bootstrap Note**: Phase 2.1 (Test Framework) uses `native-print` (Task 1.8.22) until Milestone 3 provides the Lonala UART driver.
+> **Bootstrap Note**: Phase 2.1 (Test Framework) uses `native-print` (Task 1.8.23) until Milestone 3 provides the Lonala UART driver.
 
 ### Phase 2.1: Test Framework
 
@@ -91,7 +91,7 @@
 - `lona/core/seq.lona`
 
 **Requirements**:
-- `seq` - native primitive (Task 1.8.25), add convenience wrapper if needed
+- `seq` - native primitive (Task 1.8.26), add convenience wrapper if needed
 - `first`, `rest` - native primitives, document in this namespace
 - `next` - `(defn next [coll] (seq (rest coll)))`
 - `ffirst`, `fnext`, `nnext` - convenience compositions
@@ -213,7 +213,7 @@
 - `lona/core/fn.lona`
 
 **Requirements**:
-- Wraps native `apply` (Task 1.8.21) which handles basic `(apply f args)`
+- Wraps native `apply` (Task 1.8.20) which handles basic `(apply f args)`
 - Adds multi-argument convenience: `(apply f x y args)` prepends x, y to args
 - Variadic form: `(apply f x y z & more)` for arbitrary leading args
 
@@ -333,27 +333,25 @@
 
 ### Phase 2.4: Collection Functions
 
-#### Task 2.4.0: Collection Constructors
+#### Task 2.4.0: Collection Transformation
 
-**Description**: Implement collection constructor functions in pure Lonala.
+**Description**: Implement collection converters. This task must come first as other collection functions depend on `into`.
 
 **Files to create**:
 - `lona/core/coll.lona`
 
 **Requirements**:
-- `list` - create list: `(defn list [& args] args)`
-- `vector` - create vector: `(defn vector [& args] (into [] args))`
-- `hash-map` - create map: `(defn hash-map [& kvs] (apply assoc {} kvs))`
-- `hash-set` - create set: `(defn hash-set [& vals] (into #{} vals))`
+- `into` - pour into collection: `(defn into [to from] (reduce conj to (seq from)))`
+- `empty` - empty version of collection
+- `vec` - to vector: `(defn vec [coll] (if (vector? coll) coll (into [] coll)))`
+- `set` - to set: `(defn set [coll] (into #{} coll))`
+- `sort`, `sort-by` - sorting
 
-**Dependencies**: Requires `apply` (Task 2.2.7), `into` (Task 2.4.2)
+**Note**: `vec` and `set` are pure Lonala implementations using `into`, not native wrappers.
 
-**Tests**:
-- Constructor with zero arguments returns empty collection
-- Constructor with multiple arguments
-- Type verification of results
+**Tests**: Full coverage
 
-**Estimated effort**: 0.5 context windows
+**Estimated effort**: 1 context window
 
 ---
 
@@ -361,7 +359,7 @@
 
 **Description**: Implement collection testing functions.
 
-**Files to create**:
+**Files to modify**:
 - `lona/core/coll.lona`
 
 **Requirements**:
@@ -377,25 +375,27 @@
 
 ---
 
-#### Task 2.4.2: Collection Transformation
+#### Task 2.4.2: Collection Constructors
 
-**Description**: Implement collection converters.
+**Description**: Implement collection constructor functions in pure Lonala.
 
 **Files to modify**:
 - `lona/core/coll.lona`
 
 **Requirements**:
-- `into` - pour into collection: `(defn into [to from] (reduce conj to (seq from)))`
-- `empty` - empty version of collection
-- `vec` - to vector: `(defn vec [coll] (if (vector? coll) coll (into [] coll)))`
-- `set` - to set: `(defn set [coll] (into #{} coll))`
-- `sort`, `sort-by` - sorting
+- `list` - create list: `(defn list [& args] args)`
+- `vector` - create vector: `(defn vector [& args] (into [] args))`
+- `hash-map` - create map: `(defn hash-map [& kvs] (apply assoc {} kvs))`
+- `hash-set` - create set: `(defn hash-set [& vals] (into #{} vals))`
 
-**Note**: `vec` and `set` are pure Lonala implementations using `into`, not native wrappers.
+**Dependencies**: Requires `apply` (Task 2.2.7), `into` (Task 2.4.0)
 
-**Tests**: Full coverage
+**Tests**:
+- Constructor with zero arguments returns empty collection
+- Constructor with multiple arguments
+- Type verification of results
 
-**Estimated effort**: 1 context window
+**Estimated effort**: 0.5 context windows
 
 ---
 
@@ -461,7 +461,7 @@
 
 Implement Clojure-style protocols for polymorphic dispatch.
 
-> **Dependency**: Protocol dispatch uses native `type-of` (Task 1.8.22) for O(1) type lookup instead of O(N) predicate chains.
+> **Dependency**: Protocol dispatch uses native `type-of` (Task 1.8.21) for O(1) type lookup instead of O(N) predicate chains.
 
 #### Task 2.5.1: Protocol Definition (`defprotocol`)
 

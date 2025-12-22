@@ -70,8 +70,8 @@ Do NOT output this plan yet. Hold it for comparison.
 Launch Gemini and Codex in parallel to create independent plans. Send a **single message** with **two background Bash calls**:
 
 ```bash
-timeout 900 gemini -m gemini-3-pro-preview "PROMPT"
-timeout 900 codex exec -m gpt-5.2 -c model_reasoning_effort=high "PROMPT"
+timeout 900 gemini -m gemini-3-pro-preview -s "PROMPT"
+timeout 900 codex exec -m gpt-5.2 -c model_reasoning_effort=high -c hide_agent_reasoning=true -s read-only "PROMPT" 2>/dev/null
 ```
 
 Both receive the **identical prompt** (substitute actual values):
@@ -161,6 +161,28 @@ Revise your plan incorporating insights from all sources. The final plan must:
 3. **Be properly phased**: Each phase MUST fit in one context window
 4. **Be self-contained per phase**: A fresh agent with only PLAN.md can execute any phase
 
+### Phase Sizing Guidance
+
+Use judgment based on task complexity. For each phase, ask:
+- Can a fresh agent complete this phase without hitting context limits?
+- Is this a single logical unit of work?
+- Are the entry/exit conditions clear and testable?
+
+**Simple tasks** → fewer, larger phases
+**Complex tasks** → more, smaller phases
+
+When uncertain, err on the side of smaller phases. A phase that's "too small" just means faster iteration; a phase that's "too large" means wasted work when context is exhausted.
+
+### Phase Validation Checklist
+
+Before finalizing, verify each phase:
+- [ ] Single responsibility - describable in one sentence
+- [ ] Clear entry conditions - what must exist before starting
+- [ ] Clear exit conditions - how to verify completion
+- [ ] Self-contained - a fresh agent can execute with only PLAN.md
+
+If a phase feels like "do X, Y, and Z", consider splitting into separate phases.
+
 ---
 
 ## Step 7: Write to PLAN.md
@@ -176,6 +198,14 @@ Each phase in the plan must be structured so that:
 3. **Entry conditions are explicit**: What files/state must exist before starting
 4. **Exit conditions are testable**: How to verify the phase is complete
 5. **It references specific files**: Not vague descriptions, but exact paths
+
+### Phase Status Tracking
+
+Each phase has a status in its header:
+- `[OPEN]` - Not yet started (default for all phases)
+- `[DONE]` - Completed successfully
+
+This allows quick scanning to find the next phase to work on.
 
 ### PLAN.md Structure
 
@@ -201,7 +231,7 @@ Each phase in the plan must be structured so that:
 
 ---
 
-## Phase 1: {Descriptive Name}
+## Phase 1: {Descriptive Name} [OPEN]
 
 **Entry Conditions:**
 - {What must exist before starting this phase}
@@ -228,7 +258,7 @@ Each phase in the plan must be structured so that:
 
 ---
 
-## Phase 2: {Descriptive Name}
+## Phase 2: {Descriptive Name} [OPEN]
 
 **Entry Conditions:**
 - Phase 1 exit conditions met

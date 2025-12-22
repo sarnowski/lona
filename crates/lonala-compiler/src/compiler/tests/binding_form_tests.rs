@@ -353,8 +353,115 @@ fn compile_let_invalid_non_symbol_binding_name() {
     })) = result
     {
         assert_eq!(form, "let");
-        assert!(message.contains("symbol"));
+        assert!(message.contains("symbol") || message.contains("vector pattern"));
     } else {
         panic!("expected InvalidSpecialForm error for let with non-symbol binding name");
     }
+}
+
+// =========================================================================
+// Special Form: let with destructuring
+// =========================================================================
+
+#[test]
+fn compile_let_destructure_simple() {
+    // (let [[a b] [1 2]] a) should compile successfully
+    let chunk = compile_source("(let [[a b] [1 2]] a)");
+    let code = chunk.code();
+
+    // Should have GetGlobal for "first" and "rest"
+    let get_global_count = code
+        .iter()
+        .filter(|&&instr| decode_op(instr) == Some(Opcode::GetGlobal))
+        .count();
+    assert!(
+        get_global_count >= 2_usize,
+        "expected at least 2 GetGlobal instructions for first/rest, got {get_global_count}"
+    );
+}
+
+#[test]
+fn compile_let_destructure_with_rest() {
+    // (let [[a & r] [1 2 3]] r) should compile successfully
+    let chunk = compile_source("(let [[a & r] [1 2 3]] r)");
+    let code = chunk.code();
+
+    // Should have Call instructions for first/rest
+    let call_count = code
+        .iter()
+        .filter(|&&instr| decode_op(instr) == Some(Opcode::Call))
+        .count();
+    assert!(
+        call_count >= 1_usize,
+        "expected at least 1 Call instruction, got {call_count}"
+    );
+}
+
+#[test]
+fn compile_let_destructure_with_ignore() {
+    // (let [[a _ c] [1 2 3]] c) should compile successfully
+    let chunk = compile_source("(let [[a _ c] [1 2 3]] c)");
+    let code = chunk.code();
+
+    // Should have GetGlobal instructions
+    let has_get_global = code
+        .iter()
+        .any(|&instr| decode_op(instr) == Some(Opcode::GetGlobal));
+    assert!(
+        has_get_global,
+        "expected GetGlobal instructions for first/rest"
+    );
+}
+
+#[test]
+fn compile_let_destructure_with_as() {
+    // (let [[a :as all] [1 2]] all) should compile successfully
+    let chunk = compile_source("(let [[a :as all] [1 2]] all)");
+    let code = chunk.code();
+
+    // Should have Move instruction for :as binding
+    let move_count = code
+        .iter()
+        .filter(|&&instr| decode_op(instr) == Some(Opcode::Move))
+        .count();
+    assert!(
+        move_count >= 1_usize,
+        "expected at least 1 Move instruction for :as binding"
+    );
+}
+
+#[test]
+fn compile_let_destructure_nested() {
+    // (let [[[a b] c] [[1 2] 3]] a) should compile with nested patterns
+    let chunk = compile_source("(let [[[a b] c] [[1 2] 3]] a)");
+    let code = chunk.code();
+
+    // Should have multiple GetGlobal for "first" (outer + inner destructuring)
+    let get_global_count = code
+        .iter()
+        .filter(|&&instr| decode_op(instr) == Some(Opcode::GetGlobal))
+        .count();
+    assert!(
+        get_global_count >= 4_usize,
+        "expected at least 4 GetGlobal instructions for nested destructuring"
+    );
+}
+
+#[test]
+fn compile_let_destructure_mixed_bindings() {
+    // Mix simple and destructuring bindings
+    let chunk = compile_source("(let [x 1 [a b] [2 3] y 4] (+ x y))");
+    let code = chunk.code();
+
+    // Should have GetGlobal for first/rest (from destructuring)
+    let has_get_global = code
+        .iter()
+        .any(|&instr| decode_op(instr) == Some(Opcode::GetGlobal));
+    assert!(has_get_global, "expected GetGlobal for destructuring");
+
+    // Should have Add for (+ x y)
+    let has_add = code
+        .iter()
+        .any(|&instr| decode_op(instr) == Some(Opcode::Add));
+    assert!(has_add, "expected Add instruction");
 }

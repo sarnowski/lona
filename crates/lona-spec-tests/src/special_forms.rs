@@ -119,6 +119,115 @@ fn test_6_2_let_empty_body_returns_nil() {
 }
 
 // ============================================================================
+// Section 6.2.1: let with sequential destructuring
+// Reference: docs/lonala.md#62-let (destructuring subsection)
+// ============================================================================
+
+/// Spec 6.2.1: Simple destructuring with fixed elements
+#[test]
+fn test_6_2_1_let_destructure_fixed_elements() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(let [[a b c] [1 2 3]] (+ a (+ b c)))",
+        6,
+        &spec_ref("6.2.1", "let", "destructure fixed elements [a b c]"),
+    );
+}
+
+/// Spec 6.2.1: Destructuring with rest binding
+#[test]
+fn test_6_2_1_let_destructure_rest_binding() {
+    let mut ctx = SpecTestContext::new();
+    // Rest binding produces a list
+    ctx.assert_list_eq(
+        "(let [[a b & r] [1 2 3 4]] r)",
+        "'(3 4)",
+        &spec_ref("6.2.1", "let", "rest binding collects remaining as list"),
+    );
+}
+
+/// Spec 6.2.1: Destructuring with ignore (_)
+#[test]
+fn test_6_2_1_let_destructure_ignore() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(let [[a _ c] [1 2 3]] c)",
+        3,
+        &spec_ref("6.2.1", "let", "_ ignores position"),
+    );
+}
+
+/// Spec 6.2.1: Destructuring with :as whole binding
+#[test]
+fn test_6_2_1_let_destructure_as_binding() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_vector_eq(
+        "(let [[a :as all] [1 2]] all)",
+        "[1 2]",
+        &spec_ref("6.2.1", "let", ":as binds original collection"),
+    );
+}
+
+/// Spec 6.2.1: Nested destructuring
+#[test]
+fn test_6_2_1_let_destructure_nested() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(let [[[a b] c] [[1 2] 3]] (+ a (+ b c)))",
+        6,
+        &spec_ref("6.2.1", "let", "nested destructuring [[a b] c]"),
+    );
+}
+
+/// Spec 6.2.1: Destructuring nil returns nil for elements
+#[test]
+fn test_6_2_1_let_destructure_nil() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_nil(
+        "(let [[a] nil] a)",
+        &spec_ref("6.2.1", "let", "destructuring nil yields nil"),
+    );
+}
+
+/// Spec 6.2.1: Destructuring short collection yields nil for missing
+#[test]
+fn test_6_2_1_let_destructure_short_collection() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_nil(
+        "(let [[a b] [1]] b)",
+        &spec_ref("6.2.1", "let", "missing elements are nil"),
+    );
+}
+
+/// Spec 6.2.1: Destructuring with both :as and & rest
+#[test]
+fn test_6_2_1_let_destructure_as_and_rest() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_vector_eq(
+        "(let [[a & r :as all] [1 2 3]] all)",
+        "[1 2 3]",
+        &spec_ref("6.2.1", "let", ":as with rest still binds original"),
+    );
+    let mut ctx2 = SpecTestContext::new();
+    ctx2.assert_list_eq(
+        "(let [[a & r :as all] [1 2 3]] r)",
+        "'(2 3)",
+        &spec_ref("6.2.1", "let", "rest binding with :as"),
+    );
+}
+
+/// Spec 6.2.1: Destructuring in complex expression
+#[test]
+fn test_6_2_1_let_destructure_in_expression() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(let [[x y] [10 20]] (let [[a b] [x y]] (+ a b)))",
+        30,
+        &spec_ref("6.2.1", "let", "nested let with destructuring"),
+    );
+}
+
+// ============================================================================
 // Section 6.3: if
 // Reference: docs/lonala.md#63-if
 // ============================================================================

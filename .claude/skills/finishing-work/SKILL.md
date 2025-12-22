@@ -68,7 +68,7 @@ All three CLIs accept the prompt as a positional argument:
 ```bash
 timeout 900 claude --model opus -p "PROMPT"
 timeout 900 gemini -m gemini-3-pro-preview -s "PROMPT"
-timeout 900 codex exec -m gpt-5.2 -c model_reasoning_effort=medium -s read-only "PROMPT"
+timeout 900 codex exec -m gpt-5.1-codex-max -c model_reasoning_effort=low -c hide_agent_reasoning=true -s read-only "PROMPT" 2>/dev/null
 ```
 
 All three receive the **identical prompt** (substitute actual values):
@@ -269,6 +269,26 @@ If `PLAN.md` exists at repo root:
 
 ---
 
+## Step 5: File Size Check
+
+Verify no source code or documentation files exceed the size limit:
+
+```bash
+# Find files over 600 lines (hard limit)
+find . -type f \( -name "*.rs" -o -name "*.lona" -o -name "*.md" \) \
+  -exec sh -c 'lines=$(wc -l < "$1"); [ "$lines" -gt 600 ] && echo "$1: $lines lines"' _ {} \;
+```
+
+**Hard limit: 600 lines.** Any file exceeding this must be split before completion.
+
+**Splitting strategies:**
+- **Rust/Lonala**: Externalize tests to `tests/` subdirectory, or split into submodules
+- **Markdown**: Split into multiple linked documents (e.g., `index.md` linking to `section-*.md`)
+
+See [Rust Coding Guidelines - File Size Limits](../../docs/development/rust-coding-guidelines.md#file-size-limits) for detailed guidance.
+
+---
+
 ## Done
 
 Work is complete when:
@@ -277,5 +297,6 @@ Work is complete when:
 3. **All issues were resolved**—including pre-existing issues found during review
 4. Documentation build has zero warnings
 5. Roadmap updated
+6. **All source and markdown files are under 600 lines**
 
 If you skipped any issue for any reason (scope, pre-existing, minor, etc.), work is NOT complete.

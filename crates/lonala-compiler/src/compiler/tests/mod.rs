@@ -11,11 +11,15 @@
 //! - `binding_form_tests` - binding forms (def, let)
 //! - `quote_form_tests` - quoting forms (quote, syntax-quote)
 //! - `macro_tests` - defmacro and macro expansion
+//! - `destructure_compile_tests` - destructuring bytecode compilation
+//! - `destructure_parse_tests` - destructuring pattern parsing
 
 extern crate alloc;
 
 mod binding_form_tests;
 mod call_tests;
+mod destructure_compile_tests;
+mod destructure_parse_tests;
 mod literal_tests;
 mod macro_tests;
 mod operator_tests;

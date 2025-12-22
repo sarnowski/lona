@@ -4,16 +4,18 @@ Lonala is inspired by Clojure but differs in several ways:
 | Feature | Clojure | Lonala |
 |---------|---------|--------|
 | **Runtime** | JVM | seL4 / custom VM |
-| **Concurrency** | STM + atoms + agents | Erlang-style processes |
+| **Concurrency** | STM + atoms + agents | Erlang-style processes *(Planned)* |
 | **Interop** | Java interop | No FFI; systems programming primitives |
+| **Closures** | Supported | Supported (copy semantics) |
+| **Keywords** | Full support | Supported |
+| **Sets** | `#{1 2 3}` | Supported |
+| **Metadata** | Pervasive | Partial (`meta`/`with-meta` work; reader syntax parsed but not applied) |
 | **Lazy sequences** | Default | *(Planned)*, explicit |
-| **Namespaces** | First-class | *(Planned)* (Phase 6) |
-| **Metadata** | Pervasive | *(Planned)* |
+| **Namespaces** | First-class | *(Planned)* |
+| **Destructuring** | Supported | *(Planned)* |
 | **Protocols** | Supported | *(Planned)* |
 | **Transducers** | Supported | *(Planned)* |
-| **Keywords** | Full support | *(Planned)* — currently parsed but not represented as values |
 | **Regular expressions** | `#"pattern"` | *(Planned)* |
-| **Sets** | `#{1 2 3}` | *(Planned)* |
 
 ## Key Philosophical Differences
 

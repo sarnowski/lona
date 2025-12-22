@@ -8,53 +8,6 @@
 
 ---
 
-## Current State
-
-### Completed (Phases 1-4.4)
-
-| Component | Status | Details |
-|-----------|--------|---------|
-| Lexer | ✅ Complete | Full S-expression tokenization |
-| Parser | ✅ Complete | AST generation, reader macros (`'`, `` ` ``, `~`, `~@`) |
-| Bytecode Compiler | ✅ Complete | 25 opcodes, register-based |
-| VM Interpreter | ✅ Complete | Bytecode execution, call stack |
-| Special Forms | ✅ Complete | `def`, `let`, `if`, `do`, `fn`, `quote`, `syntax-quote`, `defmacro` |
-| Macro System | ✅ Complete | Compile-time expansion, introspection |
-| Core Values | ✅ Complete | Nil, Bool, Integer, Float, Ratio, Symbol, String, List, Vector, Map |
-| Basic Natives | ✅ Complete | `cons`, `first`, `rest`, `list`, `concat` |
-| Collection Constructors | ✅ Complete | `vector`, `hash-map`, `vec` (native bootstrap) |
-| REPL (Rust) | ✅ Complete | Interactive evaluation (native bootstrap) |
-| Rest Arguments | ✅ Complete | `& rest` syntax in functions and macros |
-
-### Missing (Required for Milestone 1)
-
-| Component | Status | Priority |
-|-----------|--------|----------|
-| Keyword Value Type | ✅ Complete | High |
-| Set Value Type | ✅ Complete | High |
-| Binary Value Type | ✅ Complete | High |
-| Metadata System | ❌ Not Started | High |
-| Closures | ❌ Not Started | Critical |
-| Multi-Arity Functions | ❌ Not Started | High |
-| Destructuring | ❌ Not Started | Critical |
-| [Proper Tail Calls](../development/tco.md) | ❌ Not Started | Critical |
-| Namespace System | ❌ Not Started | High |
-| Process Model | ❌ Not Started | Critical |
-| Green Thread Scheduler | ❌ Not Started | Critical |
-| Garbage Collection | ❌ Not Started | Critical |
-| Domain Isolation | ❌ Not Started | Critical |
-| Inter-Domain IPC | ❌ Not Started | Critical |
-| MMIO/DMA/IRQ Primitives | ❌ Not Started | Critical |
-| All Type Predicates | ⚠️ Partial | High |
-| Bitwise Operations | ❌ Not Started | High |
-| Atom Primitives | ❌ Not Started | Medium |
-| Sorted Collections | ❌ Not Started | Low |
-| Condition/Restart System | ❌ Not Started | Critical |
-| Introspection System | ❌ Not Started | High |
-| Debug Infrastructure | ❌ Not Started | High |
-
----
-
 ## Phases
 
 | Phase | Name | Description |

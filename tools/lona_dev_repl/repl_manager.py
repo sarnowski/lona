@@ -12,6 +12,8 @@ This module handles:
 import asyncio
 import atexit
 import re
+import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 # REPL prompt patterns
@@ -86,7 +88,9 @@ class ReplManager:
         """
         self.project_root = project_root or Path.cwd()
         self.process: asyncio.subprocess.Process | None = None
+        self.container_id: str | None = None  # Track our specific Docker container
         self.buffer: str = ""
+        self.started_at: datetime | None = None
         self._lock = asyncio.Lock()
 
         # Register cleanup on exit
@@ -94,26 +98,24 @@ class ReplManager:
 
     def _sync_cleanup(self) -> None:
         """Synchronous cleanup for atexit handler."""
+        # Kill the Docker container directly (this is the reliable way)
+        if self.container_id is not None:
+            try:
+                subprocess.run(
+                    ["docker", "kill", self.container_id],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5.0,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+        # Also terminate the attach process
         if self.process is not None:
             try:
                 self.process.terminate()
             except ProcessLookupError:
                 pass
 
-    async def _cleanup_stale_containers(self) -> None:
-        """Remove any stale runner containers before starting."""
-        proc = await asyncio.create_subprocess_exec(
-            "docker",
-            "compose",
-            "rm",
-            "-f",
-            "-s",
-            "runner-aarch64",
-            cwd=self.project_root,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
 
     async def _build(self) -> tuple[bool, str]:
         """Build the Lona image using make debug-aarch64.
@@ -138,19 +140,42 @@ class ReplManager:
     async def _start_qemu(self) -> tuple[bool, str]:
         """Start QEMU via docker compose.
 
+        Uses detached mode to get the container ID, then attaches to it.
+        This allows us to reliably kill exactly our container without
+        affecting other parallel sessions.
+
         Returns:
             Tuple of (success, message)
         """
-        await self._cleanup_stale_containers()
-
-        # Start QEMU with -T to disable TTY allocation for proper piping
-        self.process = await asyncio.create_subprocess_exec(
+        # Start container in detached mode to get its ID
+        # -T disables TTY allocation for proper piping
+        proc = await asyncio.create_subprocess_exec(
             "docker",
             "compose",
             "run",
             "--rm",
+            "-d",
             "-T",
             "runner-aarch64",
+            cwd=self.project_root,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+
+        if proc.returncode != 0:
+            error_msg = stderr.decode("utf-8", errors="replace")
+            return False, f"Failed to start container: {error_msg}"
+
+        self.container_id = stdout.decode("utf-8", errors="replace").strip()
+
+        # Attach to the container's stdin/stdout
+        # --sig-proxy=false prevents signals from being forwarded (we handle shutdown ourselves)
+        self.process = await asyncio.create_subprocess_exec(
+            "docker",
+            "attach",
+            "--sig-proxy=false",
+            self.container_id,
             cwd=self.project_root,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -162,6 +187,7 @@ class ReplManager:
         # Wait for the REPL to be ready
         try:
             await self._wait_for_prompt(timeout=BOOT_TIMEOUT)
+            self.started_at = datetime.now(timezone.utc)
             return True, "REPL ready"
         except asyncio.TimeoutError:
             await self._stop_qemu()
@@ -171,7 +197,21 @@ class ReplManager:
             )
 
     async def _stop_qemu(self) -> None:
-        """Stop the QEMU process."""
+        """Stop the QEMU process by killing our specific container."""
+        # Kill the Docker container directly by ID
+        # This is the only reliable way to stop QEMU when running via docker compose
+        if self.container_id is not None:
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "kill",
+                self.container_id,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await proc.wait()
+            self.container_id = None
+
+        # Terminate the attach process
         if self.process is not None:
             try:
                 self.process.terminate()
@@ -182,7 +222,9 @@ class ReplManager:
                 except ProcessLookupError:
                     pass
             self.process = None
-            self.buffer = ""
+
+        self.buffer = ""
+        self.started_at = None
 
     async def _read_chunk(self, timeout: float) -> str | None:
         """Read a chunk of output from QEMU.
@@ -235,7 +277,18 @@ class ReplManager:
 
     def _is_running(self) -> bool:
         """Check if QEMU process is running."""
-        return self.process is not None and self.process.returncode is None
+        # Both the container and the attach process must be alive
+        return (
+            self.container_id is not None
+            and self.process is not None
+            and self.process.returncode is None
+        )
+
+    def get_started_at_iso(self) -> str | None:
+        """Get the QEMU start time as an ISO 8601 string."""
+        if self.started_at is None:
+            return None
+        return self.started_at.isoformat()
 
     async def _ensure_running_locked(self) -> tuple[bool, str]:
         """Ensure QEMU is running (must be called with lock held).

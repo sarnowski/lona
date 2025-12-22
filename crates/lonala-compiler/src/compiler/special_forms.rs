@@ -488,78 +488,15 @@ impl Compiler<'_, '_, '_> {
         }
 
         let body = args.get(1_usize..).unwrap_or(&[]);
-
-        // Save register state for cleanup
         let checkpoint = self.next_register;
-
-        // Push new scope
         self.locals.push_scope();
 
-        // Process bindings in pairs
-        let mut binding_idx: usize = 0;
-        while binding_idx < bindings.len() {
-            let name_ast = bindings
-                .get(binding_idx)
-                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
-            let value_ast = bindings
-                .get(binding_idx.saturating_add(1))
-                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        // Process all binding pairs
+        self.compile_let_bindings(bindings, span)?;
 
-            // Name must be a symbol
-            let Ast::Symbol(ref name) = name_ast.node else {
-                return Err(Error::new(
-                    ErrorKind::InvalidSpecialForm {
-                        form: "let",
-                        message: "binding name must be a symbol",
-                    },
-                    self.location(name_ast.span),
-                ));
-            };
+        // Compile body and return result
+        let result = self.compile_body(body, span)?;
 
-            // Allocate register for this binding
-            let reg = self.alloc_register(value_ast.span)?;
-
-            // Compile value into the register
-            let value_result = self.compile_expr(value_ast)?;
-            if value_result.register != reg {
-                self.chunk.emit(
-                    encode_abc(Opcode::Move, reg, value_result.register, 0),
-                    value_ast.span,
-                );
-            }
-
-            // Free any temps but keep the binding register
-            self.free_registers_to(reg.saturating_add(1));
-
-            // Register the binding
-            let symbol_id = self.interner.intern(name);
-            self.locals.define(symbol_id, reg);
-
-            binding_idx = binding_idx.saturating_add(2);
-        }
-
-        // Compile body (like do)
-        let result = if body.is_empty() {
-            // Empty body returns nil
-            let dest = self.alloc_register(span)?;
-            self.chunk
-                .emit(encode_abc(Opcode::LoadNil, dest, 0, 0), span);
-            ExprResult { register: dest }
-        } else {
-            // Compile all but last expression, discarding results
-            for expr in body.get(..body.len().saturating_sub(1)).unwrap_or(&[]) {
-                let temp_checkpoint = self.next_register;
-                let _temp_result = self.compile_expr(expr)?;
-                self.free_registers_to(temp_checkpoint);
-            }
-            // Compile last expression to return
-            let last = body
-                .last()
-                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
-            self.compile_expr(last)?
-        };
-
-        // Pop scope and restore registers
         self.locals.pop_scope();
         self.free_registers_to(checkpoint);
 
@@ -571,6 +508,95 @@ impl Compiler<'_, '_, '_> {
         }
 
         Ok(ExprResult { register: dest })
+    }
+
+    /// Processes binding pairs in a let form.
+    fn compile_let_bindings(&mut self, bindings: &[Spanned<Ast>], span: Span) -> Result<(), Error> {
+        let mut binding_idx: usize = 0;
+        while binding_idx < bindings.len() {
+            let name_ast = bindings
+                .get(binding_idx)
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+            let value_ast = bindings
+                .get(binding_idx.saturating_add(1))
+                .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+
+            let value_result = self.compile_expr(value_ast)?;
+            self.compile_binding_target(name_ast, value_result.register, value_ast.span)?;
+
+            binding_idx = binding_idx.saturating_add(2);
+        }
+        Ok(())
+    }
+
+    /// Compiles a single binding target (symbol or destructuring pattern).
+    fn compile_binding_target(
+        &mut self,
+        name_ast: &Spanned<Ast>,
+        value_reg: u8,
+        value_span: Span,
+    ) -> Result<(), Error> {
+        match name_ast.node {
+            Ast::Symbol(ref name) => {
+                let reg = self.alloc_register(value_span)?;
+                if value_reg != reg {
+                    self.chunk
+                        .emit(encode_abc(Opcode::Move, reg, value_reg, 0), value_span);
+                }
+                self.free_registers_to(reg.saturating_add(1));
+                let symbol_id = self.interner.intern(name);
+                self.locals.define(symbol_id, reg);
+            }
+            Ast::Vector(_) => {
+                let pattern = super::destructure::parse_sequential_pattern(
+                    self.interner,
+                    name_ast,
+                    self.source_id,
+                )?;
+                self.compile_sequential_binding(&pattern, value_reg, name_ast.span)?;
+            }
+            Ast::Integer(_)
+            | Ast::Float(_)
+            | Ast::String(_)
+            | Ast::Bool(_)
+            | Ast::Nil
+            | Ast::Keyword(_)
+            | Ast::List(_)
+            | Ast::Map(_)
+            | Ast::Set(_)
+            | Ast::WithMeta { .. }
+            | _ => {
+                return Err(Error::new(
+                    ErrorKind::InvalidSpecialForm {
+                        form: "let",
+                        message: "binding target must be a symbol or vector pattern",
+                    },
+                    self.location(name_ast.span),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Compiles a body (sequence of expressions), returning the last result or nil.
+    fn compile_body(&mut self, body: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
+        if body.is_empty() {
+            let dest = self.alloc_register(span)?;
+            self.chunk
+                .emit(encode_abc(Opcode::LoadNil, dest, 0, 0), span);
+            return Ok(ExprResult { register: dest });
+        }
+
+        for expr in body.get(..body.len().saturating_sub(1)).unwrap_or(&[]) {
+            let temp_checkpoint = self.next_register;
+            let _temp_result = self.compile_expr(expr)?;
+            self.free_registers_to(temp_checkpoint);
+        }
+
+        let last = body
+            .last()
+            .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
+        self.compile_expr(last)
     }
 
     /// Compiles a `quote` special form.

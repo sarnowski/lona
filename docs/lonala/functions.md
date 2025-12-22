@@ -137,12 +137,60 @@ Named functions can call themselves recursively:
 (sum-to 5)  ; => 15 (5+4+3+2+1)
 ```
 
-## 8.7 Planned Features
+## 8.7 Closures
+
+Functions capture their lexical environment, creating closures:
+
+```clojure
+(defn make-adder [n]
+  (fn [x] (+ x n)))  ; captures n from enclosing scope
+
+(def add5 (make-adder 5))
+(add5 10)  ; => 15
+```
+
+**Closure semantics**:
+- **Copy semantics**: Values are captured at closure creation time, not by reference
+- **Multi-level capture**: Nested closures can access variables from grandparent+ scopes
+- **Identity equality**: Two closures with same code but different captures are not equal
+
+## 8.8 Parameter Destructuring
+
+Function parameters support sequential destructuring patterns, enabling direct extraction of values from collection arguments.
+
+```clojure
+; Basic destructuring
+((fn [[a b]] (+ a b)) [1 2])        ; => 3
+
+; With rest binding
+((fn [[x & xs]] xs) [1 2 3 4])      ; => (2 3 4)
+
+; With :as binding
+((fn [[a :as all]] all) [1 2 3])    ; => [1 2 3]
+
+; Nested destructuring
+((fn [[[x y] z]] (+ x y z)) [[1 2] 3])  ; => 6
+
+; Mixed with simple params
+((fn [[a b] c] (+ a b c)) [1 2] 3)  ; => 6
+
+; Ignored parameters with _
+((fn [_ x] x) 1 2)                   ; => 2
+((fn [x & _] x) 1 2 3 4)            ; => 1
+```
+
+**Missing elements** bind to `nil`:
+```clojure
+((fn [[a b]] b) [1])        ; => nil
+((fn [[a]] a) nil)          ; => nil
+```
+
+See [Special Forms - fn](special-forms.md#65-fn) for complete documentation.
+
+## 8.9 Planned Features
 
 The following function features are planned for future implementation:
 
-- **Closures** *(Planned)*: Capture lexical environment - functions currently cannot close over variables from enclosing scopes
-- **Destructuring parameters** *(Planned)*: Pattern match in parameter lists
 - **Tail call optimization** *(Planned)*: Efficient recursive loops with `recur`
 
 ---

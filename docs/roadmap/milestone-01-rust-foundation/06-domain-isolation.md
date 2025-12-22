@@ -4,6 +4,35 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
+### Task 1.6.0: Capability Value Type
+
+**Description**: Define the Lonala-level representation of seL4 capabilities.
+
+**Files to modify**:
+- `crates/lona-core/src/value/mod.rs`
+- `crates/lona-core/src/value/capability.rs` (new)
+
+**Requirements**:
+- `Capability` as a distinct Value type (opaque handle to seL4 capability)
+- Capability equality (comparing slot references, not contents)
+- Capability printing (type and limited info, no secret exposure)
+- Capability cannot be forged from integers or other values
+- Capability metadata support (type, granted rights, origin)
+- Support for capability "badges" (user data attached by granter)
+
+**Design Note**: Capabilities are first-class Lonala values, passed explicitly to primitives that require them. This enables "No Ambient Authority" - all privileged operations require explicit capability arguments.
+
+**Tests**:
+- Capability creation (only via system primitives)
+- Capability equality
+- Capability printing
+- Cannot forge from other types
+- Metadata access
+
+**Estimated effort**: 1-2 context windows
+
+---
+
 ### Task 1.6.1: VSpace Manager
 
 **Description**: Manage seL4 virtual address spaces.
@@ -28,7 +57,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ### Task 1.6.2: CSpace Manager
 
-**Description**: Manage seL4 capability spaces.
+**Description**: Manage seL4 capability spaces with full lifecycle including revocation.
 
 **Files to modify**:
 - `crates/lona-runtime/src/domain/cspace.rs` (new)
@@ -36,15 +65,22 @@ Implement seL4-based security domains and inter-domain communication.
 **Requirements**:
 - Create new CSpace
 - Allocate capability slots
-- Copy/mint capabilities
+- Copy/mint capabilities with attenuation
 - Delete capabilities
+- **Revocation**: `(cap-revoke cap)` invalidates capability and all derivatives
+- Revocation tracking (parent→child capability derivation tree)
+- Revocation cascades to all descendants per seL4 semantics
+
+**Design Note**: Per goals, "Revocation cascades to all descendants." The derivation tree tracks which capabilities were minted/copied from which, enabling cascade revocation.
 
 **Tests**:
 - CSpace creation
 - Slot allocation
-- Capability operations
+- Capability copy/mint with attenuation
+- Revocation of single capability
+- Cascade revocation to derivatives
 
-**Estimated effort**: 2 context windows
+**Estimated effort**: 2-3 context windows
 
 ---
 
@@ -147,17 +183,18 @@ Implement seL4-based security domains and inter-domain communication.
 - `crates/lona-runtime/src/domain/ipc.rs`
 
 **Requirements**:
-- Serialize message to shared buffer
+- Message passing across domain boundaries
 - Notify target domain
-- Deserialize on receive
-- Transparent to Lonala code
+- Transparent to Lonala code (same `send` API)
+
+> ⚠️ **OPEN DESIGN DECISION**: See "Cross-Domain Zero-Copy IPC" in roadmap index. Goals promise zero-copy via immutability, but current description says "serialize/deserialize". Need dedicated design session to resolve: (1) shared-heap for persistent structures, (2) cross-domain GC coordination, (3) hybrid small-copy/large-share approach.
 
 **Tests**:
 - Cross-domain send
 - Message integrity
 - Transparency (same API)
 
-**Estimated effort**: 2 context windows
+**Estimated effort**: 2-3 context windows (may increase based on design decision)
 
 ---
 

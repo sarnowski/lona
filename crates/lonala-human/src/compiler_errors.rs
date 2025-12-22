@@ -55,6 +55,12 @@ impl Diagnostic for Error {
             Kind::MacroExpansionDepthExceeded { depth } => {
                 format!("macro expansion exceeded maximum depth ({depth})")
             }
+            Kind::InvalidDestructuringPattern { message } => {
+                format!("invalid destructuring pattern: {message}")
+            }
+            Kind::InternalError { message } => {
+                format!("internal compiler error: {message}")
+            }
             // Non-exhaustive pattern: future variants
             _ => String::from("compilation error"),
         }
@@ -132,6 +138,16 @@ impl Diagnostic for Error {
                 ));
                 notes.push(Note::help_static(
                     "check if the macro expands to code that calls itself",
+                ));
+            }
+            Kind::InvalidDestructuringPattern { .. } => {
+                notes.push(Note::text_static(
+                    "valid patterns: [a b c], [a & rest], [_ x], [a :as all], [[nested] x]",
+                ));
+            }
+            Kind::InternalError { .. } => {
+                notes.push(Note::text_static(
+                    "this is a bug in the compiler; please report it",
                 ));
             }
             // Non-exhaustive pattern: future variants
@@ -305,6 +321,36 @@ mod tests {
             notes
                 .iter()
                 .any(|note| matches!(note, Note::Text(msg) if msg.contains("infinite")))
+        );
+    }
+
+    #[test]
+    fn invalid_destructuring_pattern_message() {
+        let interner = Interner::new();
+        let error = Error::new(
+            Kind::InvalidDestructuringPattern {
+                message: "duplicate & in pattern",
+            },
+            test_location(),
+        );
+        assert_eq!(
+            error.message(&interner),
+            "invalid destructuring pattern: duplicate & in pattern"
+        );
+    }
+
+    #[test]
+    fn invalid_destructuring_pattern_notes() {
+        let interner = Interner::new();
+        let error = Error::new(
+            Kind::InvalidDestructuringPattern { message: "test" },
+            test_location(),
+        );
+        let notes = error.notes(&interner);
+        assert!(
+            notes
+                .iter()
+                .any(|note| matches!(note, Note::Text(msg) if msg.contains("[a b c]")))
         );
     }
 

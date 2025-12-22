@@ -19,6 +19,42 @@ Coding guidelines for Lona's `no_std` Rust runtime on seL4.
 
 ---
 
+## File Size Limits
+
+**Target: 500 lines maximum per file.** Files approaching or exceeding this limit must be split.
+
+**Splitting strategies:**
+
+1. **Externalize tests**: Move `#[cfg(test)]` modules to separate `tests/` subdirectories
+   ```
+   src/compiler/mod.rs (400 lines)
+   src/compiler/tests/mod.rs
+   src/compiler/tests/expressions.rs
+   src/compiler/tests/special_forms.rs
+   ```
+
+2. **Extract submodules**: Split logical units into their own files
+   ```
+   # Before: one large file
+   src/value.rs (700 lines)
+
+   # After: module with subfiles
+   src/value/mod.rs (100 lines - re-exports)
+   src/value/primitives.rs
+   src/value/collections.rs
+   src/value/display.rs
+   ```
+
+3. **Split by concern**: Separate parsing, validation, execution, etc.
+
+**Why this matters:**
+- Smaller files are easier to review and understand
+- Reduces merge conflicts in collaborative work
+- Encourages better modularity and separation of concerns
+- Keeps code within reasonable context windows for tooling
+
+---
+
 ## Crate Architecture
 
 ```
@@ -473,6 +509,89 @@ The workspace uses **all clippy categories at deny level**, including `restricti
 | `module_name_repetitions` | Don't repeat module in names |
 | `shadow_reuse`, `shadow_same` | Avoid variable shadowing |
 | `min_ident_chars` | Use descriptive names |
+| `expect_used`, `unwrap_used` | Use `let ... else` or `?` |
+| `wildcard_enum_match_arm` | List all variants for `#[non_exhaustive]` enums |
+| `exhaustive_structs`, `exhaustive_enums` | Add `#[non_exhaustive]` to public types |
+| `missing_inline_in_public_items` | Add `#[inline]` to public functions |
+| `allow_attributes` | Use `#[expect]` instead of `#[allow]` |
+
+### Required Patterns
+
+**No `expect()` or `unwrap()`** - Use pattern matching or `?`:
+
+```rust
+// Bad
+let elem = elements.get(idx).expect("in bounds");
+
+// Good
+let Some(elem) = elements.get(idx) else {
+    return Err(Error::OutOfBounds);
+};
+```
+
+**Matching `#[non_exhaustive]` enums** - List all known variants plus wildcard:
+
+```rust
+// Bad - clippy::wildcard_enum_match_arm fires
+match ast.node {
+    Ast::Symbol(ref name) => { /* ... */ }
+    _ => { /* ... */ }
+}
+
+// Good - explicit variants plus wildcard for future variants
+match ast.node {
+    Ast::Symbol(ref name) => { /* ... */ }
+    Ast::Integer(_)
+    | Ast::Float(_)
+    | Ast::String(_)
+    | Ast::Bool(_)
+    | Ast::Nil
+    | Ast::Keyword(_)
+    | Ast::List(_)
+    | Ast::Vector(_)
+    | Ast::Map(_)
+    | Ast::Set(_)
+    | Ast::WithMeta { .. }
+    | _ => { /* ... */ }
+}
+```
+
+**Public types require `#[non_exhaustive]`**:
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Binding {
+    Symbol(symbol::Id),
+    Ignore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Pattern {
+    pub items: Vec<Binding>,
+}
+```
+
+**Public functions require `#[inline]`**:
+
+```rust
+#[inline]
+pub fn parse_pattern(ast: &Ast) -> Result<Pattern, Error> {
+    // ...
+}
+```
+
+**Doc code blocks** - Use ` ```text ` for non-Rust examples:
+
+```rust
+/// # Examples
+///
+/// ```text
+/// [a b c]     -> 3 symbol bindings
+/// [a & rest]  -> rest binding
+/// ```
+```
 
 ### Suppressing Lints
 

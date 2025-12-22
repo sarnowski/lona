@@ -4,6 +4,56 @@
 
 **Prerequisite**: Milestone 12 complete
 
+### Phase 15.0: TLS Prerequisites
+
+#### Task 15.0.1: Cryptographic Random Number Generator
+
+**Description**: Implement secure random number generation for cryptographic operations.
+
+**Files to create**:
+- `lona/crypto/random.lona`
+
+**Requirements**:
+- `(crypto-random n)` - generate n bytes of cryptographically secure random data
+- Entropy gathering from hardware sources (timer jitter, interrupt timing)
+- CSPRNG implementation (e.g., ChaCha20-based)
+- Automatic reseeding from entropy pool
+- Resistance to state compromise
+
+**Design Note**: TLS key generation, nonces, and IVs require strong randomness. Without this, TLS security is compromised.
+
+**Tests**:
+- Randomness quality tests (statistical)
+- No repeated outputs
+- Reseeding behavior
+
+**Estimated effort**: 2 context windows
+
+---
+
+#### Task 15.0.2: Real-Time Clock Access
+
+**Description**: Access hardware RTC for certificate validation and time-sensitive operations.
+
+**Files to create**:
+- `lona/time/rtc.lona`
+
+**Requirements**:
+- `(rtc-now)` - current wall-clock time as date-time structure
+- `(rtc-set datetime)` - set RTC (requires capability)
+- Hardware RTC driver (PL031 for ARM, CMOS for x86)
+- Time zone handling (UTC internally)
+
+**Design Note**: ACME and certificate validation require wall-clock time to check expiration. `now-ms` provides uptime, not calendar time.
+
+**Tests**:
+- RTC read operations
+- Time format handling
+
+**Estimated effort**: 1-2 context windows
+
+---
+
 ### Phase 15.1: Cryptographic Primitives
 
 #### Task 15.1.1: Hash Functions

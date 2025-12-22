@@ -454,7 +454,11 @@ Immutable unordered collections of unique elements.
 - **Any element type**: Elements can be any value that supports equality
 
 ```clojure
-#{1 2 2 3}            ; => #{1 2 3} (duplicate removed)
+#{1 2 3}              ; => #{1 2 3}
+#{1 2 2 3}            ; ERROR: set literal contains duplicate element
+
+; Runtime constructors silently remove duplicates:
+(hash-set 1 2 2 3)    ; => #{1 2 3}
 (conj #{1 2} 3)       ; => #{1 2 3}
 (disj #{1 2 3} 2)     ; => #{1 3}
 (contains? #{1 2} 1)  ; => true
@@ -474,7 +478,7 @@ First-class callable values created with `fn`.
 - **Multi-arity**: Functions support multiple arities with dispatch based on argument count
 - **Variadic**: Rest parameters via `& rest` syntax
 - **Identity**: Functions are compared by identity, not structure
-- **No closures yet**: Functions cannot capture lexical environment *(closures planned)*
+- **Closures**: Functions capture their lexical environment (copy semantics at creation time)
 
 ## 3.14 Truthiness
 
