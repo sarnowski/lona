@@ -95,6 +95,55 @@ Bindings support vector patterns for extracting values from collections:
   a)                 ; => nil
 ```
 
+### Associative Destructuring
+
+Bindings also support map patterns for extracting values from maps:
+
+```clojure
+; :keys - extract by keyword keys
+(let [{:keys [a b]} {:a 1 :b 2}]
+  (+ a b))           ; => 3
+
+; :strs - extract by string keys
+(let [{:strs [name]} {"name" "Alice"}]
+  name)              ; => "Alice"
+
+; :syms - extract by symbol keys
+(let [{:syms [x]} {'x 42}]
+  x)                 ; => 42
+
+; Explicit key binding
+(let [{x :foo} {:foo 42}]
+  x)                 ; => 42
+
+; :or - default values for missing keys
+(let [{:keys [a b] :or {b 0}} {:a 1}]
+  (+ a b))           ; => 1
+
+; :as - bind the whole map
+(let [{:keys [a] :as m} {:a 1 :b 2}]
+  m)                 ; => {:a 1 :b 2}
+
+; Combined patterns
+(let [{:keys [a b] :or {b 100} :as m} {:a 1}]
+  [a b])             ; => [1 100]
+
+; Missing keys bind to nil
+(let [{:keys [a]} {}]
+  a)                 ; => nil
+
+; Destructuring nil map
+(let [{:keys [a]} nil]
+  a)                 ; => nil
+```
+
+**Note**: `:or` defaults apply only when the value is `nil`, not when it's `false`:
+
+```clojure
+(let [{:keys [a] :or {a true}} {:a false}]
+  a)                 ; => false (not true)
+```
+
 ## 6.3 `if`
 
 Conditional branching.
@@ -235,6 +284,45 @@ Parameters support sequential destructuring patterns, allowing direct extraction
 ```clojure
 ((fn [[a b]] b) [1])        ; => nil
 ((fn [[a]] a) nil)          ; => nil
+```
+
+### Map Destructuring in Parameters
+
+Parameters also support map patterns for extracting values from map arguments:
+
+```clojure
+; :keys - extract by keyword keys
+((fn [{:keys [a b]}] (+ a b)) {:a 1 :b 2})  ; => 3
+
+; :strs - extract by string keys
+((fn [{:strs [name]}] name) {"name" "Alice"})  ; => "Alice"
+
+; :syms - extract by symbol keys
+((fn [{:syms [x]}] x) {'x 42})              ; => 42
+
+; Explicit key binding
+((fn [{x :foo}] x) {:foo 99})               ; => 99
+
+; :or - default values
+((fn [{:keys [a b] :or {b 100}}] (+ a b)) {:a 1})  ; => 101
+
+; :as - bind whole map
+((fn [{:keys [a] :as m}] m) {:a 1 :b 2})    ; => {:a 1 :b 2}
+```
+
+**Mixed parameters** - map destructuring with simple params:
+
+```clojure
+((fn [x {:keys [a b]}] (+ x a b)) 10 {:a 1 :b 2})  ; => 13
+```
+
+**Multi-arity with map destructuring**:
+
+```clojure
+(def f (fn ([{:keys [a]}] a)
+           ([{:keys [a]} b] (+ a b))))
+(f {:a 10})        ; => 10
+(f {:a 10} 5)      ; => 15
 ```
 
 ## 6.6 `quote`

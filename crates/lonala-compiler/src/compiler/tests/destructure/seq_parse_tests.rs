@@ -3,32 +3,14 @@
 
 //! Tests for sequential destructuring pattern parsing.
 
-extern crate alloc;
-
 use alloc::vec;
 
-use lona_core::source;
-use lona_core::span::Span;
 use lona_core::symbol;
-use lonala_parser::{Ast, Spanned};
+use lonala_parser::Ast;
 
+use super::{source_id, spanned, spanned_at};
 use crate::compiler::destructure::{Binding, parse_sequential_pattern};
 use crate::error::Kind as ErrorKind;
-
-/// Test source ID for all destructure tests.
-fn source_id() -> source::Id {
-    source::Id::new(0_u32)
-}
-
-/// Helper to create a spanned AST node.
-fn spanned<T>(node: T) -> Spanned<T> {
-    Spanned::new(node, Span::new(0_usize, 1_usize))
-}
-
-/// Helper to create a spanned AST node with specific span.
-fn spanned_at<T>(node: T, start: usize, end: usize) -> Spanned<T> {
-    Spanned::new(node, Span::new(start, end))
-}
 
 // ==================== Basic Pattern Parsing ====================
 

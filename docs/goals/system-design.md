@@ -4,11 +4,13 @@ This document describes the implementation mechanics that realize Lona's goals. 
 
 ---
 
-## Zero-Copy Memory Model
+## Memory Model for High-Throughput Data
 
-**Pillars**: seL4 + Clojure
+**Pillars**: seL4 + Clojure + BEAM
 
-With strong isolation between Domains, naive message passing would require copying all data. For high-throughput scenarios like networking, this is unacceptable.
+Lona adopts **pure BEAM semantics** for message passing: all immutable values are deep-copied on send. This ensures per-process heap independence and instant memory reclaim on process death.
+
+However, for high-throughput scenarios like networking, copying every byte is unacceptable. The **Binary** type is the explicit escape hatch—a reference-counted byte buffer that can be shared without copying.
 
 ### The Challenge
 
@@ -17,14 +19,14 @@ net-driver → tcp-stack → application
           copy       copy
 ```
 
-Every boundary crossing copies data. For a network packet, this means:
+Without optimization, every boundary crossing copies data. For a network packet:
 - Copy from DMA buffer to driver
 - Copy from driver to TCP stack
 - Copy from TCP stack to application
 
-### The Solution: Shared Memory Regions
+### The Solution: Binary + Shared Memory Regions
 
-Lona uses capability-controlled shared memory:
+For large data, Lona uses capability-controlled shared memory via the **Binary** type:
 
 ```clojure
 ;; Create a shared memory region
@@ -65,28 +67,28 @@ Multiple Domains map the same physical memory. Access is controlled by capabilit
     (process-packet header pkt-ref)))
 ```
 
-### Why Immutability Enables This
+### Why Binary is the Escape Hatch
 
-With mutable data, shared memory is dangerous—either process could modify data underneath the other.
+Regular immutable values (maps, vectors, etc.) are always **deep-copied** on send—this is pure BEAM semantics. This ensures:
+- Process heaps are truly independent
+- Dead process memory can be instantly reclaimed
+- Per-process GC with no cross-process references
 
-With Clojure's immutable data:
-- The sender cannot modify after sharing
-- The receiver sees a consistent snapshot
-- No locks, no races
-
-The **Binary** type (mutable bytes) is the exception. For Binaries:
-- Ownership transfers explicitly (`binary-transfer!`)
-- Views are read-only
-- Programmer ensures synchronization via message passing
+The **Binary** type is the explicit exception for large data. For Binaries:
+- Large binaries (> 64B intra-domain, > 4KB cross-domain) are shared by reference
+- Receiver gets a read-only **View**
+- Owner domain maintains the refcount
+- Views are read-only—writer must be explicit owner
 
 ### Data Transfer Costs
 
 | Scenario | Mechanism | Copy Cost |
 |----------|-----------|-----------|
-| Small messages (< 1KB) | seL4 IPC inline | 1 copy (acceptable) |
-| Large immutable values | Shared region + read-only cap | Zero copy |
+| Immutable values | Deep copy | 1 copy (always) |
+| Binary (intra, > 64B) | Share reference | Zero copy |
+| Binary (cross, > 4KB) | Shared region + capability | Zero copy |
+| Binary (cross, ≤ 4KB) | Inline in seL4 IPC | 1 copy |
 | Stream data (network, disk) | Shared ring buffer | Zero copy |
-| Security boundary | Per-connection buffers | 1 copy (necessary) |
 
 ---
 
@@ -444,13 +446,18 @@ Benefits:
 
 ### Message Passing Internals
 
+Lona adopts **pure BEAM semantics**: all messages are deep-copied except for large Binaries.
+
 **Same Domain**:
-- Immutable data: share reference (zero copy)
-- Mutable data (Binary): copy or explicit transfer
+- Immutable data (maps, vectors, etc.): **deep copy** to receiver's heap
+- Binary (> 64 bytes): share reference, receiver gets read-only view
+- Binary (≤ 64 bytes): deep copy (avoids refcount overhead)
+- This ensures process heaps are independent—dead process heap is instantly reclaimable
 
 **Different Domain**:
-- seL4 IPC for small messages
-- Shared memory regions for large data
+- Immutable data: deep copy via serialization
+- Binary (> 4 KB): shared memory region + capability grant
+- Binary (≤ 4 KB): inline copy in seL4 IPC
 - Capability transfer for resource delegation
 
 ---
@@ -500,7 +507,8 @@ In production mode, if no handler matches:
 
 | Mechanism | Purpose | Key Insight |
 |-----------|---------|-------------|
-| **Zero-copy memory** | High-throughput IPC | Immutability enables safe sharing |
+| **Deep copy messages** | Process isolation | BEAM semantics enable instant heap reclaim |
+| **Binary sharing** | High-throughput data | Explicit escape hatch for large data |
 | **Code sharing** | Fast domain spawn | Bytecode shared, dispatch tables private |
 | **Capability plumbing** | Security enforcement | Kernel validates every access |
 | **Hot-patching pipeline** | Live modification | Late binding via dispatch tables |

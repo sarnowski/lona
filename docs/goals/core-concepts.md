@@ -164,7 +164,7 @@ Processes communicate exclusively through messages:
     (handle-timeout)))
 ```
 
-Messages are immutable data (Clojure pillar). Within the same Domain, this means safe reference sharing. Across Domains, messages go through seL4 IPC.
+Messages are immutable data (Clojure pillar) and are **deep-copied on send** (BEAM pillar). This ensures each process heap is independent. For large data, use the Binary type which shares by reference instead of copying.
 
 ### Isolation and Failure
 
@@ -301,12 +301,19 @@ Benefits:
 - **Extensible**: Add fields without breaking receivers
 - **Universal**: Same format for IPC, config, storage
 
-### Cross-Domain Messages
+### Message Copy Semantics
 
-When a message crosses a Domain boundary:
-- seL4 IPC mediates the transfer
-- Immutable data can be shared read-only (zero-copy)
-- Mutable data (Binary) requires explicit transfer or copy
+Lona adopts **pure BEAM semantics**: messages are always deep-copied.
+
+**Within a Domain**:
+- Immutable values (maps, vectors, etc.) are **deep-copied** to receiver's heap
+- Binary (> 64 bytes) shares reference—receiver gets read-only View
+- This ensures process heaps are independent (instant reclaim on death)
+
+**Across Domain boundaries**:
+- Immutable values are serialized and deep-copied via seL4 IPC
+- Binary (> 4 KB) uses capability-controlled shared memory
+- Binary (≤ 4 KB) is copied inline in IPC (avoids capability overhead)
 
 ---
 

@@ -13,6 +13,7 @@ use crate::vm::natives::NativeContext;
 mod concat_tests;
 mod cons_tests;
 mod first_tests;
+mod get_tests;
 mod list_tests;
 mod map_tests;
 mod rest_tests;

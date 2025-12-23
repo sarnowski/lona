@@ -763,3 +763,137 @@ fn test_8_8_rest_destructuring_with_as() {
         &spec_ref("8.8", "Destructuring", "rest destructuring with :as"),
     );
 }
+
+// ============================================================================
+// Section 8.9: Map Destructuring in Function Parameters
+// Reference: docs/lonala/special-forms.md#associative-destructuring
+// ============================================================================
+
+/// Spec 8.9: Basic :keys destructuring in fn parameter
+#[test]
+fn test_8_9_fn_map_destructure_keys() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [{:keys [a b]}] (+ a b)) {:a 1 :b 2})",
+        3,
+        &spec_ref("8.9", "Map Destructuring", ":keys extracts keyword keys"),
+    );
+}
+
+/// Spec 8.9: :strs destructuring (string keys) in fn parameter
+#[test]
+fn test_8_9_fn_map_destructure_strs() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_string(
+        "((fn [{:strs [name]}] name) {\"name\" \"Bob\"})",
+        "Bob",
+        &spec_ref("8.9", "Map Destructuring", ":strs extracts string keys"),
+    );
+}
+
+/// Spec 8.9: :syms destructuring in fn parameter
+#[test]
+fn test_8_9_fn_map_destructure_syms() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [{:syms [x]}] x) {'x 42})",
+        42,
+        &spec_ref("8.9", "Map Destructuring", ":syms extracts symbol keys"),
+    );
+}
+
+/// Spec 8.9: :or provides default values in fn parameter
+#[test]
+fn test_8_9_fn_map_destructure_or() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [{:keys [a b] :or {b 100}}] (+ a b)) {:a 1})",
+        101,
+        &spec_ref("8.9", "Map Destructuring", ":or provides default"),
+    );
+}
+
+/// Spec 8.9: :as binds whole map in fn parameter
+#[test]
+fn test_8_9_fn_map_destructure_as() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_map_eq(
+        "((fn [{:keys [a] :as m}] m) {:a 1 :b 2})",
+        "{:a 1 :b 2}",
+        &spec_ref("8.9", "Map Destructuring", ":as binds entire map"),
+    );
+}
+
+/// Spec 8.9: Explicit key binding in fn parameter
+#[test]
+fn test_8_9_fn_map_destructure_explicit() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [{x :foo}] x) {:foo 99})",
+        99,
+        &spec_ref("8.9", "Map Destructuring", "explicit binding {x :key}"),
+    );
+}
+
+/// Spec 8.9: Multiple parameters with map destructuring
+#[test]
+fn test_8_9_fn_mixed_params_map() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "((fn [x {:keys [a b]}] (+ x a b)) 10 {:a 1 :b 2})",
+        13,
+        &spec_ref("8.9", "Map Destructuring", "mixed simple and map params"),
+    );
+}
+
+/// Spec 8.9: Map destructuring in multi-arity function
+#[test]
+fn test_8_9_fn_multi_arity_map() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx
+        .eval("(def f (fn ([{:keys [a]}] a) ([{:keys [a]} b] (+ a b))))")
+        .unwrap();
+    ctx.assert_int(
+        "(f {:a 10})",
+        10,
+        &spec_ref("8.9", "Map Destructuring", "1-arity with map"),
+    );
+    ctx.assert_int(
+        "(f {:a 10} 5)",
+        15,
+        &spec_ref("8.9", "Map Destructuring", "2-arity with map and simple"),
+    );
+}
+
+/// Spec 8.9: Map destructuring with closure capture
+#[test]
+fn test_8_9_fn_closure_map_destructure() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx
+        .eval("(def make-fn (fn [x] (fn [{:keys [a b]}] (+ x a b))))")
+        .unwrap();
+    let _res = ctx.eval("(def f (make-fn 100))").unwrap();
+    ctx.assert_int(
+        "(f {:a 1 :b 2})",
+        103,
+        &spec_ref("8.9", "Map Destructuring", "closure captures x"),
+    );
+}
+
+/// [IGNORED] Spec 8.9: Map destructuring as rest parameter
+/// Tracking: Task 1.2.4 - Rest parameter map destructuring requires special handling
+/// where flattened key-value pairs are converted to a map (Clojure behavior).
+/// See docs/roadmap/milestone-01-rust-foundation/02-language-features.md#task-124
+#[test]
+#[ignore]
+fn test_8_9_fn_rest_map_destructure() {
+    let mut ctx = SpecTestContext::new();
+    // Note: In Clojure, `& {:keys [y]}` collects remaining args as flattened key-value
+    // pairs that are then reassembled into a map. This requires special handling in
+    // the compiler to convert the list (1 :y 2) into a map {:y 2} for destructuring.
+    ctx.assert_int(
+        "((fn [x & {:keys [y]}] (+ x y)) 1 :y 2)",
+        3,
+        &spec_ref("8.9", "Map Destructuring", "rest param with map options"),
+    );
+}

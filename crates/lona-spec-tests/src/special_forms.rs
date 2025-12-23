@@ -228,6 +228,119 @@ fn test_6_2_1_let_destructure_in_expression() {
 }
 
 // ============================================================================
+// Section 6.2.2: let with associative (map) destructuring
+// Reference: docs/lonala/special-forms.md#associative-destructuring
+// ============================================================================
+
+/// Spec 6.2.2: Basic :keys destructuring
+#[test]
+fn test_6_2_2_let_map_destructure_keys() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(let [{:keys [a b]} {:a 1 :b 2}] (+ a b))",
+        3,
+        &spec_ref("6.2.2", "let", ":keys extracts keyword keys"),
+    );
+}
+
+/// Spec 6.2.2: :strs destructuring (string keys)
+#[test]
+fn test_6_2_2_let_map_destructure_strs() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_string(
+        "(let [{:strs [name]} {\"name\" \"Alice\"}] name)",
+        "Alice",
+        &spec_ref("6.2.2", "let", ":strs extracts string keys"),
+    );
+}
+
+/// Spec 6.2.2: :syms destructuring (symbol keys)
+#[test]
+fn test_6_2_2_let_map_destructure_syms() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(let [{:syms [x]} {'x 42}] x)",
+        42,
+        &spec_ref("6.2.2", "let", ":syms extracts symbol keys"),
+    );
+}
+
+/// Spec 6.2.2: :or provides default values
+#[test]
+fn test_6_2_2_let_map_destructure_or() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(let [{:keys [a b] :or {b 0}} {:a 1}] (+ a b))",
+        1,
+        &spec_ref("6.2.2", "let", ":or provides default for missing key"),
+    );
+}
+
+/// Spec 6.2.2: :or default applies only on nil, not false
+#[test]
+fn test_6_2_2_let_map_destructure_or_nil_only() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_bool(
+        "(let [{:keys [a] :or {a true}} {:a false}] a)",
+        false,
+        &spec_ref("6.2.2", "let", ":or default only on nil, not false"),
+    );
+}
+
+/// Spec 6.2.2: :as binds whole map
+#[test]
+fn test_6_2_2_let_map_destructure_as() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_map_eq(
+        "(let [{:keys [a] :as m} {:a 1 :b 2}] m)",
+        "{:a 1 :b 2}",
+        &spec_ref("6.2.2", "let", ":as binds entire map"),
+    );
+}
+
+/// Spec 6.2.2: Explicit key binding
+#[test]
+fn test_6_2_2_let_map_destructure_explicit() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(let [{x :foo} {:foo 42}] x)",
+        42,
+        &spec_ref("6.2.2", "let", "explicit binding {x :key}"),
+    );
+}
+
+/// Spec 6.2.2: Missing key returns nil
+#[test]
+fn test_6_2_2_let_map_destructure_missing_key() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_nil(
+        "(let [{:keys [a]} {}] a)",
+        &spec_ref("6.2.2", "let", "missing key returns nil"),
+    );
+}
+
+/// Spec 6.2.2: Destructuring nil map
+#[test]
+fn test_6_2_2_let_map_destructure_nil() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_nil(
+        "(let [{:keys [a]} nil] a)",
+        &spec_ref("6.2.2", "let", "nil map yields nil for keys"),
+    );
+}
+
+/// Spec 6.2.2: Combined patterns (:keys, :or, :as)
+#[test]
+fn test_6_2_2_let_map_destructure_combined() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_vector_eq(
+        "(let [{:keys [a b] :or {b 100} :as m} {:a 1}] [a b])",
+        "[1 100]",
+        &spec_ref("6.2.2", "let", "combined :keys, :or, :as"),
+    );
+}
+
+// ============================================================================
 // Section 6.3: if
 // Reference: docs/lonala.md#63-if
 // ============================================================================

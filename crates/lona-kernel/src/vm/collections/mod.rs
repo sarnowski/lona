@@ -9,6 +9,7 @@
 //! - `rest` - get rest of a collection (tail)
 //! - `vector` - create a vector from arguments
 //! - `hash-map` - create a map from key-value pairs
+//! - `get` - lookup value by key in a map
 //! - `list` - create a list from arguments
 //! - `concat` - concatenate sequences into a list
 //! - `vec` - convert collection to vector
@@ -35,7 +36,7 @@ mod set_ops;
 mod vector_ops;
 
 pub use list_ops::{native_concat, native_cons, native_first, native_list, native_rest};
-pub use map_ops::native_hash_map;
+pub use map_ops::{native_get, native_hash_map};
 pub use set_ops::{
     native_conj, native_contains_p, native_count, native_disj, native_hash_set, native_set_p,
 };
@@ -60,6 +61,7 @@ pub const PRIMITIVE_NAMES: &[&str] = &[
     "conj",
     "contains?",
     "count",
+    "get",
 ];
 
 /// Pre-interns all collection primitive symbols.
@@ -109,6 +111,7 @@ pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
         native_conj,
         native_contains_p,
         native_count,
+        native_get,
     ];
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {

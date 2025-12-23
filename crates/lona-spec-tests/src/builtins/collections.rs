@@ -135,10 +135,8 @@ fn test_9_3_2_nth_default() {
     );
 }
 
-/// [IGNORED] Spec 9.3.2: conj - Add element to collection
-/// Tracking: conj not yet implemented
+/// Spec 9.3.2: conj - Add element to collection
 #[test]
-#[ignore]
 fn test_9_3_2_conj_vector() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_vector_eq(
@@ -148,10 +146,8 @@ fn test_9_3_2_conj_vector() {
     );
 }
 
-/// [IGNORED] Spec 9.3.2: conj on list prepends
-/// Tracking: conj not yet implemented
+/// Spec 9.3.2: conj on list prepends
 #[test]
-#[ignore]
 fn test_9_3_2_conj_list() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_list_eq(
@@ -161,10 +157,8 @@ fn test_9_3_2_conj_list() {
     );
 }
 
-/// [IGNORED] Spec 9.3.2: count - Get collection size
-/// Tracking: count not yet implemented
+/// Spec 9.3.2: count - Get collection size
 #[test]
-#[ignore]
 fn test_9_3_2_count() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -189,10 +183,8 @@ fn test_9_3_2_count() {
     );
 }
 
-/// [IGNORED] Spec 9.3.2: count of nil is 0
-/// Tracking: count not yet implemented
+/// Spec 9.3.2: count of nil is 0
 #[test]
-#[ignore]
 fn test_9_3_2_count_nil() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -207,10 +199,8 @@ fn test_9_3_2_count_nil() {
 // Reference: docs/lonala.md#933-map-operations
 // ============================================================================
 
-/// [IGNORED] Spec 9.3.3: get - Get value for key
-/// Tracking: get not yet implemented
+/// Spec 9.3.3: get - Get value for key
 #[test]
-#[ignore]
 fn test_9_3_3_get() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
@@ -225,10 +215,8 @@ fn test_9_3_3_get() {
     );
 }
 
-/// [IGNORED] Spec 9.3.3: get - Missing key returns nil
-/// Tracking: get not yet implemented
+/// Spec 9.3.3: get - Missing key returns nil
 #[test]
-#[ignore]
 fn test_9_3_3_get_missing() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_nil(
@@ -237,16 +225,63 @@ fn test_9_3_3_get_missing() {
     );
 }
 
-/// [IGNORED] Spec 9.3.3: get - With default value
-/// Tracking: get not yet implemented
+/// Spec 9.3.3: get - With default value
 #[test]
-#[ignore]
 fn test_9_3_3_get_default() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_int(
         "(get (hash-map 'a 1) 'b 42)",
         42,
         &spec_ref("9.3.3", "get", "missing key returns default"),
+    );
+}
+
+/// Spec 9.3.3: get - False value is not treated as missing
+#[test]
+fn test_9_3_3_get_false_value() {
+    let mut ctx = SpecTestContext::new();
+    // Ensure false values are returned correctly, not treated as "not found"
+    ctx.assert_bool(
+        "(get {:a false} :a)",
+        false,
+        &spec_ref("9.3.3", "get", "false value returned correctly"),
+    );
+    // With default, should still return false (not the default)
+    ctx.assert_bool(
+        "(get {:a false} :a true)",
+        false,
+        &spec_ref("9.3.3", "get", "false value not replaced by default"),
+    );
+}
+
+/// Spec 9.3.3: get - With keyword keys
+#[test]
+fn test_9_3_3_get_keyword_key() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(get {:foo 42} :foo)",
+        42,
+        &spec_ref("9.3.3", "get", "keyword key lookup"),
+    );
+    ctx.assert_nil(
+        "(get {:foo 42} :bar)",
+        &spec_ref("9.3.3", "get", "missing keyword key returns nil"),
+    );
+}
+
+/// Spec 9.3.3: get - From nil map
+#[test]
+fn test_9_3_3_get_nil_map() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_nil(
+        "(get nil :a)",
+        &spec_ref("9.3.3", "get", "get from nil returns nil"),
+    );
+    // Test that default is returned when map is nil
+    ctx.assert_keyword_eq(
+        "(get nil :a :default)",
+        "default",
+        &spec_ref("9.3.3", "get", "get from nil with default returns default"),
     );
 }
 
@@ -328,10 +363,8 @@ fn test_9_3_3_vals() {
 // in Lonala, not as native primitives. Only disj and contains? are native.
 // ============================================================================
 
-/// [IGNORED] Spec 9.3.4: disj - Remove element from set
-/// Tracking: Set type not yet implemented
+/// Spec 9.3.4: disj - Remove element from set
 #[test]
-#[ignore]
 fn test_9_3_4_disj() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -346,10 +379,8 @@ fn test_9_3_4_disj() {
     );
 }
 
-/// [IGNORED] Spec 9.3.4: contains? - Check membership
-/// Tracking: Set type not yet implemented
+/// Spec 9.3.4: contains? - Check membership
 #[test]
-#[ignore]
 fn test_9_3_4_contains() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(

@@ -354,9 +354,11 @@ impl Compiler<'_, '_, '_> {
         let mut meta_pairs: Vec<(Constant, Constant)> = Vec::new();
 
         // Add source location: :line, :column
-        // Use 1-based line/column from the span offset
-        let line = 1_i64; // TODO: compute from source registry when available
-        let column = i64::try_from(name_span.start.saturating_add(1_usize)).unwrap_or(1_i64);
+        // TODO: compute proper line/column from source registry when available.
+        // For now, use placeholder values. Using byte offset as column would be
+        // semantically incorrect and produce confusing debug info.
+        let line = 1_i64;
+        let column = 1_i64;
 
         let line_kw = self.interner.intern(":line");
         let col_kw = self.interner.intern(":column");
@@ -555,6 +557,11 @@ impl Compiler<'_, '_, '_> {
                 )?;
                 self.compile_sequential_binding(&pattern, value_reg, name_ast.span)?;
             }
+            Ast::Map(_) => {
+                let pattern =
+                    super::destructure::parse_map_pattern(self.interner, name_ast, self.source_id)?;
+                self.compile_map_binding(&pattern, value_reg, name_ast.span)?;
+            }
             Ast::Integer(_)
             | Ast::Float(_)
             | Ast::String(_)
@@ -562,14 +569,13 @@ impl Compiler<'_, '_, '_> {
             | Ast::Nil
             | Ast::Keyword(_)
             | Ast::List(_)
-            | Ast::Map(_)
             | Ast::Set(_)
             | Ast::WithMeta { .. }
             | _ => {
                 return Err(Error::new(
                     ErrorKind::InvalidSpecialForm {
                         form: "let",
-                        message: "binding target must be a symbol or vector pattern",
+                        message: "binding target must be a symbol, vector, or map pattern",
                     },
                     self.location(name_ast.span),
                 ));

@@ -6,55 +6,16 @@
 //! These tests verify bytecode emission patterns for sequential destructuring.
 //! They directly call compile_sequential_binding to test the compilation logic.
 
-extern crate alloc;
-
-use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
 use lona_core::chunk::Constant;
 use lona_core::opcode::{Opcode, decode_bx, decode_op};
-use lona_core::source;
 use lona_core::span::Span;
-use lona_core::symbol;
-use lonala_parser::{Ast, Spanned};
+use lonala_parser::Ast;
 
+use super::{setup_compiler, source_id, spanned};
 use crate::compiler::destructure::parse_sequential_pattern;
-use crate::compiler::{Compiler, MacroRegistry};
-
-/// Test source ID for all destructure tests.
-fn source_id() -> source::Id {
-    source::Id::new(0_u32)
-}
-
-/// Helper to create a spanned AST node.
-fn spanned<T>(node: T) -> Spanned<T> {
-    Spanned::new(node, Span::new(0_usize, 1_usize))
-}
-
-/// Creates a test compiler with a pre-allocated source register.
-///
-/// Returns (compiler, source_register) where source_register is the
-/// register containing the "collection" to destructure.
-fn setup_compiler() -> (Compiler<'static, 'static, 'static>, u8) {
-    // We need static lifetime interner and registry for test setup
-    // Use Box::leak to create 'static references (memory leak is OK in tests)
-    let interner: &'static mut symbol::Interner = Box::leak(Box::new(symbol::Interner::new()));
-    let registry: &'static mut MacroRegistry = Box::leak(Box::new(MacroRegistry::new()));
-
-    let mut compiler = Compiler::new(interner, registry, source_id());
-
-    // Push a scope for local bindings
-    compiler.locals.push_scope();
-
-    // Allocate a register to serve as the "source collection"
-    // This simulates having compiled the value expression first
-    let source_reg = compiler
-        .alloc_register(Span::new(0_usize, 1_usize))
-        .expect("register allocation");
-
-    (compiler, source_reg)
-}
 
 #[test]
 fn compile_simple_pattern_emits_get_global_for_first() {

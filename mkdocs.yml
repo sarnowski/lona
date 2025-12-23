@@ -123,6 +123,7 @@ nav:
           - Development Principles: development/principles.md
           - LISP Machine Philosophy: development/lisp-machine.md
           - Minimal Rust Runtime: development/minimal-rust.md
+          - Process Communication: development/process-communication.md
           - Testing Strategy: development/testing-strategy.md
           - Lonala Coding Guidelines: development/lonala-coding-guidelines.md
           - Rust Coding Guidelines: development/rust-coding-guidelines.md

@@ -17,10 +17,8 @@ use crate::{SpecTestContext, spec_ref};
 // Reference: docs/lonala.md#317-error-tuples
 // ============================================================================
 
-/// [IGNORED] Spec 3.17: {:ok value} tuple for success
-/// Tracking: Requires keyword support for :ok and get primitive
+/// Spec 3.17: {:ok value} tuple for success
 #[test]
-#[ignore]
 fn test_3_17_ok_tuple() {
     let mut ctx = SpecTestContext::new();
     // Success tuple pattern - verify it's a map with extractable value
@@ -35,10 +33,8 @@ fn test_3_17_ok_tuple() {
     );
 }
 
-/// [IGNORED] Spec 3.17: {:error reason} tuple for failure with keyword reason
-/// Tracking: Requires keyword support for :error and get primitive
+/// Spec 3.17: {:error reason} tuple for failure with keyword reason
 #[test]
-#[ignore]
 fn test_3_17_error_tuple_keyword() {
     let mut ctx = SpecTestContext::new();
     // Error tuple pattern with keyword reason
@@ -53,10 +49,8 @@ fn test_3_17_error_tuple_keyword() {
     );
 }
 
-/// [IGNORED] Spec 3.17: {:error reason} with string reason
-/// Tracking: Requires keyword support and get primitive
+/// Spec 3.17: {:error reason} with string reason
 #[test]
-#[ignore]
 fn test_3_17_error_tuple_string() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_string(
@@ -66,10 +60,8 @@ fn test_3_17_error_tuple_string() {
     );
 }
 
-/// [IGNORED] Spec 3.17: Error tuple with map reason for rich context
-/// Tracking: Requires keyword support and get primitive
+/// Spec 3.17: Error tuple with map reason for rich context
 #[test]
-#[ignore]
 fn test_3_17_error_with_map_reason() {
     let mut ctx = SpecTestContext::new();
     // Rich error context - nested map

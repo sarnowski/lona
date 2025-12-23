@@ -187,7 +187,7 @@ Implement seL4-based security domains and inter-domain communication.
 - Notify target domain
 - Transparent to Lonala code (same `send` API)
 
-> ⚠️ **OPEN DESIGN DECISION**: See "Cross-Domain Zero-Copy IPC" in roadmap index. Goals promise zero-copy via immutability, but current description says "serialize/deserialize". Need dedicated design session to resolve: (1) shared-heap for persistent structures, (2) cross-domain GC coordination, (3) hybrid small-copy/large-share approach.
+> ✅ **DESIGN RESOLVED**: See [Process Communication](../../development/process-communication.md) for the complete design. Summary: Tiered hybrid model — intra-domain reference sharing, inter-domain copy for small messages (<1KB), arena-based zero-copy for large data with capability-controlled access.
 
 **Tests**:
 - Cross-domain send

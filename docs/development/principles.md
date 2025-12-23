@@ -307,21 +307,22 @@ All core types are immutable:
 
 "Updates" return new values; old values unchanged.
 
-### Zero-Copy via Capabilities
+### BEAM-Style Message Passing
 
-Immutability enables safe sharing:
+Lona adopts **pure BEAM semantics** for message passing:
 
-- **Within Domain**: Immutable data shared by reference (zero copy)
-- **Across Domains**: Capability-controlled shared memory regions
-- **Binary transfer**: Explicit ownership transfer via `binary-transfer!`
+- **Within Domain**: Immutable data is **deep-copied** on send (ensures independent heaps)
+- **Binary (large data)**: Shared by reference—the explicit escape hatch
+- **Across Domains**: Serialization + seL4 IPC for small data, shared memory for Binary
+
+This ensures per-process heap independence and instant memory reclaim on process death.
 
 ```clojure
-;; Create shared region
-(def packet-buffer (create-shared-region (megabytes 16)))
+;; Regular values: deep copied on send
+(send other-process {:data large-map})  ; map is copied
 
-;; Grant capabilities
-(cap-grant net-driver-domain packet-buffer :read-write)
-(cap-grant tcp-stack-domain packet-buffer :read-only)
+;; Binary: shared by reference (explicit escape hatch)
+(send other-process {:packet packet-binary})  ; binary shared, not copied
 ```
 
 ### Zero Magic
@@ -549,7 +550,7 @@ When making a design choice, record:
 | Security | No ambient authority. Sandboxing by default. Domain is only boundary. |
 | Resilience | Let it crash. Supervision mandatory. No shared mutable state. |
 | Introspection | Everything observable (within domain). Late binding. Two-mode architecture. |
-| Data | Data is the interface. Immutable by default. Zero-copy via capabilities. |
+| Data | Data is the interface. Immutable by default. Deep copy on send. Binary escape hatch. |
 | Testing | Test-first bug fixes. Host-testable architecture. Reproducible tests. |
 | Code Quality | Strict lints. Determinism. Single source of truth. |
 | Rust | Panic=abort. Fallible allocation. Strict unsafe hygiene. |

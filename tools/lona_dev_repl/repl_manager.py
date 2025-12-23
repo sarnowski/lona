@@ -26,6 +26,10 @@ EVAL_TIMEOUT = 30.0
 # Timeout for REPL boot (seconds)
 BOOT_TIMEOUT = 60.0
 
+# Idle shutdown settings
+IDLE_TIMEOUT = 60.0  # Shutdown after 60 seconds of inactivity
+IDLE_CHECK_INTERVAL = 10.0  # Check for idle every 10 seconds
+
 # ANSI escape code pattern
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
@@ -92,6 +96,8 @@ class ReplManager:
         self.buffer: str = ""
         self.started_at: datetime | None = None
         self._lock = asyncio.Lock()
+        self._last_activity: datetime | None = None
+        self._idle_monitor_task: asyncio.Task | None = None
 
         # Register cleanup on exit
         atexit.register(self._sync_cleanup)
@@ -188,6 +194,8 @@ class ReplManager:
         try:
             await self._wait_for_prompt(timeout=BOOT_TIMEOUT)
             self.started_at = datetime.now(timezone.utc)
+            self._last_activity = datetime.now(timezone.utc)
+            self._start_idle_monitor()
             return True, "REPL ready"
         except asyncio.TimeoutError:
             await self._stop_qemu()
@@ -225,6 +233,17 @@ class ReplManager:
 
         self.buffer = ""
         self.started_at = None
+        self._last_activity = None
+
+        # Cancel idle monitor if it's not the current task (avoid self-cancel)
+        if self._idle_monitor_task is not None:
+            try:
+                current = asyncio.current_task()
+            except RuntimeError:
+                current = None
+            if self._idle_monitor_task is not current:
+                self._idle_monitor_task.cancel()
+            self._idle_monitor_task = None
 
     async def _read_chunk(self, timeout: float) -> str | None:
         """Read a chunk of output from QEMU.
@@ -284,6 +303,31 @@ class ReplManager:
             and self.process.returncode is None
         )
 
+    def _start_idle_monitor(self) -> None:
+        """Start the idle monitor task if not already running."""
+        if self._idle_monitor_task is None or self._idle_monitor_task.done():
+            self._idle_monitor_task = asyncio.create_task(self._idle_monitor())
+
+    async def _idle_monitor(self) -> None:
+        """Background task that shuts down QEMU after idle timeout."""
+        try:
+            while True:
+                await asyncio.sleep(IDLE_CHECK_INTERVAL)
+                async with self._lock:
+                    if not self._is_running():
+                        # QEMU not running, stop monitoring
+                        break
+                    if self._last_activity is None:
+                        continue
+                    elapsed = (
+                        datetime.now(timezone.utc) - self._last_activity
+                    ).total_seconds()
+                    if elapsed >= IDLE_TIMEOUT:
+                        await self._stop_qemu()
+                        break
+        except asyncio.CancelledError:
+            pass  # Clean shutdown
+
     def get_started_at_iso(self) -> str | None:
         """Get the QEMU start time as an ISO 8601 string."""
         if self.started_at is None:
@@ -298,6 +342,11 @@ class ReplManager:
         """
         if self._is_running():
             return True, "Already running"
+
+        # Clean up stale state if process died externally (e.g., container killed)
+        # This ensures orphan containers are killed and state is reset
+        if self.container_id is not None or self.process is not None:
+            await self._stop_qemu()
 
         # Build first
         success, msg = await self._build()
@@ -344,48 +393,62 @@ class ReplManager:
             Tuple of (success, result_or_error)
         """
         async with self._lock:
-            # Ensure QEMU is running (under the same lock to prevent races)
-            success, msg = await self._ensure_running_locked()
-            if not success:
-                return False, msg
+            # Record activity to reset idle timer (also updated at end via finally)
+            self._last_activity = datetime.now(timezone.utc)
 
-            if self.process is None or self.process.stdin is None:
-                return False, "QEMU stdin not available"
-
-            # Clear buffer from previous operations
-            self.buffer = ""
-
-            # Send the expression
-            # Add newline to submit
-            command = expression + "\n"
-            self.process.stdin.write(command.encode("utf-8"))
-            await self.process.stdin.drain()
-
-            # Wait for response
             try:
-                prompt_type = await self._wait_for_prompt(timeout=EVAL_TIMEOUT)
-            except asyncio.TimeoutError:
-                return False, "Timeout waiting for response"
+                # Ensure QEMU is running (under the same lock to prevent races)
+                success, msg = await self._ensure_running_locked()
+                if not success:
+                    return False, msg
 
-            if prompt_type == "continuation":
-                # Expression is incomplete
-                return False, "Incomplete expression (missing closing delimiter)"
+                if self.process is None or self.process.stdin is None:
+                    return False, "QEMU stdin not available"
 
-            # Extract result from buffer
-            # Buffer contains: echo + result + prompt
-            clean_buffer = strip_ansi(self.buffer)
+                # Clear buffer from previous operations
+                self.buffer = ""
 
-            # Find the last prompt and take everything before it
-            if PROMPT_READY in clean_buffer:
-                result_part = clean_buffer.rsplit(PROMPT_READY, 1)[0]
-            else:
-                result_part = clean_buffer
+                # Send the expression
+                # Add newline to submit
+                command = expression + "\n"
+                self.process.stdin.write(command.encode("utf-8"))
+                await self.process.stdin.drain()
 
-            # Clean up the result
-            result = clean_output(result_part, expression)
+                # Wait for response
+                try:
+                    prompt_type = await self._wait_for_prompt(timeout=EVAL_TIMEOUT)
+                except asyncio.TimeoutError:
+                    return False, "Timeout waiting for response"
 
-            return True, result
+                if prompt_type == "continuation":
+                    # Expression is incomplete
+                    return False, "Incomplete expression (missing closing delimiter)"
+
+                # Extract result from buffer
+                # Buffer contains: echo + result + prompt
+                clean_buffer = strip_ansi(self.buffer)
+
+                # Find the last prompt and take everything before it
+                if PROMPT_READY in clean_buffer:
+                    result_part = clean_buffer.rsplit(PROMPT_READY, 1)[0]
+                else:
+                    result_part = clean_buffer
+
+                # Clean up the result
+                result = clean_output(result_part, expression)
+
+                return True, result
+            finally:
+                # Always update activity at end to prevent immediate shutdown
+                # after long-running evaluations
+                self._last_activity = datetime.now(timezone.utc)
 
     async def close(self) -> None:
         """Clean up resources."""
-        await self._stop_qemu()
+        # Acquire lock to safely modify shared state and prevent races
+        async with self._lock:
+            # Cancel idle monitor (can't await - it may be waiting for this lock)
+            if self._idle_monitor_task is not None:
+                self._idle_monitor_task.cancel()
+                self._idle_monitor_task = None
+            await self._stop_qemu()

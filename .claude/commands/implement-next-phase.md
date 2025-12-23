@@ -46,7 +46,6 @@ Before implementing, verify all entry conditions are met:
 
 1. Check that prerequisite phases are marked `[DONE]`
 2. Verify required files/state exist
-3. Run `make test` to confirm baseline is green
 
 If entry conditions are not met, inform the user and stop.
 

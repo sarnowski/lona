@@ -72,10 +72,8 @@ fn test_3_6_keyword_qualified() {
     );
 }
 
-/// [IGNORED] Spec 3.6: Keywords as map keys (common use case)
-/// Tracking: Map literal syntax and `get` function not yet implemented
+/// Spec 3.6: Keywords as map keys (common use case)
 #[test]
-#[ignore]
 fn test_3_6_keyword_as_map_key() {
     let mut ctx = SpecTestContext::new();
     // Map lookup with keyword key

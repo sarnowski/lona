@@ -152,34 +152,22 @@ Complex data can be written directly:
 
 ---
 
-## Immutability Enables Safe Sharing
+## Immutability and the BEAM Memory Model
 
-This is the critical insight for operating systems.
+### The Design Choice
 
-### The Problem
+Lona adopts **pure BEAM semantics** for message passing: all immutable values are **deep-copied** on send. This might seem to contradict the "safe sharing" promise of immutability, but it's the right choice:
 
-In traditional systems, sharing data across boundaries is dangerous:
+| Property | Benefit |
+|----------|---------|
+| **Per-process heap isolation** | Each process GCs independently |
+| **Instant memory reclaim** | Dead process heap freed immediately |
+| **No cross-process references** | Simpler, more predictable GC |
+| **Crash isolation** | Process crash can't corrupt other heaps |
 
-```
-Process A                    Process B
-    │                            │
-    └──── pointer to data ───────┘
-              │
-              ▼
-         ┌─────────┐
-         │ mutable │ ← Data race! Who owns this?
-         │  data   │
-         └─────────┘
-```
+### Why Not Share References?
 
-Solutions (all have costs):
-- **Copy everything**: Expensive
-- **Locks**: Deadlocks, priority inversion
-- **Ownership types**: Complexity
-
-### The Clojure Solution
-
-With immutable data, sharing is safe:
+While immutable data is technically safe to share, doing so creates problems:
 
 ```
 Process A                    Process B
@@ -188,19 +176,39 @@ Process A                    Process B
               │
               ▼
          ┌───────────┐
-         │ immutable │ ← Safe! Neither can change it
-         │   data    │
+         │ immutable │ ← Safe from mutation...
+         │   data    │   but heaps are now coupled!
          └───────────┘
 ```
 
-When Process A "sends" an immutable map to Process B:
-- No copy needed (within same Domain)
-- No lock needed (data can't change)
-- No race possible (immutability guarantee)
+If processes share references:
+- GC must trace across process boundaries
+- Process A's death doesn't free memory B still references
+- "Instant heap reclaim" becomes impossible
+- GC complexity increases dramatically
+
+### The Binary Escape Hatch
+
+For **large data** (network packets, file contents), copying is too expensive. The **Binary** type is Clojure's (and BEAM's) solution:
+
+```clojure
+;; Binary is explicitly shared, not copied
+(def packet-data (binary-create 1500))
+
+;; Send to another process - shares reference, not bytes
+(send tcp-handler {:packet packet-data})
+
+;; Receiver gets read-only View
+;; Underlying bytes shared via reference counting
+```
+
+This gives us the best of both worlds:
+- Regular data: deep copy (simple GC, crash isolation)
+- Large data: explicit sharing via Binary (efficiency)
 
 ### Cross-Domain Sharing
 
-Even across Domain boundaries (which have separate memory), immutability helps:
+Across Domain boundaries (separate address spaces), Binary sharing uses capability-controlled shared memory:
 
 ```
 Domain A                     Domain B
@@ -209,19 +217,17 @@ Domain A                     Domain B
               │
               ▼
          ┌───────────┐
-         │ immutable │ ← Safe read-only sharing
-         │   data    │
+         │  Binary   │ ← Capability-controlled access
+         │  bytes    │   A: read-write, B: read-only
          └───────────┘
 ```
 
-Domain A can grant read-only access to a memory region containing immutable data. Domain B can read it safely—there's no way for A to mutate it underneath B.
-
-This enables **zero-copy networking**:
+This enables **zero-copy networking** for large payloads:
 
 ```clojure
-;; Network driver writes packet to shared buffer
-;; TCP stack reads directly from buffer (no copy)
-;; Safe because the packet data is immutable
+;; Network driver writes packet to shared Binary region
+;; TCP stack reads directly from shared region (no copy)
+;; Only possible via explicit Binary type
 ```
 
 ---
@@ -352,20 +358,21 @@ Clojure philosophy provides Lona with:
 
 | Guarantee | Mechanism |
 |-----------|-----------|
-| **Safe sharing** | Immutable data structures |
-| **Zero-copy IPC** | Immutability + capability-controlled regions |
+| **Immutable values** | Core data structures can't be modified |
+| **Per-process isolation** | Deep copy on send (BEAM semantics) |
+| **Zero-copy for large data** | Binary type as explicit escape hatch |
 | **Inspectable messages** | Data is the interface |
 | **Powerful metaprogramming** | Homoiconicity |
 | **Concurrency safety** | No shared mutable state |
 
-**The Bottom Line**: In Lona, data is not hidden inside objects. Data is visible, immutable, shareable, and inspectable. Messages between processes are plain data. Configuration is plain data. State is plain data. This transparency—enabled by immutability—makes systems understandable.
+**The Bottom Line**: In Lona, data is not hidden inside objects. Data is visible, immutable, and inspectable. Messages are plain data that gets deep-copied on send—ensuring process isolation. For large data, Binary provides an explicit escape hatch with reference sharing. This combination of immutability + BEAM copy semantics makes systems both understandable and robust.
 
 ---
 
 ## Further Reading
 
 - [Core Concepts: Message](core-concepts.md#message)
-- [System Design: Zero-Copy Memory](system-design.md#zero-copy-memory-model)
+- [System Design: Memory Model](system-design.md#memory-model-for-high-throughput-data)
 - [Language Specification: Data Types](/docs/lonala/data-types.md)
 - [Clojure Rationale](https://clojure.org/about/rationale)
 - [Simple Made Easy](https://www.infoq.com/presentations/Simple-Made-Easy/) — Rich Hickey

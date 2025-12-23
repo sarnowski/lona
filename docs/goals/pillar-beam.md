@@ -96,7 +96,7 @@ Processes communicate exclusively through message passing:
     (handle-timeout)))
 ```
 
-There is no shared mutable state between processes. No locks, no mutexes, no races. Messages are copied (or, with Clojure's immutable data, safely shared).
+There is no shared mutable state between processes. No locks, no mutexes, no races. Messages are always **deep-copied** to the receiver's heap—this ensures process heap independence and enables instant memory reclaim on process death. For large data, use the Binary type which shares by reference.
 
 ### 3. Fault Containment
 

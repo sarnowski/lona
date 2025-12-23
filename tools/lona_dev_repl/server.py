@@ -117,4 +117,7 @@ async def cleanup() -> None:
 
 async def serve() -> None:
     """Run the MCP server over stdio."""
-    await mcp.run_stdio_async()
+    try:
+        await mcp.run_stdio_async()
+    finally:
+        await cleanup()

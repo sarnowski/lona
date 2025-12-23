@@ -28,7 +28,7 @@ This document provides a detailed, task-level breakdown of the Lona operating sy
 
 | Decision | Status | Affects | Notes |
 |----------|--------|---------|-------|
-| **Cross-Domain Zero-Copy IPC** | 🔴 OPEN | Task 1.6.5-1.6.7 | Goals promise "zero-copy via capabilities" for immutable data. Current Task 1.6.7 describes serialize/deserialize which is copy-based. Need to evaluate: (1) shared-heap allocation for persistent structures, (2) cross-domain GC coordination, (3) hybrid approach for small vs large messages. Since we use persistent data structures, true zero-copy should be achievable. |
+| **Cross-Domain Zero-Copy IPC** | 🟢 RESOLVED | Task 1.6.5-1.6.7 | See [Process Communication](../development/process-communication.md). Design: Tiered hybrid model with intra-domain reference sharing, inter-domain copy for small messages, and arena-based zero-copy for large data. |
 
 ### Architecture Layers
 
@@ -134,7 +134,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.1 | Multi-Arity Function Support | done |
 | 1.2.2 | Closure Implementation | done |
 | 1.2.3 | Sequential Destructuring | done |
-| 1.2.4 | Associative Destructuring | open |
+| 1.2.4 | Associative Destructuring | done |
 | 1.2.5 | Nested Destructuring | open |
 | 1.2.6 | [Proper Tail Calls - Compiler](../development/tco.md) | open |
 | 1.2.7 | [Proper Tail Calls - VM Trampoline](../development/tco.md) | open |
