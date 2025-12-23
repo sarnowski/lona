@@ -7,12 +7,12 @@
    Font Stack:
    - Headings: Fraunces (variable font, optical sizing)
    - Body: Literata (variable font, optimized for reading)
-   - Code: Iosevka (condensed monospace with ligatures)
+   - Code: JetBrains Mono (designed for developers, excellent readability)
 
    Download instructions:
    - Fraunces: https://fonts.google.com/specimen/Fraunces (download, convert to woff2)
    - Literata: https://fonts.google.com/specimen/Literata (download, convert to woff2)
-   - Iosevka: https://github.com/be5invis/Iosevka/releases (download webfont package)
+   - JetBrains Mono: https://github.com/JetBrains/JetBrainsMono/releases (download webfont package)
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
@@ -58,37 +58,37 @@
 }
 
 /* --------------------------------------------------------------------------
-   IOSEVKA - Code font
-   Condensed monospace with programming ligatures
+   JETBRAINS MONO - Code font
+   Designed for developers with excellent readability and ligatures
    -------------------------------------------------------------------------- */
 
 @font-face {
-    font-family: 'Iosevka';
-    src: url('../../assets/fonts/iosevka/Iosevka-Regular.woff2') format('woff2');
+    font-family: 'JetBrains Mono';
+    src: url('../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.woff2') format('woff2');
     font-weight: 400;
     font-style: normal;
     font-display: swap;
 }
 
 @font-face {
-    font-family: 'Iosevka';
-    src: url('../../assets/fonts/iosevka/Iosevka-Italic.woff2') format('woff2');
+    font-family: 'JetBrains Mono';
+    src: url('../../assets/fonts/jetbrains-mono/JetBrainsMono-Italic.woff2') format('woff2');
     font-weight: 400;
     font-style: italic;
     font-display: swap;
 }
 
 @font-face {
-    font-family: 'Iosevka';
-    src: url('../../assets/fonts/iosevka/Iosevka-Medium.woff2') format('woff2');
+    font-family: 'JetBrains Mono';
+    src: url('../../assets/fonts/jetbrains-mono/JetBrainsMono-Medium.woff2') format('woff2');
     font-weight: 500;
     font-style: normal;
     font-display: swap;
 }
 
 @font-face {
-    font-family: 'Iosevka';
-    src: url('../../assets/fonts/iosevka/Iosevka-Bold.woff2') format('woff2');
+    font-family: 'JetBrains Mono';
+    src: url('../../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.woff2') format('woff2');
     font-weight: 700;
     font-style: normal;
     font-display: swap;

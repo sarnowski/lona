@@ -26,3 +26,6 @@ __pycache__/
 
 # Docker
 .docker-cache/
+
+# Playwright MCP
+.playwright-mcp

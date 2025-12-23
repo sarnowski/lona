@@ -207,7 +207,8 @@ fn parse_as_binding(
 /// A binding can be:
 /// - A symbol name (binds value to that name)
 /// - `_` (ignores the value)
-/// - A nested vector (recursive destructuring)
+/// - A nested vector (recursive sequential destructuring)
+/// - A nested map (recursive associative destructuring)
 fn parse_binding(
     interner: &mut symbol::Interner,
     ast: &Spanned<Ast>,
@@ -226,6 +227,11 @@ fn parse_binding(
             Ok(Binding::Seq(Box::new(nested)))
         }
 
+        Ast::Map(_) => {
+            let nested = parse_map_pattern(interner, ast, source_id)?;
+            Ok(Binding::Map(Box::new(nested)))
+        }
+
         // All other AST types are invalid binding targets
         Ast::Integer(_)
         | Ast::Float(_)
@@ -234,12 +240,11 @@ fn parse_binding(
         | Ast::Nil
         | Ast::Keyword(_)
         | Ast::List(_)
-        | Ast::Map(_)
         | Ast::Set(_)
         | Ast::WithMeta { .. }
         | _ => Err(Error::new(
             ErrorKind::InvalidDestructuringPattern {
-                message: "binding must be a symbol, _, or vector pattern",
+                message: "binding must be a symbol, _, vector, or map pattern",
             },
             SourceLocation::new(source_id, ast.span),
         )),
@@ -377,8 +382,9 @@ impl<'interner> MapPatternParser<'interner> {
             Ast::Keyword(ref kw) if kw == "syms" => self.parse_syms(key_ast, value_ast),
             Ast::Keyword(ref kw) if kw == "or" => self.parse_or(key_ast, value_ast),
             Ast::Keyword(ref kw) if kw == "as" => self.parse_as(key_ast, value_ast),
-            Ast::Symbol(ref sym_name) => {
-                self.parse_explicit(sym_name, value_ast);
+            // Binding targets: symbol, vector (nested seq), or map (nested map)
+            Ast::Symbol(_) | Ast::Vector(_) | Ast::Map(_) => {
+                self.parse_explicit_binding(key_ast, value_ast)?;
                 Ok(())
             }
             // Explicit variants for clippy::wildcard_enum_match_arm compliance
@@ -389,8 +395,6 @@ impl<'interner> MapPatternParser<'interner> {
             | Ast::Nil
             | Ast::Keyword(_)
             | Ast::List(_)
-            | Ast::Vector(_)
-            | Ast::Map(_)
             | Ast::Set(_)
             | Ast::WithMeta { .. }
             // Wildcard required for #[non_exhaustive] - handles future variants
@@ -465,10 +469,15 @@ impl<'interner> MapPatternParser<'interner> {
         Ok(())
     }
 
-    /// Parses explicit binding: `{a :key-a}`.
-    fn parse_explicit(&mut self, sym_name: &str, value_ast: &Spanned<Ast>) {
-        let sym_id = self.interner.intern(sym_name);
-        self.pattern.explicit.push((sym_id, value_ast.clone()));
+    /// Parses explicit binding (`{a :key-a}`, `{[a b] :point}`, or `{{:keys [x]} :inner}`).
+    fn parse_explicit_binding(
+        &mut self,
+        binding_ast: &Spanned<Ast>,
+        value_ast: &Spanned<Ast>,
+    ) -> Result<(), Error> {
+        let binding = parse_binding(self.interner, binding_ast, self.source_id)?;
+        self.pattern.explicit.push((binding, value_ast.clone()));
+        Ok(())
     }
 
     /// Creates a duplicate keyword error.

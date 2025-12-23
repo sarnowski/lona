@@ -20,9 +20,12 @@
     filter: drop-shadow(0 4px 8px rgba(60, 56, 54, 0.1));
 }
 
-.lona-hero__title {
+.lona-hero__title,
+.md-typeset .lona-hero__title,
+[data-md-color-scheme="living-manual-light"] .md-typeset .lona-hero__title,
+[data-md-color-scheme="living-manual-dark"] .md-typeset .lona-hero__title {
     font-family: "Fraunces", Georgia, serif;
-    font-size: clamp(2.5rem, 6vw, 4rem);
+    font-size: clamp(2.75rem, 7vw, 4.5rem);
     font-weight: 700;
     letter-spacing: -0.02em;
     margin: 0 0 0.5rem 0;

@@ -11,7 +11,7 @@ Lona is an operating system for developers who want full transparency and contro
 ## Quickstart
 
 > [!WARNING]
-> This project is in early development — interfaces may change. Read the [Raodmap](https://lona.systems/roadmap/) for current status.
+> This project is in early development — interfaces may change. Read the [Roadmap](https://lona.systems/roadmap/) for current status.
 
 Requires Docker and GNU Make 4.0+ (on macOS: `brew install make`, use `gmake`).
 

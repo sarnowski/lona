@@ -236,6 +236,12 @@ make shell-aarch64   # Interactive Docker shell for debugging
 
 **IMPORTANT: To check code quality or whether tests run successful, ALWAYS run `make test`!**
 
+## Command Usage Policy
+
+**Use ONLY the commands documented in this file.** Do not invent, guess, or assume that other commands or make targets exist. If a command is not explicitly listed in this document, do not use it.
+
+If you believe a faster or alternative command might be useful, **ask the user first** before attempting to use it.
+
 ## MCP Tools
 
 The following MCP tools are available for interactive testing in the real seL4 environment:

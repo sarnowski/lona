@@ -1,8 +1,7 @@
 <div class="lona-hero">
-<img src="assets/logo.svg" alt="Lona" class="lona-hero__logo">
 <h1 class="lona-hero__title">Lona</h1>
 <p class="lona-hero__tagline">LISP Machines Never Died. They Evolved.</p>
-<p class="lona-hero__description">A next-generation operating system combining verified security, complete runtime transparency, and fault-tolerant distributed computing.</p>
+<p class="lona-hero__description">A next-generation operating system combining strong security, complete runtime transparency, and fault-tolerant distributed computing.</p>
 </div>
 
 ---

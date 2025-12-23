@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <!-- Logo for light theme (dark foreground on light background) -->
+
+  <!-- Root connection lines -->
+  <line x1="200" y1="80" x2="120" y2="150" stroke="#282828" stroke-width="5" stroke-linecap="round"/>
+  <line x1="200" y1="80" x2="280" y2="150" stroke="#282828" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- Root supervisor node with lambda -->
+  <circle cx="200" cy="80" r="30" fill="#282828"/>
+  <text x="200" y="90" font-family="Georgia, serif" font-size="30" fill="#f9f5d7" text-anchor="middle">λ</text>
+
+  <!-- Left security domain boundary (rounded rectangle encapsulating left subtree) -->
+  <rect x="50" y="130" width="140" height="200" rx="20" ry="20"
+        fill="none" stroke="#282828" stroke-width="4"/>
+
+  <!-- Left subtree -->
+  <circle cx="120" cy="170" r="22" fill="#282828"/>
+  <line x1="120" y1="192" x2="85" y2="260" stroke="#282828" stroke-width="4" stroke-linecap="round"/>
+  <line x1="120" y1="192" x2="155" y2="260" stroke="#282828" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="85" cy="280" r="16" fill="#282828"/>
+  <circle cx="155" cy="280" r="16" fill="#282828"/>
+
+  <!-- Right security domain boundary -->
+  <rect x="210" y="130" width="140" height="200" rx="20" ry="20"
+        fill="none" stroke="#282828" stroke-width="4"/>
+
+  <!-- Right subtree -->
+  <circle cx="280" cy="170" r="22" fill="#282828"/>
+  <line x1="280" y1="192" x2="245" y2="260" stroke="#282828" stroke-width="4" stroke-linecap="round"/>
+  <line x1="280" y1="192" x2="315" y2="260" stroke="#282828" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="245" cy="280" r="16" fill="#282828"/>
+  <circle cx="315" cy="280" r="16" fill="#282828"/>
+
+  <!-- Outer parentheses representing LISP/the expression wrapping everything -->
+  <path d="M 30 200 Q 10 120, 50 50" fill="none" stroke="#282828" stroke-width="8" stroke-linecap="round"/>
+  <path d="M 30 200 Q 10 280, 40 360" fill="none" stroke="#282828" stroke-width="8" stroke-linecap="round"/>
+  <path d="M 370 200 Q 390 120, 350 50" fill="none" stroke="#282828" stroke-width="8" stroke-linecap="round"/>
+  <path d="M 370 200 Q 390 280, 360 360" fill="none" stroke="#282828" stroke-width="8" stroke-linecap="round"/>
+</svg>

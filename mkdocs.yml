@@ -19,12 +19,23 @@ extra_css:
 theme:
     name: material
     custom_dir: docs/overrides
-    logo: assets/logo.svg
+    logo: assets/logo-light.svg
     favicon: assets/favicon.svg
     palette:
-        scheme: living-manual
-        primary: custom
-        accent: custom
+        - media: "(prefers-color-scheme: light)"
+          scheme: living-manual-light
+          primary: custom
+          accent: custom
+          toggle:
+              icon: material/brightness-7
+              name: Switch to dark mode
+        - media: "(prefers-color-scheme: dark)"
+          scheme: living-manual-dark
+          primary: custom
+          accent: custom
+          toggle:
+              icon: material/brightness-4
+              name: Switch to light mode
     features:
         - navigation.tabs
         - navigation.sections

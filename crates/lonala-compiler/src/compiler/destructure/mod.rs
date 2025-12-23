@@ -123,6 +123,7 @@ impl SeqPattern {
 /// Represents a map pattern like `{:keys [a b] :or {b 0} :as m}` with:
 /// - Shorthand bindings via `:keys`, `:strs`, `:syms`
 /// - Explicit bindings like `{a :key-a}` (symbol bound to key lookup)
+/// - Nested pattern bindings like `{[a b] :point}` or `{{:keys [x]} :inner}`
 /// - Default values via `:or`
 /// - Whole-map binding via `:as`
 ///
@@ -132,6 +133,7 @@ impl SeqPattern {
 /// 1. Optionally bind `:as` first (binds original map)
 /// 2. For each binding, emit `(get map key)` via `GetGlobal`
 /// 3. For each symbol with `:or` default, emit nil check and conditional
+/// 4. For nested patterns, recurse into sequential or map compilation
 ///
 /// # Example Patterns
 ///
@@ -140,17 +142,23 @@ impl SeqPattern {
 /// {:strs [name]}          ; extract "name" as string key
 /// {:syms [x]}             ; extract 'x as symbol key
 /// {a :key-a}              ; bind a to (get m :key-a)
+/// {[a b] :point}          ; nested sequential destructuring
+/// {{:keys [x]} :inner}    ; nested map destructuring
 /// {:keys [a] :or {a 0}}   ; default a to 0 if nil
 /// {:keys [a] :as m}       ; also bind entire map to m
 /// ```
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct MapPattern {
-    /// Explicit symbol-to-key bindings: `{a :key-a}` becomes `(symbol_a, :key-a)`.
+    /// Explicit bindings: pattern-to-key mappings.
+    ///
+    /// - `{a :key-a}` becomes `(Binding::Symbol(a), :key-a)`
+    /// - `{[a b] :point}` becomes `(Binding::Seq(...), :point)`
+    /// - `{{:keys [x]} :inner}` becomes `(Binding::Map(...), :inner)`
     ///
     /// The key expression is an arbitrary AST that will be compiled to produce
     /// the lookup key.
-    pub explicit: Vec<(symbol::Id, Spanned<Ast>)>,
+    pub explicit: Vec<(Binding, Spanned<Ast>)>,
 
     /// `:keys [a b]` - symbols to extract using keyword keys.
     ///

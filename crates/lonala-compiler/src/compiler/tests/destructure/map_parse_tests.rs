@@ -9,7 +9,7 @@ use lona_core::symbol;
 use lonala_parser::Ast;
 
 use super::{map_elements, source_id, spanned, spanned_at};
-use crate::compiler::destructure::parse_map_pattern;
+use crate::compiler::destructure::{Binding, parse_map_pattern};
 use crate::error::Kind as ErrorKind;
 
 // ==================== Basic Map Pattern Parsing ====================
@@ -101,7 +101,7 @@ fn parse_map_as() {
 
 #[test]
 fn parse_map_explicit() {
-    // {a :key-a} -> explicit=[(a, :key-a)]
+    // {a :key-a} -> explicit=[(Binding::Symbol(a), :key-a)]
     let mut interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Symbol("a".into()),
@@ -111,11 +111,14 @@ fn parse_map_explicit() {
     let pattern = parse_map_pattern(&mut interner, &ast, source_id()).unwrap();
 
     assert_eq!(pattern.explicit.len(), 1);
-    let Some((sym_id, key_ast)) = pattern.explicit.get(0) else {
+    let Some((binding, key_ast)) = pattern.explicit.get(0) else {
         panic!("expected explicit binding");
     };
 
-    // Verify the symbol is interned correctly
+    // Verify the binding is a symbol with the correct name
+    let Binding::Symbol(sym_id) = binding else {
+        panic!("expected Binding::Symbol");
+    };
     let name = interner.resolve(*sym_id);
     assert_eq!(name, "a");
 
@@ -465,4 +468,43 @@ fn map_symbols_are_interned() {
         panic!("expected second key");
     };
     assert_eq!(id1, id2, "same symbol name should have same ID");
+}
+
+#[test]
+fn error_map_odd_element_count() {
+    // {:a} -> error (map pattern must have even number of elements)
+    let mut interner = symbol::Interner::new();
+    let ast = spanned(Ast::Map(vec![spanned(Ast::Keyword("a".into()))]));
+
+    let result = parse_map_pattern(&mut interner, &ast, source_id());
+    assert!(result.is_err());
+
+    let err = result.unwrap_err();
+    assert!(matches!(
+        err.kind,
+        ErrorKind::InvalidDestructuringPattern {
+            message: "map pattern must have even number of elements"
+        }
+    ));
+}
+
+#[test]
+fn error_map_or_odd_element_count() {
+    // {:or {:a}} -> error (:or map must have even number of elements)
+    let mut interner = symbol::Interner::new();
+    let ast = spanned(Ast::Map(map_elements(vec![(
+        Ast::Keyword("or".into()),
+        Ast::Map(vec![spanned(Ast::Symbol("a".into()))]),
+    )])));
+
+    let result = parse_map_pattern(&mut interner, &ast, source_id());
+    assert!(result.is_err());
+
+    let err = result.unwrap_err();
+    assert!(matches!(
+        err.kind,
+        ErrorKind::InvalidDestructuringPattern {
+            message: ":or map must have even number of elements"
+        }
+    ));
 }

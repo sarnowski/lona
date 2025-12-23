@@ -231,9 +231,9 @@ impl Compiler<'_, '_, '_> {
             self.compile_key_binding(sym_id, source_reg, KeyKind::Symbol, &pattern.defaults, span)?;
         }
 
-        // 5. Process explicit bindings (symbol -> key expression)
-        for &(sym_id, ref key_ast) in &pattern.explicit {
-            self.compile_explicit_binding(sym_id, source_reg, key_ast, &pattern.defaults, span)?;
+        // 5. Process explicit bindings (binding pattern -> key expression)
+        for entry in &pattern.explicit {
+            self.compile_explicit_binding(&entry.0, source_reg, &entry.1, &pattern.defaults, span)?;
         }
 
         Ok(())
@@ -300,44 +300,96 @@ impl Compiler<'_, '_, '_> {
         Ok(())
     }
 
-    /// Compiles an explicit binding like `{a :key-a}`.
+    /// Compiles an explicit binding like `{a :key-a}`, `{[a b] :point}`, or `{{:keys [x]} :inner}`.
     ///
     /// The key expression is compiled to produce the lookup key.
+    /// The binding can be a symbol, sequential pattern, or map pattern.
     fn compile_explicit_binding(
         &mut self,
-        sym_id: symbol::Id,
+        binding: &Binding,
         source_reg: u8,
         key_ast: &Spanned<Ast>,
         defaults: &[(symbol::Id, Spanned<Ast>)],
         span: Span,
     ) -> Result<(), Error> {
-        // Allocate permanent register for this binding first
-        let binding_reg = self.alloc_register(span)?;
+        match *binding {
+            Binding::Symbol(sym_id) => {
+                // For symbol bindings, allocate permanent register BEFORE checkpoint
+                // so it won't be freed when we clean up temps
+                let binding_reg = self.alloc_register(span)?;
 
-        // Track checkpoint for temps
-        let checkpoint = self.next_register;
+                // Track checkpoint for temps (after permanent register)
+                let checkpoint = self.next_register;
 
-        // Compile the key expression (temp register)
-        let key_result = self.compile_expr(key_ast)?;
-        let key_reg = key_result.register;
+                // Compile the key expression (temp register)
+                let key_result = self.compile_expr(key_ast)?;
+                let key_reg = key_result.register;
 
-        // Call (get map key) - result in temp register
-        let result_reg = self.emit_global_call_2("get", source_reg, key_reg, span)?;
+                // Call (get map key) - result in temp register
+                let result_reg = self.emit_global_call_2("get", source_reg, key_reg, span)?;
 
-        // Move result to permanent binding register
-        self.chunk
-            .emit(encode_abc(Opcode::Move, binding_reg, result_reg, 0), span);
+                // Move result to permanent binding register
+                self.chunk
+                    .emit(encode_abc(Opcode::Move, binding_reg, result_reg, 0), span);
 
-        // Free all temps (key expression and call temps)
-        self.free_registers_to(checkpoint);
+                // Free all temps (key expression and call temps), but NOT binding_reg
+                self.free_registers_to(checkpoint);
 
-        // Check if this symbol has a default and apply if needed
-        if let Some(default_ast) = find_default(defaults, sym_id) {
-            self.apply_default_if_nil(binding_reg, default_ast, span)?;
+                // Check if this symbol has a default and apply if needed
+                if let Some(default_ast) = find_default(defaults, sym_id) {
+                    self.apply_default_if_nil(binding_reg, default_ast, span)?;
+                }
+
+                // Define local for symbol
+                self.locals.define(sym_id, binding_reg);
+            }
+            Binding::Ignore => {
+                // Track checkpoint for temps
+                let checkpoint = self.next_register;
+
+                // Compile the key expression (temp register)
+                let key_result = self.compile_expr(key_ast)?;
+                let key_reg = key_result.register;
+
+                // Call (get map key) - result discarded
+                let _result_reg = self.emit_global_call_2("get", source_reg, key_reg, span)?;
+
+                // Free all temps - the value is discarded
+                self.free_registers_to(checkpoint);
+            }
+            Binding::Seq(ref nested_pattern) => {
+                // Compile the key expression (temp register)
+                let key_result = self.compile_expr(key_ast)?;
+                let key_reg = key_result.register;
+
+                // Call (get map key) - result in temp register
+                let result_reg = self.emit_global_call_2("get", source_reg, key_reg, span)?;
+
+                // Recursively compile nested sequential pattern on the extracted value
+                // result_reg holds the value extracted from the map
+                self.compile_sequential_binding(nested_pattern, result_reg, span)?;
+
+                // Note: We do NOT free temp registers here because:
+                // 1. Nested bindings allocate permanent registers above our temps
+                // 2. Calling free_registers_to() would free those permanent registers
+                // 3. The caller handles cleanup when the entire binding scope ends
+                // This matches the pattern in compile_sequential_binding lines 126-130
+            }
+            Binding::Map(ref nested_pattern) => {
+                // Compile the key expression (temp register)
+                let key_result = self.compile_expr(key_ast)?;
+                let key_reg = key_result.register;
+
+                // Call (get map key) - result in temp register
+                let result_reg = self.emit_global_call_2("get", source_reg, key_reg, span)?;
+
+                // Recursively compile nested map pattern on the extracted value
+                // result_reg holds the value extracted from the map
+                self.compile_map_binding(nested_pattern, result_reg, span)?;
+
+                // Note: Same as Binding::Seq - don't free temps to preserve nested bindings
+            }
         }
-
-        // Define local for symbol
-        self.locals.define(sym_id, binding_reg);
 
         Ok(())
     }

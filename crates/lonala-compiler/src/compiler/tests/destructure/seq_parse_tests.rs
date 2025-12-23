@@ -310,7 +310,7 @@ fn error_invalid_binding() {
     assert!(matches!(
         err.kind,
         ErrorKind::InvalidDestructuringPattern {
-            message: "binding must be a symbol, _, or vector pattern"
+            message: "binding must be a symbol, _, vector, or map pattern"
         }
     ));
 }

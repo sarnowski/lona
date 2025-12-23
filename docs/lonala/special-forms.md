@@ -144,6 +144,38 @@ Bindings also support map patterns for extracting values from maps:
   a)                 ; => false (not true)
 ```
 
+### Nested Destructuring
+
+Destructuring patterns can be arbitrarily nested, combining sequential and map patterns:
+
+```clojure
+; Sequential → Map: extract map from vector position
+(let [[{:keys [a]} b] [{:a 1} 2]]
+  (+ a b))           ; => 3
+
+; Map → Sequential: extract vector from map key
+(let [{[a b] :point} {:point [1 2]}]
+  (+ a b))           ; => 3
+
+; Map → Map: extract nested map
+(let [{{:keys [x]} :inner} {:inner {:x 99}}]
+  x)                 ; => 99
+
+; Deep nesting (3+ levels)
+(let [[{[a b] :p}] [{:p [10 20]}]]
+  (+ a b))           ; => 30
+
+; Map → Sequential with rest binding
+(let [{[first & rest] :items} {:items [1 2 3 4]}]
+  rest)              ; => (2 3 4)
+
+; Map → Map with :or default
+(let [{{:keys [x] :or {x 100}} :inner} {:inner {}}]
+  x)                 ; => 100
+```
+
+**Note**: Nested patterns use explicit bindings (`{[a b] :key}` or `{{:keys [x]} :key}`). The `:keys`, `:strs`, and `:syms` shorthands only accept symbols, not patterns.
+
 ## 6.3 `if`
 
 Conditional branching.
@@ -323,6 +355,24 @@ Parameters also support map patterns for extracting values from map arguments:
            ([{:keys [a]} b] (+ a b))))
 (f {:a 10})        ; => 10
 (f {:a 10} 5)      ; => 15
+```
+
+### Nested Destructuring in Parameters
+
+Parameters support arbitrary nesting of sequential and map patterns:
+
+```clojure
+; Sequential → Map nesting
+((fn [[{:keys [a]} b]] (+ a b)) [{:a 1} 2])  ; => 3
+
+; Map → Sequential nesting
+((fn [{[a b] :point}] (+ a b)) {:point [1 2]})  ; => 3
+
+; Map → Map nesting
+((fn [{{:keys [x]} :inner}] x) {:inner {:x 99}})  ; => 99
+
+; Deep nesting (3+ levels)
+((fn [[{[a b] :p}]] (+ a b)) [{:p [10 20]}])  ; => 30
 ```
 
 ## 6.6 `quote`
