@@ -323,6 +323,8 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Compiles unary negation: `(- x)` → `Neg`.
+    ///
+    /// The operand is never in tail position since its result is used by `Neg`.
     fn compile_unary_negation(
         &mut self,
         elements: &[Spanned<Ast>],
@@ -332,7 +334,8 @@ impl Compiler<'_, '_, '_> {
             .get(1_usize)
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let checkpoint = self.next_register;
-        let result = self.compile_expr(arg)?;
+        // Operand is NOT in tail position - its result is used by `Neg`
+        let result = self.with_tail_position(false, |compiler| compiler.compile_expr(arg))?;
 
         self.free_registers_to(checkpoint);
         let dest = self.alloc_register(span)?;
@@ -345,6 +348,9 @@ impl Compiler<'_, '_, '_> {
     ///
     /// Unlike negation which has a dedicated opcode, reciprocal is implemented
     /// by calling the native `/` function with a single argument.
+    ///
+    /// This function call respects tail position: if `(/ x)` is in tail position,
+    /// a `TailCall` opcode is emitted instead of `Call`.
     fn compile_unary_reciprocal(
         &mut self,
         elements: &[Spanned<Ast>],
@@ -354,6 +360,8 @@ impl Compiler<'_, '_, '_> {
             .get(1_usize)
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
+        // Remember if we're in tail position
+        let is_tail = self.in_tail_position;
         let base = self.next_register;
 
         // Load the `/` native function into base register
@@ -363,12 +371,16 @@ impl Compiler<'_, '_, '_> {
         self.chunk
             .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
 
-        // Compile the argument into the next register
-        let _arg_result = self.compile_expr(arg)?;
+        // Compile the argument into the next register (NOT in tail position)
+        let _arg_result = self.with_tail_position(false, |compiler| compiler.compile_expr(arg))?;
 
-        // Emit call instruction with 1 argument
-        self.chunk
-            .emit(encode_abc(Opcode::Call, base, 1_u8, 1_u8), span);
+        // Emit call instruction (TailCall if in tail position)
+        let opcode = if is_tail {
+            Opcode::TailCall
+        } else {
+            Opcode::Call
+        };
+        self.chunk.emit(encode_abc(opcode, base, 1_u8, 1_u8), span);
 
         // Result is left in base register
         // Free argument registers
@@ -571,6 +583,8 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Compiles unary `not` operation.
+    ///
+    /// The operand is never in tail position since its result is used by `not`.
     pub(super) fn compile_not(
         &mut self,
         elements: &[Spanned<Ast>],
@@ -581,7 +595,8 @@ impl Compiler<'_, '_, '_> {
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
 
         let checkpoint = self.next_register;
-        let result = self.compile_expr(arg)?;
+        // Operand is NOT in tail position - its result is used by `not`
+        let result = self.with_tail_position(false, |compiler| compiler.compile_expr(arg))?;
 
         self.free_registers_to(checkpoint);
         let dest = self.alloc_register(span)?;
@@ -593,14 +608,17 @@ impl Compiler<'_, '_, '_> {
     /// Tries to compile an operand as an RK value (constant if possible).
     ///
     /// Returns the RK-encoded value (either a register index or constant index).
+    ///
+    /// Operands of binary operators are never in tail position, so this method
+    /// compiles expressions with `in_tail_position = false`.
     pub(super) fn try_compile_rk_operand(&mut self, expr: &Spanned<Ast>) -> Result<u8, Error> {
         // Check if this can be a direct constant
         if let Some(rk) = self.try_constant_rk(expr)? {
             return Ok(rk);
         }
 
-        // Otherwise compile to a register
-        let result = self.compile_expr(expr)?;
+        // Otherwise compile to a register (operands are never in tail position)
+        let result = self.with_tail_position(false, |compiler| compiler.compile_expr(expr))?;
         rk_register(result.register)
             .ok_or_else(|| Error::new(ErrorKind::TooManyRegisters, self.location(expr.span)))
     }
@@ -645,6 +663,10 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Compiles a general function call.
+    ///
+    /// If the call is in tail position (`self.in_tail_position` is true), emits
+    /// `TailCall` opcode instead of `Call`. This enables tail call optimization
+    /// in the VM, allowing recursive functions to run in constant stack space.
     pub(super) fn compile_call(
         &mut self,
         elements: &[Spanned<Ast>],
@@ -655,11 +677,17 @@ impl Compiler<'_, '_, '_> {
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let args = elements.get(1_usize..).unwrap_or(&[]);
 
+        // Remember if we're in tail position before compiling subexpressions
+        let is_tail = self.in_tail_position;
+
         // Allocate contiguous registers: R_base = func, R_base+1..N = args
         let base = self.next_register;
 
-        // Compile function into base register
-        let func_result = self.compile_expr(func_expr)?;
+        // Compile function and arguments NOT in tail position
+        // (only the call itself can be a tail call, not its subexpressions)
+        let func_result =
+            self.with_tail_position(false, |compiler| compiler.compile_expr(func_expr))?;
+
         // Ensure function is at base (should be since we just allocated)
         if func_result.register != base {
             // Move to base if needed (shouldn't happen with current design)
@@ -669,9 +697,10 @@ impl Compiler<'_, '_, '_> {
             );
         }
 
-        // Compile arguments into consecutive registers
+        // Compile arguments into consecutive registers (not in tail position)
         for arg in args {
-            let _arg_result = self.compile_expr(arg)?;
+            let _arg_result =
+                self.with_tail_position(false, |compiler| compiler.compile_expr(arg))?;
             // Arguments are automatically placed in consecutive registers
         }
 
@@ -679,8 +708,14 @@ impl Compiler<'_, '_, '_> {
         let arg_count = u8::try_from(args.len())
             .map_err(|_err| Error::new(ErrorKind::TooManyRegisters, self.location(span)))?;
 
+        // Use TailCall if in tail position, otherwise regular Call
+        let opcode = if is_tail {
+            Opcode::TailCall
+        } else {
+            Opcode::Call
+        };
         self.chunk
-            .emit(encode_abc(Opcode::Call, base, arg_count, 1), span);
+            .emit(encode_abc(opcode, base, arg_count, 1), span);
 
         // Result is left in base register
         // Free argument registers

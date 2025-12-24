@@ -38,6 +38,9 @@ impl Compiler<'_, '_, '_> {
     ///
     /// Evaluates expressions left to right and returns the value of the last
     /// expression. Empty `(do)` returns nil.
+    ///
+    /// For tail call optimization: only the last expression inherits tail position.
+    /// All preceding expressions are compiled with `in_tail_position = false`.
     pub(super) fn compile_do(
         &mut self,
         args: &[Spanned<Ast>],
@@ -51,21 +54,24 @@ impl Compiler<'_, '_, '_> {
             return Ok(ExprResult { register: dest });
         }
 
-        // Compile all but last expression, discarding results
+        // Save tail position - only last expression inherits it
+        let is_tail = self.in_tail_position;
+
+        // Compile all but last expression, discarding results (NOT in tail position)
         for expr in args
             .get(..args.len().saturating_sub(1_usize))
             .unwrap_or(&[])
         {
             let checkpoint = self.next_register;
-            let _result = self.compile_expr(expr)?;
+            let _result = self.with_tail_position(false, |compiler| compiler.compile_expr(expr))?;
             self.free_registers_to(checkpoint);
         }
 
-        // Compile last expression and return its result
+        // Compile last expression and return its result (inherits tail position)
         let last_expr = args
             .last()
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
-        self.compile_expr(last_expr)
+        self.with_tail_position(is_tail, |compiler| compiler.compile_expr(last_expr))
     }
 
     /// Compiles an `if` special form.
@@ -74,6 +80,9 @@ impl Compiler<'_, '_, '_> {
     ///
     /// Evaluates `test`. If truthy (not nil or false), evaluates and returns
     /// `then`. Otherwise evaluates and returns `else` (or nil if no else).
+    ///
+    /// For tail call optimization: the test expression is never in tail position,
+    /// but both `then` and `else` branches inherit the current tail position.
     pub(super) fn compile_if(
         &mut self,
         args: &[Spanned<Ast>],
@@ -98,9 +107,13 @@ impl Compiler<'_, '_, '_> {
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
         let else_expr = args.get(2_usize);
 
-        // Compile test expression
+        // Save tail position - branches inherit it, but test does not
+        let is_tail = self.in_tail_position;
+
+        // Compile test expression NOT in tail position
         let checkpoint = self.next_register;
-        let test_result = self.compile_expr(test_expr)?;
+        let test_result =
+            self.with_tail_position(false, |compiler| compiler.compile_expr(test_expr))?;
 
         // Emit JumpIfNot (will patch offset later)
         let jump_to_else_idx = self.chunk.emit(
@@ -114,8 +127,9 @@ impl Compiler<'_, '_, '_> {
         // Allocate destination register for result
         let dest = self.alloc_register(span)?;
 
-        // Compile then branch into dest
-        let then_result = self.compile_expr(then_expr)?;
+        // Compile then branch into dest (inherits tail position)
+        let then_result =
+            self.with_tail_position(is_tail, |compiler| compiler.compile_expr(then_expr))?;
         if then_result.register != dest {
             self.chunk.emit(
                 encode_abc(Opcode::Move, dest, then_result.register, 0),
@@ -141,9 +155,10 @@ impl Compiler<'_, '_, '_> {
             encode_asbx(Opcode::JumpIfNot, test_result.register, else_offset_i16),
         );
 
-        // Compile else branch (or nil) into dest
+        // Compile else branch (or nil) into dest (inherits tail position)
         if let Some(else_branch) = else_expr {
-            let else_result = self.compile_expr(else_branch)?;
+            let else_result =
+                self.with_tail_position(is_tail, |compiler| compiler.compile_expr(else_branch))?;
             if else_result.register != dest {
                 self.chunk.emit(
                     encode_abc(Opcode::Move, dest, else_result.register, 0),
@@ -448,6 +463,9 @@ impl Compiler<'_, '_, '_> {
     /// Bindings are evaluated left to right, and each binding can reference
     /// previous bindings. Body expressions are evaluated with bindings in scope,
     /// and the value of the last body expression is returned.
+    ///
+    /// For tail call optimization: binding values are never in tail position,
+    /// but the body (specifically its last expression) inherits tail position.
     pub(super) fn compile_let(
         &mut self,
         args: &[Spanned<Ast>],
@@ -489,15 +507,21 @@ impl Compiler<'_, '_, '_> {
             ));
         }
 
+        // Save tail position - body inherits it, but bindings do not
+        let is_tail = self.in_tail_position;
+
         let body = args.get(1_usize..).unwrap_or(&[]);
         let checkpoint = self.next_register;
         self.locals.push_scope();
 
-        // Process all binding pairs
-        self.compile_let_bindings(bindings, span)?;
+        // Process all binding pairs (NOT in tail position)
+        self.with_tail_position(false, |compiler| {
+            compiler.compile_let_bindings(bindings, span)
+        })?;
 
-        // Compile body and return result
-        let result = self.compile_body(body, span)?;
+        // Compile body and return result (inherits tail position)
+        let result =
+            self.with_tail_position(is_tail, |compiler| compiler.compile_body(body, span))?;
 
         self.locals.pop_scope();
         self.free_registers_to(checkpoint);
@@ -590,6 +614,10 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Compiles a body (sequence of expressions), returning the last result or nil.
+    ///
+    /// For tail call optimization: all but the last expression are compiled with
+    /// `in_tail_position = false`. The last expression inherits the current
+    /// tail position setting.
     fn compile_body(&mut self, body: &[Spanned<Ast>], span: Span) -> Result<ExprResult, Error> {
         if body.is_empty() {
             let dest = self.alloc_register(span)?;
@@ -598,16 +626,22 @@ impl Compiler<'_, '_, '_> {
             return Ok(ExprResult { register: dest });
         }
 
+        // Save tail position - only last expression inherits it
+        let is_tail = self.in_tail_position;
+
+        // Compile all but last expression NOT in tail position
         for expr in body.get(..body.len().saturating_sub(1)).unwrap_or(&[]) {
             let temp_checkpoint = self.next_register;
-            let _temp_result = self.compile_expr(expr)?;
+            let _temp_result =
+                self.with_tail_position(false, |compiler| compiler.compile_expr(expr))?;
             self.free_registers_to(temp_checkpoint);
         }
 
+        // Compile last expression (inherits tail position)
         let last = body
             .last()
             .ok_or_else(|| Error::new(ErrorKind::EmptyCall, self.location(span)))?;
-        self.compile_expr(last)
+        self.with_tail_position(is_tail, |compiler| compiler.compile_expr(last))
     }
 
     /// Compiles a `quote` special form.

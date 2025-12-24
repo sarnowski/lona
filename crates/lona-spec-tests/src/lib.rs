@@ -61,6 +61,8 @@ mod operators;
 mod reader_macros;
 #[cfg(test)]
 mod special_forms;
+#[cfg(test)]
+mod tco;
 
 // Re-export test infrastructure for use in test modules
 #[cfg(test)]

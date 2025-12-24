@@ -100,6 +100,9 @@ impl Diagnostic for Error {
                     "closure captured variable out of bounds (index {index}, closure has {available} captured values)"
                 )
             }
+            Kind::NotImplemented { feature } => {
+                format!("feature not yet implemented: {feature}")
+            }
             // Non-exhaustive pattern: future variants
             _ => String::from("runtime error"),
         }

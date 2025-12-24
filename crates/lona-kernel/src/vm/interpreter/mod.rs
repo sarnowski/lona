@@ -33,11 +33,77 @@ pub(super) const MAX_CALL_DEPTH: usize = 256;
 const DEFAULT_REGISTER_COUNT: usize = 256;
 
 /// Result of dispatching a single opcode.
-enum DispatchResult {
+///
+/// Used internally by the interpreter to control execution flow.
+pub(super) enum DispatchResult {
     /// Continue to the next instruction.
     Continue,
     /// Return from the current function with a value.
     Return(Value),
+    /// Perform a tail call (replace current frame instead of pushing new one).
+    ///
+    /// When a function call is in tail position, returning this variant
+    /// signals to the trampoline to replace the current frame and continue
+    /// execution without growing the Rust stack.
+    TailCall(TailCallData),
+}
+
+/// Data needed to perform a tail call without growing the stack.
+///
+/// When a function call is in tail position, instead of recursively calling
+/// `run()`, we return this data to the trampoline loop which replaces the
+/// current frame and continues execution.
+pub(super) struct TailCallData {
+    /// The function to call.
+    function: Function,
+    /// Arguments to pass to the function.
+    arguments: Vec<Value>,
+    /// Source ID for error reporting.
+    source: source::Id,
+}
+
+impl TailCallData {
+    /// Creates new tail call data.
+    #[inline]
+    pub(super) const fn new(function: Function, arguments: Vec<Value>, source: source::Id) -> Self {
+        Self {
+            function,
+            arguments,
+            source,
+        }
+    }
+
+    /// Returns the source ID.
+    #[inline]
+    pub(super) const fn source(&self) -> source::Id {
+        self.source
+    }
+}
+
+/// Result of setting up a tail call frame.
+///
+/// Contains all data needed to create a new frame for a tail call.
+pub(super) struct TailCallSetup {
+    /// The chunk to execute.
+    chunk: alloc::sync::Arc<Chunk>,
+    /// Source ID for error reporting.
+    source: source::Id,
+    /// Captured upvalues for the function.
+    upvalues: alloc::sync::Arc<[Value]>,
+}
+
+impl TailCallSetup {
+    /// Returns the chunk Arc, consuming self.
+    #[inline]
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        alloc::sync::Arc<Chunk>,
+        source::Id,
+        alloc::sync::Arc<[Value]>,
+    ) {
+        (self.chunk, self.source, self.upvalues)
+    }
 }
 
 /// The Lonala virtual machine.
@@ -144,6 +210,10 @@ impl<'interner> Vm<'interner> {
 
     /// Executes a chunk of bytecode and returns the result.
     ///
+    /// Uses a trampoline loop to handle tail calls without growing the Rust
+    /// stack. When a function returns `TailCall`, the trampoline replaces the
+    /// current frame and continues execution instead of making a recursive call.
+    ///
     /// # Errors
     ///
     /// Returns an error if execution fails due to:
@@ -154,6 +224,8 @@ impl<'interner> Vm<'interner> {
     /// - Stack overflow
     #[inline]
     pub fn execute(&mut self, chunk: &Chunk) -> Result<Value, Error> {
+        use alloc::sync::Arc;
+
         // Reset registers to nil
         for reg in &mut self.registers {
             *reg = Value::Nil;
@@ -162,8 +234,52 @@ impl<'interner> Vm<'interner> {
         // Reset call depth
         self.call_depth = 0;
 
-        let mut frame = Frame::new(chunk, 0, self.current_source);
-        self.run(&mut frame)
+        // Store chunk in Arc for uniform handling with tail calls.
+        // This allows the trampoline to replace the chunk when a tail call occurs.
+        let mut current_chunk: Arc<Chunk> = Arc::new(chunk.clone());
+        let mut current_source = self.current_source;
+        let mut current_upvalues: Arc<[Value]> = Arc::from([]);
+
+        // Trampoline loop - handles tail calls without growing Rust stack
+        loop {
+            // Create frame in inner scope so it's dropped before we update current_chunk
+            let result = {
+                let mut frame = Frame::with_upvalues(
+                    &current_chunk,
+                    0,
+                    current_source,
+                    Arc::clone(&current_upvalues),
+                );
+                self.run(&mut frame)?
+            };
+
+            match result {
+                DispatchResult::Continue => {
+                    // run() should never return Continue - it's only used internally.
+                    // If this happens, it's an internal VM bug.
+                    return Err(Error::new(
+                        ErrorKind::NotImplemented {
+                            feature: "internal error: run() returned Continue",
+                        },
+                        source::Location::new(current_source, lona_core::span::Span::default()),
+                    ));
+                }
+                DispatchResult::Return(value) => return Ok(value),
+                DispatchResult::TailCall(data) => {
+                    // Get location for error reporting before consuming data
+                    let location =
+                        source::Location::new(data.source(), lona_core::span::Span::default());
+
+                    // Set up registers and get new frame parameters
+                    // Base is 0 for top-level execution
+                    let setup = self.setup_tail_call(data, 0, location)?;
+
+                    // Update frame parameters for next iteration
+                    // Note: call_depth is NOT incremented - that's the key to TCO
+                    (current_chunk, current_source, current_upvalues) = setup.into_parts();
+                }
+            }
+        }
     }
 
     /// Executes a chunk of bytecode with a specific source ID.
@@ -189,6 +305,8 @@ impl<'interner> Vm<'interner> {
     /// execution begins. This is used for macro expansion where the macro
     /// transformer receives its arguments as register values.
     ///
+    /// Uses the same trampoline loop as `execute()` for tail call handling.
+    ///
     /// # Errors
     ///
     /// Returns an error if execution fails due to:
@@ -199,6 +317,8 @@ impl<'interner> Vm<'interner> {
     /// - Stack overflow
     #[inline]
     pub fn execute_with_args(&mut self, chunk: &Chunk, args: &[Value]) -> Result<Value, Error> {
+        use alloc::sync::Arc;
+
         // Reset registers to nil
         for reg in &mut self.registers {
             *reg = Value::Nil;
@@ -214,16 +334,167 @@ impl<'interner> Vm<'interner> {
         // Reset call depth
         self.call_depth = 0;
 
-        let mut frame = Frame::new(chunk, 0, self.current_source);
-        self.run(&mut frame)
+        // Store chunk in Arc for uniform handling with tail calls
+        let mut current_chunk: Arc<Chunk> = Arc::new(chunk.clone());
+        let mut current_source = self.current_source;
+        let mut current_upvalues: Arc<[Value]> = Arc::from([]);
+
+        // Trampoline loop - handles tail calls without growing Rust stack
+        loop {
+            // Create frame in inner scope so it's dropped before we update current_chunk
+            let result = {
+                let mut frame = Frame::with_upvalues(
+                    &current_chunk,
+                    0,
+                    current_source,
+                    Arc::clone(&current_upvalues),
+                );
+                self.run(&mut frame)?
+            };
+
+            match result {
+                DispatchResult::Continue => {
+                    // run() should never return Continue - it's only used internally.
+                    // If this happens, it's an internal VM bug.
+                    return Err(Error::new(
+                        ErrorKind::NotImplemented {
+                            feature: "internal error: run() returned Continue",
+                        },
+                        source::Location::new(current_source, lona_core::span::Span::default()),
+                    ));
+                }
+                DispatchResult::Return(value) => return Ok(value),
+                DispatchResult::TailCall(data) => {
+                    // Get location for error reporting before consuming data
+                    let location =
+                        source::Location::new(data.source(), lona_core::span::Span::default());
+
+                    // Set up registers and get new frame parameters
+                    let setup = self.setup_tail_call(data, 0, location)?;
+
+                    // Update frame parameters for next iteration
+                    (current_chunk, current_source, current_upvalues) = setup.into_parts();
+                }
+            }
+        }
+    }
+
+    /// Sets up registers and returns frame parameters for a tail call.
+    ///
+    /// This is the core of tail call optimization. Instead of creating a
+    /// new frame on the stack, we:
+    /// 1. Find the matching arity body for the function being called
+    /// 2. Handle rest parameters (collect extra args into a list)
+    /// 3. Set up argument registers at the given base
+    /// 4. Return the chunk and upvalues for the new frame
+    ///
+    /// The caller (trampoline) uses these to create a replacement frame.
+    ///
+    /// # Parameters
+    /// - `data`: The tail call data containing function and arguments
+    /// - `base`: The base register index for the new frame's arguments
+    /// - `location`: Source location for error reporting
+    ///
+    /// # Returns
+    /// A `TailCallSetup` containing the chunk, source ID, and upvalues for the new frame.
+    pub(super) fn setup_tail_call(
+        &mut self,
+        data: TailCallData,
+        base: usize,
+        location: source::Location,
+    ) -> Result<TailCallSetup, Error> {
+        use lona_core::error_context::ArityExpectation;
+        use lona_core::list::List;
+
+        let argc = data.arguments.len();
+
+        // Find matching arity body
+        let body = data.function.find_body(argc).ok_or_else(|| {
+            // Build arity expectation for error message
+            let bodies = data.function.bodies();
+            let expectation = if let &[ref first] = bodies {
+                if first.has_rest() {
+                    ArityExpectation::AtLeast(first.arity())
+                } else {
+                    ArityExpectation::Exact(first.arity())
+                }
+            } else {
+                bodies
+                    .first()
+                    .map_or(ArityExpectation::Exact(0), |first_body| {
+                        ArityExpectation::Exact(first_body.arity())
+                    })
+            };
+            Error::new(
+                ErrorKind::ArityMismatch {
+                    callable: None,
+                    expected: expectation,
+                    got: u8::try_from(argc).unwrap_or(u8::MAX),
+                },
+                location,
+            )
+        })?;
+
+        let fixed_arity = body.arity();
+        let has_rest = body.has_rest();
+
+        // Build the effective arguments list
+        // Fixed args: arguments[0..fixed_arity]
+        // Rest arg (if has_rest): arguments[fixed_arity..] collected into a list
+        let effective_args: alloc::vec::Vec<Value> = if has_rest {
+            let fixed_arity_usize = usize::from(fixed_arity);
+            let mut effective = alloc::vec::Vec::with_capacity(fixed_arity_usize.saturating_add(1));
+            // Add fixed arguments
+            for arg in data.arguments.iter().take(fixed_arity_usize) {
+                effective.push(arg.clone());
+            }
+            // Collect rest arguments into a list
+            let rest_elements: alloc::vec::Vec<Value> = data
+                .arguments
+                .iter()
+                .skip(fixed_arity_usize)
+                .cloned()
+                .collect();
+            effective.push(Value::List(List::from_vec(rest_elements)));
+            effective
+        } else {
+            data.arguments
+        };
+
+        // Ensure we have enough registers
+        let needed_registers = base.saturating_add(usize::from(body.chunk().max_registers()));
+        if needed_registers > self.registers.len() {
+            self.registers.resize(needed_registers, Value::Nil);
+        }
+
+        // Set up argument registers (R[0], R[1], ... relative to base)
+        for (idx, arg) in effective_args.into_iter().enumerate() {
+            let reg_idx = base.saturating_add(idx);
+            if let Some(reg) = self.registers.get_mut(reg_idx) {
+                *reg = arg;
+            }
+        }
+
+        Ok(TailCallSetup {
+            chunk: alloc::sync::Arc::clone(body.chunk_arc()),
+            source: data.source,
+            upvalues: alloc::sync::Arc::clone(data.function.upvalues_arc()),
+        })
     }
 
     /// Main execution loop.
-    pub(super) fn run(&mut self, frame: &mut Frame<'_>) -> Result<Value, Error> {
+    ///
+    /// Returns a `DispatchResult` indicating how the function terminated:
+    /// - `Return(value)`: Function returned normally with a value
+    /// - `TailCall(data)`: Function wants to tail-call another function
+    ///
+    /// The `Continue` variant is never returned from `run()` - it's only used
+    /// internally to continue the dispatch loop.
+    pub(super) fn run(&mut self, frame: &mut Frame<'_>) -> Result<DispatchResult, Error> {
         loop {
             let Some(instruction) = frame.fetch() else {
                 // End of bytecode - return nil by default
-                return Ok(Value::Nil);
+                return Ok(DispatchResult::Return(Value::Nil));
             };
 
             let Some(opcode) = decode_op(instruction) else {
@@ -238,12 +509,18 @@ impl<'interner> Vm<'interner> {
 
             match self.dispatch(opcode, instruction, frame)? {
                 DispatchResult::Continue => {}
-                DispatchResult::Return(value) => return Ok(value),
+                result @ (DispatchResult::Return(_) | DispatchResult::TailCall(_)) => {
+                    return Ok(result);
+                }
             }
         }
     }
 
     /// Dispatches a single opcode and returns the result.
+    #[expect(
+        clippy::cognitive_complexity,
+        reason = "[approved] Large switch over all opcodes is inherent to the dispatch design"
+    )]
     fn dispatch(
         &mut self,
         opcode: Opcode,
@@ -290,9 +567,7 @@ impl<'interner> Vm<'interner> {
                 self.op_call(instruction, frame)?;
             }
             Opcode::TailCall => {
-                // TailCall will be fully implemented in Phase 4
-                // For now, treat as regular call
-                self.op_call(instruction, frame)?;
+                return self.op_tail_call(instruction, frame);
             }
             Opcode::Return => {
                 let dest = decode_a(instruction);

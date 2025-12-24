@@ -193,6 +193,11 @@ pub struct Compiler<'interner, 'registry, 'expander> {
     /// Upvalues captured by the current function.
     /// Each entry describes a variable captured from an enclosing scope.
     upvalues: Vec<UpvalueInfo>,
+    /// Whether the current expression is in tail position.
+    /// Used for tail call optimization - calls in tail position emit `TailCall`
+    /// instead of `Call` so the VM can replace the current frame rather than
+    /// pushing a new one.
+    in_tail_position: bool,
 }
 
 impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> {
@@ -219,6 +224,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
             macro_expansion_depth: 0,
             capture_context: CaptureContext::new(),
             upvalues: Vec::new(),
+            in_tail_position: false,
         }
     }
 
@@ -246,6 +252,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
             macro_expansion_depth: 0,
             capture_context: CaptureContext::new(),
             upvalues: Vec::new(),
+            in_tail_position: false,
         }
     }
 
@@ -318,6 +325,15 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
     /// The compiled chunk is extracted from the compiler. After calling this
     /// method, the compiler can still be inspected (e.g., for macro definitions)
     /// but should not be used to compile more code.
+    ///
+    /// # Tail Position
+    ///
+    /// Top-level expressions are compiled with `in_tail_position = false`.
+    /// This is intentional: tail call optimization only applies within function
+    /// bodies where recursive calls can replace the current frame. At the top
+    /// level (e.g., REPL), there's no function frame to replace, so TCO doesn't
+    /// apply. The final `Return` instruction returns from the program, not from
+    /// a function that could be tail-called.
     ///
     /// # Errors
     ///
@@ -571,6 +587,41 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
     /// Used to reclaim temporary registers after a subexpression.
     const fn free_registers_to(&mut self, checkpoint: u8) {
         self.next_register = checkpoint;
+    }
+
+    // =========================================================================
+    // Tail Position Tracking
+    // =========================================================================
+
+    /// Executes a closure with a specific tail position setting, then restores
+    /// the previous value.
+    ///
+    /// This is used to propagate tail position through the AST during compilation.
+    /// Expressions in tail position can have their calls optimized to tail calls.
+    ///
+    /// # Example
+    ///
+    /// ```text
+    /// // Compile the test expression NOT in tail position
+    /// self.with_tail_position(false, |compiler| {
+    ///     compiler.compile_expr(test_expr)
+    /// })?;
+    ///
+    /// // Compile the then branch in tail position (if we are)
+    /// self.with_tail_position(self.in_tail_position, |compiler| {
+    ///     compiler.compile_expr(then_expr)
+    /// })?;
+    /// ```
+    #[inline]
+    fn with_tail_position<F, R>(&mut self, tail: bool, closure: F) -> R
+    where
+        F: FnOnce(&mut Self) -> R,
+    {
+        let prev = self.in_tail_position;
+        self.in_tail_position = tail;
+        let result = closure(self);
+        self.in_tail_position = prev;
+        result
     }
 }
 

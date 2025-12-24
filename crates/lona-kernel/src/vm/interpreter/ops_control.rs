@@ -12,7 +12,7 @@ use lona_core::opcode::{decode_a, decode_b, decode_c, decode_sbx};
 use lona_core::symbol;
 use lona_core::value::{Function, Value};
 
-use super::{MAX_CALL_DEPTH, Vm};
+use super::{DispatchResult, MAX_CALL_DEPTH, TailCallData, Vm};
 use crate::vm::error::{Error, Kind as ErrorKind};
 use crate::vm::frame::Frame;
 use crate::vm::natives::NativeContext;
@@ -104,11 +104,81 @@ impl Vm<'_> {
         }
     }
 
+    /// `TailCall`: Perform tail call optimization.
+    ///
+    /// For user-defined functions, returns `TailCallData` for the trampoline
+    /// to handle instead of making a recursive call. For native functions,
+    /// executes immediately since they cannot be tail-call optimized.
+    ///
+    /// This is the key to TCO: instead of recursively calling `run()`, we
+    /// return a continuation that the outer trampoline loop processes by
+    /// replacing the current frame.
+    pub(super) fn op_tail_call(
+        &mut self,
+        instruction: u32,
+        frame: &Frame<'_>,
+    ) -> Result<DispatchResult, Error> {
+        let base = decode_a(instruction);
+        let argc = decode_b(instruction);
+
+        // Get function value from R[base]
+        let func_value = self.get_register(base, frame)?;
+
+        match func_value {
+            Value::Function(ref func) => {
+                // User-defined function - return continuation for trampoline
+                let arguments = self.collect_args(base, argc, frame)?;
+                Ok(DispatchResult::TailCall(TailCallData::new(
+                    func.clone(),
+                    arguments,
+                    frame.source(),
+                )))
+            }
+            Value::Symbol(ref symbol) => {
+                // Native function - cannot tail-call, execute immediately
+                self.call_symbol_function(symbol.id(), base, argc, frame)?;
+                // Return the result (now in base register)
+                let result = self.get_register(base, frame)?;
+                Ok(DispatchResult::Return(result))
+            }
+            Value::NativeFunction(symbol) => {
+                // First-class native function - cannot tail-call, execute immediately
+                self.call_symbol_function(symbol, base, argc, frame)?;
+                let result = self.get_register(base, frame)?;
+                Ok(DispatchResult::Return(result))
+            }
+            // All other types are not callable
+            Value::Nil
+            | Value::Bool(_)
+            | Value::Integer(_)
+            | Value::Float(_)
+            | Value::Ratio(_)
+            | Value::String(_)
+            | Value::List(_)
+            | Value::Vector(_)
+            | Value::Map(_)
+            | _ => Err(Error::new(
+                ErrorKind::NotCallable {
+                    got: func_value.kind(),
+                },
+                frame.current_location(),
+            )),
+        }
+    }
+
     /// Calls a user-defined function.
     ///
     /// Handles multi-arity dispatch: finds the matching arity body based on
     /// argument count. For rest parameters, extra arguments beyond `arity`
     /// are collected into a list in the rest parameter position.
+    ///
+    /// This function has its own trampoline loop for tail call optimization.
+    /// When a called function returns `TailCall`, the trampoline replaces
+    /// the local frame and continues without growing the Rust stack.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "[approved] Handles multi-arity, rest params, and TCO trampoline - already well-structured"
+    )]
     fn call_user_function(
         &mut self,
         func: &Function,
@@ -116,6 +186,9 @@ impl Vm<'_> {
         argc: u8,
         frame: &Frame<'_>,
     ) -> Result<(), Error> {
+        use lona_core::source::Location as SourceLocation;
+        use lona_core::span::Span;
+
         // Check for stack overflow
         if self.call_depth >= MAX_CALL_DEPTH {
             return Err(Error::new(
@@ -157,7 +230,6 @@ impl Vm<'_> {
 
         let fixed_arity = body.arity();
         let has_rest = body.has_rest();
-        let fn_chunk = body.chunk();
 
         // Collect arguments from R[base+1] .. R[base+argc]
         let raw_arguments = self.collect_args(base, argc, frame)?;
@@ -191,8 +263,13 @@ impl Vm<'_> {
             .saturating_add(usize::from(base))
             .saturating_add(1);
 
+        // Store chunk in Arc for uniform handling with tail calls
+        let mut current_chunk = Arc::clone(body.chunk_arc());
+        let mut current_source = frame.source();
+        let mut current_upvalues = Arc::clone(func.upvalues_arc());
+
         // Ensure we have enough registers
-        let needed_registers = new_base.saturating_add(usize::from(fn_chunk.max_registers()));
+        let needed_registers = new_base.saturating_add(usize::from(current_chunk.max_registers()));
         if needed_registers > self.registers.len() {
             self.registers.resize(needed_registers, Value::Nil);
         }
@@ -205,21 +282,52 @@ impl Vm<'_> {
             }
         }
 
-        // Create new frame and execute with the closure's upvalues
-        // Use the same source ID as the current frame for now
-        // (TODO: functions could have their own source ID in the future)
-        let mut fn_frame = Frame::with_upvalues(
-            fn_chunk,
-            new_base,
-            frame.source(),
-            Arc::clone(func.upvalues_arc()),
-        );
+        // Increment call depth once for this call (tail calls don't increment further)
         self.call_depth = self.call_depth.saturating_add(1);
-        let result = self.run(&mut fn_frame);
+
+        // Trampoline loop - handles tail calls without growing Rust stack
+        let result_value = loop {
+            // Create frame in inner scope so it's dropped before we update current_chunk
+            let result = {
+                let mut fn_frame = Frame::with_upvalues(
+                    &current_chunk,
+                    new_base,
+                    current_source,
+                    Arc::clone(&current_upvalues),
+                );
+                self.run(&mut fn_frame)?
+            };
+
+            match result {
+                DispatchResult::Return(value) => break value,
+                DispatchResult::Continue => {
+                    // run() should never return Continue - internal VM bug
+                    self.call_depth = self.call_depth.saturating_sub(1);
+                    return Err(Error::new(
+                        ErrorKind::NotImplemented {
+                            feature: "internal error: run() returned Continue",
+                        },
+                        frame.current_location(),
+                    ));
+                }
+                DispatchResult::TailCall(data) => {
+                    // Handle tail call by replacing current frame parameters
+                    // Note: call_depth is NOT incremented - that's the key to TCO
+                    let location = SourceLocation::new(data.source(), Span::default());
+
+                    // Use the VM's setup_tail_call to handle arity matching and rest params
+                    let setup = self.setup_tail_call(data, new_base, location)?;
+
+                    // Update frame parameters for next iteration
+                    (current_chunk, current_source, current_upvalues) = setup.into_parts();
+                    // Loop continues with new frame parameters
+                }
+            }
+        };
+
         self.call_depth = self.call_depth.saturating_sub(1);
 
         // Store result in R[base]
-        let result_value = result?;
         self.set_register(base, result_value, frame)?;
         Ok(())
     }

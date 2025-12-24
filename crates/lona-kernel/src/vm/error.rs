@@ -115,6 +115,14 @@ pub enum Kind {
         /// How many upvalues the closure actually has.
         available: usize,
     },
+
+    /// A feature is not yet implemented.
+    ///
+    /// Used for placeholder code that will be completed in later phases.
+    NotImplemented {
+        /// Description of the unimplemented feature.
+        feature: &'static str,
+    },
 }
 
 impl Kind {
@@ -137,6 +145,7 @@ impl Kind {
             Self::Native { .. } => "NativeError",
             Self::ArityMismatch { .. } => "ArityMismatch",
             Self::InvalidUpvalue { .. } => "InvalidUpvalue",
+            Self::NotImplemented { .. } => "NotImplemented",
         }
     }
 }

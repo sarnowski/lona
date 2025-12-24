@@ -136,9 +136,9 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.3 | Sequential Destructuring | done |
 | 1.2.4 | Associative Destructuring | done |
 | 1.2.5 | Nested Destructuring | done |
-| 1.2.6 | [Proper Tail Calls - Compiler](../development/tco.md) | open |
-| 1.2.7 | [Proper Tail Calls - VM Trampoline](../development/tco.md) | open |
-| 1.2.8 | [Proper Tail Calls - Integration Tests](../development/tco.md) | open |
+| 1.2.6 | [Proper Tail Calls - Compiler](../development/tco.md) | done |
+| 1.2.7 | [Proper Tail Calls - VM Trampoline](../development/tco.md) | done |
+| 1.2.8 | [Proper Tail Calls - Integration Tests](../development/tco.md) | done |
 | 1.2.9 | Pattern Matching - Core Infrastructure | open |
 | 1.2.10 | Case Special Form | open |
 | 1.2.11 | Gensym Implementation | open |

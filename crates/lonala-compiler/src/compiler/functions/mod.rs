@@ -372,6 +372,7 @@ impl Compiler<'_, '_, '_> {
         Self::setup_params_on_compiler(&mut fn_compiler, &parsed_params, arity, location)?;
 
         // Compile body
+        // The last expression in a function body is in tail position
         let result_reg = if body.is_empty() {
             let reg = fn_compiler.alloc_register(span)?;
             fn_compiler
@@ -379,15 +380,19 @@ impl Compiler<'_, '_, '_> {
                 .emit(encode_abc(Opcode::LoadNil, reg, 0, 0), span);
             reg
         } else {
+            // Compile all but last expression NOT in tail position
             for expr in body.get(..body.len().saturating_sub(1)).unwrap_or(&[]) {
                 let checkpoint = fn_compiler.next_register;
-                let _result = fn_compiler.compile_expr(expr)?;
+                let _result = fn_compiler
+                    .with_tail_position(false, |compiler| compiler.compile_expr(expr))?;
                 fn_compiler.free_registers_to(checkpoint);
             }
+            // Compile last expression IN tail position
             let last = body
                 .last()
                 .ok_or_else(|| Error::new(ErrorKind::EmptyCall, location))?;
-            let result = fn_compiler.compile_expr(last)?;
+            let result =
+                fn_compiler.with_tail_position(true, |compiler| compiler.compile_expr(last))?;
             result.register
         };
 

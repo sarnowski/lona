@@ -12,6 +12,7 @@
 //! - `quote_form_tests` - quoting forms (quote, syntax-quote)
 //! - `macro_tests` - defmacro and macro expansion
 //! - `destructure` - destructuring pattern parsing and bytecode compilation
+//! - `tail_call_tests` - tail call optimization (TailCall opcode emission)
 
 extern crate alloc;
 
@@ -23,6 +24,7 @@ mod macro_tests;
 mod operator_tests;
 mod quote_form_tests;
 mod special_form_tests;
+mod tail_call_tests;
 
 use lona_core::chunk::Chunk;
 use lona_core::source;
