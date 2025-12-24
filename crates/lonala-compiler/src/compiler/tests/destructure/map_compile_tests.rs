@@ -26,7 +26,7 @@ fn compile_map_keys_emits_get_global_for_get() {
         Ast::Keyword("keys".into()),
         Ast::Vector(vec![spanned(Ast::Symbol("a".into()))]),
     )])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -75,7 +75,7 @@ fn compile_map_keys_emits_loadk_for_keyword() {
         Ast::Keyword("keys".into()),
         Ast::Vector(vec![spanned(Ast::Symbol("a".into()))]),
     )])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -124,7 +124,7 @@ fn compile_map_keys_emits_call_instruction() {
         Ast::Keyword("keys".into()),
         Ast::Vector(vec![spanned(Ast::Symbol("a".into()))]),
     )])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -160,7 +160,7 @@ fn compile_map_pattern_defines_local_bindings() {
             spanned(Ast::Symbol("b".into())),
         ]),
     )])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -193,7 +193,7 @@ fn compile_map_pattern_with_as_defines_as_local() {
         ),
         (Ast::Keyword("as".into()), Ast::Symbol("m".into())),
     ])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -232,7 +232,7 @@ fn compile_map_pattern_with_or_emits_conditional() {
             )])),
         ),
     ])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -273,7 +273,7 @@ fn compile_map_strs_emits_string_constant() {
         Ast::Keyword("strs".into()),
         Ast::Vector(vec![spanned(Ast::Symbol("name".into()))]),
     )])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -318,7 +318,7 @@ fn compile_map_syms_emits_symbol_constant() {
         Ast::Keyword("syms".into()),
         Ast::Vector(vec![spanned(Ast::Symbol("x".into()))]),
     )])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -367,7 +367,7 @@ fn compile_map_explicit_binding() {
         Ast::Symbol("a".into()),
         Ast::Keyword("key-a".into()),
     )])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -408,7 +408,7 @@ fn compile_map_preserves_binding_registers() {
             spanned(Ast::Symbol("c".into())),
         ]),
     )])));
-    let pattern = parse_map_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_map_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler

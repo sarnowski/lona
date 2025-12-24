@@ -17,6 +17,12 @@ use lonala_parser::{Ast, Spanned};
 use super::{Binding, MapPattern, SeqPattern};
 use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 
+/// Maximum nesting depth for destructuring patterns.
+///
+/// This is a generous limit (1024) that allows legitimate complex patterns
+/// while preventing stack overflow from runaway recursion.
+pub const MAX_PATTERN_DEPTH: usize = 1024;
+
 // =============================================================================
 // Sequential Pattern Parsing
 // =============================================================================
@@ -28,6 +34,7 @@ use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 /// * `interner` - Symbol interner for interning symbol names
 /// * `ast` - The vector AST to parse as a pattern
 /// * `source_id` - Source ID for error reporting
+/// * `depth` - Current nesting depth (starts at 0 from external callers)
 ///
 /// # Returns
 ///
@@ -36,6 +43,7 @@ use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 /// # Errors
 ///
 /// Returns an error if:
+/// - Pattern nesting exceeds `MAX_PATTERN_DEPTH`
 /// - Input is not a vector
 /// - Duplicate `&` in pattern
 /// - `:as` not followed by a symbol
@@ -56,7 +64,16 @@ pub fn parse_sequential_pattern(
     interner: &mut symbol::Interner,
     ast: &Spanned<Ast>,
     source_id: source::Id,
+    depth: usize,
 ) -> Result<SeqPattern, Error> {
+    if depth > MAX_PATTERN_DEPTH {
+        return Err(Error::new(
+            ErrorKind::RecursionDepthExceeded {
+                max_depth: MAX_PATTERN_DEPTH,
+            },
+            SourceLocation::new(source_id, ast.span),
+        ));
+    }
     let Ast::Vector(ref elements) = ast.node else {
         return Err(Error::new(
             ErrorKind::InvalidDestructuringPattern {
@@ -74,6 +91,7 @@ pub fn parse_sequential_pattern(
         interner,
         elements,
         source_id,
+        depth,
     };
 
     while idx < elements.len() {
@@ -134,7 +152,7 @@ pub fn parse_sequential_pattern(
                         SourceLocation::new(source_id, elem.span),
                     ));
                 }
-                let binding = parse_binding(ctx.interner, elem, source_id)?;
+                let binding = parse_binding(ctx.interner, elem, source_id, ctx.depth)?;
                 pattern.items.push(binding);
             }
         }
@@ -150,6 +168,7 @@ struct ParseContext<'elements> {
     interner: &'elements mut symbol::Interner,
     elements: &'elements [Spanned<Ast>],
     source_id: source::Id,
+    depth: usize,
 }
 
 /// Parses a rest binding after `&`.
@@ -169,7 +188,7 @@ fn parse_rest_binding(
             SourceLocation::new(ctx.source_id, ampersand_elem.span),
         ));
     };
-    parse_binding(ctx.interner, rest_elem, ctx.source_id)
+    parse_binding(ctx.interner, rest_elem, ctx.source_id, ctx.depth)
 }
 
 /// Parses an `:as` binding.
@@ -209,10 +228,18 @@ fn parse_as_binding(
 /// - `_` (ignores the value)
 /// - A nested vector (recursive sequential destructuring)
 /// - A nested map (recursive associative destructuring)
+///
+/// # Arguments
+///
+/// * `interner` - Symbol interner for interning symbol names
+/// * `ast` - The AST node to parse as a binding
+/// * `source_id` - Source ID for error reporting
+/// * `depth` - Current nesting depth for recursion limit checking
 fn parse_binding(
     interner: &mut symbol::Interner,
     ast: &Spanned<Ast>,
     source_id: source::Id,
+    depth: usize,
 ) -> Result<Binding, Error> {
     match ast.node {
         Ast::Symbol(ref name) if name == "_" => Ok(Binding::Ignore),
@@ -223,12 +250,13 @@ fn parse_binding(
         }
 
         Ast::Vector(_) => {
-            let nested = parse_sequential_pattern(interner, ast, source_id)?;
+            let nested =
+                parse_sequential_pattern(interner, ast, source_id, depth.saturating_add(1))?;
             Ok(Binding::Seq(Box::new(nested)))
         }
 
         Ast::Map(_) => {
-            let nested = parse_map_pattern(interner, ast, source_id)?;
+            let nested = parse_map_pattern(interner, ast, source_id, depth.saturating_add(1))?;
             Ok(Binding::Map(Box::new(nested)))
         }
 
@@ -262,6 +290,7 @@ fn parse_binding(
 /// * `interner` - Symbol interner for interning symbol names
 /// * `ast` - The map AST to parse as a pattern
 /// * `source_id` - Source ID for error reporting
+/// * `depth` - Current nesting depth (starts at 0 from external callers)
 ///
 /// # Returns
 ///
@@ -269,8 +298,9 @@ fn parse_binding(
 ///
 /// # Errors
 ///
-/// Returns an error if the pattern is invalid. See `MapPatternParser::parse_entry`
-/// for specific error conditions.
+/// Returns an error if:
+/// - Pattern nesting exceeds `MAX_PATTERN_DEPTH`
+/// - The pattern is invalid. See `MapPatternParser::parse_entry` for specific conditions
 ///
 /// # Examples
 ///
@@ -288,7 +318,17 @@ pub fn parse_map_pattern(
     interner: &mut symbol::Interner,
     ast: &Spanned<Ast>,
     source_id: source::Id,
+    depth: usize,
 ) -> Result<MapPattern, Error> {
+    if depth > MAX_PATTERN_DEPTH {
+        return Err(Error::new(
+            ErrorKind::RecursionDepthExceeded {
+                max_depth: MAX_PATTERN_DEPTH,
+            },
+            SourceLocation::new(source_id, ast.span),
+        ));
+    }
+
     let Ast::Map(ref elements) = ast.node else {
         return Err(Error::new(
             ErrorKind::InvalidDestructuringPattern {
@@ -308,7 +348,7 @@ pub fn parse_map_pattern(
         ));
     }
 
-    let mut parser = MapPatternParser::new(interner, source_id, ast.span);
+    let mut parser = MapPatternParser::new(interner, source_id, ast.span, depth);
     parser.parse_all_entries(elements)?;
     Ok(parser.into_pattern())
 }
@@ -341,16 +381,23 @@ struct MapPatternParser<'interner> {
     source_id: source::Id,
     pattern: MapPattern,
     seen: SeenKeywords,
+    depth: usize,
 }
 
 impl<'interner> MapPatternParser<'interner> {
     /// Creates a new parser instance.
-    fn new(interner: &'interner mut symbol::Interner, source_id: source::Id, span: Span) -> Self {
+    fn new(
+        interner: &'interner mut symbol::Interner,
+        source_id: source::Id,
+        span: Span,
+        depth: usize,
+    ) -> Self {
         Self {
             interner,
             source_id,
             pattern: MapPattern::new(span),
             seen: SeenKeywords::default(),
+            depth,
         }
     }
 
@@ -475,7 +522,7 @@ impl<'interner> MapPatternParser<'interner> {
         binding_ast: &Spanned<Ast>,
         value_ast: &Spanned<Ast>,
     ) -> Result<(), Error> {
-        let binding = parse_binding(self.interner, binding_ast, self.source_id)?;
+        let binding = parse_binding(self.interner, binding_ast, self.source_id, self.depth)?;
         self.pattern.explicit.push((binding, value_ast.clone()));
         Ok(())
     }
@@ -492,7 +539,7 @@ impl<'interner> MapPatternParser<'interner> {
     const fn invalid_key_error(&self, span: Span) -> Error {
         Error::new(
             ErrorKind::InvalidDestructuringPattern {
-                message: "map pattern key must be a symbol or special keyword (:keys, :strs, :syms, :or, :as)",
+                message: "map pattern key must be a binding target (symbol, vector, or map) or special keyword (:keys, :strs, :syms, :or, :as)",
             },
             SourceLocation::new(self.source_id, span),
         )

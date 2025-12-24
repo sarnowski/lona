@@ -589,7 +589,8 @@ mod interactive {
                 self.io.write_str(&formatted);
             } else {
                 // Fallback if registry is full
-                self.io.write_fmt(format_args!("Error: {}\n", error.kind));
+                self.io
+                    .write_fmt(format_args!("Error: {}\n", error.kind.variant_name()));
             }
         }
 
@@ -618,7 +619,8 @@ mod interactive {
                 self.io.write_str(&formatted);
             } else {
                 // Fallback if registry is full
-                self.io.write_fmt(format_args!("Error: {}\n", error.kind));
+                self.io
+                    .write_fmt(format_args!("Error: {}\n", error.kind.variant_name()));
             }
         }
     }

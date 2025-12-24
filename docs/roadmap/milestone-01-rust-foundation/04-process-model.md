@@ -2,6 +2,21 @@
 
 Implement BEAM-style lightweight processes.
 
+### Design Goal: Process-Level Crash Semantics
+
+A critical goal of the process model is **process-level crash isolation**. When a process exhausts its heap (OOM), only that process crashes—not the entire VM or domain. This follows BEAM semantics:
+
+1. **Per-process heaps**: Each process allocates from its own heap
+2. **OOM = process death**: When allocation fails, the allocator marks the process as dying
+3. **Supervisor restart**: The supervisor detects the crash and restarts the process
+4. **No Result propagation**: Code does NOT need to return `Result<T, AllocError>` everywhere; the allocator handles OOM by terminating the process
+
+This design means:
+- The shared compiler/VM code uses normal allocation (`Box::new`, `Vec::push`, etc.)
+- The per-process allocator intercepts OOM and terminates the current process
+- The root process (trusted code) crashing still takes down the system—this is acceptable since it only runs trusted code
+- Untrusted code in child processes/domains can OOM safely without affecting others
+
 ---
 
 ### Task 1.4.1: Process Data Structure
@@ -35,7 +50,7 @@ Implement BEAM-style lightweight processes.
 
 ### Task 1.4.2: Per-Process Heap
 
-**Description**: Implement isolated heap per process.
+**Description**: Implement isolated heap per process with OOM-triggered process termination.
 
 **Files to modify**:
 - `crates/lona-kernel/src/memory/heap.rs` (new)
@@ -46,12 +61,17 @@ Implement BEAM-style lightweight processes.
 - Heap grows on demand (within domain limits)
 - Values allocated in owning process's heap
 - Cross-process references require copying
+- **OOM handling**: When allocation fails, mark process as `dying` with reason `OutOfMemory`
+- **No panic on OOM**: Allocator must not panic; instead it signals process death
+- **Safe points**: VM checks process status at reduction boundaries and handles death gracefully
 
 **Tests**:
 - Heap creation per process
 - Allocation in process heap
 - Heap isolation verification
 - Heap growth
+- OOM triggers process death (not panic)
+- Process death reason is `OutOfMemory`
 
 **Estimated effort**: 1-2 context windows
 

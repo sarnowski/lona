@@ -2,6 +2,15 @@
 
 Implement per-process incremental garbage collection.
 
+### Relationship to Process Model
+
+GC builds on the per-process heap from Phase 1.4. Key interactions:
+
+1. **Per-process isolation**: Each process's GC runs independently; one process's GC pause doesn't affect others
+2. **OOM recovery**: GC can be triggered when allocation pressure is detected, potentially freeing memory before OOM
+3. **Process death cleanup**: When a process dies (including from OOM), its entire heap is bulk-freed without GC traversal
+4. **No cross-process roots**: Process isolation means GC only traces within a single heap
+
 ---
 
 ### Task 1.5.1: Root Discovery
@@ -122,7 +131,7 @@ Implement per-process incremental garbage collection.
 
 ### Task 1.5.6: GC Scheduling
 
-**Description**: Determine when to run GC.
+**Description**: Determine when to run GC, including OOM recovery attempts.
 
 **Files to modify**:
 - `crates/lona-kernel/src/gc/scheduler.rs` (new)
@@ -132,12 +141,14 @@ Implement per-process incremental garbage collection.
 - Trigger on allocation pressure
 - Incremental work between process yields
 - Per-process isolation (one process's GC doesn't affect others)
+- **OOM recovery**: When allocation fails, trigger emergency GC and retry before killing process
 - `gc` and `gc-stats` primitives
 
 **Tests**:
 - GC triggered on pressure
 - Incremental progress
 - Process isolation
+- OOM triggers GC, retry succeeds if memory freed
 - Statistics accuracy
 
 **Estimated effort**: 1-2 context windows

@@ -348,7 +348,8 @@ fn compile_error_display() {
         SourceLocation::new(TEST_SOURCE_ID, Span::new(0_usize, 2_usize)),
     ));
     let msg = alloc::format!("{}", err);
-    assert!(msg.contains("empty list"));
+    // CompileError uses variant_name() for display; rich formatting is in lonala-human
+    assert!(msg.contains("EmptyCall"));
 }
 
 #[test]

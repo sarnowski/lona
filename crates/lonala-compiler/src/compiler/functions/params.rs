@@ -297,12 +297,17 @@ impl Compiler<'_, '_, '_> {
                     child.interner,
                     pattern_ast,
                     child.source_id,
+                    0, // Initial depth
                 )?;
                 child.compile_sequential_binding(&pattern, arg_reg, pattern_ast.span)?;
             }
             Ast::Map(_) => {
-                let pattern =
-                    destructure::parse_map_pattern(child.interner, pattern_ast, child.source_id)?;
+                let pattern = destructure::parse_map_pattern(
+                    child.interner,
+                    pattern_ast,
+                    child.source_id,
+                    0, // Initial depth
+                )?;
                 child.compile_map_binding(&pattern, arg_reg, pattern_ast.span)?;
             }
             // These cases should not happen since we only store vector/map patterns

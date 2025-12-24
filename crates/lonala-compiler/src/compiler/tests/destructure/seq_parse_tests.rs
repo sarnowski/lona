@@ -9,7 +9,7 @@ use lona_core::symbol;
 use lonala_parser::Ast;
 
 use super::{source_id, spanned, spanned_at};
-use crate::compiler::destructure::{Binding, parse_sequential_pattern};
+use crate::compiler::destructure::{Binding, MAX_PATTERN_DEPTH, parse_sequential_pattern};
 use crate::error::Kind as ErrorKind;
 
 // ==================== Basic Pattern Parsing ====================
@@ -24,7 +24,7 @@ fn parse_simple_symbols() {
         spanned(Ast::Symbol("c".into())),
     ]));
 
-    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.items.len(), 3);
     assert!(pattern.rest.is_none());
@@ -46,7 +46,7 @@ fn parse_rest_binding() {
         spanned(Ast::Symbol("rest".into())),
     ]));
 
-    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.items.len(), 1);
     let Some(ref rest) = pattern.rest else {
@@ -65,7 +65,7 @@ fn parse_ignore_binding() {
         spanned(Ast::Symbol("c".into())),
     ]));
 
-    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.items.len(), 3);
     let Some(item0) = pattern.items.get(0) else {
@@ -92,7 +92,7 @@ fn parse_as_binding() {
         spanned(Ast::Symbol("all".into())),
     ]));
 
-    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.items.len(), 1);
     assert!(pattern.as_binding.is_some());
@@ -110,8 +110,8 @@ fn parse_nested_pattern() {
         spanned(Ast::Symbol("c".into())),
     ]));
 
-    let pattern =
-        parse_sequential_pattern(&mut interner, &ast, source_id()).expect("pattern should parse");
+    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id(), 0)
+        .expect("pattern should parse");
 
     assert_eq!(pattern.items.len(), 2);
     let Some(item0) = pattern.items.get(0) else {
@@ -142,7 +142,7 @@ fn parse_rest_with_as() {
         spanned(Ast::Symbol("all".into())),
     ]));
 
-    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.items.len(), 1);
     assert!(pattern.rest.is_some());
@@ -155,7 +155,7 @@ fn parse_empty_pattern() {
     let mut interner = symbol::Interner::new();
     let ast = spanned(Ast::Vector(vec![]));
 
-    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id(), 0).unwrap();
 
     assert!(pattern.items.is_empty());
     assert!(pattern.rest.is_none());
@@ -175,7 +175,7 @@ fn error_duplicate_ampersand() {
         spanned(Ast::Symbol("b".into())),
     ]));
 
-    let result = parse_sequential_pattern(&mut interner, &ast, source_id());
+    let result = parse_sequential_pattern(&mut interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -199,7 +199,7 @@ fn error_duplicate_as() {
         spanned(Ast::Symbol("y".into())),
     ]));
 
-    let result = parse_sequential_pattern(&mut interner, &ast, source_id());
+    let result = parse_sequential_pattern(&mut interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -217,7 +217,7 @@ fn error_as_without_symbol() {
     let mut interner = symbol::Interner::new();
     let ast = spanned(Ast::Vector(vec![spanned(Ast::Keyword("as".into()))]));
 
-    let result = parse_sequential_pattern(&mut interner, &ast, source_id());
+    let result = parse_sequential_pattern(&mut interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -238,7 +238,7 @@ fn error_as_followed_by_non_symbol() {
         spanned(Ast::Integer(42)),
     ]));
 
-    let result = parse_sequential_pattern(&mut interner, &ast, source_id());
+    let result = parse_sequential_pattern(&mut interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -259,7 +259,7 @@ fn error_ampersand_without_binding() {
         spanned(Ast::Symbol("&".into())),
     ]));
 
-    let result = parse_sequential_pattern(&mut interner, &ast, source_id());
+    let result = parse_sequential_pattern(&mut interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -281,7 +281,7 @@ fn error_not_vector() {
         spanned(Ast::Symbol("c".into())),
     ]));
 
-    let result = parse_sequential_pattern(&mut interner, &ast, source_id());
+    let result = parse_sequential_pattern(&mut interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -303,7 +303,7 @@ fn error_invalid_binding() {
         spanned(Ast::Symbol("c".into())),
     ]));
 
-    let result = parse_sequential_pattern(&mut interner, &ast, source_id());
+    let result = parse_sequential_pattern(&mut interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -326,8 +326,8 @@ fn symbols_are_interned() {
         spanned(Ast::Symbol("foo".into())), // Same name
     ]));
 
-    let pattern =
-        parse_sequential_pattern(&mut interner, &ast, source_id()).expect("pattern should parse");
+    let pattern = parse_sequential_pattern(&mut interner, &ast, source_id(), 0)
+        .expect("pattern should parse");
 
     // Both should be Symbol bindings with the same ID
     let Some(item0) = pattern.items.get(0) else {
@@ -340,4 +340,60 @@ fn symbols_are_interned() {
         panic!("expected both items to be Symbol bindings");
     };
     assert_eq!(id1, id2, "same symbol name should have same ID");
+}
+
+// ==================== Recursion Depth Limit ====================
+
+/// Helper to generate a deeply nested vector pattern.
+///
+/// Creates a pattern like `[[[[...x...]...]...]` with `depth` levels of nesting.
+fn generate_nested_vectors(depth: usize) -> lonala_parser::Spanned<Ast> {
+    let mut result = spanned(Ast::Symbol("x".into()));
+
+    for _ in 0..depth {
+        result = spanned(Ast::Vector(vec![result]));
+    }
+
+    result
+}
+
+#[test]
+fn deep_nesting_within_limit_succeeds() {
+    // 500 levels is well within the 1024 limit
+    let mut interner = symbol::Interner::new();
+    let deep = generate_nested_vectors(500_usize);
+
+    let result = parse_sequential_pattern(&mut interner, &deep, source_id(), 0);
+    assert!(
+        result.is_ok(),
+        "500 levels of nesting should succeed (limit is {MAX_PATTERN_DEPTH})"
+    );
+}
+
+#[test]
+fn recursion_limit_exceeded_returns_error() {
+    // Test that exceeding the limit returns an error by starting at a depth
+    // close to the limit. We use depth=MAX_PATTERN_DEPTH to ensure the check
+    // triggers on the very first nested call.
+    let mut interner = symbol::Interner::new();
+    // Create just 2 levels of nesting, but start at depth MAX_PATTERN_DEPTH
+    let ast = spanned(Ast::Vector(vec![spanned(Ast::Vector(vec![spanned(
+        Ast::Symbol("x".into()),
+    )]))]));
+
+    // Start at MAX_PATTERN_DEPTH - the inner vector will exceed the limit
+    let result = parse_sequential_pattern(&mut interner, &ast, source_id(), MAX_PATTERN_DEPTH);
+    assert!(result.is_err());
+
+    let err = result.unwrap_err();
+    assert!(
+        matches!(
+            err.kind,
+            ErrorKind::RecursionDepthExceeded {
+                max_depth: MAX_PATTERN_DEPTH
+            }
+        ),
+        "expected RecursionDepthExceeded error, got {:?}",
+        err.kind
+    );
 }

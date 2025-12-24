@@ -58,6 +58,9 @@ impl Diagnostic for Error {
             Kind::InvalidDestructuringPattern { message } => {
                 format!("invalid destructuring pattern: {message}")
             }
+            Kind::RecursionDepthExceeded { max_depth } => {
+                format!("pattern nesting exceeded maximum depth ({max_depth})")
+            }
             Kind::InternalError { message } => {
                 format!("internal compiler error: {message}")
             }
@@ -142,7 +145,18 @@ impl Diagnostic for Error {
             }
             Kind::InvalidDestructuringPattern { .. } => {
                 notes.push(Note::text_static(
-                    "valid patterns: [a b c], [a & rest], [_ x], [a :as all], [[nested] x]",
+                    "valid sequential patterns: [a b c], [a & rest], [_ x], [a :as all], [[nested] x]",
+                ));
+                notes.push(Note::text_static(
+                    "valid map patterns: {:keys [a b]}, {:strs [name]}, {a :key-a}, {:as m}",
+                ));
+            }
+            Kind::RecursionDepthExceeded { .. } => {
+                notes.push(Note::text_static(
+                    "this typically indicates an extremely deeply nested pattern",
+                ));
+                notes.push(Note::help_static(
+                    "consider simplifying the pattern structure",
                 ));
             }
             Kind::InternalError { .. } => {

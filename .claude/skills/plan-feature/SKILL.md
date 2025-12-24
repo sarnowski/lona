@@ -71,7 +71,7 @@ Launch Gemini and Codex in parallel to create independent plans. Send a **single
 
 ```bash
 timeout 900 gemini -m gemini-3-pro-preview -s "PROMPT"
-timeout 900 codex exec -m gpt-5.2 -c model_reasoning_effort=high -c hide_agent_reasoning=true -s read-only "PROMPT" 2>/dev/null
+timeout 900 codex exec -m gpt-5.2-codex -c model_reasoning_effort=high -c hide_agent_reasoning=true -s read-only "PROMPT" 2>/dev/null
 ```
 
 Both receive the **identical prompt** (substitute actual values):

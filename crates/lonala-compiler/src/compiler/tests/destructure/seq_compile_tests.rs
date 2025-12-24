@@ -23,7 +23,7 @@ fn compile_simple_pattern_emits_get_global_for_first() {
 
     // Parse pattern [a]
     let ast = spanned(Ast::Vector(vec![spanned(Ast::Symbol("a".into()))]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -70,7 +70,7 @@ fn compile_simple_pattern_emits_get_global_for_rest() {
 
     // Parse pattern [a]
     let ast = spanned(Ast::Vector(vec![spanned(Ast::Symbol("a".into()))]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id())
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0)
         .expect("pattern should parse");
 
     // Compile the pattern
@@ -116,7 +116,7 @@ fn compile_simple_pattern_emits_call_instructions() {
 
     // Parse pattern [a]
     let ast = spanned(Ast::Vector(vec![spanned(Ast::Symbol("a".into()))]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -150,7 +150,7 @@ fn compile_pattern_defines_local_bindings() {
         spanned(Ast::Symbol("b".into())),
         spanned(Ast::Symbol("c".into())),
     ]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -186,7 +186,7 @@ fn compile_pattern_with_rest_defines_rest_local() {
         spanned(Ast::Symbol("&".into())),
         spanned(Ast::Symbol("r".into())),
     ]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -217,7 +217,7 @@ fn compile_pattern_with_as_defines_as_local() {
         spanned(Ast::Keyword("as".into())),
         spanned(Ast::Symbol("all".into())),
     ]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -248,7 +248,7 @@ fn compile_ignore_does_not_define_local() {
         spanned(Ast::Symbol("_".into())),
         spanned(Ast::Symbol("c".into())),
     ]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -286,7 +286,7 @@ fn compile_nested_pattern_emits_recursive_calls() {
         ])),
         spanned(Ast::Symbol("z".into())),
     ]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id()).unwrap();
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0).unwrap();
 
     // Compile the pattern
     compiler
@@ -353,7 +353,7 @@ fn compile_preserves_binding_registers() {
         spanned(Ast::Symbol("b".into())),
         spanned(Ast::Symbol("c".into())),
     ]));
-    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id())
+    let pattern = parse_sequential_pattern(compiler.interner, &ast, source_id(), 0)
         .expect("pattern should parse");
 
     // Compile the pattern

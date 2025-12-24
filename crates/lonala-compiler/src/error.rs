@@ -15,7 +15,6 @@
 extern crate alloc;
 
 use alloc::string::String;
-use core::fmt;
 
 // Re-export source types from lona-core for consistency.
 pub use lona_core::source::{self, Id as SourceId, Location as SourceLocation};
@@ -113,6 +112,16 @@ pub enum Kind {
         message: &'static str,
     },
 
+    /// Destructuring pattern nesting exceeded maximum depth.
+    ///
+    /// This prevents stack overflow from deeply nested patterns.
+    /// The limit is generous (1024) to allow legitimate complex patterns
+    /// while preventing runaway recursion.
+    RecursionDepthExceeded {
+        /// The maximum allowed depth.
+        max_depth: usize,
+    },
+
     // ========== Internal errors ==========
     /// Internal compiler error.
     ///
@@ -143,51 +152,15 @@ impl Kind {
             Self::MacroExpansionFailed { .. } => "MacroExpansionFailed",
             Self::MacroExpansionDepthExceeded { .. } => "MacroExpansionDepthExceeded",
             Self::InvalidDestructuringPattern { .. } => "InvalidDestructuringPattern",
+            Self::RecursionDepthExceeded { .. } => "RecursionDepthExceeded",
             Self::InternalError { .. } => "InternalError",
         }
     }
 }
 
-impl fmt::Display for Kind {
-    #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            Self::TooManyConstants => {
-                write!(f, "too many constants in chunk (maximum 65535)")
-            }
-            Self::TooManyRegisters => {
-                write!(f, "too many registers needed (maximum 255)")
-            }
-            Self::JumpTooLarge => {
-                write!(f, "jump offset too large (maximum +/- 32767)")
-            }
-            Self::EmptyCall => {
-                write!(f, "empty list cannot be called as function")
-            }
-            Self::NotImplemented { feature } => {
-                write!(f, "not implemented: {feature}")
-            }
-            Self::InvalidSpecialForm { form, message } => {
-                write!(f, "invalid '{form}' form: {message}")
-            }
-            Self::InvalidMacroResult { ref message } => {
-                write!(f, "invalid macro result: {message}")
-            }
-            Self::MacroExpansionFailed { ref message } => {
-                write!(f, "macro expansion failed: {message}")
-            }
-            Self::MacroExpansionDepthExceeded { depth } => {
-                write!(f, "macro expansion exceeded maximum depth ({depth})")
-            }
-            Self::InvalidDestructuringPattern { message } => {
-                write!(f, "invalid destructuring pattern: {message}")
-            }
-            Self::InternalError { message } => {
-                write!(f, "internal compiler error: {message}")
-            }
-        }
-    }
-}
+// NOTE: No Display impl on Kind. All error formatting is centralized in the
+// `lonala-human` crate via the Diagnostic trait, ensuring consistent error
+// presentation across REPL and future LSP implementations.
 
 /// An error encountered during compilation.
 ///
@@ -235,93 +208,13 @@ impl Error {
 mod tests {
     extern crate alloc;
 
-    use alloc::format;
+    use alloc::string::String;
 
     use super::*;
 
     /// Helper to create a test source location.
     fn test_location(start: usize, end: usize) -> SourceLocation {
         SourceLocation::new(SourceId::new(0_u32), Span::new(start, end))
-    }
-
-    // ==================== Kind Display Tests ====================
-
-    #[test]
-    fn kind_display_resource_errors() {
-        assert_eq!(
-            format!("{}", Kind::TooManyConstants),
-            "too many constants in chunk (maximum 65535)"
-        );
-        assert_eq!(
-            format!("{}", Kind::TooManyRegisters),
-            "too many registers needed (maximum 255)"
-        );
-        assert_eq!(
-            format!("{}", Kind::JumpTooLarge),
-            "jump offset too large (maximum +/- 32767)"
-        );
-    }
-
-    #[test]
-    fn kind_display_semantic_errors() {
-        assert_eq!(
-            format!("{}", Kind::EmptyCall),
-            "empty list cannot be called as function"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                Kind::NotImplemented {
-                    feature: "closures"
-                }
-            ),
-            "not implemented: closures"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                Kind::InvalidSpecialForm {
-                    form: "if",
-                    message: "expected (if test then) or (if test then else)"
-                }
-            ),
-            "invalid 'if' form: expected (if test then) or (if test then else)"
-        );
-    }
-
-    #[test]
-    fn kind_display_macro_errors() {
-        assert_eq!(
-            format!(
-                "{}",
-                Kind::InvalidMacroResult {
-                    message: String::from("function cannot be converted to AST")
-                }
-            ),
-            "invalid macro result: function cannot be converted to AST"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                Kind::MacroExpansionFailed {
-                    message: String::from("division by zero")
-                }
-            ),
-            "macro expansion failed: division by zero"
-        );
-        assert_eq!(
-            format!("{}", Kind::MacroExpansionDepthExceeded { depth: 256_usize }),
-            "macro expansion exceeded maximum depth (256)"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                Kind::InvalidDestructuringPattern {
-                    message: "test error"
-                }
-            ),
-            "invalid destructuring pattern: test error"
-        );
     }
 
     // ==================== Kind variant_name() Tests ====================
@@ -365,6 +258,13 @@ mod tests {
         assert_eq!(
             Kind::InvalidDestructuringPattern { message: "test" }.variant_name(),
             "InvalidDestructuringPattern"
+        );
+        assert_eq!(
+            Kind::RecursionDepthExceeded {
+                max_depth: 1024_usize
+            }
+            .variant_name(),
+            "RecursionDepthExceeded"
         );
     }
 
@@ -451,6 +351,16 @@ mod tests {
         assert_eq!(
             Error::new(
                 Kind::InvalidDestructuringPattern { message: "test" },
+                location
+            )
+            .span(),
+            location.span
+        );
+        assert_eq!(
+            Error::new(
+                Kind::RecursionDepthExceeded {
+                    max_depth: 1024_usize
+                },
                 location
             )
             .span(),

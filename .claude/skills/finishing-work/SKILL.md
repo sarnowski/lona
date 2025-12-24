@@ -68,7 +68,7 @@ All three CLIs accept the prompt as a positional argument:
 ```bash
 timeout 900 claude --model opus -p "PROMPT"
 timeout 900 gemini -m gemini-3-pro-preview -s "PROMPT"
-timeout 900 codex exec -m gpt-5.1-codex-max -c model_reasoning_effort=low -c hide_agent_reasoning=true -s read-only "PROMPT" 2>/dev/null
+timeout 900 codex exec -m gpt-5.2-codex -c model_reasoning_effort=low -c hide_agent_reasoning=true -s read-only "PROMPT" 2>/dev/null
 ```
 
 All three receive the **identical prompt** (substitute actual values):

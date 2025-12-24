@@ -260,7 +260,7 @@ For code review and analysis, these CLI tools are available:
 timeout 900 gemini -m gemini-3-pro-preview -s "PROMPT"
 
 # Codex (add "-c model_reasoning_effort=LEVEL" where LEVEL is minimal/low/medium/high/xhigh - defaults to medium)
-timeout 900 codex exec -m gpt-5.2 -c hide_agent_reasoning=true "PROMPT" 2>/dev/null
+timeout 900 codex exec -m gpt-5.2-codex -c hide_agent_reasoning=true "PROMPT" 2>/dev/null
 ```
 
 Both accept prompts as positional arguments. For multiline prompts, use proper shell quoting. Always run with the `timeout 900` to give them sufficient time!

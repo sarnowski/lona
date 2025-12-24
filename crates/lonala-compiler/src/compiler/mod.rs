@@ -591,10 +591,11 @@ pub enum CompileError {
 impl core::fmt::Display for CompileError {
     #[inline]
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // Use variant_name() for basic display. Rich formatting with context
+        // and help text is provided by the Diagnostic trait in lonala-human.
         match *self {
-            // Use err.kind since neither Error type implements Display directly
-            Self::Parse(ref err) => write!(f, "parse error: {}", err.kind),
-            Self::Compile(ref err) => write!(f, "compile error: {}", err.kind),
+            Self::Parse(ref err) => write!(f, "parse error: {}", err.kind.variant_name()),
+            Self::Compile(ref err) => write!(f, "compile error: {}", err.kind.variant_name()),
         }
     }
 }

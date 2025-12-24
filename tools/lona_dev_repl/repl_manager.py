@@ -193,7 +193,7 @@ class ReplManager:
         # Wait for the REPL to be ready
         try:
             await self._wait_for_prompt(timeout=BOOT_TIMEOUT)
-            self.started_at = datetime.now(timezone.utc)
+            self.started_at = datetime.now().astimezone()
             self._last_activity = datetime.now(timezone.utc)
             self._start_idle_monitor()
             return True, "REPL ready"

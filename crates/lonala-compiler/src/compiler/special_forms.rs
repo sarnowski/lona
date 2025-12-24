@@ -554,12 +554,17 @@ impl Compiler<'_, '_, '_> {
                     self.interner,
                     name_ast,
                     self.source_id,
+                    0, // Initial depth
                 )?;
                 self.compile_sequential_binding(&pattern, value_reg, name_ast.span)?;
             }
             Ast::Map(_) => {
-                let pattern =
-                    super::destructure::parse_map_pattern(self.interner, name_ast, self.source_id)?;
+                let pattern = super::destructure::parse_map_pattern(
+                    self.interner,
+                    name_ast,
+                    self.source_id,
+                    0, // Initial depth
+                )?;
                 self.compile_map_binding(&pattern, value_reg, name_ast.span)?;
             }
             Ast::Integer(_)
