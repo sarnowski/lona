@@ -17,7 +17,7 @@ pub const TYPE_PREDICATE_NAMES: &[&str] = &["keyword?"];
 /// This must be called before creating the VM to avoid borrow conflicts.
 /// Returns a vector of symbol IDs in the same order as `TYPE_PREDICATE_NAMES`.
 #[inline]
-pub fn intern_type_predicates(interner: &mut symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
+pub fn intern_type_predicates(interner: &symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
     TYPE_PREDICATE_NAMES
         .iter()
         .map(|name| interner.intern(name))

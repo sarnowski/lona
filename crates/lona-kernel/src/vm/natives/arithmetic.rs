@@ -19,9 +19,7 @@ pub const ARITHMETIC_PRIMITIVE_NAMES: &[&str] = &["+", "-", "*", "/", "mod"];
 /// This must be called before creating the VM to avoid borrow conflicts.
 /// Returns a vector of symbol IDs in the same order as `ARITHMETIC_PRIMITIVE_NAMES`.
 #[inline]
-pub fn intern_arithmetic_primitives(
-    interner: &mut symbol::Interner,
-) -> alloc::vec::Vec<symbol::Id> {
+pub fn intern_arithmetic_primitives(interner: &symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
     ARITHMETIC_PRIMITIVE_NAMES
         .iter()
         .map(|name| interner.intern(name))

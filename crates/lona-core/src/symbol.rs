@@ -8,7 +8,8 @@
 //! Lisp-like language where symbols are ubiquitous.
 
 #[cfg(feature = "alloc")]
-use alloc::{collections::BTreeMap, string::String, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
+use core::cell::RefCell;
 
 /// Unique identifier for an interned symbol.
 ///
@@ -48,12 +49,18 @@ impl Id {
 ///
 /// Stores each unique symbol string once and assigns it an [`Id`].
 /// Interning the same string multiple times returns the same ID.
+///
+/// Uses interior mutability via `RefCell` to allow interning and gensym
+/// through shared references (`&self`). This is safe because the runtime
+/// is single-threaded (seL4 root task).
 #[cfg(feature = "alloc")]
 pub struct Interner {
     /// Maps [`Id`] index to the interned string.
-    strings: Vec<String>,
+    strings: RefCell<Vec<String>>,
     /// Maps string content to its [`Id`] for deduplication.
-    lookup: BTreeMap<String, Id>,
+    lookup: RefCell<BTreeMap<String, Id>>,
+    /// Monotonic counter for gensym.
+    gensym_counter: RefCell<u64>,
 }
 
 #[cfg(feature = "alloc")]
@@ -63,8 +70,9 @@ impl Interner {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            strings: Vec::new(),
-            lookup: BTreeMap::new(),
+            strings: RefCell::new(Vec::new()),
+            lookup: RefCell::new(BTreeMap::new()),
+            gensym_counter: RefCell::new(0),
         }
     }
 
@@ -78,19 +86,23 @@ impl Interner {
     /// Panics if more than `u32::MAX` symbols are interned.
     #[inline]
     #[expect(clippy::expect_used, reason = "overflow is unrecoverable")]
-    pub fn intern(&mut self, name: &str) -> Id {
-        if let Some(&id) = self.lookup.get(name) {
+    pub fn intern(&self, name: &str) -> Id {
+        if let Some(&id) = self.lookup.borrow().get(name) {
             return id;
         }
 
-        let id = Id(u32::try_from(self.strings.len())
-            .expect("symbol table overflow: exceeded u32::MAX symbols"));
-        self.strings.push(String::from(name));
-        let _previous = self.lookup.insert(String::from(name), id);
+        let mut strings = self.strings.borrow_mut();
+        let id =
+            Id(u32::try_from(strings.len())
+                .expect("symbol table overflow: exceeded u32::MAX symbols"));
+        strings.push(String::from(name));
+        let _previous = self.lookup.borrow_mut().insert(String::from(name), id);
         id
     }
 
     /// Resolves an [`Id`] to its string representation.
+    ///
+    /// Returns an owned `String` because the interner uses interior mutability.
     ///
     /// # Panics
     ///
@@ -98,10 +110,12 @@ impl Interner {
     #[inline]
     #[must_use]
     #[expect(clippy::expect_used, reason = "invalid ID is a programming error")]
-    pub fn resolve(&self, id: Id) -> &str {
+    pub fn resolve(&self, id: Id) -> String {
         self.strings
+            .borrow()
             .get(id.as_usize())
             .expect("invalid symbol Id: not from this interner")
+            .clone()
     }
 
     /// Looks up a symbol by name without interning it.
@@ -111,21 +125,40 @@ impl Interner {
     #[inline]
     #[must_use]
     pub fn get(&self, name: &str) -> Option<Id> {
-        self.lookup.get(name).copied()
+        self.lookup.borrow().get(name).copied()
     }
 
     /// Returns the number of interned symbols.
     #[inline]
     #[must_use]
-    pub const fn len(&self) -> usize {
-        self.strings.len()
+    pub fn len(&self) -> usize {
+        self.strings.borrow().len()
     }
 
     /// Returns `true` if no symbols have been interned.
     #[inline]
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
-        self.strings.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.strings.borrow().is_empty()
+    }
+
+    /// Generates a unique symbol with optional prefix.
+    ///
+    /// # Examples
+    ///
+    /// - `gensym(None)` returns symbol like `G__123`
+    /// - `gensym(Some("temp"))` returns symbol like `temp__123`
+    #[inline]
+    pub fn gensym(&self, prefix: Option<&str>) -> Id {
+        let mut counter = self.gensym_counter.borrow_mut();
+        let current = *counter;
+        // Use wrapping_add - u64 overflow is practically impossible
+        // (would require ~18 quintillion gensyms)
+        *counter = counter.wrapping_add(1);
+
+        let sym_prefix = prefix.unwrap_or("G");
+        let name = format!("{sym_prefix}__{current}");
+        self.intern(&name)
     }
 }
 
@@ -143,7 +176,7 @@ mod tests {
 
     #[test]
     fn intern_same_string_returns_same_id() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let id1 = interner.intern("foo");
         let id2 = interner.intern("foo");
         assert_eq!(id1, id2);
@@ -151,7 +184,7 @@ mod tests {
 
     #[test]
     fn intern_different_strings_returns_different_ids() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let id1 = interner.intern("foo");
         let id2 = interner.intern("bar");
         assert_ne!(id1, id2);
@@ -159,7 +192,7 @@ mod tests {
 
     #[test]
     fn resolve_returns_original_string() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let id = interner.intern("hello-world");
         assert_eq!(interner.resolve(id), "hello-world");
     }
@@ -172,14 +205,14 @@ mod tests {
 
     #[test]
     fn get_returns_some_for_known_symbol() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let id = interner.intern("known");
         assert_eq!(interner.get("known"), Some(id));
     }
 
     #[test]
     fn len_tracks_unique_symbols() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         assert_eq!(interner.len(), 0);
         assert!(interner.is_empty());
 
@@ -197,7 +230,7 @@ mod tests {
 
     #[test]
     fn symbol_id_as_u32() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let id = interner.intern("test");
         assert_eq!(id.as_u32(), 0);
 
@@ -207,7 +240,7 @@ mod tests {
 
     #[test]
     fn interning_special_characters() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
 
         // Lisp-style symbols with special characters
         let id_plus = interner.intern("+");
@@ -225,14 +258,14 @@ mod tests {
 
     #[test]
     fn interning_empty_string() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let id = interner.intern("");
         assert_eq!(interner.resolve(id), "");
     }
 
     #[test]
     fn symbol_id_equality() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let id1 = interner.intern("same");
         let id2 = interner.intern("same");
         let id3 = interner.intern("different");
@@ -241,5 +274,40 @@ mod tests {
         assert!(id1 == id2);
         // Different symbol IDs are not equal
         assert!(id1 != id3);
+    }
+
+    #[test]
+    fn gensym_generates_unique_symbols() {
+        let interner = Interner::new();
+        let id1 = interner.gensym(None);
+        let id2 = interner.gensym(None);
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn gensym_uses_default_prefix() {
+        let interner = Interner::new();
+        let id = interner.gensym(None);
+        assert!(interner.resolve(id).starts_with("G__"));
+    }
+
+    #[test]
+    fn gensym_uses_custom_prefix() {
+        let interner = Interner::new();
+        let id = interner.gensym(Some("temp"));
+        assert!(interner.resolve(id).starts_with("temp__"));
+    }
+
+    #[test]
+    fn gensym_counter_is_monotonic() {
+        let interner = Interner::new();
+        let id1 = interner.gensym(None);
+        let id2 = interner.gensym(None);
+        let name1 = interner.resolve(id1);
+        let name2 = interner.resolve(id2);
+        // Extract counter values and verify monotonicity
+        let n1: u64 = name1.split("__").nth(1).unwrap().parse().unwrap();
+        let n2: u64 = name2.split("__").nth(1).unwrap().parse().unwrap();
+        assert!(n2 > n1);
     }
 }

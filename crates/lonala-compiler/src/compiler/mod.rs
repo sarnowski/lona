@@ -84,7 +84,7 @@ pub struct Compiler<'interner, 'registry, 'expander> {
     /// The bytecode chunk being built.
     chunk: Chunk,
     /// Symbol interner for looking up and creating symbol IDs.
-    interner: &'interner mut symbol::Interner,
+    interner: &'interner symbol::Interner,
     /// Source identifier for error reporting.
     source_id: source::Id,
     /// Next available register.
@@ -122,7 +122,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
     #[inline]
     #[must_use]
     pub fn new(
-        interner: &'interner mut symbol::Interner,
+        interner: &'interner symbol::Interner,
         registry: &'registry mut MacroRegistry,
         source_id: source::Id,
     ) -> Self {
@@ -149,7 +149,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
     #[inline]
     #[must_use]
     pub fn with_expander(
-        interner: &'interner mut symbol::Interner,
+        interner: &'interner symbol::Interner,
         registry: &'registry mut MacroRegistry,
         source_id: source::Id,
         expander: &'expander mut dyn MacroExpander,

@@ -39,7 +39,7 @@ use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 /// Symbols are interned as `Value::Symbol` and keywords as `Value::Keyword`.
 /// Keywords are stored without the colon prefix (the colon is syntax only).
 #[inline]
-pub fn ast_to_value(ast: &Spanned<Ast>, interner: &mut symbol::Interner) -> Value {
+pub fn ast_to_value(ast: &Spanned<Ast>, interner: &symbol::Interner) -> Value {
     match ast.node {
         Ast::Bool(bool_val) => Value::Bool(bool_val),
         Ast::Integer(num) => Value::Integer(Integer::from_i64(num)),
@@ -148,11 +148,11 @@ pub fn value_to_ast(
         }
         Value::Symbol(ref sym) => {
             let name = interner.resolve(sym.id());
-            Ast::Symbol(String::from(name))
+            Ast::Symbol(name)
         }
         Value::Keyword(id) => {
             let name = interner.resolve(id);
-            Ast::Keyword(String::from(name))
+            Ast::Keyword(name)
         }
         Value::String(ref text) => Ast::String(String::from(text.as_str())),
         Value::List(ref list) => {

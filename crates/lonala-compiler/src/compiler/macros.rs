@@ -14,10 +14,10 @@
 //! let mut registry = MacroRegistry::new();
 //!
 //! // First REPL eval: define a macro
-//! let chunk1 = compile_with_registry("(defmacro when [test & body] ...)", &mut interner, &mut registry)?;
+//! let chunk1 = compile_with_registry("(defmacro when [test & body] ...)", &interner, &mut registry)?;
 //!
 //! // Second REPL eval: use the macro (it persists in the registry)
-//! let chunk2 = compile_with_registry("(when true (print \"hi\"))", &mut interner, &mut registry)?;
+//! let chunk2 = compile_with_registry("(when true (print \"hi\"))", &interner, &mut registry)?;
 //! ```
 
 use alloc::collections::BTreeMap;
@@ -295,7 +295,7 @@ pub trait MacroExpander {
         &mut self,
         definition: &MacroDefinition,
         args: Vec<lona_core::value::Value>,
-        interner: &mut symbol::Interner,
+        interner: &symbol::Interner,
     ) -> Result<lona_core::value::Value, MacroExpansionError>;
 }
 
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn register_and_get() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = MacroRegistry::new();
 
         let name = interner.intern("my-macro");
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn register_overwrites() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = MacroRegistry::new();
 
         let name = interner.intern("my-macro");
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn contains_unknown_returns_false() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let registry = MacroRegistry::new();
 
         let unknown = interner.intern("unknown-macro");
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn get_unknown_returns_none() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let registry = MacroRegistry::new();
 
         let unknown = interner.intern("unknown-macro");
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn remove_macro() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = MacroRegistry::new();
 
         let name = interner.intern("my-macro");
@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn remove_unknown_returns_none() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = MacroRegistry::new();
 
         let unknown = interner.intern("unknown-macro");
@@ -397,7 +397,7 @@ mod tests {
 
     #[test]
     fn clear_removes_all() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = MacroRegistry::new();
 
         let name1 = interner.intern("macro1");
@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn merge_registries() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry1 = MacroRegistry::new();
         let mut registry2 = MacroRegistry::new();
 
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn iterate_names() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = MacroRegistry::new();
 
         let name1 = interner.intern("macro1");
@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn clone_registry() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = MacroRegistry::new();
 
         let name = interner.intern("my-macro");

@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn undefined_global_message() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("foo");
         let error = Error::new(
             Kind::UndefinedGlobal {
@@ -353,7 +353,7 @@ mod tests {
 
     #[test]
     fn undefined_global_with_suggestion() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("fooo");
         let suggestion = interner.intern("foo");
         let error = Error::new(
@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn arity_mismatch_message_with_name() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("add");
         let error = Error::new(
             Kind::ArityMismatch {

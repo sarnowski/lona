@@ -51,7 +51,7 @@ use super::parse::{MAX_PATTERN_DEPTH, parse_binding};
 /// ```
 #[inline]
 pub fn parse_sequential_pattern(
-    interner: &mut symbol::Interner,
+    interner: &symbol::Interner,
     ast: &Spanned<Ast>,
     source_id: source::Id,
     depth: usize,
@@ -77,7 +77,7 @@ pub fn parse_sequential_pattern(
     let mut idx = 0_usize;
     let mut seen_ampersand = false;
     let mut seen_as = false;
-    let mut ctx = ParseContext {
+    let ctx = ParseContext {
         interner,
         elements,
         source_id,
@@ -99,7 +99,7 @@ pub fn parse_sequential_pattern(
                     ));
                 }
                 seen_ampersand = true;
-                let rest_binding = parse_rest_binding(&mut ctx, elem, idx)?;
+                let rest_binding = parse_rest_binding(&ctx, elem, idx)?;
                 pattern.rest = Some(Box::new(rest_binding));
                 idx = idx.saturating_add(1); // Skip past the rest binding
             }
@@ -115,7 +115,7 @@ pub fn parse_sequential_pattern(
                     ));
                 }
                 seen_as = true;
-                pattern.as_binding = Some(parse_as_binding(&mut ctx, elem, idx)?);
+                pattern.as_binding = Some(parse_as_binding(&ctx, elem, idx)?);
                 idx = idx.saturating_add(1); // Skip past the symbol
             }
 
@@ -155,7 +155,7 @@ pub fn parse_sequential_pattern(
 
 /// Context for parsing within a pattern.
 struct ParseContext<'elements> {
-    interner: &'elements mut symbol::Interner,
+    interner: &'elements symbol::Interner,
     elements: &'elements [Spanned<Ast>],
     source_id: source::Id,
     depth: usize,
@@ -165,7 +165,7 @@ struct ParseContext<'elements> {
 ///
 /// Returns the parsed binding for the rest position.
 fn parse_rest_binding(
-    ctx: &mut ParseContext<'_>,
+    ctx: &ParseContext<'_>,
     ampersand_elem: &Spanned<Ast>,
     idx: usize,
 ) -> Result<Binding, Error> {
@@ -185,7 +185,7 @@ fn parse_rest_binding(
 ///
 /// Returns the symbol ID for the binding.
 fn parse_as_binding(
-    ctx: &mut ParseContext<'_>,
+    ctx: &ParseContext<'_>,
     as_elem: &Spanned<Ast>,
     idx: usize,
 ) -> Result<symbol::Id, Error> {

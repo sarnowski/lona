@@ -18,6 +18,6 @@ mod wildcard_tests;
 use lona_core::{symbol, symbol::Interner};
 
 /// Helper to create a test symbol ID.
-pub(super) fn make_symbol(interner: &mut Interner, name: &str) -> symbol::Id {
+pub(super) fn make_symbol(interner: &Interner, name: &str) -> symbol::Id {
     interner.intern(name)
 }

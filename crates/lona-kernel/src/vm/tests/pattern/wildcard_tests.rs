@@ -44,7 +44,7 @@ fn wildcard_matches_string() {
 
 #[test]
 fn wildcard_matches_keyword() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let kw_id = interner.intern("foo");
     let value = Value::Keyword(kw_id);
     assert_eq!(try_match(&Pattern::Wildcard, &value), Some(Vec::new()));

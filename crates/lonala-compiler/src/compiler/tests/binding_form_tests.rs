@@ -134,8 +134,8 @@ fn compile_def_multiple() {
 
 #[test]
 fn compile_def_invalid_no_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(def)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(def)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -151,8 +151,8 @@ fn compile_def_invalid_no_args() {
 
 #[test]
 fn compile_def_invalid_one_arg() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(def x)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(def x)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -168,8 +168,8 @@ fn compile_def_invalid_one_arg() {
 
 #[test]
 fn compile_def_invalid_three_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(def x 1 2)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(def x 1 2)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -185,8 +185,8 @@ fn compile_def_invalid_three_args() {
 
 #[test]
 fn compile_def_invalid_non_symbol_name() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(def 42 1)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(def 42 1)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -290,8 +290,8 @@ fn compile_let_empty_body() {
 
 #[test]
 fn compile_let_invalid_no_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(let)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(let)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -307,8 +307,8 @@ fn compile_let_invalid_no_args() {
 
 #[test]
 fn compile_let_invalid_non_vector_bindings() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(let (x 1) x)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(let (x 1) x)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -325,8 +325,8 @@ fn compile_let_invalid_non_vector_bindings() {
 
 #[test]
 fn compile_let_invalid_odd_bindings() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(let [x 1 y] x)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(let [x 1 y] x)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -343,8 +343,8 @@ fn compile_let_invalid_odd_bindings() {
 
 #[test]
 fn compile_let_invalid_non_symbol_binding_name() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(let [42 1] 0)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(let [42 1] 0)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {

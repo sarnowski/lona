@@ -18,9 +18,9 @@ const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
 
 /// Tests empty do: (do) should return nil.
 pub fn test_do_empty() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(do)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(do)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -34,9 +34,9 @@ pub fn test_do_empty() -> Status {
 
 /// Tests single do: (do 42) should return 42.
 pub fn test_do_single() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(do 42)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(do 42)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -50,9 +50,9 @@ pub fn test_do_single() -> Status {
 
 /// Tests multiple do: (do 1 2 3) should return 3.
 pub fn test_do_multiple() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(do 1 2 3)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(do 1 2 3)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -66,9 +66,9 @@ pub fn test_do_multiple() -> Status {
 
 /// Tests if true branch: (if true 1 2) should return 1.
 pub fn test_if_true() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(if true 1 2)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(if true 1 2)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -82,9 +82,9 @@ pub fn test_if_true() -> Status {
 
 /// Tests if false branch: (if false 1 2) should return 2.
 pub fn test_if_false() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(if false 1 2)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(if false 1 2)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -98,9 +98,9 @@ pub fn test_if_false() -> Status {
 
 /// Tests if without else: (if false 1) should return nil.
 pub fn test_if_no_else() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(if false 1)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(if false 1)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -114,9 +114,9 @@ pub fn test_if_no_else() -> Status {
 
 /// Tests simple def: (def x 42) should define x and return symbol.
 pub fn test_def_simple() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(do (def x 42) x)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(do (def x 42) x)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };

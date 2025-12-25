@@ -18,7 +18,7 @@ use super::make_symbol;
 use crate::vm::pattern::{Pattern, try_match};
 
 /// Helper to create a keyword Value from a string.
-fn make_keyword(interner: &mut Interner, name: &str) -> Value {
+fn make_keyword(interner: &Interner, name: &str) -> Value {
     Value::Keyword(interner.intern(name))
 }
 
@@ -28,9 +28,9 @@ fn make_keyword(interner: &mut Interner, name: &str) -> Value {
 
 #[test]
 fn seq_containing_map_pattern() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let key_a = make_keyword(&mut interner, "a");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let key_a = make_keyword(&interner, "a");
 
     // Pattern: [{:a x}]
     let pattern = Pattern::Seq {
@@ -51,11 +51,11 @@ fn seq_containing_map_pattern() {
 
 #[test]
 fn seq_containing_multiple_maps() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let y = make_symbol(&mut interner, "y");
-    let key_a = make_keyword(&mut interner, "a");
-    let key_b = make_keyword(&mut interner, "b");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let y = make_symbol(&interner, "y");
+    let key_a = make_keyword(&interner, "a");
+    let key_b = make_keyword(&interner, "b");
 
     // Pattern: [{:a x} {:b y}]
     let pattern = Pattern::Seq {
@@ -92,10 +92,10 @@ fn seq_containing_multiple_maps() {
 
 #[test]
 fn map_containing_seq_pattern() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
-    let b = make_symbol(&mut interner, "b");
-    let key_items = make_keyword(&mut interner, "items");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
+    let b = make_symbol(&interner, "b");
+    let key_items = make_keyword(&interner, "items");
 
     // Pattern: {:items [a b]}
     let pattern = Pattern::Map {
@@ -128,10 +128,10 @@ fn map_containing_seq_pattern() {
 
 #[test]
 fn map_with_seq_and_rest() {
-    let mut interner = Interner::new();
-    let first = make_symbol(&mut interner, "first");
-    let rest = make_symbol(&mut interner, "rest");
-    let key_data = make_keyword(&mut interner, "data");
+    let interner = Interner::new();
+    let first = make_symbol(&interner, "first");
+    let rest = make_symbol(&interner, "rest");
+    let key_data = make_keyword(&interner, "data");
 
     // Pattern: {:data [first & rest]}
     let pattern = Pattern::Map {
@@ -173,10 +173,10 @@ fn map_with_seq_and_rest() {
 
 #[test]
 fn nested_map_patterns() {
-    let mut interner = Interner::new();
-    let name = make_symbol(&mut interner, "name");
-    let key_user = make_keyword(&mut interner, "user");
-    let key_name = make_keyword(&mut interner, "name");
+    let interner = Interner::new();
+    let name = make_symbol(&interner, "name");
+    let key_user = make_keyword(&interner, "user");
+    let key_name = make_keyword(&interner, "name");
 
     // Pattern: {:user {:name name}}
     let pattern = Pattern::Map {
@@ -206,9 +206,9 @@ fn nested_map_patterns() {
 
 #[test]
 fn deeply_nested_seq_in_map_in_seq() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let key_x = make_keyword(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let key_x = make_keyword(&interner, "x");
 
     // Pattern: [[{:x x}]]
     let pattern = Pattern::Seq {
@@ -233,10 +233,10 @@ fn deeply_nested_seq_in_map_in_seq() {
 
 #[test]
 fn deeply_nested_map_in_seq_in_map() {
-    let mut interner = Interner::new();
-    let val = make_symbol(&mut interner, "val");
-    let key_outer = make_keyword(&mut interner, "outer");
-    let key_inner = make_keyword(&mut interner, "inner");
+    let interner = Interner::new();
+    let val = make_symbol(&interner, "val");
+    let key_outer = make_keyword(&interner, "outer");
+    let key_inner = make_keyword(&interner, "inner");
 
     // Pattern: {:outer [{:inner val}]}
     let pattern = Pattern::Map {
@@ -267,11 +267,11 @@ fn deeply_nested_map_in_seq_in_map() {
 
 #[test]
 fn mixed_wildcards_binds_literals_in_nested() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let key_type = make_keyword(&mut interner, "type");
-    let key_data = make_keyword(&mut interner, "data");
-    let kw_message = make_keyword(&mut interner, "message");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let key_type = make_keyword(&interner, "type");
+    let key_data = make_keyword(&interner, "data");
+    let kw_message = make_keyword(&interner, "message");
 
     // Pattern: {:type :message :data [_ x]}
     // Matches if :type is :message, ignores first data element, binds second
@@ -304,8 +304,8 @@ fn mixed_wildcards_binds_literals_in_nested() {
 
 #[test]
 fn nested_fails_on_inner_mismatch() {
-    let mut interner = Interner::new();
-    let key_items = make_keyword(&mut interner, "items");
+    let interner = Interner::new();
+    let key_items = make_keyword(&interner, "items");
 
     // Pattern: {:items [1 2]}
     let pattern = Pattern::Map {
@@ -334,9 +334,9 @@ fn nested_fails_on_inner_mismatch() {
 
 #[test]
 fn nested_fails_on_type_mismatch() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let key_items = make_keyword(&mut interner, "items");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let key_items = make_keyword(&interner, "items");
 
     // Pattern: {:items [x]} - expects vector
     let pattern = Pattern::Map {

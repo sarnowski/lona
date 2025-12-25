@@ -19,8 +19,8 @@ use crate::vm::pattern::{Pattern, try_match};
 
 #[test]
 fn guarded_pattern_matches_inner_pattern() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     let pattern = Pattern::Guarded {
         pattern: Box::new(Pattern::Bind(x)),
@@ -59,9 +59,9 @@ fn guarded_wildcard_always_matches() {
 
 #[test]
 fn guarded_seq_pattern() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
-    let b = make_symbol(&mut interner, "b");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
+    let b = make_symbol(&interner, "b");
 
     let pattern = Pattern::Guarded {
         pattern: Box::new(Pattern::Seq {
@@ -89,8 +89,8 @@ fn guarded_seq_pattern() {
 
 #[test]
 fn nested_guarded_patterns() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     // Outer guarded wrapping inner guarded
     let pattern = Pattern::Guarded {

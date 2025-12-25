@@ -30,6 +30,8 @@ extern crate alloc;
 
 #[cfg(feature = "integration-test")]
 mod integration_tests;
+#[cfg(not(feature = "integration-test"))]
+mod interactive;
 mod memory;
 mod platform;
 mod repl;

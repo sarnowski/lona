@@ -17,7 +17,7 @@ use super::{create_registry, loc};
 fn suggestion_with_special_characters_hyphen() {
     // my-functon → my-function (typo in hyphenated name)
     let (registry, source_id) = create_registry("<repl>", "(my-functon 42)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("my-functon");
@@ -41,7 +41,7 @@ fn suggestion_with_special_characters_hyphen() {
 fn suggestion_with_special_characters_question_mark() {
     // emty? → empty? (predicate with question mark)
     let (registry, source_id) = create_registry("<repl>", "(emty? [])");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("emty?");
@@ -65,7 +65,7 @@ fn suggestion_with_special_characters_question_mark() {
 fn suggestion_with_special_characters_asterisk() {
     // *foo → *bar (with sigil)
     let (registry, source_id) = create_registry("<repl>", "*foo");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("*foo");
@@ -92,7 +92,7 @@ fn suggestion_with_special_characters_asterisk() {
 #[test]
 fn multiple_errors_with_different_suggestions() {
     let (registry, source_id) = create_registry("<repl>", "(fooo (barr 42))");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo1 = interner.intern("fooo");
@@ -133,7 +133,7 @@ fn multiple_errors_with_different_suggestions() {
 fn suggestion_for_long_function_name() {
     let (registry, source_id) =
         create_registry("<repl>", "(calculate-the-total-sum-of-values 1 2 3)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("calculate-the-total-sum-of-values");
@@ -157,7 +157,7 @@ fn suggestion_for_long_function_name() {
 fn suggestion_for_short_name() {
     // x → y (single character)
     let (registry, source_id) = create_registry("<repl>", "x");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("x");
@@ -185,7 +185,7 @@ fn suggestion_for_short_name() {
 fn suggestion_with_unicode_symbols() {
     // Japanese hiragana example
     let (registry, source_id) = create_registry("<repl>", "こんにちわ");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("こんにちわ");
@@ -209,7 +209,7 @@ fn suggestion_with_unicode_symbols() {
 fn suggestion_with_emoji() {
     // Symbol containing emoji
     let (registry, source_id) = create_registry("<repl>", "rocket-launch🚀");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("rocket-launch🚀");
@@ -237,7 +237,7 @@ fn suggestion_with_emoji() {
 fn suggestion_for_numeric_suffix_typo() {
     // var1 → var2
     let (registry, source_id) = create_registry("<repl>", "var1");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("var1");
@@ -266,7 +266,7 @@ fn suggestion_same_as_typo_displays_correctly() {
     // Edge case: suggestion is the same as the typo
     // This shouldn't happen in practice, but formatting should still work
     let (registry, source_id) = create_registry("<repl>", "foo");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let sym = interner.intern("foo");
@@ -290,7 +290,7 @@ fn suggestion_same_as_typo_displays_correctly() {
 fn suggestion_with_empty_string_symbol() {
     // Edge case: empty string symbol (shouldn't happen in practice)
     let (registry, source_id) = create_registry("<repl>", "");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("");
@@ -314,7 +314,7 @@ fn suggestion_with_empty_string_symbol() {
 #[test]
 fn error_variant_name_displayed_correctly() {
     let (registry, source_id) = create_registry("<repl>", "typo");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let sym = interner.intern("typo");
@@ -337,7 +337,7 @@ fn error_variant_name_displayed_correctly() {
 #[test]
 fn suggestion_location_displayed_correctly() {
     let (registry, source_id) = create_registry("<test-file>", "(defn test [] (fooo))");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("fooo");
@@ -366,7 +366,7 @@ fn suggestion_location_displayed_correctly() {
 fn suggestion_output_format_matches_spec() {
     // Verify the exact format matches the PLAN.md specification
     let (registry, source_id) = create_registry("<repl>", "(fooo 42)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("fooo");

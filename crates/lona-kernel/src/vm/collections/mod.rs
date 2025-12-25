@@ -18,7 +18,7 @@
 //!
 //! These primitives use a two-phase registration pattern to avoid borrow conflicts:
 //!
-//! 1. Call [`intern_primitives`] with `&mut Interner` to intern symbol names
+//! 1. Call [`intern_primitives`] with `&Interner` to intern symbol names
 //! 2. Create the VM with `Vm::new(&interner)` (immutable borrow)
 //! 3. Call [`register_primitives`] with the VM and the symbols from step 1
 //!
@@ -69,7 +69,7 @@ pub const PRIMITIVE_NAMES: &[&str] = &[
 /// This must be called before creating the VM to avoid borrow conflicts.
 /// Returns a vector of symbol IDs in the same order as `PRIMITIVE_NAMES`.
 #[inline]
-pub fn intern_primitives(interner: &mut symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
+pub fn intern_primitives(interner: &symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
     PRIMITIVE_NAMES
         .iter()
         .map(|name| interner.intern(name))

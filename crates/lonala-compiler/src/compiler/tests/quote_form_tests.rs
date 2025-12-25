@@ -143,8 +143,8 @@ fn compile_quote_prevents_evaluation() {
 
 #[test]
 fn compile_quote_invalid_no_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(quote)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(quote)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -160,8 +160,8 @@ fn compile_quote_invalid_no_args() {
 
 #[test]
 fn compile_quote_invalid_two_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(quote a b)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(quote a b)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -303,8 +303,8 @@ fn compile_syntax_quote_vector() {
 
 #[test]
 fn compile_unquote_outside_syntax_quote_error() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("~x", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("~x", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -321,8 +321,8 @@ fn compile_unquote_outside_syntax_quote_error() {
 
 #[test]
 fn compile_unquote_splicing_outside_syntax_quote_error() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("~@x", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("~@x", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -339,8 +339,8 @@ fn compile_unquote_splicing_outside_syntax_quote_error() {
 
 #[test]
 fn compile_syntax_quote_invalid_no_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(syntax-quote)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(syntax-quote)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -356,8 +356,8 @@ fn compile_syntax_quote_invalid_no_args() {
 
 #[test]
 fn compile_syntax_quote_invalid_two_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(syntax-quote a b)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(syntax-quote a b)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {

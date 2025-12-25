@@ -15,7 +15,7 @@ use crate::vm::error::{Error, Kind as ErrorKind};
 
 #[test]
 fn execute_set_and_get_global() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let x_sym = interner.intern("x");
 
     let mut vm = make_vm(&interner);
@@ -56,7 +56,7 @@ fn execute_set_and_get_global() {
 
 #[test]
 fn execute_undefined_global_error() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let x_sym = interner.intern("undefined");
 
     let mut vm = make_vm(&interner);

@@ -57,7 +57,7 @@ pub(super) fn map_elements(pairs: Vec<(Ast, Ast)>) -> Vec<Spanned<Ast>> {
 pub(super) fn setup_compiler() -> (Compiler<'static, 'static, 'static>, u8) {
     // We need static lifetime interner and registry for test setup
     // Use Box::leak to create 'static references (memory leak is OK in tests)
-    let interner: &'static mut symbol::Interner = Box::leak(Box::new(symbol::Interner::new()));
+    let interner: &'static symbol::Interner = Box::leak(Box::new(symbol::Interner::new()));
     let registry: &'static mut MacroRegistry = Box::leak(Box::new(MacroRegistry::new()));
 
     let mut compiler = Compiler::new(interner, registry, source_id());

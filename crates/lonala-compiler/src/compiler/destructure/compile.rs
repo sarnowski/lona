@@ -6,8 +6,6 @@
 //! This module implements the `Compiler` methods that emit bytecode for
 //! sequential and associative destructuring patterns.
 
-use alloc::borrow::ToOwned as _;
-
 use lona_core::chunk::Constant;
 use lona_core::opcode::{Opcode, encode_abc, encode_abx, encode_asbx};
 use lona_core::span::Span;
@@ -254,7 +252,7 @@ impl Compiler<'_, '_, '_> {
         span: Span,
     ) -> Result<(), Error> {
         // Get the symbol name to construct the key
-        let sym_name = self.interner.resolve(sym_id).to_owned();
+        let sym_name = self.interner.resolve(sym_id);
 
         // Allocate permanent register for this binding first
         let binding_reg = self.alloc_register(span)?;

@@ -243,6 +243,8 @@ pub fn native_expand_fully(args: &[Value], ctx: &NativeContext<'_>) -> Result<Va
 }
 
 /// Checks if two values are equal.
+///
+/// Used for macro expansion to detect when the form has stopped changing.
 fn values_equal(left: &Value, right: &Value) -> bool {
     match (left, right) {
         (&Value::Nil, &Value::Nil) => true,
@@ -251,6 +253,7 @@ fn values_equal(left: &Value, right: &Value) -> bool {
         (&Value::Float(lhs), &Value::Float(rhs)) => floats_equal(lhs, rhs),
         (&Value::Ratio(ref lhs), &Value::Ratio(ref rhs)) => lhs == rhs,
         (&Value::Symbol(ref lhs), &Value::Symbol(ref rhs)) => lhs == rhs,
+        (&Value::Keyword(lhs), &Value::Keyword(rhs)) => lhs == rhs,
         (&Value::String(ref lhs), &Value::String(ref rhs)) => lhs.as_str() == rhs.as_str(),
         (&Value::List(ref lhs), &Value::List(ref rhs)) => {
             lhs.len() == rhs.len()
@@ -266,6 +269,14 @@ fn values_equal(left: &Value, right: &Value) -> bool {
                     .zip(rhs.iter())
                     .all(|(left_val, right_val)| values_equal(left_val, right_val))
         }
+        (&Value::Map(ref lhs), &Value::Map(ref rhs)) => {
+            lhs.len() == rhs.len()
+                && lhs.iter().all(|(key, val)| {
+                    rhs.get(key.value())
+                        .is_some_and(|rhs_val| values_equal(val, rhs_val))
+                })
+        }
+        (&Value::Set(ref lhs), &Value::Set(ref rhs)) => lhs == rhs,
         _ => false,
     }
 }
@@ -287,7 +298,7 @@ pub const PRIMITIVE_NAMES: &[&str] = &["macro?", "macroexpand-1", "macroexpand"]
 /// This must be called before creating the VM to avoid borrow conflicts.
 /// Returns a vector of symbol IDs in the same order as `PRIMITIVE_NAMES`.
 #[inline]
-pub fn intern_primitives(interner: &mut symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
+pub fn intern_primitives(interner: &symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
     PRIMITIVE_NAMES
         .iter()
         .map(|name| interner.intern(name))
@@ -304,7 +315,7 @@ pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
         vm.register_native(*sym, *func);
-        vm.set_global(*sym, Value::from(*sym));
+        vm.set_global(*sym, Value::NativeFunction(*sym));
     }
 }
 

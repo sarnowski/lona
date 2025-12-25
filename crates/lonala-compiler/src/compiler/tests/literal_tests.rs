@@ -171,8 +171,8 @@ fn compile_string_with_escapes() {
 
 #[test]
 fn compile_keyword_literal() {
-    let mut interner = symbol::Interner::new();
-    let chunk = compile(":keyword", TEST_SOURCE_ID, &mut interner).unwrap();
+    let interner = symbol::Interner::new();
+    let chunk = compile(":keyword", TEST_SOURCE_ID, &interner).unwrap();
 
     // Verify the bytecode structure
     assert_eq!(chunk.code().len(), 2_usize);
@@ -354,7 +354,7 @@ fn compile_error_display() {
 
 #[test]
 fn compile_error_from_parse() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(unclosed", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(unclosed", TEST_SOURCE_ID, &interner);
     assert!(matches!(result, Err(CompileError::Parse(_))));
 }

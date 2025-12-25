@@ -116,8 +116,8 @@ fn compile_print_string() {
 
 #[test]
 fn compile_empty_call_error() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("()", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("()", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {

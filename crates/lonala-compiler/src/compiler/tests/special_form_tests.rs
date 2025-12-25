@@ -185,8 +185,8 @@ fn compile_if_with_expressions() {
 
 #[test]
 fn compile_if_invalid_no_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(if)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(if)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -202,8 +202,8 @@ fn compile_if_invalid_no_args() {
 
 #[test]
 fn compile_if_invalid_one_arg() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(if true)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(if true)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -219,8 +219,8 @@ fn compile_if_invalid_one_arg() {
 
 #[test]
 fn compile_if_invalid_four_args() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(if true 1 2 3)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(if true 1 2 3)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {

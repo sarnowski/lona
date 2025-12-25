@@ -127,7 +127,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.8 | [Proper Tail Calls - Integration Tests](../architecture/tco.md) | done |
 | 1.2.9 | Pattern Matching - Core Infrastructure | done |
 | 1.2.10 | Case Special Form | done |
-| 1.2.11 | Gensym Implementation | open |
+| 1.2.11 | Gensym Implementation | done |
 | 1.2.12 | Anonymous Function Reader Macro (`#()`) | open |
 | 1.2.13 | Discard Reader Macro (`#_`) | open |
 | 1.2.14 | Regex Literal Syntax (`#""`) | open |
@@ -213,7 +213,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.8.5 | Set Operations - disj, contains? | open |
 | 1.8.6 | Callable Value Types (Keywords and Sets as Functions) | open |
 | 1.8.7 | Binary Operations | open |
-| 1.8.8 | Symbol Operations | open |
+| 1.8.8 | Symbol Operations | done |
 | 1.8.9 | Metadata Operations | open |
 | 1.8.10 | MMIO Primitives | open |
 | 1.8.11 | DMA Primitives | open |

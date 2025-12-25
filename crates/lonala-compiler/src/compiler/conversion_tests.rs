@@ -44,29 +44,29 @@ fn spanned(ast: Ast) -> Spanned<Ast> {
 
 #[test]
 fn ast_to_value_nil() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Nil);
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     assert_eq!(value, Value::Nil);
 }
 
 #[test]
 fn ast_to_value_bool() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast_true = spanned(Ast::Bool(true));
-    assert_eq!(ast_to_value(&ast_true, &mut interner), Value::Bool(true));
+    assert_eq!(ast_to_value(&ast_true, &interner), Value::Bool(true));
 
     let ast_false = spanned(Ast::Bool(false));
-    assert_eq!(ast_to_value(&ast_false, &mut interner), Value::Bool(false));
+    assert_eq!(ast_to_value(&ast_false, &interner), Value::Bool(false));
 }
 
 #[test]
 fn ast_to_value_integer() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Integer(42_i64));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     if let Value::Integer(int_val) = value {
         assert_eq!(int_val.to_i64(), Some(42_i64));
@@ -77,20 +77,20 @@ fn ast_to_value_integer() {
 
 #[test]
 fn ast_to_value_float() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Float(3.14_f64));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     assert_eq!(value, Value::Float(3.14_f64));
 }
 
 #[test]
 fn ast_to_value_string() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::String(String::from("hello")));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     if let Value::String(text) = value {
         assert_eq!(text.as_str(), "hello");
@@ -101,10 +101,10 @@ fn ast_to_value_string() {
 
 #[test]
 fn ast_to_value_symbol() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Symbol(String::from("foo")));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     if let Value::Symbol(sym) = value {
         assert_eq!(interner.resolve(sym.id()), "foo");
@@ -115,10 +115,10 @@ fn ast_to_value_symbol() {
 
 #[test]
 fn ast_to_value_keyword() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Keyword(String::from("key")));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     if let Value::Keyword(id) = value {
         // Keywords are stored without the ':' prefix
@@ -130,7 +130,7 @@ fn ast_to_value_keyword() {
 
 #[test]
 fn ast_to_value_list() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let elements = vec![
         spanned(Ast::Integer(1_i64)),
@@ -138,7 +138,7 @@ fn ast_to_value_list() {
         spanned(Ast::Integer(3_i64)),
     ];
     let ast = spanned(Ast::List(elements));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     if let Value::List(list) = value {
         assert_eq!(list.len(), 3_usize);
@@ -149,11 +149,11 @@ fn ast_to_value_list() {
 
 #[test]
 fn ast_to_value_vector() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let elements = vec![spanned(Ast::Integer(1_i64)), spanned(Ast::Integer(2_i64))];
     let ast = spanned(Ast::Vector(elements));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     if let Value::Vector(vec) = value {
         assert_eq!(vec.len(), 2_usize);
@@ -164,7 +164,7 @@ fn ast_to_value_vector() {
 
 #[test]
 fn ast_to_value_map() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     // Map elements are flat: [k1 v1 k2 v2]
     let elements = vec![
@@ -174,7 +174,7 @@ fn ast_to_value_map() {
         spanned(Ast::Integer(2_i64)),
     ];
     let ast = spanned(Ast::Map(elements));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     if let Value::Map(map) = value {
         assert_eq!(map.len(), 2_usize);
@@ -185,7 +185,7 @@ fn ast_to_value_map() {
 
 #[test]
 fn ast_to_value_nested_list() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let inner = vec![
         spanned(Ast::Symbol(String::from("+"))),
@@ -197,7 +197,7 @@ fn ast_to_value_nested_list() {
         spanned(Ast::List(inner)),
     ];
     let ast = spanned(Ast::List(outer));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
 
     if let Value::List(list) = value {
         assert_eq!(list.len(), 2_usize);
@@ -273,7 +273,7 @@ fn value_to_ast_string() {
 
 #[test]
 fn value_to_ast_symbol() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let id = interner.intern("foo");
 
     let value = Value::from(id);
@@ -284,7 +284,7 @@ fn value_to_ast_symbol() {
 
 #[test]
 fn value_to_ast_keyword() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     // Keywords are stored without the ':' prefix
     let id = interner.intern("key");
 
@@ -336,7 +336,7 @@ fn value_to_ast_vector() {
 
 #[test]
 fn value_to_ast_map() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let key_id = interner.intern(":a");
 
     let map = Map::from_pairs(vec![(
@@ -360,76 +360,76 @@ fn value_to_ast_map() {
 
 #[test]
 fn roundtrip_nil() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Nil);
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
     assert_eq!(result.node, ast.node);
 }
 
 #[test]
 fn roundtrip_bool() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Bool(true));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
     assert_eq!(result.node, ast.node);
 }
 
 #[test]
 fn roundtrip_integer() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Integer(42_i64));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
     assert_eq!(result.node, ast.node);
 }
 
 #[test]
 fn roundtrip_float() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Float(3.14_f64));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
     assert_eq!(result.node, ast.node);
 }
 
 #[test]
 fn roundtrip_string() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::String(String::from("hello")));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
     assert_eq!(result.node, ast.node);
 }
 
 #[test]
 fn roundtrip_symbol() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Symbol(String::from("foo")));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
     assert_eq!(result.node, ast.node);
 }
 
 #[test]
 fn roundtrip_keyword() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let ast = spanned(Ast::Keyword(String::from("key")));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
     assert_eq!(result.node, ast.node);
 }
 
 #[test]
 fn roundtrip_list() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let elements = vec![
         spanned(Ast::Symbol(String::from("+"))),
@@ -437,7 +437,7 @@ fn roundtrip_list() {
         spanned(Ast::Integer(2_i64)),
     ];
     let ast = spanned(Ast::List(elements));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
 
     // Compare structure (spans may differ)
@@ -453,11 +453,11 @@ fn roundtrip_list() {
 
 #[test]
 fn roundtrip_vector() {
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
 
     let elements = vec![spanned(Ast::Integer(1_i64)), spanned(Ast::Integer(2_i64))];
     let ast = spanned(Ast::Vector(elements));
-    let value = ast_to_value(&ast, &mut interner);
+    let value = ast_to_value(&ast, &interner);
     let result = value_to_ast(&value, &interner, test_source_id(), test_span()).unwrap();
 
     if let (Ast::Vector(orig), Ast::Vector(res)) = (&ast.node, &result.node) {

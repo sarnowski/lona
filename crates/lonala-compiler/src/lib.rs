@@ -27,9 +27,9 @@
 //! use lona_core::symbol::Interner;
 //! use lonala_compiler::compile;
 //!
-//! let mut interner = Interner::new();
+//! let interner = Interner::new();
 //! let source_id = source::Id::new(0);
-//! let chunk = compile("(+ 1 2)", source_id, &mut interner).unwrap();
+//! let chunk = compile("(+ 1 2)", source_id, &interner).unwrap();
 //!
 //! // The chunk can now be executed by the VM (Phase 2.5)
 //! println!("{}", chunk.disassemble());

@@ -18,9 +18,7 @@ pub const COMPARISON_PRIMITIVE_NAMES: &[&str] = &["=", "<", ">", "<=", ">="];
 /// This must be called before creating the VM to avoid borrow conflicts.
 /// Returns a vector of symbol IDs in the same order as `COMPARISON_PRIMITIVE_NAMES`.
 #[inline]
-pub fn intern_comparison_primitives(
-    interner: &mut symbol::Interner,
-) -> alloc::vec::Vec<symbol::Id> {
+pub fn intern_comparison_primitives(interner: &symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
     COMPARISON_PRIMITIVE_NAMES
         .iter()
         .map(|name| interner.intern(name))

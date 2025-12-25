@@ -80,7 +80,7 @@ fn literal_rejects_wrong_string() {
 
 #[test]
 fn literal_matches_keyword() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let kw_id = interner.intern("foo");
     let pattern = Pattern::Literal(Value::Keyword(kw_id));
     let value = Value::Keyword(kw_id);
@@ -89,7 +89,7 @@ fn literal_matches_keyword() {
 
 #[test]
 fn literal_rejects_wrong_keyword() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let foo_id = interner.intern("foo");
     let bar_id = interner.intern("bar");
     let pattern = Pattern::Literal(Value::Keyword(foo_id));
@@ -121,7 +121,7 @@ fn literal_rejects_wrong_ratio() {
 
 #[test]
 fn literal_matches_symbol() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let sym_id = interner.intern("my-symbol");
     let sym = Symbol::new(sym_id);
     let pattern = Pattern::Literal(Value::Symbol(sym.clone()));
@@ -131,7 +131,7 @@ fn literal_matches_symbol() {
 
 #[test]
 fn literal_rejects_wrong_symbol() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let foo_id = interner.intern("foo");
     let bar_id = interner.intern("bar");
     let pattern = Pattern::Literal(Value::Symbol(Symbol::new(foo_id)));

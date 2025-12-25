@@ -17,6 +17,7 @@ mod arithmetic;
 mod comparison;
 mod metadata;
 mod predicates;
+mod symbols;
 
 pub use arithmetic::{
     ARITHMETIC_PRIMITIVE_NAMES, intern_arithmetic_primitives, lookup_arithmetic_primitives,
@@ -33,6 +34,10 @@ pub use metadata::{
 pub use predicates::{
     TYPE_PREDICATE_NAMES, intern_type_predicates, lookup_type_predicates, native_keyword_p,
     register_type_predicates,
+};
+pub use symbols::{
+    SYMBOL_PRIMITIVE_NAMES, intern_symbol_primitives, lookup_symbol_primitives, native_gensym,
+    native_symbol, register_symbol_primitives,
 };
 
 use alloc::collections::BTreeMap;
@@ -239,7 +244,7 @@ mod tests {
 
     #[test]
     fn register_and_get_native() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = Registry::new();
 
         let add_sym = interner.intern("add");
@@ -250,7 +255,7 @@ mod tests {
 
     #[test]
     fn get_unknown_symbol_returns_none() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let registry = Registry::new();
 
         let unknown_sym = interner.intern("unknown");
@@ -259,7 +264,7 @@ mod tests {
 
     #[test]
     fn call_registered_native() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = Registry::new();
 
         let add_sym = interner.intern("add");
@@ -314,7 +319,7 @@ mod tests {
 
     #[test]
     fn registry_len_and_is_empty() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = Registry::new();
 
         assert!(registry.is_empty());
@@ -329,7 +334,7 @@ mod tests {
 
     #[test]
     fn register_replaces_existing() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut registry = Registry::new();
 
         let sym = interner.intern("test");

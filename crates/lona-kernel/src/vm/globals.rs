@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn set_and_get_global() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("x");
 
         let mut globals = Globals::new();
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn get_undefined_global_returns_none() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("undefined");
 
         let globals = Globals::new();
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn set_overwrites_existing_global() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("x");
 
         let mut globals = Globals::new();
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn multiple_globals() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let x = interner.intern("x");
         let y = interner.intern("y");
         let z = interner.intern("z");
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn globals_with_different_value_types() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let a = interner.intern("a");
         let b = interner.intern("b");
         let c = interner.intern("c");
@@ -210,7 +210,7 @@ mod tests {
 
     #[test]
     fn get_var_returns_var() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("x");
 
         let mut globals = Globals::new();
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn get_var_undefined_returns_none() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("undefined");
 
         let globals = Globals::new();
@@ -236,7 +236,7 @@ mod tests {
 
     #[test]
     fn set_preserves_metadata_on_redefine() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("x");
 
         let meta = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));
@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn set_with_meta_creates_new_var() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("x");
 
         let meta = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn set_with_meta_merges_on_existing() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("x");
 
         let meta_a = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));
@@ -300,7 +300,7 @@ mod tests {
 
     #[test]
     fn set_with_meta_none_does_not_clear() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("x");
 
         let meta = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn merge_meta_on_existing() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("x");
 
         let meta_a = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn merge_meta_on_undefined_does_nothing() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let sym = interner.intern("undefined");
 
         let meta = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));

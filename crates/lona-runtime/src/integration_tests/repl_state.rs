@@ -19,11 +19,7 @@ use lonala_compiler::compile;
 const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
 
 /// Helper to evaluate source with persistent state (like the REPL does).
-fn eval_with_state(
-    source: &str,
-    interner: &mut Interner,
-    globals: &mut Globals,
-) -> Result<Value, ()> {
+fn eval_with_state(source: &str, interner: &Interner, globals: &mut Globals) -> Result<Value, ()> {
     let chunk = compile(source, TEST_SOURCE_ID, interner).map_err(|err| {
         println!("Compile error: {err}");
     })?;
@@ -42,16 +38,16 @@ fn eval_with_state(
 
 /// Tests that def persists across evaluations.
 pub fn test_repl_def_persist() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let mut globals = Globals::new();
 
     // First evaluation: define x
-    if eval_with_state("(def x 42)", &mut interner, &mut globals).is_err() {
+    if eval_with_state("(def x 42)", &interner, &mut globals).is_err() {
         return Status::Fail;
     }
 
     // Second evaluation: use x
-    match eval_with_state("x", &mut interner, &mut globals) {
+    match eval_with_state("x", &interner, &mut globals) {
         Ok(Value::Integer(result)) if result == Integer::from_i64(42) => Status::Pass,
         _ => Status::Fail,
     }
@@ -59,20 +55,16 @@ pub fn test_repl_def_persist() -> Status {
 
 /// Tests the exact failing scenario: def x, then use x in if condition.
 pub fn test_repl_def_use_in_if() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let mut globals = Globals::new();
 
     // First evaluation: define x
-    if eval_with_state("(def x 42)", &mut interner, &mut globals).is_err() {
+    if eval_with_state("(def x 42)", &interner, &mut globals).is_err() {
         return Status::Fail;
     }
 
     // Second evaluation: use x in if condition
-    match eval_with_state(
-        "(if (> x 10) \"big\" \"small\")",
-        &mut interner,
-        &mut globals,
-    ) {
+    match eval_with_state("(if (> x 10) \"big\" \"small\")", &interner, &mut globals) {
         Ok(Value::String(ref s)) if s.as_str() == "big" => Status::Pass,
         _ => Status::Fail,
     }

@@ -1,5 +1,5 @@
 # Symbol Operations
-> **Status**: *(Planned)* — `gensym` is essential for hygienic macro expansion. Both functions are planned but not yet implemented.
+> **Status**: Implemented. Both `symbol` and `gensym` are fully functional.
 
 ## Functions
 

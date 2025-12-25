@@ -36,7 +36,7 @@ fn format_vm_invalid_opcode() {
 #[test]
 fn format_vm_undefined_global() {
     let (registry, source_id) = create_registry("<repl>", "fooo");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let sym = interner.intern("fooo");
@@ -57,7 +57,7 @@ fn format_vm_undefined_global() {
 #[test]
 fn format_vm_undefined_global_with_suggestion() {
     let (registry, source_id) = create_registry("<repl>", "fooo");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let sym = interner.intern("fooo");
@@ -159,7 +159,7 @@ fn format_vm_not_callable() {
 #[test]
 fn format_vm_arity_mismatch_exact() {
     let (registry, source_id) = create_registry("<repl>", "(add 1 2 3)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let sym = interner.intern("add");
@@ -367,7 +367,7 @@ fn format_error_unknown_source() {
 #[test]
 fn format_all_vm_error_kinds_have_messages() {
     let (registry, source_id) = create_registry("<test>", "test source");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
     let test_loc = loc(source_id, 0, 4);
 

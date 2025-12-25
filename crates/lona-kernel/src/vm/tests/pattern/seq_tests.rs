@@ -78,8 +78,8 @@ fn seq_single_wildcard_matches_single_element_vector() {
 
 #[test]
 fn seq_single_bind_captures_single_element_vector() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Bind(x)],
@@ -120,10 +120,10 @@ fn seq_single_literal_rejects_non_matching_element() {
 
 #[test]
 fn seq_multiple_binds_capture_all_elements() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
-    let b = make_symbol(&mut interner, "b");
-    let c = make_symbol(&mut interner, "c");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
+    let b = make_symbol(&interner, "b");
+    let c = make_symbol(&interner, "c");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Bind(a), Pattern::Bind(b), Pattern::Bind(c)],
@@ -149,8 +149,8 @@ fn seq_multiple_binds_capture_all_elements() {
 
 #[test]
 fn seq_mixed_patterns() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     let pattern = Pattern::Seq {
         items: vec![
@@ -205,9 +205,9 @@ fn seq_rejects_wrong_length_too_long() {
 
 #[test]
 fn seq_with_rest_captures_remaining_vector() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
-    let rest = make_symbol(&mut interner, "rest");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
+    let rest = make_symbol(&interner, "rest");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Bind(a)],
@@ -236,9 +236,9 @@ fn seq_with_rest_captures_remaining_vector() {
 
 #[test]
 fn seq_with_rest_captures_empty_when_exact() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
-    let rest = make_symbol(&mut interner, "rest");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
+    let rest = make_symbol(&interner, "rest");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Bind(a)],
@@ -260,10 +260,10 @@ fn seq_with_rest_captures_empty_when_exact() {
 
 #[test]
 fn seq_with_rest_fails_when_not_enough_elements() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
-    let b = make_symbol(&mut interner, "b");
-    let rest = make_symbol(&mut interner, "rest");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
+    let b = make_symbol(&interner, "b");
+    let rest = make_symbol(&interner, "rest");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Bind(a), Pattern::Bind(b)],
@@ -277,8 +277,8 @@ fn seq_with_rest_fails_when_not_enough_elements() {
 
 #[test]
 fn seq_with_wildcard_rest() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Bind(a)],
@@ -297,8 +297,8 @@ fn seq_with_wildcard_rest() {
 
 #[test]
 fn seq_rest_only_matches_empty() {
-    let mut interner = Interner::new();
-    let rest = make_symbol(&mut interner, "rest");
+    let interner = Interner::new();
+    let rest = make_symbol(&interner, "rest");
 
     let pattern = Pattern::Seq {
         items: vec![],
@@ -313,8 +313,8 @@ fn seq_rest_only_matches_empty() {
 
 #[test]
 fn seq_rest_only_captures_all() {
-    let mut interner = Interner::new();
-    let rest = make_symbol(&mut interner, "rest");
+    let interner = Interner::new();
+    let rest = make_symbol(&interner, "rest");
 
     let pattern = Pattern::Seq {
         items: vec![],
@@ -337,9 +337,9 @@ fn seq_rest_only_captures_all() {
 
 #[test]
 fn seq_binds_work_with_lists() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
-    let b = make_symbol(&mut interner, "b");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
+    let b = make_symbol(&interner, "b");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Bind(a), Pattern::Bind(b)],
@@ -362,9 +362,9 @@ fn seq_binds_work_with_lists() {
 
 #[test]
 fn seq_with_rest_captures_remaining_list() {
-    let mut interner = Interner::new();
-    let a = make_symbol(&mut interner, "a");
-    let rest = make_symbol(&mut interner, "rest");
+    let interner = Interner::new();
+    let a = make_symbol(&interner, "a");
+    let rest = make_symbol(&interner, "rest");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Bind(a)],
@@ -397,9 +397,9 @@ fn seq_with_rest_captures_remaining_list() {
 
 #[test]
 fn nested_seq_patterns() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let y = make_symbol(&mut interner, "y");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let y = make_symbol(&interner, "y");
 
     let pattern = Pattern::Seq {
         items: vec![
@@ -432,8 +432,8 @@ fn nested_seq_patterns() {
 
 #[test]
 fn deeply_nested_patterns() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     let pattern = Pattern::Seq {
         items: vec![Pattern::Seq {

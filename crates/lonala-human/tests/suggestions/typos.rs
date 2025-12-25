@@ -13,7 +13,7 @@ use super::{create_registry, loc};
 fn suggestion_for_typo_extra_character() {
     // fooo → foo (extra 'o')
     let (registry, source_id) = create_registry("<repl>", "fooo");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("fooo");
@@ -43,7 +43,7 @@ fn suggestion_for_typo_extra_character() {
 fn suggestion_for_typo_missing_character() {
     // prin → print (missing 't')
     let (registry, source_id) = create_registry("<repl>", "(prin 42)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("prin");
@@ -73,7 +73,7 @@ fn suggestion_for_typo_missing_character() {
 fn suggestion_for_typo_swapped_characters() {
     // pirnt → print (swapped 'r' and 'i')
     let (registry, source_id) = create_registry("<repl>", "(pirnt \"hello\")");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("pirnt");
@@ -97,7 +97,7 @@ fn suggestion_for_typo_swapped_characters() {
 fn suggestion_for_typo_wrong_character() {
     // priny → print (wrong final character)
     let (registry, source_id) = create_registry("<repl>", "(priny 42)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("priny");

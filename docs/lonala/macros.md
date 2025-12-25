@@ -1,5 +1,5 @@
 # Macros
-> **Status**: The macro system is implemented. `defmacro` (single and multi-arity), macro expansion at compile time, and introspection (`macro?`, `macroexpand-1`, `macroexpand`) are all working. `gensym` support is pending, which means hygienic macros require manual naming conventions for now.
+> **Status**: The macro system is implemented. `defmacro` (single and multi-arity), macro expansion at compile time, introspection (`macro?`, `macroexpand-1`, `macroexpand`), and `gensym` are all working.
 
 Macros enable compile-time code transformation. They receive unevaluated code as data and return new code to be compiled.
 
@@ -32,7 +32,7 @@ Macros enable compile-time code transformation. They receive unevaluated code as
 ; => when
 ```
 
-> **Note**: Macros are fully functional. They are defined with `defmacro`, stored in a persistent registry, and expanded at compile time using the VM-based macro expander. Introspection primitives (`macro?`, `macroexpand-1`, `macroexpand`) are implemented. The only missing piece is `gensym` for hygienic macro expansion.
+> **Note**: Macros are fully functional. They are defined with `defmacro`, stored in a persistent registry, and expanded at compile time using the VM-based macro expander. Introspection primitives (`macro?`, `macroexpand-1`, `macroexpand`) and `gensym` for hygienic macro expansion are all implemented.
 
 ## 11.2 Macro Introspection
 

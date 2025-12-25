@@ -17,7 +17,7 @@ use crate::error::Kind as ErrorKind;
 #[test]
 fn parse_map_keys() {
     // {:keys [a b]} -> keys=[a, b]
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("keys".into()),
         Ast::Vector(vec![
@@ -26,7 +26,7 @@ fn parse_map_keys() {
         ]),
     )])));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.keys.len(), 2);
     assert!(pattern.strs.is_empty());
@@ -39,13 +39,13 @@ fn parse_map_keys() {
 #[test]
 fn parse_map_strs() {
     // {:strs [name]} -> strs=[name]
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("strs".into()),
         Ast::Vector(vec![spanned(Ast::Symbol("name".into()))]),
     )])));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     assert!(pattern.keys.is_empty());
     assert_eq!(pattern.strs.len(), 1);
@@ -55,13 +55,13 @@ fn parse_map_strs() {
 #[test]
 fn parse_map_syms() {
     // {:syms [x]} -> syms=[x]
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("syms".into()),
         Ast::Vector(vec![spanned(Ast::Symbol("x".into()))]),
     )])));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     assert!(pattern.keys.is_empty());
     assert!(pattern.strs.is_empty());
@@ -71,7 +71,7 @@ fn parse_map_syms() {
 #[test]
 fn parse_map_or() {
     // {:or {a 0}} -> defaults=[(a, 0)]
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("or".into()),
         Ast::Map(map_elements(vec![(
@@ -80,7 +80,7 @@ fn parse_map_or() {
         )])),
     )])));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.defaults.len(), 1);
 }
@@ -88,13 +88,13 @@ fn parse_map_or() {
 #[test]
 fn parse_map_as() {
     // {:as m} -> as_binding=Some(m)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("as".into()),
         Ast::Symbol("m".into()),
     )])));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     assert!(pattern.as_binding.is_some());
 }
@@ -102,13 +102,13 @@ fn parse_map_as() {
 #[test]
 fn parse_map_explicit() {
     // {a :key-a} -> explicit=[(Binding::Symbol(a), :key-a)]
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Symbol("a".into()),
         Ast::Keyword("key-a".into()),
     )])));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.explicit.len(), 1);
     let Some((binding, key_ast)) = pattern.explicit.get(0) else {
@@ -129,7 +129,7 @@ fn parse_map_explicit() {
 #[test]
 fn parse_map_combined() {
     // {:keys [a b] :or {a 0} :as m} -> combined pattern
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![
         (
             Ast::Keyword("keys".into()),
@@ -148,7 +148,7 @@ fn parse_map_combined() {
         (Ast::Keyword("as".into()), Ast::Symbol("m".into())),
     ])));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     assert_eq!(pattern.keys.len(), 2);
     assert_eq!(pattern.defaults.len(), 1);
@@ -158,10 +158,10 @@ fn parse_map_combined() {
 #[test]
 fn parse_map_empty() {
     // {} -> empty pattern
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(vec![]));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     assert!(pattern.keys.is_empty());
     assert!(pattern.strs.is_empty());
@@ -176,7 +176,7 @@ fn parse_map_empty() {
 #[test]
 fn error_map_duplicate_keys() {
     // {:keys [a] :keys [b]} -> error
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     // Build manually to have specific span for second :keys
     let ast = spanned(Ast::Map(vec![
         spanned(Ast::Keyword("keys".into())),
@@ -185,7 +185,7 @@ fn error_map_duplicate_keys() {
         spanned(Ast::Vector(vec![spanned(Ast::Symbol("b".into()))])),
     ]));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -200,7 +200,7 @@ fn error_map_duplicate_keys() {
 #[test]
 fn error_map_duplicate_strs() {
     // {:strs [a] :strs [b]} -> error
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(vec![
         spanned(Ast::Keyword("strs".into())),
         spanned(Ast::Vector(vec![spanned(Ast::Symbol("a".into()))])),
@@ -208,7 +208,7 @@ fn error_map_duplicate_strs() {
         spanned(Ast::Vector(vec![spanned(Ast::Symbol("b".into()))])),
     ]));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -223,7 +223,7 @@ fn error_map_duplicate_strs() {
 #[test]
 fn error_map_duplicate_syms() {
     // {:syms [a] :syms [b]} -> error
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(vec![
         spanned(Ast::Keyword("syms".into())),
         spanned(Ast::Vector(vec![spanned(Ast::Symbol("a".into()))])),
@@ -231,7 +231,7 @@ fn error_map_duplicate_syms() {
         spanned(Ast::Vector(vec![spanned(Ast::Symbol("b".into()))])),
     ]));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -246,7 +246,7 @@ fn error_map_duplicate_syms() {
 #[test]
 fn error_map_duplicate_or() {
     // {:or {a 0} :or {b 1}} -> error
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(vec![
         spanned(Ast::Keyword("or".into())),
         spanned(Ast::Map(map_elements(vec![(
@@ -260,7 +260,7 @@ fn error_map_duplicate_or() {
         )]))),
     ]));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -275,7 +275,7 @@ fn error_map_duplicate_or() {
 #[test]
 fn error_map_duplicate_as() {
     // {:as m :as n} -> error
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(vec![
         spanned(Ast::Keyword("as".into())),
         spanned(Ast::Symbol("m".into())),
@@ -283,7 +283,7 @@ fn error_map_duplicate_as() {
         spanned(Ast::Symbol("n".into())),
     ]));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -298,13 +298,13 @@ fn error_map_duplicate_as() {
 #[test]
 fn error_map_keys_not_vector() {
     // {:keys :a} -> error (value must be vector)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("keys".into()),
         Ast::Keyword("a".into()),
     )])));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -319,13 +319,13 @@ fn error_map_keys_not_vector() {
 #[test]
 fn error_map_keys_non_symbol() {
     // {:keys [42]} -> error (vector must contain symbols)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("keys".into()),
         Ast::Vector(vec![spanned(Ast::Integer(42))]),
     )])));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -340,7 +340,7 @@ fn error_map_keys_non_symbol() {
 #[test]
 fn error_map_or_not_map() {
     // {:or [a 0]} -> error (value must be map)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("or".into()),
         Ast::Vector(vec![
@@ -349,7 +349,7 @@ fn error_map_or_not_map() {
         ]),
     )])));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -364,13 +364,13 @@ fn error_map_or_not_map() {
 #[test]
 fn error_map_or_non_symbol_key() {
     // {:or {42 0}} -> error (keys must be symbols)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("or".into()),
         Ast::Map(map_elements(vec![(Ast::Integer(42), Ast::Integer(0))])),
     )])));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -385,13 +385,13 @@ fn error_map_or_non_symbol_key() {
 #[test]
 fn error_map_as_not_symbol() {
     // {:as 42} -> error (value must be symbol)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("as".into()),
         Ast::Integer(42),
     )])));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -406,13 +406,13 @@ fn error_map_as_not_symbol() {
 #[test]
 fn error_map_not_map() {
     // [a b] -> error (must be map, not vector)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Vector(vec![
         spanned(Ast::Symbol("a".into())),
         spanned(Ast::Symbol("b".into())),
     ]));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -427,13 +427,13 @@ fn error_map_not_map() {
 #[test]
 fn error_map_invalid_key() {
     // {42 :foo} -> error (key must be symbol or special keyword)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Integer(42),
         Ast::Keyword("foo".into()),
     )])));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -448,7 +448,7 @@ fn error_map_invalid_key() {
 #[test]
 fn map_symbols_are_interned() {
     // Verify that symbols are properly interned
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("keys".into()),
         Ast::Vector(vec![
@@ -457,7 +457,7 @@ fn map_symbols_are_interned() {
         ]),
     )])));
 
-    let pattern = parse_map_pattern(&mut interner, &ast, source_id(), 0).unwrap();
+    let pattern = parse_map_pattern(&interner, &ast, source_id(), 0).unwrap();
 
     // Both should have the same symbol ID
     assert_eq!(pattern.keys.len(), 2);
@@ -473,10 +473,10 @@ fn map_symbols_are_interned() {
 #[test]
 fn error_map_odd_element_count() {
     // {:a} -> error (map pattern must have even number of elements)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(vec![spanned(Ast::Keyword("a".into()))]));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -491,13 +491,13 @@ fn error_map_odd_element_count() {
 #[test]
 fn error_map_or_odd_element_count() {
     // {:or {:a}} -> error (:or map must have even number of elements)
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Keyword("or".into()),
         Ast::Map(vec![spanned(Ast::Symbol("a".into()))]),
     )])));
 
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), 0);
+    let result = parse_map_pattern(&interner, &ast, source_id(), 0);
     assert!(result.is_err());
 
     let err = result.unwrap_err();
@@ -516,7 +516,7 @@ fn map_recursion_limit_exceeded_returns_error() {
     // Test that exceeding the limit returns an error by starting at a depth
     // close to the limit. We use depth=MAX_PATTERN_DEPTH to ensure the check
     // triggers on the very first nested call.
-    let mut interner = symbol::Interner::new();
+    let interner = symbol::Interner::new();
     // Create a nested map pattern: {{:keys [x]} :inner}
     let ast = spanned(Ast::Map(map_elements(vec![(
         Ast::Map(map_elements(vec![(
@@ -527,7 +527,7 @@ fn map_recursion_limit_exceeded_returns_error() {
     )])));
 
     // Start at MAX_PATTERN_DEPTH - the inner map will exceed the limit
-    let result = parse_map_pattern(&mut interner, &ast, source_id(), MAX_PATTERN_DEPTH);
+    let result = parse_map_pattern(&interner, &ast, source_id(), MAX_PATTERN_DEPTH);
     assert!(result.is_err());
 
     let err = result.unwrap_err();

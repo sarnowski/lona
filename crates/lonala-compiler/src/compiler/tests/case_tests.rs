@@ -74,11 +74,11 @@ fn compile_case_keyword_patterns() {
         })
         .collect();
     assert!(
-        keywords.contains(&"a"),
+        keywords.iter().any(|k| k == "a"),
         "should have keyword constant for :a"
     );
     assert!(
-        keywords.contains(&"b"),
+        keywords.iter().any(|k| k == "b"),
         "should have keyword constant for :b"
     );
 }
@@ -146,12 +146,8 @@ fn compile_case_with_else() {
 
 #[test]
 fn compile_case_else_must_be_last() {
-    let mut interner = symbol::Interner::new();
-    let result = compile(
-        "(case 1 :else :default 2 :two)",
-        TEST_SOURCE_ID,
-        &mut interner,
-    );
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 :else :default 2 :two)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -168,8 +164,8 @@ fn compile_case_else_must_be_last() {
 
 #[test]
 fn compile_case_else_needs_result() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case 1 :else)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 :else)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -189,8 +185,8 @@ fn compile_case_else_needs_result() {
 
 #[test]
 fn compile_case_rejects_symbol_pattern() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case 1 x 2)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 x 2)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -207,8 +203,8 @@ fn compile_case_rejects_symbol_pattern() {
 
 #[test]
 fn compile_case_rejects_list_pattern() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case 1 (1 2) 3)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 (1 2) 3)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -225,8 +221,8 @@ fn compile_case_rejects_list_pattern() {
 
 #[test]
 fn compile_case_rejects_vector_pattern() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case 1 [1 2] 3)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 [1 2] 3)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -243,8 +239,8 @@ fn compile_case_rejects_vector_pattern() {
 
 #[test]
 fn compile_case_rejects_map_pattern() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case 1 {:a 1} 3)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 {:a 1} 3)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -261,8 +257,8 @@ fn compile_case_rejects_map_pattern() {
 
 #[test]
 fn compile_case_rejects_float_pattern() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case 1 1.5 2)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 1.5 2)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -283,8 +279,8 @@ fn compile_case_rejects_float_pattern() {
 
 #[test]
 fn compile_case_rejects_duplicate_integer() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case 1 1 :a 1 :b)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 1 :a 1 :b)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -301,8 +297,8 @@ fn compile_case_rejects_duplicate_integer() {
 
 #[test]
 fn compile_case_rejects_duplicate_keyword() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case :x :a 1 :a 2)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case :x :a 1 :a 2)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -319,8 +315,8 @@ fn compile_case_rejects_duplicate_keyword() {
 
 #[test]
 fn compile_case_rejects_duplicate_string() {
-    let mut interner = symbol::Interner::new();
-    let result = compile(r#"(case "x" "a" 1 "a" 2)"#, TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile(r#"(case "x" "a" 1 "a" 2)"#, TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -370,8 +366,8 @@ fn compile_case_in_fn_tail_position() {
 
 #[test]
 fn compile_case_empty() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {
@@ -387,8 +383,8 @@ fn compile_case_empty() {
 
 #[test]
 fn compile_case_odd_clauses() {
-    let mut interner = symbol::Interner::new();
-    let result = compile("(case 1 2)", TEST_SOURCE_ID, &mut interner);
+    let interner = symbol::Interner::new();
+    let result = compile("(case 1 2)", TEST_SOURCE_ID, &interner);
     assert!(result.is_err());
 
     if let Err(CompileError::Compile(Error {

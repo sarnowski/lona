@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
 
-//! Tests for Symbol Operations (Planned).
+//! Tests for Symbol Operations.
 //!
 //! Section 9.5 of the Lonala specification.
 
@@ -12,10 +12,8 @@ use crate::{SpecTestContext, spec_ref};
 // Reference: docs/lonala.md#95-symbol-operations
 // ============================================================================
 
-/// [IGNORED] Spec 9.5: symbol creates/interns a symbol
-/// Tracking: Symbol operations not fully exposed yet
+/// Spec 9.5: symbol creates/interns a symbol
 #[test]
-#[ignore]
 fn test_9_5_symbol() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_symbol_eq(
@@ -25,10 +23,8 @@ fn test_9_5_symbol() {
     );
 }
 
-/// [IGNORED] Spec 9.5: symbol from string equality
-/// Tracking: Symbol operations not fully exposed yet
+/// Spec 9.5: symbol from string equality
 #[test]
-#[ignore]
 fn test_9_5_symbol_equality() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_bool(
@@ -38,10 +34,8 @@ fn test_9_5_symbol_equality() {
     );
 }
 
-/// [IGNORED] Spec 9.5: gensym generates unique symbol
-/// Tracking: gensym not yet implemented
+/// Spec 9.5: gensym generates unique symbol
 #[test]
-#[ignore]
 fn test_9_5_gensym() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_symbol(
@@ -50,10 +44,8 @@ fn test_9_5_gensym() {
     );
 }
 
-/// [IGNORED] Spec 9.5: gensym with prefix
-/// Tracking: gensym not yet implemented
+/// Spec 9.5: gensym with prefix
 #[test]
-#[ignore]
 fn test_9_5_gensym_prefix() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_symbol(
@@ -62,10 +54,8 @@ fn test_9_5_gensym_prefix() {
     );
 }
 
-/// [IGNORED] Spec 9.5: gensym symbols are unique
-/// Tracking: gensym not yet implemented
+/// Spec 9.5: gensym symbols are unique
 #[test]
-#[ignore]
 fn test_9_5_gensym_unique() {
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def g1 (gensym))").unwrap();
@@ -74,5 +64,74 @@ fn test_9_5_gensym_unique() {
         "(= g1 g2)",
         false,
         &spec_ref("9.5", "gensym", "two gensyms are different"),
+    );
+}
+
+// ============================================================================
+// Edge Cases
+// ============================================================================
+
+/// Spec 9.5: symbol with empty string creates empty-named symbol
+#[test]
+fn test_9_5_symbol_empty_string() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_symbol_eq(
+        "(symbol \"\")",
+        "",
+        &spec_ref("9.5", "symbol", "create symbol from empty string"),
+    );
+}
+
+/// Spec 9.5: gensym with empty prefix uses empty prefix
+#[test]
+fn test_9_5_gensym_empty_prefix() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_symbol(
+        "(gensym \"\")",
+        &spec_ref("9.5", "gensym", "generate symbol with empty prefix"),
+    );
+}
+
+// ============================================================================
+// Error Cases
+// ============================================================================
+
+/// Spec 9.5: symbol requires string argument
+#[test]
+fn test_9_5_symbol_type_error() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_error(
+        "(symbol 42)",
+        &spec_ref("9.5", "symbol", "type error for non-string argument"),
+    );
+}
+
+/// Spec 9.5: symbol requires exactly one argument
+#[test]
+fn test_9_5_symbol_arity_error() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_error(
+        "(symbol)",
+        &spec_ref("9.5", "symbol", "arity error for no arguments"),
+    );
+}
+
+/// Spec 9.5: gensym prefix must be string
+#[test]
+fn test_9_5_gensym_type_error() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_error(
+        "(gensym 42)",
+        &spec_ref("9.5", "gensym", "type error for non-string prefix"),
+    );
+}
+
+/// Spec 9.5: gensym takes at most one argument
+#[test]
+fn test_9_5_gensym_arity_error() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_error(
+        "(gensym \"a\" \"b\")",
+        &spec_ref("9.5", "gensym", "arity error for too many arguments"),
     );
 }

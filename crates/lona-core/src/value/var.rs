@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn var_identity_preserved_on_clone() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let name = interner.intern("x");
         let var = Var::new(name, Value::Integer(Integer::from_i64(42)), None);
         let var_clone = var.clone();
@@ -160,7 +160,7 @@ mod tests {
 
     #[test]
     fn var_value_get_set() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let name = interner.intern("x");
         let var = Var::new(name, Value::Integer(Integer::from_i64(1)), None);
 
@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn var_metadata_get_set() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let name = interner.intern("x");
         let var = Var::new(name, Value::Nil, None);
 
@@ -191,7 +191,7 @@ mod tests {
 
     #[test]
     fn var_metadata_merge() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let name = interner.intern("x");
 
         let meta_a = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));
@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn var_metadata_merge_when_none() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let name = interner.intern("x");
         let var = Var::new(name, Value::Nil, None);
 
@@ -224,7 +224,7 @@ mod tests {
 
     #[test]
     fn var_name() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let name = interner.intern("my-var");
         let var = Var::new(name, Value::Nil, None);
 
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn var_equality_is_identity() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let name = interner.intern("x");
 
         let var1 = Var::new(name, Value::Integer(Integer::from_i64(42)), None);
@@ -254,7 +254,7 @@ mod tests {
         use crate::fnv::FnvHasher;
         use core::hash::Hasher;
 
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let name = interner.intern("x");
 
         let var1 = Var::new(name, Value::Integer(Integer::from_i64(42)), None);

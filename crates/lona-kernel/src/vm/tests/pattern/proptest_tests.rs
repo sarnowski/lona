@@ -82,8 +82,8 @@ proptest! {
     /// Bind pattern always matches and captures the value.
     #[test]
     fn bind_always_captures(value in arb_value()) {
-        let mut interner = Interner::new();
-        let x = make_symbol(&mut interner, "x");
+        let interner = Interner::new();
+        let x = make_symbol(&interner, "x");
 
         let result = try_match(&Pattern::Bind(x), &value);
         prop_assert!(result.is_some());
@@ -155,8 +155,8 @@ proptest! {
     /// Map pattern rejects non-map types.
     #[test]
     fn map_pattern_rejects_non_map(value in arb_simple_value()) {
-        let mut interner = Interner::new();
-        let x = make_symbol(&mut interner, "x");
+        let interner = Interner::new();
+        let x = make_symbol(&interner, "x");
         let key = Value::Keyword(interner.intern("a"));
 
         let pattern = Pattern::Map {
@@ -170,8 +170,8 @@ proptest! {
     /// Guarded pattern returns same bindings as inner pattern.
     #[test]
     fn guarded_same_as_inner(value in arb_value()) {
-        let mut interner = Interner::new();
-        let x = make_symbol(&mut interner, "x");
+        let interner = Interner::new();
+        let x = make_symbol(&interner, "x");
 
         let inner = Pattern::Bind(x);
         let guarded = Pattern::Guarded {

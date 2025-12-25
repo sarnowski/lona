@@ -78,7 +78,7 @@ fn format_error_whitespace_only_source() {
 #[test]
 fn format_output_structure() {
     let (registry, source_id) = create_registry("<repl>", "(fooo 42)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let sym = interner.intern("fooo");

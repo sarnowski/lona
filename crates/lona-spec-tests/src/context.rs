@@ -58,14 +58,14 @@ impl SpecTestContext {
         .map_err(|err| alloc::format!("compile error: {err:?}"))?;
 
         // Pre-intern primitive symbols before creating VM
-        let collection_symbols =
-            lona_kernel::vm::collections::intern_primitives(&mut self.interner);
+        let collection_symbols = lona_kernel::vm::collections::intern_primitives(&self.interner);
         let introspection_symbols =
-            lona_kernel::vm::introspection::intern_primitives(&mut self.interner);
-        let arithmetic_symbols = lona_kernel::vm::intern_arithmetic_primitives(&mut self.interner);
-        let comparison_symbols = lona_kernel::vm::intern_comparison_primitives(&mut self.interner);
-        let type_predicate_symbols = lona_kernel::vm::intern_type_predicates(&mut self.interner);
-        let metadata_symbols = lona_kernel::vm::intern_metadata_primitives(&mut self.interner);
+            lona_kernel::vm::introspection::intern_primitives(&self.interner);
+        let arithmetic_symbols = lona_kernel::vm::intern_arithmetic_primitives(&self.interner);
+        let comparison_symbols = lona_kernel::vm::intern_comparison_primitives(&self.interner);
+        let type_predicate_symbols = lona_kernel::vm::intern_type_predicates(&self.interner);
+        let metadata_symbols = lona_kernel::vm::intern_metadata_primitives(&self.interner);
+        let symbol_symbols = lona_kernel::vm::intern_symbol_primitives(&self.interner);
 
         // Create VM and restore persistent globals
         let mut vm = Vm::new(&self.interner);
@@ -85,6 +85,9 @@ impl SpecTestContext {
 
         // Register metadata primitives (meta, with-meta)
         lona_kernel::vm::register_metadata_primitives(&mut vm, &metadata_symbols);
+
+        // Register symbol primitives (symbol, gensym)
+        lona_kernel::vm::register_symbol_primitives(&mut vm, &symbol_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);

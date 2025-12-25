@@ -15,8 +15,8 @@ use crate::vm::pattern::{Pattern, try_match};
 
 #[test]
 fn bind_captures_nil() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     let result = try_match(&Pattern::Bind(x), &Value::Nil);
     assert_eq!(result, Some(vec![(x, Value::Nil)]));
@@ -24,8 +24,8 @@ fn bind_captures_nil() {
 
 #[test]
 fn bind_captures_integer() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
     let value = Value::Integer(Integer::from(42));
 
     let result = try_match(&Pattern::Bind(x), &value);
@@ -34,8 +34,8 @@ fn bind_captures_integer() {
 
 #[test]
 fn bind_captures_string() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
     let value = Value::String(HeapStr::from("hello"));
 
     let result = try_match(&Pattern::Bind(x), &value);
@@ -44,8 +44,8 @@ fn bind_captures_string() {
 
 #[test]
 fn bind_captures_bool() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
     let value = Value::Bool(true);
 
     let result = try_match(&Pattern::Bind(x), &value);
@@ -54,8 +54,8 @@ fn bind_captures_bool() {
 
 #[test]
 fn bind_captures_float() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
     let value = Value::Float(3.14);
 
     let result = try_match(&Pattern::Bind(x), &value);
@@ -64,8 +64,8 @@ fn bind_captures_float() {
 
 #[test]
 fn bind_captures_ratio() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
     let numer = Integer::from(1);
     let denom = Integer::from(2);
     let ratio = Ratio::new(&numer, &denom);
@@ -77,8 +77,8 @@ fn bind_captures_ratio() {
 
 #[test]
 fn bind_captures_vector() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
     let vec = Vector::from_vec(vec![
         Value::Integer(Integer::from(1)),
         Value::Integer(Integer::from(2)),

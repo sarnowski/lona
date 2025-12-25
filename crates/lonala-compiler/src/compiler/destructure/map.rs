@@ -49,7 +49,7 @@ use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 /// ```
 #[inline]
 pub fn parse_map_pattern(
-    interner: &mut symbol::Interner,
+    interner: &symbol::Interner,
     ast: &Spanned<Ast>,
     source_id: source::Id,
     depth: usize,
@@ -111,7 +111,7 @@ impl SeenKeywords {
 
 /// State machine for parsing map destructuring patterns.
 struct MapPatternParser<'interner> {
-    interner: &'interner mut symbol::Interner,
+    interner: &'interner symbol::Interner,
     source_id: source::Id,
     pattern: MapPattern,
     seen: SeenKeywords,
@@ -121,7 +121,7 @@ struct MapPatternParser<'interner> {
 impl<'interner> MapPatternParser<'interner> {
     /// Creates a new parser instance.
     fn new(
-        interner: &'interner mut symbol::Interner,
+        interner: &'interner symbol::Interner,
         source_id: source::Id,
         span: Span,
         depth: usize,
@@ -291,7 +291,7 @@ impl<'interner> MapPatternParser<'interner> {
 ///
 /// Returns an error if the value is not a vector or contains non-symbols.
 fn parse_symbol_vector(
-    interner: &mut symbol::Interner,
+    interner: &symbol::Interner,
     ast: &Spanned<Ast>,
     source_id: source::Id,
 ) -> Result<Vec<symbol::Id>, Error> {
@@ -328,7 +328,7 @@ fn parse_symbol_vector(
 ///
 /// Returns an error if the value is not a map or keys are not symbols.
 fn parse_defaults_map(
-    interner: &mut symbol::Interner,
+    interner: &symbol::Interner,
     ast: &Spanned<Ast>,
     source_id: source::Id,
 ) -> Result<Vec<(symbol::Id, Spanned<Ast>)>, Error> {

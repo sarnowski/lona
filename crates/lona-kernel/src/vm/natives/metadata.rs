@@ -18,7 +18,7 @@ pub const METADATA_PRIMITIVE_NAMES: &[&str] = &["meta", "with-meta"];
 /// This must be called before creating the VM to avoid borrow conflicts.
 /// Returns a vector of symbol IDs in the same order as `METADATA_PRIMITIVE_NAMES`.
 #[inline]
-pub fn intern_metadata_primitives(interner: &mut symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
+pub fn intern_metadata_primitives(interner: &symbol::Interner) -> alloc::vec::Vec<symbol::Id> {
     METADATA_PRIMITIVE_NAMES
         .iter()
         .map(|name| interner.intern(name))

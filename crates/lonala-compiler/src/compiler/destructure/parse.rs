@@ -47,7 +47,7 @@ pub const MAX_PATTERN_DEPTH: usize = 1024;
 /// * `depth` - Current nesting depth for recursion limit checking
 #[inline]
 pub fn parse_binding(
-    interner: &mut symbol::Interner,
+    interner: &symbol::Interner,
     ast: &Spanned<Ast>,
     source_id: source::Id,
     depth: usize,

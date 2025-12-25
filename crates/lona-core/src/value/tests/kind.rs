@@ -103,7 +103,7 @@ fn value_kind_heap_types() {
     use crate::map::Map;
     use crate::vector::Vector;
 
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let id = interner.intern("test");
 
     assert_eq!(Value::from(id).kind(), Kind::Symbol);

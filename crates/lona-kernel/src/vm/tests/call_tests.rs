@@ -37,7 +37,7 @@ fn execute_native_function() {
         Ok(Value::Integer(num * &Integer::from_i64(2)))
     }
 
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let double_sym = interner.intern("double");
 
     let mut vm = Vm::new(&interner);
@@ -75,7 +75,7 @@ fn execute_native_function() {
 
 #[test]
 fn execute_undefined_function_error() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let unknown_sym = interner.intern("unknown");
 
     let mut vm = Vm::new(&interner);

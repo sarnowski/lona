@@ -75,15 +75,15 @@ impl From<Error> for CompileError {
 /// use lona_core::symbol::Interner;
 /// use lonala_compiler::compile;
 ///
-/// let mut interner = Interner::new();
+/// let interner = Interner::new();
 /// let source_id = source::Id::new(0);
-/// let chunk = compile("(+ 1 2)", source_id, &mut interner).unwrap();
+/// let chunk = compile("(+ 1 2)", source_id, &interner).unwrap();
 /// ```
 #[inline]
 pub fn compile(
     source: &str,
     source_id: source::Id,
-    interner: &mut symbol::Interner,
+    interner: &symbol::Interner,
 ) -> Result<Chunk, CompileError> {
     let mut registry = MacroRegistry::new();
     compile_with_registry(source, source_id, interner, &mut registry)
@@ -114,7 +114,7 @@ pub fn compile(
 /// use lona_core::symbol::Interner;
 /// use lonala_compiler::{compile_with_registry, MacroRegistry};
 ///
-/// let mut interner = Interner::new();
+/// let interner = Interner::new();
 /// let mut registry = MacroRegistry::new();
 /// let source_id = source::Id::new(0);
 ///
@@ -122,7 +122,7 @@ pub fn compile(
 /// let chunk1 = compile_with_registry(
 ///     "(defmacro double [x] (list '+ x x))",
 ///     source_id,
-///     &mut interner,
+///     &interner,
 ///     &mut registry
 /// ).unwrap();
 ///
@@ -130,7 +130,7 @@ pub fn compile(
 /// let chunk2 = compile_with_registry(
 ///     "(double 5)",
 ///     source_id,
-///     &mut interner,
+///     &interner,
 ///     &mut registry
 /// ).unwrap();
 /// ```
@@ -138,7 +138,7 @@ pub fn compile(
 pub fn compile_with_registry(
     source: &str,
     source_id: source::Id,
-    interner: &mut symbol::Interner,
+    interner: &symbol::Interner,
     registry: &mut MacroRegistry,
 ) -> Result<Chunk, CompileError> {
     let exprs = lonala_parser::parse(source, source_id)?;
@@ -176,7 +176,7 @@ pub fn compile_with_registry(
 /// use lona_core::symbol::Interner;
 /// use lonala_compiler::{compile_with_expansion, MacroRegistry, MacroExpander};
 ///
-/// let mut interner = Interner::new();
+/// let interner = Interner::new();
 /// let mut registry = MacroRegistry::new();
 /// let mut expander = MyMacroExpander::new(); // Implements MacroExpander
 /// let source_id = source::Id::new(0);
@@ -185,7 +185,7 @@ pub fn compile_with_registry(
 /// let chunk1 = compile_with_expansion(
 ///     "(defmacro double [x] `(+ ~x ~x))",
 ///     source_id,
-///     &mut interner,
+///     &interner,
 ///     &mut registry,
 ///     &mut expander
 /// ).unwrap();
@@ -194,7 +194,7 @@ pub fn compile_with_registry(
 /// let chunk2 = compile_with_expansion(
 ///     "(double 5)",
 ///     source_id,
-///     &mut interner,
+///     &interner,
 ///     &mut registry,
 ///     &mut expander
 /// ).unwrap();
@@ -203,7 +203,7 @@ pub fn compile_with_registry(
 pub fn compile_with_expansion(
     source: &str,
     source_id: source::Id,
-    interner: &mut symbol::Interner,
+    interner: &symbol::Interner,
     registry: &mut MacroRegistry,
     expander: &mut dyn MacroExpander,
 ) -> Result<Chunk, CompileError> {

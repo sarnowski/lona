@@ -98,7 +98,7 @@ fn display_float_scientific() {
 #[cfg(feature = "alloc")]
 #[test]
 fn display_symbol_without_interner() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let id = interner.intern("foo");
     let value = Value::from(id);
     // Without interner, shows raw ID
@@ -108,7 +108,7 @@ fn display_symbol_without_interner() {
 #[cfg(feature = "alloc")]
 #[test]
 fn display_symbol_with_interner() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let id = interner.intern("my-symbol");
     let value = Value::from(id);
     // With interner, shows symbol name
@@ -132,7 +132,7 @@ fn display_with_interner_passthrough() {
 fn display_list_with_symbols_resolves_names() {
     use crate::list::List;
 
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let plus_id = interner.intern("+");
     let x_id = interner.intern("x");
     let y_id = interner.intern("y");
@@ -154,7 +154,7 @@ fn display_list_with_symbols_resolves_names() {
 fn display_vector_with_symbols_resolves_names() {
     use crate::vector::Vector;
 
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let a_id = interner.intern("a");
     let b_id = interner.intern("b");
 
@@ -217,7 +217,7 @@ fn as_float() {
 #[cfg(feature = "alloc")]
 #[test]
 fn as_symbol() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let id = interner.intern("test");
     assert_eq!(Value::from(id).as_symbol(), Some(id));
     assert_eq!(Value::Nil.as_symbol(), None);
@@ -249,7 +249,7 @@ fn from_f64() {
 #[test]
 fn from_symbol_id() {
     use crate::value::Symbol;
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let id = interner.intern("test");
     assert_eq!(Value::from(id), Value::Symbol(Symbol::new(id)));
 }

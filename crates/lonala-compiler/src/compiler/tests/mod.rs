@@ -39,13 +39,13 @@ pub(super) const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
 
 /// Helper to compile source and return the chunk.
 pub(super) fn compile_source(source: &str) -> Chunk {
-    let mut interner = symbol::Interner::new();
-    compile(source, TEST_SOURCE_ID, &mut interner).expect("compilation should succeed")
+    let interner = symbol::Interner::new();
+    compile(source, TEST_SOURCE_ID, &interner).expect("compilation should succeed")
 }
 
 /// Helper to compile and return chunk + interner for symbol checks.
 pub(super) fn compile_with_interner(source: &str) -> (Chunk, symbol::Interner) {
-    let mut interner = symbol::Interner::new();
-    let chunk = compile(source, TEST_SOURCE_ID, &mut interner).expect("compilation should succeed");
+    let interner = symbol::Interner::new();
+    let chunk = compile(source, TEST_SOURCE_ID, &interner).expect("compilation should succeed");
     (chunk, interner)
 }

@@ -27,10 +27,10 @@ pub fn test_boot() -> Status {
 
 /// Tests basic arithmetic: (+ 1 2) should evaluate to 3.
 pub fn test_arithmetic() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
     // Compile a simple arithmetic expression
-    let chunk = match compile("(+ 1 2)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(+ 1 2)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -45,9 +45,9 @@ pub fn test_arithmetic() -> Status {
 
 /// Tests subtraction: (- 10 3) should evaluate to 7.
 pub fn test_subtraction() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(- 10 3)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(- 10 3)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -61,9 +61,9 @@ pub fn test_subtraction() -> Status {
 
 /// Tests multiplication: (* 6 7) should evaluate to 42.
 pub fn test_multiplication() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(* 6 7)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(* 6 7)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -77,9 +77,9 @@ pub fn test_multiplication() -> Status {
 
 /// Tests comparison: (< 1 2) should evaluate to true.
 pub fn test_comparison() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(< 1 2)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(< 1 2)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -93,9 +93,9 @@ pub fn test_comparison() -> Status {
 
 /// Tests boolean not: (not false) should evaluate to true.
 pub fn test_boolean_not() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(not false)", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(not false)", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -109,9 +109,9 @@ pub fn test_boolean_not() -> Status {
 
 /// Tests nested expression: (+ (* 2 3) (- 10 5)) should evaluate to 11.
 pub fn test_nested_expression() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("(+ (* 2 3) (- 10 5))", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("(+ (* 2 3) (- 10 5))", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };
@@ -125,9 +125,9 @@ pub fn test_nested_expression() -> Status {
 
 /// Tests string literal: "hello" should evaluate to a string value.
 pub fn test_string_literal() -> Status {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
-    let chunk = match compile("\"hello\"", TEST_SOURCE_ID, &mut interner) {
+    let chunk = match compile("\"hello\"", TEST_SOURCE_ID, &interner) {
         Ok(chunk) => chunk,
         Err(_err) => return Status::Fail,
     };

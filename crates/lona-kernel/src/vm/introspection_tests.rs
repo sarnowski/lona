@@ -44,7 +44,7 @@ fn ctx_without_macros(interner: &Interner) -> NativeContext<'_> {
 
 #[test]
 fn is_macro_returns_true_for_registered_macro() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let mut registry = MacroRegistry::new();
 
     let macro_name = interner.intern("my-macro");
@@ -61,7 +61,7 @@ fn is_macro_returns_true_for_registered_macro() {
 
 #[test]
 fn is_macro_returns_false_for_unknown_symbol() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let registry = MacroRegistry::new();
 
     let unknown_sym = interner.intern("unknown");
@@ -74,7 +74,7 @@ fn is_macro_returns_false_for_unknown_symbol() {
 
 #[test]
 fn is_macro_returns_false_without_registry() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
 
     let sym = interner.intern("anything");
     let ctx = ctx_without_macros(&interner);
@@ -98,7 +98,7 @@ fn is_macro_rejects_non_symbol() {
 
 #[test]
 fn is_macro_rejects_wrong_arity() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let registry = MacroRegistry::new();
 
     // No arguments
@@ -119,7 +119,7 @@ fn is_macro_rejects_wrong_arity() {
 
 #[test]
 fn expand_once_returns_non_list_unchanged() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let registry = MacroRegistry::new();
 
     let sym = interner.intern("foo");
@@ -132,7 +132,7 @@ fn expand_once_returns_non_list_unchanged() {
 
 #[test]
 fn expand_once_returns_non_macro_list_unchanged() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let registry = MacroRegistry::new();
 
     let sym = interner.intern("not-a-macro");
@@ -149,11 +149,11 @@ fn expand_once_returns_non_macro_list_unchanged() {
 
 #[test]
 fn expand_once_expands_macro_call() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let mut registry = MacroRegistry::new();
 
     // Pre-intern collection primitives (required for macro expansion)
-    let _primitives = intern_primitives(&mut interner);
+    let _primitives = intern_primitives(&interner);
 
     // Register an identity macro
     let macro_name = interner.intern("identity");
@@ -177,7 +177,7 @@ fn expand_once_expands_macro_call() {
 
 #[test]
 fn expand_fully_stops_when_stable() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let registry = MacroRegistry::new();
 
     // A non-macro form should return immediately

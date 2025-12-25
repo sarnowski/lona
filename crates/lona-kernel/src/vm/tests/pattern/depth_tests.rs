@@ -15,8 +15,8 @@ use crate::vm::pattern::{MAX_PATTERN_DEPTH, Pattern, try_match};
 
 #[test]
 fn depth_limit_prevents_stack_overflow() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     // Create a pattern nested deeper than MAX_PATTERN_DEPTH
     let mut pattern = Pattern::Bind(x);

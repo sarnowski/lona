@@ -17,7 +17,7 @@ use super::{create_registry, loc};
 fn suggestion_for_case_difference_all_caps() {
     // PRINT → print
     let (registry, source_id) = create_registry("<repl>", "(PRINT 42)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("PRINT");
@@ -41,7 +41,7 @@ fn suggestion_for_case_difference_all_caps() {
 fn suggestion_for_case_difference_pascal_case() {
     // Print → print (PascalCase)
     let (registry, source_id) = create_registry("<repl>", "(Print 42)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("Print");
@@ -65,7 +65,7 @@ fn suggestion_for_case_difference_pascal_case() {
 fn suggestion_for_case_difference_mixed_case() {
     // myVar → my-var (different naming convention)
     let (registry, source_id) = create_registry("<repl>", "myVar");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let typo = interner.intern("myVar");
@@ -91,7 +91,7 @@ fn suggestion_for_case_difference_mixed_case() {
 #[test]
 fn no_suggestion_when_none_available() {
     let (registry, source_id) = create_registry("<repl>", "totally-unknown-symbol");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let unknown = interner.intern("totally-unknown-symbol");
@@ -116,7 +116,7 @@ fn no_suggestion_when_none_available() {
 #[test]
 fn no_suggestion_for_function_when_none_available() {
     let (registry, source_id) = create_registry("<repl>", "(completely-unknown 42)");
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let config = Config::new();
 
     let unknown = interner.intern("completely-unknown");

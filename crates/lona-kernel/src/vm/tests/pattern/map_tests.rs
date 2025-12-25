@@ -14,7 +14,7 @@ use super::make_symbol;
 use crate::vm::pattern::{Pattern, try_match};
 
 /// Helper to create a keyword Value from a string.
-fn make_keyword(interner: &mut Interner, name: &str) -> Value {
+fn make_keyword(interner: &Interner, name: &str) -> Value {
     Value::Keyword(interner.intern(name))
 }
 
@@ -31,15 +31,15 @@ fn empty_map_pattern_matches_empty_map() {
 
 #[test]
 fn empty_map_pattern_matches_any_map() {
-    let mut interner = Interner::new();
+    let interner = Interner::new();
     let pattern = Pattern::Map { entries: vec![] };
     let map = Map::empty()
         .assoc(
-            make_keyword(&mut interner, "a"),
+            make_keyword(&interner, "a"),
             Value::Integer(Integer::from(1)),
         )
         .assoc(
-            make_keyword(&mut interner, "b"),
+            make_keyword(&interner, "b"),
             Value::Integer(Integer::from(2)),
         );
     let value = Value::Map(map);
@@ -52,9 +52,9 @@ fn empty_map_pattern_matches_any_map() {
 
 #[test]
 fn map_pattern_binds_single_value() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let key_a = make_keyword(&mut interner, "a");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let key_a = make_keyword(&interner, "a");
 
     let pattern = Pattern::Map {
         entries: vec![(key_a.clone(), Pattern::Bind(x))],
@@ -68,10 +68,10 @@ fn map_pattern_binds_single_value() {
 
 #[test]
 fn map_pattern_fails_on_missing_key() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let key_missing = make_keyword(&mut interner, "missing");
-    let key_a = make_keyword(&mut interner, "a");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let key_missing = make_keyword(&interner, "missing");
+    let key_a = make_keyword(&interner, "a");
 
     let pattern = Pattern::Map {
         entries: vec![(key_missing, Pattern::Bind(x))],
@@ -84,8 +84,8 @@ fn map_pattern_fails_on_missing_key() {
 
 #[test]
 fn map_pattern_with_literal_matches() {
-    let mut interner = Interner::new();
-    let key_a = make_keyword(&mut interner, "a");
+    let interner = Interner::new();
+    let key_a = make_keyword(&interner, "a");
 
     let pattern = Pattern::Map {
         entries: vec![(
@@ -101,8 +101,8 @@ fn map_pattern_with_literal_matches() {
 
 #[test]
 fn map_pattern_with_literal_rejects_mismatch() {
-    let mut interner = Interner::new();
-    let key_a = make_keyword(&mut interner, "a");
+    let interner = Interner::new();
+    let key_a = make_keyword(&interner, "a");
 
     let pattern = Pattern::Map {
         entries: vec![(
@@ -118,8 +118,8 @@ fn map_pattern_with_literal_rejects_mismatch() {
 
 #[test]
 fn map_pattern_with_wildcard() {
-    let mut interner = Interner::new();
-    let key_a = make_keyword(&mut interner, "a");
+    let interner = Interner::new();
+    let key_a = make_keyword(&interner, "a");
 
     let pattern = Pattern::Map {
         entries: vec![(key_a.clone(), Pattern::Wildcard)],
@@ -136,11 +136,11 @@ fn map_pattern_with_wildcard() {
 
 #[test]
 fn map_pattern_binds_multiple_values() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let y = make_symbol(&mut interner, "y");
-    let key_a = make_keyword(&mut interner, "a");
-    let key_b = make_keyword(&mut interner, "b");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let y = make_symbol(&interner, "y");
+    let key_a = make_keyword(&interner, "a");
+    let key_b = make_keyword(&interner, "b");
 
     let pattern = Pattern::Map {
         entries: vec![
@@ -165,11 +165,11 @@ fn map_pattern_binds_multiple_values() {
 
 #[test]
 fn map_pattern_ignores_extra_keys() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let key_a = make_keyword(&mut interner, "a");
-    let key_b = make_keyword(&mut interner, "b");
-    let key_c = make_keyword(&mut interner, "c");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let key_a = make_keyword(&interner, "a");
+    let key_b = make_keyword(&interner, "b");
+    let key_c = make_keyword(&interner, "c");
 
     let pattern = Pattern::Map {
         entries: vec![(key_a.clone(), Pattern::Bind(x))],
@@ -187,11 +187,11 @@ fn map_pattern_ignores_extra_keys() {
 
 #[test]
 fn map_pattern_fails_if_any_key_missing() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let y = make_symbol(&mut interner, "y");
-    let key_a = make_keyword(&mut interner, "a");
-    let key_missing = make_keyword(&mut interner, "missing");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let y = make_symbol(&interner, "y");
+    let key_a = make_keyword(&interner, "a");
+    let key_missing = make_keyword(&interner, "missing");
 
     let pattern = Pattern::Map {
         entries: vec![
@@ -211,8 +211,8 @@ fn map_pattern_fails_if_any_key_missing() {
 
 #[test]
 fn map_pattern_with_string_keys() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     let pattern = Pattern::Map {
         entries: vec![(Value::String(HeapStr::from("name")), Pattern::Bind(x))],
@@ -232,8 +232,8 @@ fn map_pattern_with_string_keys() {
 
 #[test]
 fn map_pattern_with_integer_keys() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
 
     let pattern = Pattern::Map {
         entries: vec![(Value::Integer(Integer::from(0)), Pattern::Bind(x))],
@@ -257,9 +257,9 @@ fn map_pattern_with_integer_keys() {
 
 #[test]
 fn map_pattern_rejects_non_map_types() {
-    let mut interner = Interner::new();
-    let x = make_symbol(&mut interner, "x");
-    let key_a = make_keyword(&mut interner, "a");
+    let interner = Interner::new();
+    let x = make_symbol(&interner, "x");
+    let key_a = make_keyword(&interner, "a");
 
     let pattern = Pattern::Map {
         entries: vec![(key_a, Pattern::Bind(x))],

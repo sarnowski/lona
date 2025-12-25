@@ -29,13 +29,13 @@ use super::collections::{intern_primitives, register_primitives};
 /// use lona_kernel::vm::MacroExpander;
 /// use lonala_compiler::{compile_with_expansion, MacroRegistry};
 ///
-/// let mut interner = Interner::new();
+/// let interner = Interner::new();
 /// let mut registry = MacroRegistry::new();
 /// let mut expander = MacroExpander::new();
 ///
 /// let chunk = compile_with_expansion(
 ///     "(defmacro double [x] `(+ ~x ~x))",
-///     &mut interner,
+///     &interner,
 ///     &mut registry,
 ///     &mut expander
 /// ).unwrap();
@@ -70,7 +70,7 @@ impl MacroExpander for Expander {
         &mut self,
         definition: &MacroDefinition,
         args: Vec<Value>,
-        interner: &mut Interner,
+        interner: &Interner,
     ) -> Result<Value, MacroExpansionError> {
         // Find matching arity body
         let body = definition.find_body(args.len()).ok_or_else(|| {
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn expander_returns_argument() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut expander = Expander::new();
 
         let chunk = Arc::new(make_identity_chunk());
@@ -157,14 +157,14 @@ mod tests {
         );
 
         let args = vec![Value::Integer(Integer::from_i64(42_i64))];
-        let result = expander.expand(&definition, args, &mut interner).unwrap();
+        let result = expander.expand(&definition, args, &interner).unwrap();
 
         assert_eq!(result, Value::Integer(Integer::from_i64(42_i64)));
     }
 
     #[test]
     fn expander_arity_mismatch() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut expander = Expander::new();
 
         let chunk = Arc::new(make_identity_chunk());
@@ -180,7 +180,7 @@ mod tests {
             Value::Integer(Integer::from_i64(1_i64)),
             Value::Integer(Integer::from_i64(2_i64)),
         ];
-        let result = expander.expand(&definition, args, &mut interner);
+        let result = expander.expand(&definition, args, &interner);
 
         assert!(result.is_err());
         let err = result.unwrap_err();
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn expander_returns_nil_for_empty_args() {
-        let mut interner = Interner::new();
+        let interner = Interner::new();
         let mut expander = Expander::new();
 
         // Create a macro that takes no arguments and returns nil
@@ -212,7 +212,7 @@ mod tests {
             alloc::string::String::from("nil-macro"),
         );
 
-        let result = expander.expand(&definition, vec![], &mut interner).unwrap();
+        let result = expander.expand(&definition, vec![], &interner).unwrap();
         assert_eq!(result, Value::Nil);
     }
 }
