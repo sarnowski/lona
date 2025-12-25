@@ -1,8 +1,8 @@
-## Phase 1.4: Process Model
+# Phase 1.4: Process Model
 
 Implement BEAM-style lightweight processes.
 
-### Design Goal: Process-Level Crash Semantics
+## Design Goal: Process-Level Crash Semantics
 
 A critical goal of the process model is **process-level crash isolation**. When a process exhausts its heap (OOM), only that process crashes—not the entire VM or domain. This follows BEAM semantics:
 
@@ -19,7 +19,7 @@ This design means:
 
 ---
 
-### Task 1.4.1: Process Data Structure
+## Task 1.4.1: Process Data Structure
 
 **Description**: Define the process control block (PCB).
 
@@ -48,7 +48,7 @@ This design means:
 
 ---
 
-### Task 1.4.2: Per-Process Heap
+## Task 1.4.2: Per-Process Heap
 
 **Description**: Implement isolated heap per process with OOM-triggered process termination.
 
@@ -77,7 +77,7 @@ This design means:
 
 ---
 
-### Task 1.4.3: Process Registry
+## Task 1.4.3: Process Registry
 
 **Description**: Track all processes and enable lookup.
 
@@ -100,7 +100,7 @@ This design means:
 
 ---
 
-### Task 1.4.4: Mailbox Implementation
+## Task 1.4.4: Mailbox Implementation
 
 **Description**: Per-process message queue.
 
@@ -123,7 +123,7 @@ This design means:
 
 ---
 
-### Task 1.4.5: Scheduler - Run Queue
+## Task 1.4.5: Scheduler - Run Queue
 
 **Description**: Implement run queue for process scheduling.
 
@@ -146,7 +146,7 @@ This design means:
 
 ---
 
-### Task 1.4.6: Scheduler - Context Switching
+## Task 1.4.6: Scheduler - Context Switching
 
 **Description**: Save/restore process execution state.
 
@@ -169,7 +169,7 @@ This design means:
 
 ---
 
-### Task 1.4.7: Scheduler - Cooperative Yielding
+## Task 1.4.7: Scheduler - Cooperative Yielding
 
 **Description**: Implement yield points for cooperative scheduling.
 
@@ -192,7 +192,7 @@ This design means:
 
 ---
 
-### Task 1.4.8: Scheduler - Preemptive Scheduling
+## Task 1.4.8: Scheduler - Preemptive Scheduling
 
 **Description**: Implement reduction counting for preemption.
 
@@ -215,7 +215,7 @@ This design means:
 
 ---
 
-### Task 1.4.9: Spawn Primitive
+## Task 1.4.9: Spawn Primitive
 
 **Description**: Implement `spawn` to create new processes.
 
@@ -239,7 +239,7 @@ This design means:
 
 ---
 
-### Task 1.4.10: Self and Exit Primitives
+## Task 1.4.10: Self and Exit Primitives
 
 **Description**: Implement `self` and `exit`.
 
@@ -263,7 +263,7 @@ This design means:
 
 ---
 
-### Task 1.4.11: Send Primitive - Intra-Domain
+## Task 1.4.11: Send Primitive - Intra-Domain
 
 **Description**: Implement message sending within same domain.
 
@@ -287,7 +287,7 @@ This design means:
 
 ---
 
-### Task 1.4.12: Receive Special Form - Basic
+## Task 1.4.12: Receive Special Form - Basic
 
 **Description**: Implement basic `receive` with patterns.
 
@@ -312,7 +312,7 @@ This design means:
 
 ---
 
-### Task 1.4.13: Receive with Timeout
+## Task 1.4.13: Receive with Timeout
 
 **Description**: Add timeout support to `receive`.
 
@@ -336,7 +336,7 @@ This design means:
 
 ---
 
-### Task 1.4.14: Selective Receive
+## Task 1.4.14: Selective Receive
 
 **Description**: Implement BEAM-style selective receive with save queue.
 
@@ -360,7 +360,7 @@ This design means:
 
 ---
 
-### Task 1.4.15: Per-Process Binding Stack
+## Task 1.4.15: Per-Process Binding Stack
 
 **Description**: Each process maintains a stack of dynamic binding frames.
 
@@ -385,7 +385,7 @@ This design means:
 
 ---
 
-### Task 1.4.16: `binding` Special Form
+## Task 1.4.16: `binding` Special Form
 
 **Description**: Implement `binding` to establish dynamic bindings in scope.
 

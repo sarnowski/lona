@@ -1,10 +1,10 @@
-## Phase 1.9: Integration & Spec Tests
+# Phase 1.9: Integration & Spec Tests
 
 Ensure all components work together and pass specification tests.
 
 ---
 
-### Task 1.9.1: Spec Test Framework Enhancement
+## Task 1.9.1: Spec Test Framework Enhancement
 
 **Description**: Enhance spec test infrastructure for new features.
 
@@ -25,7 +25,7 @@ Ensure all components work together and pass specification tests.
 
 ---
 
-### Task 1.9.2: Process Integration Tests
+## Task 1.9.2: Process Integration Tests
 
 **Description**: End-to-end tests for process model.
 
@@ -46,7 +46,7 @@ Ensure all components work together and pass specification tests.
 
 ---
 
-### Task 1.9.3: Domain Integration Tests
+## Task 1.9.3: Domain Integration Tests
 
 **Description**: End-to-end tests for domain isolation.
 
@@ -67,7 +67,7 @@ Ensure all components work together and pass specification tests.
 
 ---
 
-### Task 1.9.4: GC Integration Tests
+## Task 1.9.4: GC Integration Tests
 
 **Description**: Verify GC correctness under load.
 
@@ -88,7 +88,7 @@ Ensure all components work together and pass specification tests.
 
 ---
 
-### Task 1.9.5: Full System Integration Test
+## Task 1.9.5: Full System Integration Test
 
 **Description**: Boot complete system with all features.
 
@@ -110,7 +110,7 @@ Ensure all components work together and pass specification tests.
 
 ---
 
-### Task 1.9.6: Hot Code Loading Tests
+## Task 1.9.6: Hot Code Loading Tests
 
 **Description**: Verify hot code loading works correctly.
 
@@ -134,7 +134,7 @@ Ensure all components work together and pass specification tests.
 
 ---
 
-### Task 1.9.7: Cross-Domain Code Isolation Tests
+## Task 1.9.7: Cross-Domain Code Isolation Tests
 
 **Description**: Verify parent patches don't affect children.
 
@@ -158,7 +158,7 @@ Ensure all components work together and pass specification tests.
 
 ---
 
-### Task 1.9.8: Dynamic Binding Tests
+## Task 1.9.8: Dynamic Binding Tests
 
 **Description**: Test dynamic variable binding system.
 

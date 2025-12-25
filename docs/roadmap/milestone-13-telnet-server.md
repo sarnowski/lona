@@ -1,12 +1,12 @@
-## Milestone 13: Telnet Server
+# Milestone 13: Telnet Server
 
 **Goal**: Implement telnet daemon for remote REPL access.
 
 **Prerequisite**: Milestone 12 complete
 
-### Phase 13.1: Telnet Protocol
+## Phase 13.1: Telnet Protocol
 
-#### Task 13.1.1: Telnet Basics
+### Task 13.1.1: Telnet Basics
 
 **Description**: Implement telnet protocol.
 
@@ -23,9 +23,9 @@
 
 ---
 
-### Phase 13.2: Telnet Server
+## Phase 13.2: Telnet Server
 
-#### Task 13.2.1: Connection Handler
+### Task 13.2.1: Connection Handler
 
 **Description**: Handle telnet connections.
 
@@ -42,7 +42,7 @@
 
 ---
 
-#### Task 13.2.2: REPL Integration
+### Task 13.2.2: REPL Integration
 
 **Description**: Connect REPL to telnet session.
 
@@ -60,9 +60,9 @@
 
 ---
 
-### Phase 13.3: Configuration
+## Phase 13.3: Configuration
 
-#### Task 13.3.1: Boot Configuration
+### Task 13.3.1: Boot Configuration
 
 **Description**: Configure REPL sources at boot.
 
@@ -79,7 +79,7 @@
 
 ---
 
-#### Task 13.3.2: Telnet Tests
+### Task 13.3.2: Telnet Tests
 
 **Description**: Test telnet functionality.
 

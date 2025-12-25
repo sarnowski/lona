@@ -1,12 +1,12 @@
-## Milestone 14: HTTP/1 Server
+# Milestone 14: HTTP/1 Server
 
 **Goal**: Implement HTTP/1.1 server for static files.
 
 **Prerequisite**: Milestone 12, Milestone 7 complete
 
-### Phase 14.1: HTTP Protocol
+## Phase 14.1: HTTP Protocol
 
-#### Task 14.1.1: HTTP Request Parsing
+### Task 14.1.1: HTTP Request Parsing
 
 **Description**: Parse HTTP/1.1 requests.
 
@@ -23,7 +23,7 @@
 
 ---
 
-#### Task 14.1.2: HTTP Response Generation
+### Task 14.1.2: HTTP Response Generation
 
 **Description**: Generate HTTP/1.1 responses.
 
@@ -40,9 +40,9 @@
 
 ---
 
-### Phase 14.2: HTTP Server
+## Phase 14.2: HTTP Server
 
-#### Task 14.2.1: HTTP Server Core
+### Task 14.2.1: HTTP Server Core
 
 **Description**: Implement HTTP server.
 
@@ -59,7 +59,7 @@
 
 ---
 
-#### Task 14.2.2: Static File Serving
+### Task 14.2.2: Static File Serving
 
 **Description**: Serve files from filesystem.
 
@@ -76,7 +76,7 @@
 
 ---
 
-#### Task 14.2.3: Error Handling
+### Task 14.2.3: Error Handling
 
 **Description**: HTTP error responses.
 
@@ -93,9 +93,9 @@
 
 ---
 
-### Phase 14.3: Integration
+## Phase 14.3: Integration
 
-#### Task 14.3.1: HTTP Configuration
+### Task 14.3.1: HTTP Configuration
 
 **Description**: Configure HTTP server.
 
@@ -113,7 +113,7 @@
 
 ---
 
-#### Task 14.3.2: HTTP Tests
+### Task 14.3.2: HTTP Tests
 
 **Description**: Test HTTP server.
 

@@ -1,10 +1,10 @@
-## Phase 1.10: Condition/Restart System
+# Phase 1.10: Condition/Restart System
 
 Implement Common Lisp-inspired condition system for recoverable errors.
 
 ---
 
-### Task 1.10.1: Condition Type and Signal
+## Task 1.10.1: Condition Type and Signal
 
 **Description**: Define condition representation and basic signaling.
 
@@ -30,7 +30,7 @@ Implement Common Lisp-inspired condition system for recoverable errors.
 
 ---
 
-### Task 1.10.2: Handler Binding Infrastructure
+## Task 1.10.2: Handler Binding Infrastructure
 
 **Description**: Dynamic binding mechanism for condition handlers.
 
@@ -55,7 +55,7 @@ Implement Common Lisp-inspired condition system for recoverable errors.
 
 ---
 
-### Task 1.10.3: `handler-bind` Macro
+## Task 1.10.3: `handler-bind` Macro
 
 **Description**: Establish condition handlers for a body of code.
 
@@ -79,7 +79,7 @@ Implement Common Lisp-inspired condition system for recoverable errors.
 
 ---
 
-### Task 1.10.4: Restart Registry
+## Task 1.10.4: Restart Registry
 
 **Description**: Per-signal-point restart registration.
 
@@ -103,7 +103,7 @@ Implement Common Lisp-inspired condition system for recoverable errors.
 
 ---
 
-### Task 1.10.5: `restart-case` Macro
+## Task 1.10.5: `restart-case` Macro
 
 **Description**: Establish restarts for potentially-signaling code.
 
@@ -130,7 +130,7 @@ Implement Common Lisp-inspired condition system for recoverable errors.
 
 ---
 
-### Task 1.10.6: `invoke-restart` Function
+## Task 1.10.6: `invoke-restart` Function
 
 **Description**: Choose and invoke a restart from handler.
 
@@ -155,7 +155,7 @@ Implement Common Lisp-inspired condition system for recoverable errors.
 
 ---
 
-### Task 1.10.7: Basic Condition REPL Integration
+## Task 1.10.7: Basic Condition REPL Integration
 
 **Description**: Show unhandled conditions in REPL and allow restart selection.
 

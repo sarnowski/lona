@@ -1,10 +1,10 @@
-## Phase 1.2: Language Feature Completion
+# Phase 1.2: Language Feature Completion
 
 Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.1: Multi-Arity Function Support
+## Task 1.2.1: Multi-Arity Function Support
 
 **Description**: Support multiple arities in function definitions.
 
@@ -31,7 +31,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.2: Closure Implementation
+## Task 1.2.2: Closure Implementation
 
 **Description**: Enable functions to capture lexical environment.
 
@@ -60,7 +60,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.3: Sequential Destructuring
+## Task 1.2.3: Sequential Destructuring
 
 **Description**: Support `[a b & rest]` pattern in bindings.
 
@@ -86,7 +86,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.4: Associative Destructuring
+## Task 1.2.4: Associative Destructuring
 
 **Description**: Support `{:keys [a b]}` pattern in bindings.
 
@@ -112,7 +112,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.5: Nested Destructuring
+## Task 1.2.5: Nested Destructuring
 
 **Description**: Support arbitrary nesting of destructuring patterns.
 
@@ -136,7 +136,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.6: Proper Tail Calls - Compiler
+## Task 1.2.6: Proper Tail Calls - Compiler
 
 **Description**: Add tail position tracking to the compiler and emit `TailCall` opcode for calls in tail position. See [docs/architecture/tco.md](../../architecture/tco.md) for full design.
 
@@ -162,7 +162,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.7: Proper Tail Calls - VM Trampoline
+## Task 1.2.7: Proper Tail Calls - VM Trampoline
 
 **Description**: Restructure the VM interpreter to use a trampoline loop, enabling tail calls without Rust stack growth. See [docs/architecture/tco.md](../../architecture/tco.md) for full design.
 
@@ -188,7 +188,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.8: Proper Tail Calls - Integration Tests
+## Task 1.2.8: Proper Tail Calls - Integration Tests
 
 **Description**: Comprehensive integration tests for proper tail calls. See [docs/architecture/tco.md](../../architecture/tco.md) for full design.
 
@@ -212,7 +212,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.9: Pattern Matching - Core Infrastructure
+## Task 1.2.9: Pattern Matching - Core Infrastructure
 
 **Description**: Build pattern matching engine for `receive` and `case`.
 
@@ -239,7 +239,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.10: Case Special Form
+## Task 1.2.10: Case Special Form
 
 **Description**: Implement `case` for value-based dispatch.
 
@@ -264,7 +264,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.11: Gensym Implementation
+## Task 1.2.11: Gensym Implementation
 
 **Description**: Implement `gensym` for hygienic macro expansion.
 
@@ -288,7 +288,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.12: Anonymous Function Reader Macro
+## Task 1.2.12: Anonymous Function Reader Macro
 
 **Description**: Implement `#()` reader macro for anonymous functions.
 
@@ -315,7 +315,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.13: Discard Reader Macro
+## Task 1.2.13: Discard Reader Macro
 
 **Description**: Implement `#_` reader macro for discarding forms.
 
@@ -340,7 +340,7 @@ Complete core language features required for idiomatic Lonala.
 
 ---
 
-### Task 1.2.14: Regex Literal Syntax
+## Task 1.2.14: Regex Literal Syntax
 
 **Description**: Implement `#"pattern"` reader macro for regex literals.
 

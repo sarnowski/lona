@@ -1,12 +1,12 @@
-## Milestone 16: HTTP/2 with ACME
+# Milestone 16: HTTP/2 with ACME
 
 **Goal**: Implement HTTP/2 server with automatic certificate management.
 
 **Prerequisite**: Milestone 14, Milestone 15 complete
 
-### Phase 16.1: HTTP/2 Protocol
+## Phase 16.1: HTTP/2 Protocol
 
-#### Task 16.1.1: HTTP/2 Framing
+### Task 16.1.1: HTTP/2 Framing
 
 **Description**: Implement HTTP/2 frame layer.
 
@@ -23,7 +23,7 @@
 
 ---
 
-#### Task 16.1.2: HTTP/2 Streams
+### Task 16.1.2: HTTP/2 Streams
 
 **Description**: Implement HTTP/2 streams.
 
@@ -40,7 +40,7 @@
 
 ---
 
-#### Task 16.1.3: HPACK
+### Task 16.1.3: HPACK
 
 **Description**: Implement HPACK header compression.
 
@@ -57,9 +57,9 @@
 
 ---
 
-### Phase 16.2: HTTP/2 Server
+## Phase 16.2: HTTP/2 Server
 
-#### Task 16.2.1: HTTP/2 Server Core
+### Task 16.2.1: HTTP/2 Server Core
 
 **Description**: Implement HTTP/2 server.
 
@@ -76,7 +76,7 @@
 
 ---
 
-#### Task 16.2.2: HTTP/1-HTTP/2 Upgrade
+### Task 16.2.2: HTTP/1-HTTP/2 Upgrade
 
 **Description**: Support protocol upgrade.
 
@@ -93,9 +93,9 @@
 
 ---
 
-### Phase 16.3: ACME
+## Phase 16.3: ACME
 
-#### Task 16.3.1: ACME Client
+### Task 16.3.1: ACME Client
 
 **Description**: Implement ACME protocol client.
 
@@ -112,7 +112,7 @@
 
 ---
 
-#### Task 16.3.2: Certificate Renewal
+### Task 16.3.2: Certificate Renewal
 
 **Description**: Automatic certificate renewal.
 
@@ -129,9 +129,9 @@
 
 ---
 
-### Phase 16.4: Tests
+## Phase 16.4: Tests
 
-#### Task 16.4.1: HTTP/2 Tests
+### Task 16.4.1: HTTP/2 Tests
 
 **Description**: Test HTTP/2 functionality.
 
@@ -148,7 +148,7 @@
 
 ---
 
-#### Task 16.4.2: ACME Tests
+### Task 16.4.2: ACME Tests
 
 **Description**: Test ACME functionality.
 

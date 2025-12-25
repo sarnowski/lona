@@ -1,12 +1,12 @@
-## Milestone 7: Filesystem
+# Milestone 7: Filesystem
 
 **Goal**: Implement VFS and FAT filesystem.
 
 **Prerequisite**: Milestone 6 complete
 
-### Phase 7.1: VFS Layer
+## Phase 7.1: VFS Layer
 
-#### Task 7.1.1: VFS Abstraction
+### Task 7.1.1: VFS Abstraction
 
 **Description**: Define virtual filesystem abstraction.
 
@@ -24,7 +24,7 @@
 
 ---
 
-#### Task 7.1.2: File Handles
+### Task 7.1.2: File Handles
 
 **Description**: Implement file handle management.
 
@@ -41,7 +41,7 @@
 
 ---
 
-#### Task 7.1.3: Path Resolution
+### Task 7.1.3: Path Resolution
 
 **Description**: Implement path parsing and resolution.
 
@@ -58,9 +58,9 @@
 
 ---
 
-### Phase 7.2: FAT Implementation
+## Phase 7.2: FAT Implementation
 
-#### Task 7.2.1: FAT Structures
+### Task 7.2.1: FAT Structures
 
 **Description**: Parse FAT filesystem structures.
 
@@ -77,7 +77,7 @@
 
 ---
 
-#### Task 7.2.2: FAT File Operations
+### Task 7.2.2: FAT File Operations
 
 **Description**: Implement FAT file operations.
 
@@ -94,7 +94,7 @@
 
 ---
 
-#### Task 7.2.3: FAT Directory Operations
+### Task 7.2.3: FAT Directory Operations
 
 **Description**: Implement FAT directory operations.
 
@@ -112,9 +112,9 @@
 
 ---
 
-### Phase 7.3: Integration
+## Phase 7.3: Integration
 
-#### Task 7.3.1: Filesystem Server
+### Task 7.3.1: Filesystem Server
 
 **Description**: Run filesystem as server process.
 
@@ -131,7 +131,7 @@
 
 ---
 
-#### Task 7.3.2: Mount System
+### Task 7.3.2: Mount System
 
 **Description**: Implement mount/unmount.
 
@@ -148,7 +148,7 @@
 
 ---
 
-#### Task 7.3.3: Init Integration
+### Task 7.3.3: Init Integration
 
 **Description**: Mount root filesystem at boot.
 
@@ -165,7 +165,7 @@
 
 ---
 
-#### Task 7.3.4: Filesystem Tests
+### Task 7.3.4: Filesystem Tests
 
 **Description**: Test filesystem functionality.
 

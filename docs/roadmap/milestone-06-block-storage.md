@@ -1,12 +1,12 @@
-## Milestone 6: Block Storage
+# Milestone 6: Block Storage
 
 **Goal**: Implement VirtIO block storage driver.
 
 **Prerequisite**: Milestone 5 complete
 
-### Phase 6.1: VirtIO Infrastructure
+## Phase 6.1: VirtIO Infrastructure
 
-#### Task 6.1.1: VirtQueue Abstraction
+### Task 6.1.1: VirtQueue Abstraction
 
 **Description**: Implement reusable VirtQueue abstraction for all VirtIO devices.
 
@@ -35,7 +35,7 @@
 
 ---
 
-#### Task 6.1.2: VirtIO Common Layer
+### Task 6.1.2: VirtIO Common Layer
 
 **Description**: Implement VirtIO device initialization common to all device types.
 
@@ -53,7 +53,7 @@
 
 ---
 
-#### Task 6.1.3: VirtIO Device Discovery
+### Task 6.1.3: VirtIO Device Discovery
 
 **Description**: Discover VirtIO devices.
 
@@ -70,9 +70,9 @@
 
 ---
 
-### Phase 6.2: Block Driver
+## Phase 6.2: Block Driver
 
-#### Task 6.2.1: Block Device Protocol
+### Task 6.2.1: Block Device Protocol
 
 **Description**: Define block device protocol.
 
@@ -89,7 +89,7 @@
 
 ---
 
-#### Task 6.2.2: VirtIO Block Implementation
+### Task 6.2.2: VirtIO Block Implementation
 
 **Description**: Implement VirtIO block driver.
 
@@ -106,9 +106,9 @@
 
 ---
 
-### Phase 6.3: Integration
+## Phase 6.3: Integration
 
-#### Task 6.3.1: Block Driver Domain
+### Task 6.3.1: Block Driver Domain
 
 **Description**: Run block driver in isolated domain.
 
@@ -125,7 +125,7 @@
 
 ---
 
-#### Task 6.3.2: Block Driver Tests
+### Task 6.3.2: Block Driver Tests
 
 **Description**: Test block driver functionality.
 

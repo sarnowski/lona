@@ -1,12 +1,12 @@
-## Milestone 12: Transport Protocols
+# Milestone 12: Transport Protocols
 
 **Goal**: Implement ICMP, UDP, and TCP.
 
 **Prerequisite**: Milestone 11 complete
 
-### Phase 12.1: ICMP
+## Phase 12.1: ICMP
 
-#### Task 12.1.1: ICMPv4 Implementation
+### Task 12.1.1: ICMPv4 Implementation
 
 **Description**: Implement ICMPv4.
 
@@ -23,7 +23,7 @@
 
 ---
 
-#### Task 12.1.2: ICMPv6 Implementation
+### Task 12.1.2: ICMPv6 Implementation
 
 **Description**: Implement ICMPv6.
 
@@ -39,9 +39,9 @@
 
 ---
 
-### Phase 12.2: UDP
+## Phase 12.2: UDP
 
-#### Task 12.2.1: UDP Protocol
+### Task 12.2.1: UDP Protocol
 
 **Description**: Implement UDP.
 
@@ -58,7 +58,7 @@
 
 ---
 
-#### Task 12.2.2: UDP Sockets
+### Task 12.2.2: UDP Sockets
 
 **Description**: Implement UDP socket API.
 
@@ -75,9 +75,9 @@
 
 ---
 
-### Phase 12.3: TCP
+## Phase 12.3: TCP
 
-#### Task 12.3.1: TCP State Machine
+### Task 12.3.1: TCP State Machine
 
 **Description**: Implement TCP state machine.
 
@@ -94,7 +94,7 @@
 
 ---
 
-#### Task 12.3.2: TCP Connection Setup
+### Task 12.3.2: TCP Connection Setup
 
 **Description**: Implement TCP handshake.
 
@@ -111,7 +111,7 @@
 
 ---
 
-#### Task 12.3.3: TCP Data Transfer
+### Task 12.3.3: TCP Data Transfer
 
 **Description**: Implement TCP data transfer.
 
@@ -128,7 +128,7 @@
 
 ---
 
-#### Task 12.3.4: TCP Flow Control
+### Task 12.3.4: TCP Flow Control
 
 **Description**: Implement TCP flow control.
 
@@ -145,7 +145,7 @@
 
 ---
 
-#### Task 12.3.5: TCP Congestion Control
+### Task 12.3.5: TCP Congestion Control
 
 **Description**: Implement basic congestion control.
 
@@ -162,7 +162,7 @@
 
 ---
 
-#### Task 12.3.6: TCP Connection Teardown
+### Task 12.3.6: TCP Connection Teardown
 
 **Description**: Implement TCP close.
 
@@ -179,9 +179,9 @@
 
 ---
 
-### Phase 12.4: Socket API
+## Phase 12.4: Socket API
 
-#### Task 12.4.1: TCP Sockets
+### Task 12.4.1: TCP Sockets
 
 **Description**: Implement TCP socket API.
 
@@ -198,9 +198,9 @@
 
 ---
 
-### Phase 12.5: Tests
+## Phase 12.5: Tests
 
-#### Task 12.5.1: Transport Tests
+### Task 12.5.1: Transport Tests
 
 **Description**: Test transport protocols.
 
@@ -218,9 +218,9 @@
 
 ---
 
-### Phase 12.6: DNS Client
+## Phase 12.6: DNS Client
 
-#### Task 12.6.1: DNS Resolver
+### Task 12.6.1: DNS Resolver
 
 **Description**: Implement DNS client for hostname resolution.
 
@@ -248,7 +248,7 @@
 
 ---
 
-#### Task 12.6.2: DNS Caching
+### Task 12.6.2: DNS Caching
 
 **Description**: Implement DNS response caching.
 

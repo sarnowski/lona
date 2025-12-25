@@ -1,4 +1,4 @@
-## Phase 1.12: Debug Infrastructure
+# Phase 1.12: Debug Infrastructure
 
 Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM/OTP-style resilience. See [docs/lonala/debugging.md](../../lonala/debugging.md) for full specification.
 
@@ -8,7 +8,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.1: Process Debug State
+## Task 1.12.1: Process Debug State
 
 **Description**: Add debug mode flag and `:debugging` state to processes.
 
@@ -32,7 +32,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.2: Debug Attach/Detach
+## Task 1.12.2: Debug Attach/Detach
 
 **Description**: Implement `debug-attach` and `debug-detach` primitives.
 
@@ -57,7 +57,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.3: Panic Behavior in Debug Mode
+## Task 1.12.3: Panic Behavior in Debug Mode
 
 **Description**: Modify `panic!` to pause instead of crash when debugger attached.
 
@@ -84,7 +84,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.4: Stack Frame Reification
+## Task 1.12.4: Stack Frame Reification
 
 **Description**: Expose stack frames as inspectable values.
 
@@ -111,7 +111,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.5: In-Frame Evaluation
+## Task 1.12.5: In-Frame Evaluation
 
 **Description**: Evaluate expressions in the context of a specific stack frame.
 
@@ -137,7 +137,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.6: Debug Control Operations
+## Task 1.12.6: Debug Control Operations
 
 **Description**: Implement pause, continue, and stepping.
 
@@ -165,7 +165,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.7: Breakpoint Infrastructure
+## Task 1.12.7: Breakpoint Infrastructure
 
 **Description**: Implement pattern-matching breakpoints.
 
@@ -194,7 +194,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.8: Breakpoint via Dispatch Table
+## Task 1.12.8: Breakpoint via Dispatch Table
 
 **Description**: Implement breakpoints using dispatch table trampolines.
 
@@ -220,7 +220,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.9: Trace-to-Break Upgrade
+## Task 1.12.9: Trace-to-Break Upgrade
 
 **Description**: Convert non-blocking traces to blocking breakpoints.
 
@@ -244,7 +244,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.10: Debugger REPL Integration
+## Task 1.12.10: Debugger REPL Integration
 
 **Description**: Integrate debug mode with REPL interface.
 
@@ -270,7 +270,7 @@ Implement the Two-Mode Architecture for LISP-machine-style debugging within BEAM
 
 ---
 
-### Task 1.12.11: Supervisor Debug Awareness
+## Task 1.12.11: Supervisor Debug Awareness
 
 **Description**: Make supervisors aware of debug state.
 

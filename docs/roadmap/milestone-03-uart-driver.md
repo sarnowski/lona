@@ -1,12 +1,12 @@
-## Milestone 3: UART Driver
+# Milestone 3: UART Driver
 
 **Goal**: Implement abstract UART driver in Lonala with platform-specific implementations.
 
 **Prerequisite**: Milestone 2 complete
 
-### Phase 3.1: UART Abstraction
+## Phase 3.1: UART Abstraction
 
-#### Task 3.1.1: UART Protocol Definition
+### Task 3.1.1: UART Protocol Definition
 
 **Description**: Define UART driver protocol.
 
@@ -25,7 +25,7 @@
 
 ---
 
-#### Task 3.1.2: UART GenServer
+### Task 3.1.2: UART GenServer
 
 **Description**: Implement UART as GenServer.
 
@@ -42,9 +42,9 @@
 
 ---
 
-### Phase 3.2: Platform Implementations
+## Phase 3.2: Platform Implementations
 
-#### Task 3.2.1: ARM64 UART (PL011)
+### Task 3.2.1: ARM64 UART (PL011)
 
 **Description**: Implement PL011 UART for ARM64.
 
@@ -61,7 +61,7 @@
 
 ---
 
-#### Task 3.2.2: x86_64 UART (16550)
+### Task 3.2.2: x86_64 UART (16550)
 
 **Description**: Implement 16550 UART for x86_64.
 
@@ -78,9 +78,9 @@
 
 ---
 
-### Phase 3.3: Integration
+## Phase 3.3: Integration
 
-#### Task 3.3.1: UART Driver Domain
+### Task 3.3.1: UART Driver Domain
 
 **Description**: Run UART driver in isolated domain.
 
@@ -97,7 +97,7 @@
 
 ---
 
-#### Task 3.3.2: UART Driver Tests
+### Task 3.3.2: UART Driver Tests
 
 **Description**: Test UART driver functionality.
 

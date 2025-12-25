@@ -1,10 +1,10 @@
-## Phase 1.6: Domain Isolation & IPC
+# Phase 1.6: Domain Isolation & IPC
 
 Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.0: Capability Value Type
+## Task 1.6.0: Capability Value Type
 
 **Description**: Define the Lonala-level representation of seL4 capabilities.
 
@@ -33,7 +33,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.1: VSpace Manager
+## Task 1.6.1: VSpace Manager
 
 **Description**: Manage seL4 virtual address spaces.
 
@@ -55,7 +55,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.2: CSpace Manager
+## Task 1.6.2: CSpace Manager
 
 **Description**: Manage seL4 capability spaces with full lifecycle including revocation.
 
@@ -84,7 +84,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.3: Domain Data Structure
+## Task 1.6.3: Domain Data Structure
 
 **Description**: Define domain representation.
 
@@ -107,7 +107,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.4: Domain Creation Primitive
+## Task 1.6.4: Domain Creation Primitive
 
 **Description**: Implement domain spawning.
 
@@ -131,7 +131,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.5: Shared Memory Regions
+## Task 1.6.5: Shared Memory Regions
 
 **Description**: Implement shared memory for IPC.
 
@@ -153,7 +153,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.6: Inter-Domain IPC - Notification
+## Task 1.6.6: Inter-Domain IPC - Notification
 
 **Description**: Use seL4 notifications for IPC signaling.
 
@@ -174,7 +174,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.7: Inter-Domain IPC - Message Passing
+## Task 1.6.7: Inter-Domain IPC - Message Passing
 
 **Description**: Implement cross-domain send/receive.
 
@@ -198,7 +198,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.8: Capability Transfer
+## Task 1.6.8: Capability Transfer
 
 **Description**: Transfer capabilities across domains.
 
@@ -221,7 +221,7 @@ Implement seL4-based security domains and inter-domain communication.
 
 ---
 
-### Task 1.6.9: Code Sharing Between Domains
+## Task 1.6.9: Code Sharing Between Domains
 
 **Description**: Share bytecode read-only across domains.
 

@@ -134,7 +134,7 @@ Lonala synthesizes all four pillars:
 
 There is no C FFI. No third-party binary libraries. Everything is source, everything is inspectable, everything follows the same rules.
 
-→ [Language Specification](/docs/lonala/index.md)
+→ [Language Specification](../lonala/index.md)
 
 ---
 
@@ -170,7 +170,7 @@ The first release targets a minimal but functional networked system:
 - Network code loading
 - Package system
 
-→ [Implementation Roadmap](/docs/roadmap/index.md)
+→ [Implementation Roadmap](../roadmap/index.md)
 
 ---
 
@@ -184,7 +184,7 @@ The first release targets a minimal but functional networked system:
 ### "I want to implement something"
 1. [Core Concepts](core-concepts.md) — understand the abstractions
 2. [System Design](system-design.md) — understand the mechanics
-3. [Language Specification](/docs/lonala/index.md) — understand the syntax
+3. [Language Specification](../lonala/index.md) — understand the syntax
 
 ### "I want the quick version"
 This page is the quick version. The four pillars, the core promises, and the key abstractions are all here.

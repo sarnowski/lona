@@ -1,12 +1,12 @@
-## Milestone 10: ARP
+# Milestone 10: ARP
 
 **Goal**: Implement Address Resolution Protocol.
 
 **Prerequisite**: Milestone 9 complete
 
-### Phase 10.1: ARP Implementation
+## Phase 10.1: ARP Implementation
 
-#### Task 10.1.1: ARP Table
+### Task 10.1.1: ARP Table
 
 **Description**: Implement ARP cache.
 
@@ -23,7 +23,7 @@
 
 ---
 
-#### Task 10.1.2: ARP Protocol
+### Task 10.1.2: ARP Protocol
 
 **Description**: Implement ARP request/reply.
 
@@ -40,7 +40,7 @@
 
 ---
 
-#### Task 10.1.3: ARP Server
+### Task 10.1.3: ARP Server
 
 **Description**: Run ARP as server process.
 
@@ -57,7 +57,7 @@
 
 ---
 
-#### Task 10.1.4: ARP Tests
+### Task 10.1.4: ARP Tests
 
 **Description**: Test ARP functionality.
 

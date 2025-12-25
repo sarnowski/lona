@@ -1,10 +1,10 @@
-## Phase 1.8: Native Primitives
+# Phase 1.8: Native Primitives
 
 Implement remaining native functions from minimal-rust.md.
 
 ---
 
-### Task 1.8.1: Type Predicates - Complete Set
+## Task 1.8.1: Type Predicates - Complete Set
 
 **Description**: Implement all type predicate functions.
 
@@ -25,7 +25,7 @@ Implement remaining native functions from minimal-rust.md.
 
 ---
 
-### Task 1.8.2: Bitwise Operations
+## Task 1.8.2: Bitwise Operations
 
 **Description**: Implement bitwise primitives.
 
@@ -45,7 +45,7 @@ Implement remaining native functions from minimal-rust.md.
 
 ---
 
-### Task 1.8.3: Collection Primitives - nth, count, conj
+## Task 1.8.3: Collection Primitives - nth, count, conj
 
 **Description**: Implement core collection accessors.
 
@@ -65,7 +65,7 @@ Implement remaining native functions from minimal-rust.md.
 
 ---
 
-### Task 1.8.4: Map Operations - get, assoc, dissoc, keys, vals
+## Task 1.8.4: Map Operations - get, assoc, dissoc, keys, vals
 
 **Description**: Implement map manipulation primitives.
 
@@ -87,7 +87,7 @@ Implement remaining native functions from minimal-rust.md.
 
 ---
 
-### Task 1.8.5: Set Operations - disj, contains?
+## Task 1.8.5: Set Operations - disj, contains?
 
 **Description**: Implement set manipulation primitives.
 
@@ -106,7 +106,7 @@ Implement remaining native functions from minimal-rust.md.
 
 ---
 
-### Task 1.8.6: Callable Value Types (Keywords and Sets as Functions)
+## Task 1.8.6: Callable Value Types (Keywords and Sets as Functions)
 
 **Description**: Enable keywords and sets to be invoked as functions, following Clojure semantics.
 
@@ -157,7 +157,7 @@ Implement remaining native functions from minimal-rust.md.
 
 ---
 
-### Task 1.8.7: Binary Operations
+## Task 1.8.7: Binary Operations
 
 **Description**: Implement binary buffer primitives with ownership semantics.
 
@@ -229,7 +229,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.8: Symbol Operations
+## Task 1.8.8: Symbol Operations
 
 **Description**: Implement symbol creation primitives.
 
@@ -250,7 +250,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.9: Metadata Operations
+## Task 1.8.9: Metadata Operations
 
 **Description**: Implement metadata primitives.
 
@@ -271,7 +271,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.10: MMIO Primitives
+## Task 1.8.10: MMIO Primitives
 
 **Description**: Implement memory-mapped I/O for drivers.
 
@@ -302,7 +302,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.11: DMA Primitives
+## Task 1.8.11: DMA Primitives
 
 **Description**: Implement DMA buffer management.
 
@@ -329,7 +329,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.12: IRQ Primitives
+## Task 1.8.12: IRQ Primitives
 
 **Description**: Implement interrupt handling for drivers.
 
@@ -350,7 +350,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.13: Time Primitives
+## Task 1.8.13: Time Primitives
 
 **Description**: Implement time-related functions.
 
@@ -370,7 +370,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.14: Atom Primitives
+## Task 1.8.14: Atom Primitives
 
 **Description**: Implement process-local mutable state.
 
@@ -396,7 +396,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.15: Sorted Collections - Basic
+## Task 1.8.15: Sorted Collections - Basic
 
 **Description**: Implement sorted map and set.
 
@@ -418,7 +418,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.16: Sorted Collections - Custom Comparators
+## Task 1.8.16: Sorted Collections - Custom Comparators
 
 **Description**: Add custom comparator support.
 
@@ -440,7 +440,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.17: Regular Expressions - Compilation
+## Task 1.8.17: Regular Expressions - Compilation
 
 **Description**: Implement regex pattern compilation.
 
@@ -463,7 +463,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.18: Regular Expressions - Matching
+## Task 1.8.18: Regular Expressions - Matching
 
 **Description**: Implement regex matching functions.
 
@@ -486,7 +486,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.19: String Primitive Operations
+## Task 1.8.19: String Primitive Operations
 
 **Description**: Core string operations requiring native implementation for UTF-8 handling.
 
@@ -516,7 +516,7 @@ When a Binary is sent via `(send pid msg)`:
 
 ---
 
-### Task 1.8.20: `apply` Native Primitive (CRITICAL)
+## Task 1.8.20: `apply` Native Primitive (CRITICAL)
 
 **Unblocks**: This task unblocks the `vary-meta` metadata primitive.
 `vary-meta` requires `apply` for its `(vary-meta obj f & args)` signature.
@@ -549,7 +549,7 @@ After `apply` is implemented, implement `vary-meta` as well.
 
 ---
 
-### Task 1.8.21: `type-of` Native Primitive (CRITICAL)
+## Task 1.8.21: `type-of` Native Primitive (CRITICAL)
 
 **Description**: Return the type of a value as a keyword.
 
@@ -571,7 +571,7 @@ After `apply` is implemented, implement `vary-meta` as well.
 
 ---
 
-### Task 1.8.22: `identical?` Native Primitive
+## Task 1.8.22: `identical?` Native Primitive
 
 **Description**: Reference equality check.
 
@@ -594,7 +594,7 @@ After `apply` is implemented, implement `vary-meta` as well.
 
 ---
 
-### Task 1.8.23: `native-print` Bootstrap Primitive (CRITICAL)
+## Task 1.8.23: `native-print` Bootstrap Primitive (CRITICAL)
 
 **Description**: Temporary print function for Milestone 2 bootstrap.
 
@@ -620,7 +620,7 @@ After `apply` is implemented, implement `vary-meta` as well.
 
 ---
 
-### Task 1.8.24: `string-concat` Native Primitive
+## Task 1.8.24: `string-concat` Native Primitive
 
 **Description**: Concatenate two strings.
 
@@ -645,7 +645,7 @@ After `apply` is implemented, implement `vary-meta` as well.
 
 ---
 
-### Task 1.8.25: `read-string` Native Primitive
+## Task 1.8.25: `read-string` Native Primitive
 
 **Description**: Parse a string into a Lonala value.
 
@@ -669,7 +669,7 @@ After `apply` is implemented, implement `vary-meta` as well.
 
 ---
 
-### Task 1.8.26: `seq` Native Primitive
+## Task 1.8.26: `seq` Native Primitive
 
 **Description**: Coerce a value to a sequence.
 
@@ -699,7 +699,7 @@ After `apply` is implemented, implement `vary-meta` as well.
 
 ---
 
-### Task 1.8.27: x86 Port I/O Primitives
+## Task 1.8.27: x86 Port I/O Primitives
 
 **Description**: Implement x86-specific port I/O for devices that use I/O ports instead of MMIO.
 
@@ -729,7 +729,7 @@ After `apply` is implemented, implement `vary-meta` as well.
 
 ---
 
-### Task 1.8.28: Bundled Source Loading
+## Task 1.8.28: Bundled Source Loading
 
 **Description**: Implement primitives for loading Lonala source bundled with the runtime image.
 

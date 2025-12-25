@@ -1,12 +1,12 @@
-## Milestone 9: Network Driver
+# Milestone 9: Network Driver
 
 **Goal**: Implement VirtIO network driver.
 
 **Prerequisite**: Milestone 5 complete (parallel with M6-M8)
 
-### Phase 9.1: Network Abstraction
+## Phase 9.1: Network Abstraction
 
-#### Task 9.1.1: Network Device Protocol
+### Task 9.1.1: Network Device Protocol
 
 **Description**: Define network device protocol.
 
@@ -24,7 +24,7 @@
 
 ---
 
-#### Task 9.1.2: Frame Buffer Management
+### Task 9.1.2: Frame Buffer Management
 
 **Description**: Manage network frame buffers.
 
@@ -41,9 +41,9 @@
 
 ---
 
-### Phase 9.2: VirtIO Net
+## Phase 9.2: VirtIO Net
 
-#### Task 9.2.1: VirtIO Net Implementation
+### Task 9.2.1: VirtIO Net Implementation
 
 **Description**: Implement VirtIO net driver.
 
@@ -60,7 +60,7 @@
 
 ---
 
-#### Task 9.2.2: Network Driver Domain
+### Task 9.2.2: Network Driver Domain
 
 **Description**: Run network driver in isolated domain.
 
@@ -78,9 +78,9 @@
 
 ---
 
-### Phase 9.3: Integration
+## Phase 9.3: Integration
 
-#### Task 9.3.1: Network Driver Tests
+### Task 9.3.1: Network Driver Tests
 
 **Description**: Test network driver.
 

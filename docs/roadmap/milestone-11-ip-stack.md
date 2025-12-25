@@ -1,12 +1,12 @@
-## Milestone 11: IP Stack
+# Milestone 11: IP Stack
 
 **Goal**: Implement IPv4 and IPv6.
 
 **Prerequisite**: Milestone 10 complete
 
-### Phase 11.1: IPv4
+## Phase 11.1: IPv4
 
-#### Task 11.1.1: IPv4 Packet Handling
+### Task 11.1.1: IPv4 Packet Handling
 
 **Description**: Parse and generate IPv4 packets.
 
@@ -23,7 +23,7 @@
 
 ---
 
-#### Task 11.1.2: IPv4 Routing
+### Task 11.1.2: IPv4 Routing
 
 **Description**: Implement IPv4 routing.
 
@@ -40,7 +40,7 @@
 
 ---
 
-#### Task 11.1.3: IPv4 Interface
+### Task 11.1.3: IPv4 Interface
 
 **Description**: Manage IPv4 interface addresses.
 
@@ -57,9 +57,9 @@
 
 ---
 
-### Phase 11.2: IPv6
+## Phase 11.2: IPv6
 
-#### Task 11.2.1: IPv6 Packet Handling
+### Task 11.2.1: IPv6 Packet Handling
 
 **Description**: Parse and generate IPv6 packets.
 
@@ -76,7 +76,7 @@
 
 ---
 
-#### Task 11.2.2: IPv6 Routing
+### Task 11.2.2: IPv6 Routing
 
 **Description**: Implement IPv6 routing.
 
@@ -93,9 +93,9 @@
 
 ---
 
-### Phase 11.3: Integration
+## Phase 11.3: Integration
 
-#### Task 11.3.1: IP Server
+### Task 11.3.1: IP Server
 
 **Description**: Run IP stack as server.
 
@@ -112,7 +112,7 @@
 
 ---
 
-#### Task 11.3.2: IP Tests
+### Task 11.3.2: IP Tests
 
 **Description**: Test IP functionality.
 

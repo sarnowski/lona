@@ -1,4 +1,4 @@
-## Milestone 1: Rust Foundation
+# Milestone 1: Rust Foundation
 
 **Goal**: Complete all Rust code required for the Lona runtime. After this milestone, no new Rust code should be needed.
 
@@ -8,7 +8,7 @@
 
 ---
 
-## Phases
+# Phases
 
 | Phase | Name | Description |
 |-------|------|-------------|

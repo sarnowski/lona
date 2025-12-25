@@ -1,10 +1,10 @@
-## Phase 1.7: Fault Tolerance
+# Phase 1.7: Fault Tolerance
 
 Implement Erlang-style fault tolerance mechanisms.
 
 ---
 
-### Task 1.7.1: Process Linking
+## Task 1.7.1: Process Linking
 
 **Description**: Bidirectional process links for crash propagation.
 
@@ -28,7 +28,7 @@ Implement Erlang-style fault tolerance mechanisms.
 
 ---
 
-### Task 1.7.2: Process Monitoring
+## Task 1.7.2: Process Monitoring
 
 **Description**: Unidirectional monitoring without crash propagation.
 
@@ -52,7 +52,7 @@ Implement Erlang-style fault tolerance mechanisms.
 
 ---
 
-### Task 1.7.3: Exit Signals
+## Task 1.7.3: Exit Signals
 
 **Description**: Implement exit signal delivery and trapping.
 
@@ -76,7 +76,7 @@ Implement Erlang-style fault tolerance mechanisms.
 
 ---
 
-### Task 1.7.4: Panic Implementation
+## Task 1.7.4: Panic Implementation
 
 **Description**: Implement untrappable `panic!`.
 
@@ -99,7 +99,7 @@ Implement Erlang-style fault tolerance mechanisms.
 
 ---
 
-### Task 1.7.5: Cross-Domain Fault Tolerance
+## Task 1.7.5: Cross-Domain Fault Tolerance
 
 **Description**: Links and monitors work across domain boundaries.
 

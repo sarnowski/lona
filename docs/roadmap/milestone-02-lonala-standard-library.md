@@ -1,4 +1,4 @@
-## Milestone 2: Lonala Standard Library
+# Milestone 2: Lonala Standard Library
 
 **Goal**: Implement complete standard library in Lonala with test coverage.
 
@@ -6,9 +6,9 @@
 
 > **Bootstrap Note**: Phase 2.1 (Test Framework) uses `native-print` (Task 1.8.23) until Milestone 3 provides the Lonala UART driver.
 
-### Phase 2.1: Test Framework
+## Phase 2.1: Test Framework
 
-#### Task 2.1.1: Test Namespace Foundation
+### Task 2.1.1: Test Namespace Foundation
 
 **Description**: Create `lona.test` namespace with core testing primitives.
 
@@ -28,7 +28,7 @@
 
 ---
 
-#### Task 2.1.2: Test Runner
+### Task 2.1.2: Test Runner
 
 **Description**: Implement test discovery and execution.
 
@@ -46,7 +46,7 @@
 
 ---
 
-#### Task 2.1.3: Fixtures and Setup/Teardown
+### Task 2.1.3: Fixtures and Setup/Teardown
 
 **Description**: Add test lifecycle support.
 
@@ -63,7 +63,7 @@
 
 ---
 
-#### Task 2.1.4: Test Integration with Build
+### Task 2.1.4: Test Integration with Build
 
 **Description**: Integrate Lonala tests with `make test`.
 
@@ -81,9 +81,9 @@
 
 ---
 
-### Phase 2.2: Core Functions
+## Phase 2.2: Core Functions
 
-#### Task 2.2.1: Sequence Functions - Basic
+### Task 2.2.1: Sequence Functions - Basic
 
 **Description**: Implement fundamental sequence operations.
 
@@ -105,7 +105,7 @@
 
 ---
 
-#### Task 2.2.2: Sequence Functions - Transformation
+### Task 2.2.2: Sequence Functions - Transformation
 
 **Description**: Implement map, filter, reduce.
 
@@ -125,7 +125,7 @@
 
 ---
 
-#### Task 2.2.3: Sequence Functions - Construction
+### Task 2.2.3: Sequence Functions - Construction
 
 **Description**: Implement sequence builders.
 
@@ -145,7 +145,7 @@
 
 ---
 
-#### Task 2.2.4: Sequence Functions - Combination
+### Task 2.2.4: Sequence Functions - Combination
 
 **Description**: Implement sequence combinators.
 
@@ -165,7 +165,7 @@
 
 ---
 
-#### Task 2.2.5: Sequence Functions - Partitioning
+### Task 2.2.5: Sequence Functions - Partitioning
 
 **Description**: Implement sequence splitting.
 
@@ -184,7 +184,7 @@
 
 ---
 
-#### Task 2.2.6: Higher-Order Functions
+### Task 2.2.6: Higher-Order Functions
 
 **Description**: Implement function combinators.
 
@@ -205,7 +205,7 @@
 
 ---
 
-#### Task 2.2.7: apply Wrapper
+### Task 2.2.7: apply Wrapper
 
 **Description**: Lonala wrapper for native `apply` primitive.
 
@@ -232,9 +232,9 @@
 
 ---
 
-### Phase 2.3: Control Flow Macros
+## Phase 2.3: Control Flow Macros
 
-#### Task 2.3.1: Conditional Macros
+### Task 2.3.1: Conditional Macros
 
 **Description**: Implement conditional control flow.
 
@@ -254,7 +254,7 @@
 
 ---
 
-#### Task 2.3.2: Let Variants
+### Task 2.3.2: Let Variants
 
 **Description**: Implement let variations.
 
@@ -273,7 +273,7 @@
 
 ---
 
-#### Task 2.3.3: Boolean Macros
+### Task 2.3.3: Boolean Macros
 
 **Description**: Implement short-circuit booleans.
 
@@ -291,7 +291,7 @@
 
 ---
 
-#### Task 2.3.4: Threading Macros
+### Task 2.3.4: Threading Macros
 
 **Description**: Implement threading for readability.
 
@@ -312,7 +312,7 @@
 
 ---
 
-#### Task 2.3.5: Iteration Macros
+### Task 2.3.5: Iteration Macros
 
 **Description**: Implement looping constructs.
 
@@ -331,9 +331,9 @@
 
 ---
 
-### Phase 2.4: Collection Functions
+## Phase 2.4: Collection Functions
 
-#### Task 2.4.0: Collection Transformation
+### Task 2.4.0: Collection Transformation
 
 **Description**: Implement collection converters. This task must come first as other collection functions depend on `into`.
 
@@ -355,7 +355,7 @@
 
 ---
 
-#### Task 2.4.1: Collection Predicates
+### Task 2.4.1: Collection Predicates
 
 **Description**: Implement collection testing functions.
 
@@ -375,7 +375,7 @@
 
 ---
 
-#### Task 2.4.2: Collection Constructors
+### Task 2.4.2: Collection Constructors
 
 **Description**: Implement collection constructor functions in pure Lonala.
 
@@ -399,7 +399,7 @@
 
 ---
 
-#### Task 2.4.3: Collection Analysis
+### Task 2.4.3: Collection Analysis
 
 **Description**: Implement collection analysis.
 
@@ -418,7 +418,7 @@
 
 ---
 
-#### Task 2.4.4: Map Functions
+### Task 2.4.4: Map Functions
 
 **Description**: Implement map-specific operations.
 
@@ -438,7 +438,7 @@
 
 ---
 
-#### Task 2.4.5: Set Functions
+### Task 2.4.5: Set Functions
 
 **Description**: Implement set operations.
 
@@ -457,13 +457,13 @@
 
 ---
 
-### Phase 2.5: Protocol System
+## Phase 2.5: Protocol System
 
 Implement Clojure-style protocols for polymorphic dispatch.
 
 > **Dependency**: Protocol dispatch uses native `type-of` (Task 1.8.21) for O(1) type lookup instead of O(N) predicate chains.
 
-#### Task 2.5.1: Protocol Definition (`defprotocol`)
+### Task 2.5.1: Protocol Definition (`defprotocol`)
 
 **Description**: Macro to define protocol with method signatures.
 
@@ -490,7 +490,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.5.2: Type-Based Extension (`extend-type`)
+### Task 2.5.2: Type-Based Extension (`extend-type`)
 
 **Description**: Extend protocol to a specific type.
 
@@ -518,7 +518,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.5.3: Map-Based Extension (`extend`)
+### Task 2.5.3: Map-Based Extension (`extend`)
 
 **Description**: Extend protocol using explicit map of implementations.
 
@@ -544,7 +544,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.5.4: Protocol Predicates and Introspection
+### Task 2.5.4: Protocol Predicates and Introspection
 
 **Description**: Query protocol satisfaction and implementations.
 
@@ -565,9 +565,9 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-### Phase 2.6: String Functions
+## Phase 2.6: String Functions
 
-#### Task 2.6.1: String Basics
+### Task 2.6.1: String Basics
 
 **Description**: Implement basic string operations.
 
@@ -587,7 +587,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.6.2: String Transformation
+### Task 2.6.2: String Transformation
 
 **Description**: Implement string transformers.
 
@@ -607,7 +607,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.6.3: String Analysis
+### Task 2.6.3: String Analysis
 
 **Description**: Implement string analysis.
 
@@ -627,9 +627,9 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-### Phase 2.7: Numeric Functions
+## Phase 2.7: Numeric Functions
 
-#### Task 2.7.1: Numeric Operations
+### Task 2.7.1: Numeric Operations
 
 **Description**: Implement numeric utilities.
 
@@ -649,7 +649,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.7.2: Math Functions
+### Task 2.7.2: Math Functions
 
 **Description**: Implement math operations.
 
@@ -668,9 +668,9 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-### Phase 2.8: I/O Functions
+## Phase 2.8: I/O Functions
 
-#### Task 2.8.1: Print Functions
+### Task 2.8.1: Print Functions
 
 **Description**: Implement output functions.
 
@@ -690,7 +690,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.8.2: Read Functions
+### Task 2.8.2: Read Functions
 
 **Description**: Implement input functions.
 
@@ -707,9 +707,9 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-### Phase 2.9: Process Functions
+## Phase 2.9: Process Functions
 
-#### Task 2.9.1: Process Utilities
+### Task 2.9.1: Process Utilities
 
 **Description**: Implement process helper functions.
 
@@ -728,7 +728,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.9.2: GenServer Pattern
+### Task 2.9.2: GenServer Pattern
 
 **Description**: Implement GenServer behavior.
 
@@ -747,7 +747,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.9.3: Named Process Registry
+### Task 2.9.3: Named Process Registry
 
 **Description**: Implement named process registration.
 
@@ -767,7 +767,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.9.4: Supervisor Behaviors
+### Task 2.9.4: Supervisor Behaviors
 
 **Description**: Implement OTP-style supervision strategies.
 
@@ -788,7 +788,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.9.5: Atom Watches and Validators
+### Task 2.9.5: Atom Watches and Validators
 
 **Description**: Implement atom observation and validation.
 
@@ -819,9 +819,9 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-### Phase 2.10: Error Handling
+## Phase 2.10: Error Handling
 
-#### Task 2.10.1: Result Functions
+### Task 2.10.1: Result Functions
 
 **Description**: Implement result tuple utilities.
 
@@ -840,7 +840,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.10.2: Error Handling Macros
+### Task 2.10.2: Error Handling Macros
 
 **Description**: Implement error handling conveniences.
 
@@ -859,9 +859,9 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-### Phase 2.11: Lazy Sequences
+## Phase 2.11: Lazy Sequences
 
-#### Task 2.11.1: LazySeq Type
+### Task 2.11.1: LazySeq Type
 
 **Description**: Implement lazy sequence foundation.
 
@@ -880,7 +880,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.11.2: Lazy Versions of Seq Functions
+### Task 2.11.2: Lazy Versions of Seq Functions
 
 **Description**: Make seq functions lazy.
 
@@ -900,9 +900,9 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-### Phase 2.12: Standard Library Tests
+## Phase 2.12: Standard Library Tests
 
-#### Task 2.12.1: Core Function Tests
+### Task 2.12.1: Core Function Tests
 
 **Description**: Complete test coverage for core.
 
@@ -918,7 +918,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.12.2: String and Numeric Tests
+### Task 2.12.2: String and Numeric Tests
 
 **Description**: Complete test coverage for strings and numbers.
 
@@ -935,7 +935,7 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-#### Task 2.12.3: Process and Result Tests
+### Task 2.12.3: Process and Result Tests
 
 **Description**: Complete test coverage for process and error handling.
 
@@ -952,11 +952,11 @@ Implement Clojure-style protocols for polymorphic dispatch.
 
 ---
 
-### Phase 2.13: Self-Hosting
+## Phase 2.13: Self-Hosting
 
 Enable Lonala to compile and evaluate itself at runtime.
 
-#### Task 2.13.1: eval Function
+### Task 2.13.1: eval Function
 
 **Description**: Implement runtime evaluation of Lonala forms.
 
@@ -981,7 +981,7 @@ Enable Lonala to compile and evaluate itself at runtime.
 
 ---
 
-#### Task 2.13.2: load Function
+### Task 2.13.2: load Function
 
 **Description**: Implement file loading and evaluation.
 
@@ -1000,7 +1000,7 @@ Enable Lonala to compile and evaluate itself at runtime.
 
 ---
 
-#### Task 2.13.3: Sorted Collection Subsequences
+### Task 2.13.3: Sorted Collection Subsequences
 
 **Description**: Implement sorted collection range queries.
 

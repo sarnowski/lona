@@ -1,12 +1,12 @@
-## Milestone 5: Lonala REPL
+# Milestone 5: Lonala REPL
 
 **Goal**: Replace Rust REPL with pure Lonala implementation.
 
 **Prerequisite**: Milestone 4 complete
 
-### Phase 5.1: REPL Core
+## Phase 5.1: REPL Core
 
-#### Task 5.1.1: REPL Main Loop
+### Task 5.1.1: REPL Main Loop
 
 **Description**: Implement read-eval-print loop.
 
@@ -24,7 +24,7 @@
 
 ---
 
-#### Task 5.1.2: Line Editor
+### Task 5.1.2: Line Editor
 
 **Description**: Implement basic line editing.
 
@@ -41,9 +41,9 @@
 
 ---
 
-### Phase 5.2: REPL Features
+## Phase 5.2: REPL Features
 
-#### Task 5.2.1: Error Handling
+### Task 5.2.1: Error Handling
 
 **Description**: Handle and display errors gracefully.
 
@@ -60,7 +60,7 @@
 
 ---
 
-#### Task 5.2.2: Multi-line Input
+### Task 5.2.2: Multi-line Input
 
 **Description**: Support multi-line expressions.
 
@@ -76,7 +76,7 @@
 
 ---
 
-#### Task 5.2.3: History
+### Task 5.2.3: History
 
 **Description**: Implement command history.
 
@@ -92,9 +92,9 @@
 
 ---
 
-### Phase 5.3: Integration
+## Phase 5.3: Integration
 
-#### Task 5.3.1: REPL Domain
+### Task 5.3.1: REPL Domain
 
 **Description**: Run REPL in isolated domain.
 
@@ -111,7 +111,7 @@
 
 ---
 
-#### Task 5.3.2: Remove Rust REPL
+### Task 5.3.2: Remove Rust REPL
 
 **Description**: Remove interim Rust REPL code.
 

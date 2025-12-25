@@ -373,6 +373,6 @@ Clojure philosophy provides Lona with:
 
 - [Core Concepts: Message](core-concepts.md#message)
 - [System Design: Memory Model](system-design.md#memory-model-for-high-throughput-data)
-- [Language Specification: Data Types](/docs/lonala/data-types.md)
+- [Language Specification: Data Types](../lonala/data-types.md)
 - [Clojure Rationale](https://clojure.org/about/rationale)
 - [Simple Made Easy](https://www.infoq.com/presentations/Simple-Made-Easy/) — Rich Hickey

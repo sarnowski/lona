@@ -1,12 +1,12 @@
-## Milestone 4: Init System
+# Milestone 4: Init System
 
 **Goal**: Implement Lonala init system that bootstraps the OS.
 
 **Prerequisite**: Milestone 3 complete
 
-### Phase 4.1: Init Process
+## Phase 4.1: Init Process
 
-#### Task 4.1.1: Init Main Function
+### Task 4.1.1: Init Main Function
 
 **Description**: Create init process entry point.
 
@@ -23,7 +23,7 @@
 
 ---
 
-#### Task 4.1.2: Platform Detection
+### Task 4.1.2: Platform Detection
 
 **Description**: Detect hardware platform.
 
@@ -39,9 +39,9 @@
 
 ---
 
-### Phase 4.2: Driver Supervision
+## Phase 4.2: Driver Supervision
 
-#### Task 4.2.1: Driver Supervisor
+### Task 4.2.1: Driver Supervisor
 
 **Description**: Supervise device drivers.
 
@@ -58,7 +58,7 @@
 
 ---
 
-#### Task 4.2.2: UART Initialization
+### Task 4.2.2: UART Initialization
 
 **Description**: Start UART driver from init.
 
@@ -75,9 +75,9 @@
 
 ---
 
-### Phase 4.3: Rust Handoff
+## Phase 4.3: Rust Handoff
 
-#### Task 4.3.1: Boot Handoff
+### Task 4.3.1: Boot Handoff
 
 **Description**: Modify Rust runtime to start Lonala init.
 

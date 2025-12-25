@@ -1,10 +1,10 @@
-## Phase 1.3: Namespace System
+# Phase 1.3: Namespace System
 
 Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.1: Namespace Data Structure
+## Task 1.3.1: Namespace Data Structure
 
 **Description**: Create namespace representation and registry.
 
@@ -28,7 +28,7 @@ Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.2: Var System - Namespace Extension and Var Quote
+## Task 1.3.2: Var System - Namespace Extension and Var Quote
 
 **Description**: Extend the foundation Var type (from Task 1.1.7) with namespace field and implement `#'symbol` reader syntax.
 
@@ -61,7 +61,7 @@ Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.3: Namespace Declaration (`ns`)
+## Task 1.3.3: Namespace Declaration (`ns`)
 
 **Description**: Implement `ns` special form.
 
@@ -85,7 +85,7 @@ Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.4: Require/Use/Refer Implementation
+## Task 1.3.4: Require/Use/Refer Implementation
 
 **Description**: Implement namespace loading and importing.
 
@@ -110,7 +110,7 @@ Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.5: Qualified Symbol Resolution
+## Task 1.3.5: Qualified Symbol Resolution
 
 **Description**: Resolve `ns/name` symbols through namespace system.
 
@@ -134,7 +134,7 @@ Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.6: Private Vars
+## Task 1.3.6: Private Vars
 
 **Description**: Implement `:private` metadata enforcement.
 
@@ -158,7 +158,7 @@ Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.7: Dynamic Var Declaration
+## Task 1.3.7: Dynamic Var Declaration
 
 **Description**: Add support for `^:dynamic` metadata on vars to mark them as rebindable.
 
@@ -183,7 +183,7 @@ Implement namespaces for code organization.
 
 ---
 
-### Task 1.3.8: `defnative` Special Form
+## Task 1.3.8: `defnative` Special Form
 
 **Description**: Implement `defnative` for registering native functions with full metadata support.
 

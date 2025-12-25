@@ -1,12 +1,12 @@
-## Milestone 8: Persistent Storage
+# Milestone 8: Persistent Storage
 
 **Goal**: Enable applications to persist data.
 
 **Prerequisite**: Milestone 7 complete
 
-### Phase 8.1: Write Operations
+## Phase 8.1: Write Operations
 
-#### Task 8.1.1: File Write Support
+### Task 8.1.1: File Write Support
 
 **Description**: Complete file write implementation.
 
@@ -24,7 +24,7 @@
 
 ---
 
-#### Task 8.1.2: Directory Modification
+### Task 8.1.2: Directory Modification
 
 **Description**: Complete directory write support.
 
@@ -41,9 +41,9 @@
 
 ---
 
-### Phase 8.2: Durability
+## Phase 8.2: Durability
 
-#### Task 8.2.1: Sync Operations
+### Task 8.2.1: Sync Operations
 
 **Description**: Ensure durability guarantees.
 
@@ -60,7 +60,7 @@
 
 ---
 
-#### Task 8.2.2: Persistence Tests
+### Task 8.2.2: Persistence Tests
 
 **Description**: Test data persistence.
 

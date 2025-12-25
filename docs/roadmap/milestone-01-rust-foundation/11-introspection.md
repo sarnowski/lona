@@ -1,10 +1,10 @@
-## Phase 1.11: Introspection System
+# Phase 1.11: Introspection System
 
 Implement LISP-machine-style introspection and debugging capabilities as described in the [Goals documentation](../../goals/index.md).
 
 ---
 
-### Task 1.11.1: Source Storage and Retrieval
+## Task 1.11.1: Source Storage and Retrieval
 
 **Description**: Store source code per-definition with provenance tracking.
 
@@ -27,7 +27,7 @@ Implement LISP-machine-style introspection and debugging capabilities as describ
 
 ---
 
-### Task 1.11.2: `source` and `disassemble` Functions
+## Task 1.11.2: `source` and `disassemble` Functions
 
 **Description**: View source code and bytecode of definitions.
 
@@ -50,7 +50,7 @@ Implement LISP-machine-style introspection and debugging capabilities as describ
 
 ---
 
-### Task 1.11.3: Namespace Introspection
+## Task 1.11.3: Namespace Introspection
 
 **Description**: Query namespace contents and metadata.
 
@@ -74,7 +74,7 @@ Implement LISP-machine-style introspection and debugging capabilities as describ
 
 ---
 
-### Task 1.11.4: Process Introspection
+## Task 1.11.4: Process Introspection
 
 **Description**: Inspect process state and metadata.
 
@@ -97,7 +97,7 @@ Implement LISP-machine-style introspection and debugging capabilities as describ
 
 ---
 
-### Task 1.11.5: Domain Introspection
+## Task 1.11.5: Domain Introspection
 
 **Description**: Query domain hierarchy and capabilities.
 
@@ -122,7 +122,7 @@ Implement LISP-machine-style introspection and debugging capabilities as describ
 
 ---
 
-### Task 1.11.6: Tracing Infrastructure
+## Task 1.11.6: Tracing Infrastructure
 
 **Description**: Non-blocking observation of system behavior.
 
@@ -146,7 +146,7 @@ Implement LISP-machine-style introspection and debugging capabilities as describ
 
 ---
 
-### Task 1.11.7: Hot Code Propagation
+## Task 1.11.7: Hot Code Propagation
 
 **Description**: Explicit code updates between domains.
 

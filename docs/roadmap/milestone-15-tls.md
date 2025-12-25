@@ -1,12 +1,12 @@
-## Milestone 15: TLS
+# Milestone 15: TLS
 
 **Goal**: Implement TLS 1.2/1.3 for secure connections.
 
 **Prerequisite**: Milestone 12 complete
 
-### Phase 15.0: TLS Prerequisites
+## Phase 15.0: TLS Prerequisites
 
-#### Task 15.0.1: Cryptographic Random Number Generator
+### Task 15.0.1: Cryptographic Random Number Generator
 
 **Description**: Implement secure random number generation for cryptographic operations.
 
@@ -31,7 +31,7 @@
 
 ---
 
-#### Task 15.0.2: Real-Time Clock Access
+### Task 15.0.2: Real-Time Clock Access
 
 **Description**: Access hardware RTC for certificate validation and time-sensitive operations.
 
@@ -54,9 +54,9 @@
 
 ---
 
-### Phase 15.1: Cryptographic Primitives
+## Phase 15.1: Cryptographic Primitives
 
-#### Task 15.1.1: Hash Functions
+### Task 15.1.1: Hash Functions
 
 **Description**: Implement cryptographic hashes.
 
@@ -72,7 +72,7 @@
 
 ---
 
-#### Task 15.1.2: Symmetric Encryption
+### Task 15.1.2: Symmetric Encryption
 
 **Description**: Implement symmetric ciphers.
 
@@ -88,7 +88,7 @@
 
 ---
 
-#### Task 15.1.3: Asymmetric Cryptography
+### Task 15.1.3: Asymmetric Cryptography
 
 **Description**: Implement public-key crypto.
 
@@ -104,9 +104,9 @@
 
 ---
 
-### Phase 15.2: TLS Protocol
+## Phase 15.2: TLS Protocol
 
-#### Task 15.2.1: TLS Record Layer
+### Task 15.2.1: TLS Record Layer
 
 **Description**: Implement TLS record protocol.
 
@@ -123,7 +123,7 @@
 
 ---
 
-#### Task 15.2.2: TLS Handshake - Client
+### Task 15.2.2: TLS Handshake - Client
 
 **Description**: Implement TLS client handshake.
 
@@ -140,7 +140,7 @@
 
 ---
 
-#### Task 15.2.3: TLS Handshake - Server
+### Task 15.2.3: TLS Handshake - Server
 
 **Description**: Implement TLS server handshake.
 
@@ -157,7 +157,7 @@
 
 ---
 
-#### Task 15.2.4: TLS 1.3 Support
+### Task 15.2.4: TLS 1.3 Support
 
 **Description**: Add TLS 1.3 specifics.
 
@@ -174,9 +174,9 @@
 
 ---
 
-### Phase 15.3: Certificate Management
+## Phase 15.3: Certificate Management
 
-#### Task 15.3.1: X.509 Parsing
+### Task 15.3.1: X.509 Parsing
 
 **Description**: Parse X.509 certificates.
 
@@ -193,7 +193,7 @@
 
 ---
 
-#### Task 15.3.2: Certificate Storage
+### Task 15.3.2: Certificate Storage
 
 **Description**: Store and manage certificates.
 
@@ -210,9 +210,9 @@
 
 ---
 
-### Phase 15.4: Tests
+## Phase 15.4: Tests
 
-#### Task 15.4.1: Crypto Tests
+### Task 15.4.1: Crypto Tests
 
 **Description**: Test cryptographic primitives.
 
@@ -229,7 +229,7 @@
 
 ---
 
-#### Task 15.4.2: TLS Tests
+### Task 15.4.2: TLS Tests
 
 **Description**: Test TLS implementation.
 

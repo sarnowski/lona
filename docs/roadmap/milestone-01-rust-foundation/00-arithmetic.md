@@ -1,10 +1,10 @@
-## Phase 1.0: Arithmetic Primitives
+# Phase 1.0: Arithmetic Primitives
 
 Arithmetic must come first — nearly everything else depends on it.
 
 ---
 
-### Task 1.0.1: Native Addition and Subtraction
+## Task 1.0.1: Native Addition and Subtraction
 
 **Description**: Implement `+` and `-` in the VM natives.
 
@@ -30,7 +30,7 @@ Arithmetic must come first — nearly everything else depends on it.
 
 ---
 
-### Task 1.0.2: Native Multiplication and Division
+## Task 1.0.2: Native Multiplication and Division
 
 **Description**: Implement `*` and `/` in the VM natives.
 
@@ -57,7 +57,7 @@ Arithmetic must come first — nearly everything else depends on it.
 
 ---
 
-### Task 1.0.3: Modulo
+## Task 1.0.3: Modulo
 
 **Description**: Implement `mod` native.
 
@@ -80,7 +80,7 @@ Arithmetic must come first — nearly everything else depends on it.
 
 ---
 
-### Task 1.0.4: Comparison - Equality
+## Task 1.0.4: Comparison - Equality
 
 **Description**: Implement `=` for value equality.
 
@@ -106,7 +106,7 @@ Arithmetic must come first — nearly everything else depends on it.
 
 ---
 
-### Task 1.0.5: Comparison - Ordering
+## Task 1.0.5: Comparison - Ordering
 
 **Description**: Implement `<`, `>`, `<=`, `>=` natives.
 

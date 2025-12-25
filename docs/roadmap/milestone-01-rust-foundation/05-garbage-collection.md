@@ -1,8 +1,8 @@
-## Phase 1.5: Garbage Collection
+# Phase 1.5: Garbage Collection
 
 Implement per-process incremental garbage collection.
 
-### Relationship to Process Model
+## Relationship to Process Model
 
 GC builds on the per-process heap from Phase 1.4. Key interactions:
 
@@ -13,7 +13,7 @@ GC builds on the per-process heap from Phase 1.4. Key interactions:
 
 ---
 
-### Task 1.5.1: Root Discovery
+## Task 1.5.1: Root Discovery
 
 **Description**: Identify GC roots for a process.
 
@@ -36,7 +36,7 @@ GC builds on the per-process heap from Phase 1.4. Key interactions:
 
 ---
 
-### Task 1.5.2: Tri-Color Marking
+## Task 1.5.2: Tri-Color Marking
 
 **Description**: Implement tri-color marking algorithm.
 
@@ -59,7 +59,7 @@ GC builds on the per-process heap from Phase 1.4. Key interactions:
 
 ---
 
-### Task 1.5.3: Write Barrier
+## Task 1.5.3: Write Barrier
 
 **Description**: Implement write barrier for incremental correctness.
 
@@ -82,7 +82,7 @@ GC builds on the per-process heap from Phase 1.4. Key interactions:
 
 ---
 
-### Task 1.5.4: Sweep Phase
+## Task 1.5.4: Sweep Phase
 
 **Description**: Reclaim unmarked memory.
 
@@ -105,7 +105,7 @@ GC builds on the per-process heap from Phase 1.4. Key interactions:
 
 ---
 
-### Task 1.5.5: Generational Optimization
+## Task 1.5.5: Generational Optimization
 
 **Description**: Add generational collection for reduced pause times.
 
@@ -129,7 +129,7 @@ GC builds on the per-process heap from Phase 1.4. Key interactions:
 
 ---
 
-### Task 1.5.6: GC Scheduling
+## Task 1.5.6: GC Scheduling
 
 **Description**: Determine when to run GC, including OOM recovery attempts.
 

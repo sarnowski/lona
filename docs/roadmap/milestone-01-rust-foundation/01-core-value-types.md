@@ -1,10 +1,10 @@
-## Phase 1.1: Core Value Type Extensions
+# Phase 1.1: Core Value Type Extensions
 
 Extend the value system with missing fundamental types.
 
 ---
 
-### Task 1.1.1: Keyword Value Type
+## Task 1.1.1: Keyword Value Type
 
 **Description**: Add `Keyword` as a distinct value type with interning.
 
@@ -31,7 +31,7 @@ Extend the value system with missing fundamental types.
 
 ---
 
-### Task 1.1.2: Set Value Type
+## Task 1.1.2: Set Value Type
 
 **Description**: Add `Set` as a persistent hash set using HAMT.
 
@@ -59,7 +59,7 @@ Extend the value system with missing fundamental types.
 
 ---
 
-### Task 1.1.3: Collection Literal Syntax
+## Task 1.1.3: Collection Literal Syntax
 
 **Description**: Implement compiler support for vector, map, and set literal syntax.
 
@@ -89,7 +89,7 @@ Extend the value system with missing fundamental types.
 
 ---
 
-### Task 1.1.4: Binary Value Type
+## Task 1.1.4: Binary Value Type
 
 **Description**: Add `Binary` for raw byte buffers with ownership semantics, the ONLY mutable type in Lonala.
 
@@ -158,7 +158,7 @@ Binary Ownership Model:
 
 ---
 
-### Task 1.1.5: Metadata System - Value Storage
+## Task 1.1.5: Metadata System - Value Storage
 
 **Description**: Add optional metadata map storage to values that support it.
 
@@ -187,7 +187,7 @@ Binary Ownership Model:
 
 ---
 
-### Task 1.1.6: Metadata System - Reader Syntax
+## Task 1.1.6: Metadata System - Reader Syntax
 
 **Description**: Add parser support for `^` metadata reader macro.
 
@@ -212,7 +212,7 @@ Binary Ownership Model:
 
 ---
 
-### Task 1.1.7: Metadata System - Compiler Integration
+## Task 1.1.7: Metadata System - Compiler Integration
 
 **Description**: Integrate metadata into compilation and var definitions.
 

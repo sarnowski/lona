@@ -14,22 +14,6 @@ This document provides a detailed, task-level breakdown of the Lona operating sy
 
 ## Overview
 
-### Design Principles
-
-1. **Lonala-First**: All functionality achievable in Lonala MUST be implemented in Lonala
-2. **Correct Solutions Only**: No shortcuts, workarounds, or deferred solutions
-3. **Test-First Development**: All bug fixes require failing tests first
-4. **BEAM-Style Concurrency**: Lightweight processes, message passing, supervision trees
-5. **seL4 Security**: Capability-based isolation at domain boundaries
-
-### Open Design Decisions
-
-> **IMPORTANT**: These are major architectural decisions requiring dedicated design sessions before implementation.
-
-| Decision | Status | Affects | Notes |
-|----------|--------|---------|-------|
-| **Cross-Domain Zero-Copy IPC** | 🟢 RESOLVED | Task 1.6.5-1.6.7 | See [Process Communication](../architecture/process-communication.md). Design: Tiered hybrid model with intra-domain reference sharing, inter-domain copy for small messages, and arena-based zero-copy for large data. |
-
 ### Architecture Layers
 
 ```
@@ -61,37 +45,39 @@ This document provides a detailed, task-level breakdown of the Lona operating sy
 
 ## Milestones
 
-| # | Milestone | Summary |
-|---|-----------|---------|
-| 1 | [Rust Foundation](milestone-01-rust-foundation.md) | Complete all Rust code for the runtime |
-|   | ↳ [1.0 Arithmetic](milestone-01-rust-foundation/00-arithmetic.md) | +, -, *, /, mod, comparisons |
-|   | ↳ [1.1 Core Value Types](milestone-01-rust-foundation/01-core-value-types.md) | Keyword, Set, Binary, Metadata |
-|   | ↳ [1.2 Language Features](milestone-01-rust-foundation/02-language-features.md) | Closures, destructuring, TCO |
-|   | ↳ [1.3 Namespace System](milestone-01-rust-foundation/03-namespace-system.md) | Namespaces, Vars, defnative |
-|   | ↳ [1.4 Process Model](milestone-01-rust-foundation/04-process-model.md) | Scheduler, spawn/send/receive |
-|   | ↳ [1.5 Garbage Collection](milestone-01-rust-foundation/05-garbage-collection.md) | Tri-color, generational GC |
-|   | ↳ [1.6 Domain Isolation](milestone-01-rust-foundation/06-domain-isolation.md) | seL4 VSpace/CSpace, IPC |
-|   | ↳ [1.7 Fault Tolerance](milestone-01-rust-foundation/07-fault-tolerance.md) | Links, monitors, exit signals |
-|   | ↳ [1.8 Native Primitives](milestone-01-rust-foundation/08-native-primitives.md) | Types, bitwise, MMIO/DMA/IRQ |
-|   | ↳ [1.9 Integration Tests](milestone-01-rust-foundation/09-integration-tests.md) | Process, domain, GC tests |
-|   | ↳ [1.10 Condition/Restart](milestone-01-rust-foundation/10-condition-restart.md) | Conditions, handlers, restarts |
-|   | ↳ [1.11 Introspection](milestone-01-rust-foundation/11-introspection.md) | Source, namespace, process |
-|   | ↳ [1.12 Debug Infrastructure](milestone-01-rust-foundation/12-debug-infrastructure.md) | Breakpoints, stepping, REPL |
-| 2 | [Lonala Standard Library](milestone-02-lonala-standard-library.md) | Test framework, core functions, protocols, process patterns |
-| 3 | [UART Driver](milestone-03-uart-driver.md) | ARM64 PL011, x86_64 16550, domain isolation |
-| 4 | [Init System](milestone-04-init-system.md) | Platform detection, driver supervision, Rust handoff |
-| 5 | [Lonala REPL](milestone-05-lonala-repl.md) | Line editing, history, replaces Rust REPL |
-| 6 | [Block Storage](milestone-06-block-storage.md) | VirtIO infrastructure, block driver |
-| 7 | [Filesystem](milestone-07-filesystem.md) | VFS, FAT12/16/32, file handles |
-| 8 | [Persistent Storage](milestone-08-persistent-storage.md) | File writes, directory ops, fsync |
-| 9 | [Network Driver](milestone-09-network-driver.md) | VirtIO net, frame buffers, IRQ |
-| 10 | [ARP](milestone-10-arp.md) | Cache, request/reply, GenServer |
-| 11 | [IP Stack](milestone-11-ip-stack.md) | IPv4/IPv6, routing, ARP integration |
-| 12 | [Transport Protocols](milestone-12-transport-protocols.md) | ICMP, UDP, TCP with flow/congestion |
-| 13 | [Telnet Server](milestone-13-telnet-server.md) | Remote REPL, domain isolation |
-| 14 | [HTTP/1 Server](milestone-14-http1-server.md) | Request parsing, static files, keep-alive |
-| 15 | [TLS](milestone-15-tls.md) | SHA, AES-GCM, RSA, ECDSA, TLS 1.2/1.3 |
-| 16 | [HTTP/2 with ACME](milestone-16-http2-with-acme.md) | Streams, HPACK, Let's Encrypt |
+| # |   | Milestone |
+|---|---|-----------|
+| 1 |   | [Rust Foundation](milestone-01-rust-foundation.md) (complete all Rust code for the runtime) |
+| 1.0 | ✓ | ↳ [Arithmetic](milestone-01-rust-foundation/00-arithmetic.md) (+, -, *, /, mod, comparisons) |
+| 1.1 | ✓ | ↳ [Core Value Types](milestone-01-rust-foundation/01-core-value-types.md) (Keyword, Set, Binary, Metadata) |
+| 1.2 | → | ↳ [Language Features](milestone-01-rust-foundation/02-language-features.md) (closures, destructuring, TCO) |
+| 1.3 |   | ↳ [Namespace System](milestone-01-rust-foundation/03-namespace-system.md) (Namespaces, Vars, defnative) |
+| 1.4 |   | ↳ [Process Model](milestone-01-rust-foundation/04-process-model.md) (scheduler, spawn/send/receive) |
+| 1.5 |   | ↳ [Garbage Collection](milestone-01-rust-foundation/05-garbage-collection.md) (tri-color, generational GC) |
+| 1.6 |   | ↳ [Domain Isolation](milestone-01-rust-foundation/06-domain-isolation.md) (seL4 VSpace/CSpace, IPC) |
+| 1.7 |   | ↳ [Fault Tolerance](milestone-01-rust-foundation/07-fault-tolerance.md) (links, monitors, exit signals) |
+| 1.8 |   | ↳ [Native Primitives](milestone-01-rust-foundation/08-native-primitives.md) (types, bitwise, MMIO/DMA/IRQ) |
+| 1.9 |   | ↳ [Integration Tests](milestone-01-rust-foundation/09-integration-tests.md) (process, domain, GC tests) |
+| 1.10 |   | ↳ [Condition/Restart](milestone-01-rust-foundation/10-condition-restart.md) (conditions, handlers, restarts) |
+| 1.11 |   | ↳ [Introspection](milestone-01-rust-foundation/11-introspection.md) (source, namespace, process) |
+| 1.12 |   | ↳ [Debug Infrastructure](milestone-01-rust-foundation/12-debug-infrastructure.md) (breakpoints, stepping, REPL) |
+| 2 |   | [Lonala Standard Library](milestone-02-lonala-standard-library.md) (test framework, core functions, protocols, process patterns) |
+| 3 |   | [UART Driver](milestone-03-uart-driver.md) (ARM64 PL011, x86_64 16550, domain isolation) |
+| 4 |   | [Init System](milestone-04-init-system.md) (platform detection, driver supervision, Rust handoff) |
+| 5 |   | [Lonala REPL](milestone-05-lonala-repl.md) (line editing, history, replaces Rust REPL) |
+| 6 |   | [Block Storage](milestone-06-block-storage.md) (VirtIO infrastructure, block driver) |
+| 7 |   | [Filesystem](milestone-07-filesystem.md) (VFS, FAT12/16/32, file handles) |
+| 8 |   | [Persistent Storage](milestone-08-persistent-storage.md) (file writes, directory ops, fsync) |
+| 9 |   | [Network Driver](milestone-09-network-driver.md) (VirtIO net, frame buffers, IRQ) |
+| 10 |   | [ARP](milestone-10-arp.md) (cache, request/reply, GenServer) |
+| 11 |   | [IP Stack](milestone-11-ip-stack.md) (IPv4/IPv6, routing, ARP integration) |
+| 12 |   | [Transport Protocols](milestone-12-transport-protocols.md) (ICMP, UDP, TCP with flow/congestion) |
+| 13 |   | [Telnet Server](milestone-13-telnet-server.md) (remote REPL, domain isolation) |
+| 14 |   | [HTTP/1 Server](milestone-14-http1-server.md) (request parsing, static files, keep-alive) |
+| 15 |   | [TLS](milestone-15-tls.md) (SHA, AES-GCM, RSA, ECDSA, TLS 1.2/1.3) |
+| 16 |   | [HTTP/2 with ACME](milestone-16-http2-with-acme.md) (streams, HPACK, Let's Encrypt) |
+
+✓ = done, → = current/next
 
 ---
 
