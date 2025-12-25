@@ -19,11 +19,15 @@ use alloc::vec::Vec;
 
 use core::hash::Hash;
 
+mod insert;
 mod iter;
 mod node;
+mod remove;
 
+use insert::insert_rec;
 pub use iter::HamtIter;
-use node::{Node, RemoveResult, get_rec, hash_key, index_at_depth, insert_rec, remove_rec};
+use node::{Node, get_rec, hash_key, index_at_depth};
+use remove::{RemoveResult, remove_rec};
 
 #[cfg(test)]
 mod tests;

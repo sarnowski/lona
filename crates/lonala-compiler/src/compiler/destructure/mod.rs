@@ -39,7 +39,9 @@
 //! binding (hot-patching affects destructuring behavior).
 
 mod compile;
+mod map;
 mod parse;
+mod sequential;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -48,7 +50,9 @@ use lona_core::span::Span;
 use lona_core::symbol;
 use lonala_parser::Spanned;
 
-pub use parse::{MAX_PATTERN_DEPTH, parse_map_pattern, parse_sequential_pattern};
+pub use map::parse_map_pattern;
+pub use parse::{MAX_PATTERN_DEPTH, parse_binding};
+pub use sequential::parse_sequential_pattern;
 
 use super::Ast;
 

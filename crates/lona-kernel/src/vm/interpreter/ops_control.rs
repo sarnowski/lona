@@ -12,7 +12,9 @@ use lona_core::opcode::{decode_a, decode_b, decode_c, decode_sbx};
 use lona_core::symbol;
 use lona_core::value::{Function, Value};
 
-use super::{DispatchResult, MAX_CALL_DEPTH, TailCallData, Vm};
+use lona_core::source;
+
+use super::{DispatchResult, MAX_CALL_DEPTH, TailCallData, TailCallSetup, Vm};
 use crate::vm::error::{Error, Kind as ErrorKind};
 use crate::vm::frame::Frame;
 use crate::vm::natives::NativeContext;
@@ -411,5 +413,113 @@ impl Vm<'_> {
             // Return count values starting at R[start_reg]
             self.get_register(start_reg, frame)
         }
+    }
+
+    // =========================================================================
+    // Tail Call Setup
+    // =========================================================================
+
+    /// Sets up registers and returns frame parameters for a tail call.
+    ///
+    /// This is the core of tail call optimization. Instead of creating a
+    /// new frame on the stack, we:
+    /// 1. Find the matching arity body for the function being called
+    /// 2. Handle rest parameters (collect extra args into a list)
+    /// 3. Set up argument registers at the given base
+    /// 4. Return the chunk and upvalues for the new frame
+    ///
+    /// The caller (trampoline) uses these to create a replacement frame.
+    ///
+    /// # Parameters
+    /// - `data`: The tail call data containing function and arguments
+    /// - `base`: The base register index for the new frame's arguments
+    /// - `location`: Source location for error reporting
+    ///
+    /// # Returns
+    /// A `TailCallSetup` containing the chunk, source ID, and upvalues for the new frame.
+    pub(super) fn setup_tail_call(
+        &mut self,
+        data: TailCallData,
+        base: usize,
+        location: source::Location,
+    ) -> Result<TailCallSetup, Error> {
+        let argc = data.arguments.len();
+
+        // Find matching arity body
+        let body = data.function.find_body(argc).ok_or_else(|| {
+            // Build arity expectation for error message
+            let bodies = data.function.bodies();
+            let expectation = if let &[ref first] = bodies {
+                if first.has_rest() {
+                    ArityExpectation::AtLeast(first.arity())
+                } else {
+                    ArityExpectation::Exact(first.arity())
+                }
+            } else {
+                bodies
+                    .first()
+                    .map_or(ArityExpectation::Exact(0), |first_body| {
+                        ArityExpectation::Exact(first_body.arity())
+                    })
+            };
+            Error::new(
+                ErrorKind::ArityMismatch {
+                    callable: None,
+                    expected: expectation,
+                    got: u8::try_from(argc).unwrap_or(u8::MAX),
+                },
+                location,
+            )
+        })?;
+
+        let fixed_arity = body.arity();
+        let has_rest = body.has_rest();
+
+        // Extract values needed for TailCallSetup before moving arguments
+        let source_id = data.source();
+        let upvalues = Arc::clone(data.function.upvalues_arc());
+
+        // Build the effective arguments list
+        // Fixed args: arguments[0..fixed_arity]
+        // Rest arg (if has_rest): arguments[fixed_arity..] collected into a list
+        let effective_args: Vec<Value> = if has_rest {
+            let fixed_arity_usize = usize::from(fixed_arity);
+            let mut effective = Vec::with_capacity(fixed_arity_usize.saturating_add(1));
+            // Add fixed arguments
+            for arg in data.arguments.iter().take(fixed_arity_usize) {
+                effective.push(arg.clone());
+            }
+            // Collect rest arguments into a list
+            let rest_elements: Vec<Value> = data
+                .arguments
+                .iter()
+                .skip(fixed_arity_usize)
+                .cloned()
+                .collect();
+            effective.push(Value::List(List::from_vec(rest_elements)));
+            effective
+        } else {
+            data.arguments
+        };
+
+        // Ensure we have enough registers
+        let needed_registers = base.saturating_add(usize::from(body.chunk().max_registers()));
+        if needed_registers > self.registers.len() {
+            self.registers.resize(needed_registers, Value::Nil);
+        }
+
+        // Set up argument registers (R[0], R[1], ... relative to base)
+        for (idx, arg) in effective_args.into_iter().enumerate() {
+            let reg_idx = base.saturating_add(idx);
+            if let Some(reg) = self.registers.get_mut(reg_idx) {
+                *reg = arg;
+            }
+        }
+
+        Ok(TailCallSetup::new(
+            Arc::clone(body.chunk_arc()),
+            source_id,
+            upvalues,
+        ))
     }
 }

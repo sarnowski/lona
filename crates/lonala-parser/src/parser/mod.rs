@@ -9,6 +9,9 @@
 
 extern crate alloc;
 
+mod collections;
+mod metadata;
+
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -57,14 +60,14 @@ impl<'src> Parser<'src> {
     /// Creates a source location from a span.
     #[inline]
     #[must_use]
-    const fn location(&self, span: Span) -> SourceLocation {
+    pub(super) const fn location(&self, span: Span) -> SourceLocation {
         SourceLocation::new(self.source_id, span)
     }
 
     /// Creates a source location from start and end positions.
     #[inline]
     #[must_use]
-    const fn location_from(&self, start: usize, end: usize) -> SourceLocation {
+    pub(super) const fn location_from(&self, start: usize, end: usize) -> SourceLocation {
         self.location(Span::new(start, end))
     }
 
@@ -73,7 +76,11 @@ impl<'src> Parser<'src> {
     /// The `full_span` runs from `trivia_start` (before any leading
     /// whitespace/comments) to `span.end`.
     #[inline]
-    const fn spanned_with_trivia<T>(node: T, span: Span, trivia_start: usize) -> Spanned<T> {
+    pub(super) const fn spanned_with_trivia<T>(
+        node: T,
+        span: Span,
+        trivia_start: usize,
+    ) -> Spanned<T> {
         let full_span = Span::new(trivia_start, span.end);
         Spanned::with_full_span(node, span, full_span)
     }
@@ -109,7 +116,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parses a single expression.
-    fn parse_expr(&mut self) -> Result<Spanned<Ast>, Error> {
+    pub(super) fn parse_expr(&mut self) -> Result<Spanned<Ast>, Error> {
         // Peek triggers trivia skip, so capture trivia_start after peek
         let token = match self.lexer.peek() {
             Some(&Ok(ref token)) => token.clone(),
@@ -160,148 +167,6 @@ impl<'src> Parser<'src> {
                     },
                     self.location(token.span),
                 ))
-            }
-        }
-    }
-
-    /// Parses a list `(...)`.
-    fn parse_list(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
-        let (elements, span) =
-            self.parse_collection(TokenKind::LeftParen, TokenKind::RightParen, '(', ')')?;
-        Ok(Self::spanned_with_trivia(
-            Ast::list(elements),
-            span,
-            trivia_start,
-        ))
-    }
-
-    /// Parses a vector `[...]`.
-    fn parse_vector(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
-        let (elements, span) =
-            self.parse_collection(TokenKind::LeftBracket, TokenKind::RightBracket, '[', ']')?;
-        Ok(Self::spanned_with_trivia(
-            Ast::vector(elements),
-            span,
-            trivia_start,
-        ))
-    }
-
-    /// Parses a map `{...}`.
-    fn parse_map(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
-        let (elements, span) =
-            self.parse_collection(TokenKind::LeftBrace, TokenKind::RightBrace, '{', '}')?;
-
-        // Maps must have an even number of elements
-        if !elements.len().is_multiple_of(2_usize) {
-            return Err(Error::new(ErrorKind::OddMapEntries, self.location(span)));
-        }
-
-        // Check for duplicate keys (keys are at indices 0, 2, 4, ...)
-        // Uses O(n²) comparison but n is typically small for literal maps
-        let keys: Vec<&Spanned<Ast>> = elements.iter().step_by(2_usize).collect();
-        for (i, key) in keys.iter().enumerate() {
-            for prev in keys.iter().take(i) {
-                if key.node == prev.node {
-                    return Err(Error::new(
-                        ErrorKind::DuplicateMapKey,
-                        self.location(key.span),
-                    ));
-                }
-            }
-        }
-
-        Ok(Self::spanned_with_trivia(
-            Ast::map(elements),
-            span,
-            trivia_start,
-        ))
-    }
-
-    /// Parses a set `#{...}`.
-    fn parse_set(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
-        let (elements, span) =
-            self.parse_collection(TokenKind::SetStart, TokenKind::RightBrace, '#', '}')?;
-
-        // Check for duplicate AST nodes (O(n²) but n is typically small)
-        for (i, elem) in elements.iter().enumerate() {
-            for prev in elements.iter().take(i) {
-                if elem.node == prev.node {
-                    return Err(Error::new(
-                        ErrorKind::DuplicateSetElement,
-                        self.location(elem.span),
-                    ));
-                }
-            }
-        }
-
-        Ok(Self::spanned_with_trivia(
-            Ast::set(elements),
-            span,
-            trivia_start,
-        ))
-    }
-
-    /// Helper to parse a collection with the given delimiters.
-    fn parse_collection(
-        &mut self,
-        open_kind: TokenKind,
-        close_kind: TokenKind,
-        open_char: char,
-        close_char: char,
-    ) -> Result<(Vec<Spanned<Ast>>, Span), Error> {
-        // Consume opening delimiter
-        let open_token = self.expect_token(open_kind)?;
-        let start = open_token.span.start;
-        let opener_location = self.location(open_token.span);
-
-        let mut elements = Vec::new();
-
-        loop {
-            match self.lexer.peek() {
-                None => {
-                    return Err(Error::new(
-                        ErrorKind::UnexpectedEof {
-                            expected: close_kind.description(),
-                        },
-                        self.location_from(self.source.len(), self.source.len()),
-                    ));
-                }
-                Some(&Err(ref err)) => return Err(err.clone()),
-                Some(&Ok(ref token)) if token.kind == close_kind => {
-                    // Consume closing delimiter
-                    let close_token = self.advance()?;
-                    let span = Span::new(start, close_token.span.end);
-                    return Ok((elements, span));
-                }
-                Some(&Ok(ref token)) => {
-                    // Check for mismatched delimiters
-                    if matches!(
-                        token.kind,
-                        TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace
-                    ) && token.kind != close_kind
-                    {
-                        let found_char = match token.kind {
-                            TokenKind::RightParen => ')',
-                            TokenKind::RightBracket => ']',
-                            // RightBrace is the only remaining option
-                            TokenKind::RightBrace | _ => '}',
-                        };
-                        // Copy span before calling self.location() to avoid borrow conflict
-                        let error_span = token.span;
-                        return Err(Error::new(
-                            ErrorKind::UnmatchedDelimiter {
-                                opener: open_char,
-                                opener_location,
-                                expected: close_char,
-                                found: found_char,
-                            },
-                            self.location(error_span),
-                        ));
-                    }
-
-                    // Parse element
-                    elements.push(self.parse_expr()?);
-                }
             }
         }
     }
@@ -359,166 +224,6 @@ impl<'src> Parser<'src> {
             span,
             trivia_start,
         ))
-    }
-
-    /// Parses a metadata annotation and the following form.
-    ///
-    /// Handles:
-    /// - `^{:key val} form` - direct map
-    /// - `^:keyword form` - shorthand for `^{:keyword true} form`
-    /// - `^:a ^:b form` - multiple metadata items (merged right-to-left)
-    fn parse_metadata(&mut self, trivia_start: usize) -> Result<Spanned<Ast>, Error> {
-        // Consume the initial caret
-        let caret_token = self.advance()?;
-        let start = caret_token.span.start;
-
-        // Collect all metadata forms (there may be multiple ^)
-        let mut meta_forms = Vec::new();
-        meta_forms.push(self.parse_single_metadata()?);
-
-        // Check for additional ^ annotations
-        loop {
-            match self.lexer.peek() {
-                Some(&Ok(ref token)) if token.kind == TokenKind::Caret => {
-                    let _: crate::token::Token<'_> = self.advance()?; // consume ^
-                    meta_forms.push(self.parse_single_metadata()?);
-                }
-                _ => break,
-            }
-        }
-
-        // Parse the target form
-        let value = self.parse_expr()?;
-        let end = value.span.end;
-
-        // Merge metadata (right-to-left: later entries win)
-        let merged_meta = Self::merge_metadata_forms(&meta_forms, start);
-
-        let span = Span::new(start, end);
-        Ok(Self::spanned_with_trivia(
-            Ast::with_meta(merged_meta, value),
-            span,
-            trivia_start,
-        ))
-    }
-
-    /// Parses a single metadata item after `^`.
-    ///
-    /// Returns a `Spanned<Ast>` containing a map.
-    fn parse_single_metadata(&mut self) -> Result<Spanned<Ast>, Error> {
-        // Capture trivia_start before peeking
-        let trivia_start = self.lexer.trivia_start();
-
-        let token = match self.lexer.peek() {
-            Some(&Ok(ref token)) => token.clone(),
-            Some(&Err(ref err)) => return Err(err.clone()),
-            None => {
-                return Err(Error::new(
-                    ErrorKind::UnexpectedEof {
-                        expected: "metadata (map or keyword)",
-                    },
-                    self.location_from(self.source.len(), self.source.len()),
-                ));
-            }
-        };
-
-        match token.kind {
-            // Direct map: ^{:key val}
-            TokenKind::LeftBrace => self.parse_map(trivia_start),
-
-            // Keyword shorthand: ^:keyword → {:keyword true}
-            TokenKind::Keyword => {
-                let keyword_token = self.advance()?;
-                let keyword_name = keyword_token.lexeme.get(1_usize..).unwrap_or("");
-
-                // Create {:keyword true}
-                let keyword_span = keyword_token.span;
-                let keyword_ast = Spanned::new(Ast::keyword(keyword_name), keyword_span);
-                let true_ast = Spanned::new(Ast::bool(true), keyword_span);
-
-                let map_span = keyword_span;
-                Ok(Spanned::new(
-                    Ast::map(alloc::vec![keyword_ast, true_ast]),
-                    map_span,
-                ))
-            }
-
-            // Error: invalid metadata form
-            TokenKind::LeftParen
-            | TokenKind::RightParen
-            | TokenKind::LeftBracket
-            | TokenKind::RightBracket
-            | TokenKind::RightBrace
-            | TokenKind::SetStart
-            | TokenKind::Integer
-            | TokenKind::Float
-            | TokenKind::String
-            | TokenKind::True
-            | TokenKind::False
-            | TokenKind::Nil
-            | TokenKind::Symbol
-            | TokenKind::Quote
-            | TokenKind::SyntaxQuote
-            | TokenKind::Unquote
-            | TokenKind::UnquoteSplice
-            | TokenKind::Caret => Err(Error::new(
-                ErrorKind::InvalidMetadataForm {
-                    found: token.kind.description(),
-                },
-                self.location(token.span),
-            )),
-        }
-    }
-
-    /// Merges multiple metadata maps into one.
-    ///
-    /// Later entries override earlier ones for duplicate keys (right-to-left).
-    fn merge_metadata_forms(forms: &[Spanned<Ast>], start: usize) -> Spanned<Ast> {
-        // Single form - return as-is
-        if let &[ref single] = forms {
-            return single.clone();
-        }
-
-        // Collect all key-value pairs from all maps
-        let mut all_pairs: Vec<Spanned<Ast>> = Vec::new();
-        for form in forms {
-            if let Ast::Map(ref pairs) = form.node {
-                all_pairs.extend(pairs.iter().cloned());
-            }
-        }
-
-        // Deduplicate: keep last occurrence of each key (right-to-left means later wins)
-        // Process pairs in reverse, keeping first occurrence seen (which is last in original order)
-        let mut seen_keys: Vec<Ast> = Vec::new();
-        let mut deduped: Vec<Spanned<Ast>> = Vec::new();
-
-        // Iterate in reverse over key-value pairs
-        let pairs_vec: Vec<_> = all_pairs.into_iter().collect();
-        let mut idx = pairs_vec.len();
-        while idx >= 2_usize {
-            idx = idx.saturating_sub(2_usize);
-            // These gets are safe because idx is always < pairs_vec.len() - 1
-            // and we control idx to always be a valid even index
-            if let (Some(key), Some(val)) = (
-                pairs_vec.get(idx),
-                pairs_vec.get(idx.saturating_add(1_usize)),
-            ) && !seen_keys.contains(&key.node)
-            {
-                seen_keys.push(key.node.clone());
-                // Push value then key so that after final reverse they're in correct order
-                deduped.push(val.clone());
-                deduped.push(key.clone());
-            }
-        }
-
-        // Reverse to restore correct order
-        deduped.reverse();
-
-        // Determine span for merged map
-        let end = forms.last().map_or(start, |form| form.span.end);
-        let span = Span::new(start, end);
-
-        Spanned::new(Ast::map(deduped), span)
     }
 
     /// Parses an atom (literal, symbol, or keyword).
@@ -698,7 +403,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Consumes and returns the next token, returning an error if at EOF.
-    fn advance(&mut self) -> Result<crate::token::Token<'src>, Error> {
+    pub(super) fn advance(&mut self) -> Result<crate::token::Token<'src>, Error> {
         match self.lexer.next() {
             Some(Ok(token)) => Ok(token),
             Some(Err(err)) => Err(err),
@@ -710,7 +415,10 @@ impl<'src> Parser<'src> {
     }
 
     /// Consumes the next token, expecting it to be of the given kind.
-    fn expect_token(&mut self, expected: TokenKind) -> Result<crate::token::Token<'src>, Error> {
+    pub(super) fn expect_token(
+        &mut self,
+        expected: TokenKind,
+    ) -> Result<crate::token::Token<'src>, Error> {
         let token = self.advance()?;
         if token.kind == expected {
             Ok(token)

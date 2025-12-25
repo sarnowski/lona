@@ -6,10 +6,9 @@
 //! Transforms parsed [`Ast`] expressions into executable [`Chunk`] bytecode.
 //! This module implements the core compilation logic for the Lonala language.
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lona_core::chunk::{Chunk, UpvalueSource};
+use lona_core::chunk::Chunk;
 use lona_core::opcode::{Opcode, encode_abc};
 use lona_core::source;
 use lona_core::span::Span;
@@ -19,118 +18,32 @@ use lonala_parser::{Ast, Spanned};
 use crate::error::{Error, Kind as ErrorKind, SourceLocation};
 
 // Submodules containing the actual compilation logic
+mod api;
 mod calls;
+mod closures;
 pub mod conversion;
 pub mod destructure;
 mod expressions;
 mod functions;
+mod let_form;
+mod locals;
 pub mod macros;
+mod nary;
+mod operators;
 mod quasiquote;
+mod quote;
 mod special_forms;
 
+// Re-export closure types for internal use
+use closures::{CaptureContext, SymbolResolution, UpvalueInfo};
+use locals::LocalEnv;
+
+// Re-export public API
+pub use api::{CompileError, compile, compile_with_expansion, compile_with_registry};
 pub use macros::{MacroBody, MacroDefinition, MacroExpander, MacroExpansionError, MacroRegistry};
 
 #[cfg(test)]
 mod tests;
-
-/// Tracks local variable bindings across nested scopes.
-///
-/// Used to implement `let` bindings and function parameters. Each scope
-/// maps symbol IDs to the register where that variable is stored.
-struct LocalEnv {
-    /// Stack of scopes, each mapping symbol ID to register.
-    scopes: Vec<BTreeMap<symbol::Id, u8>>,
-}
-
-impl LocalEnv {
-    /// Creates a new empty local environment.
-    const fn new() -> Self {
-        Self { scopes: Vec::new() }
-    }
-
-    /// Pushes a new scope (entering `let`, `fn`, etc.).
-    fn push_scope(&mut self) {
-        self.scopes.push(BTreeMap::new());
-    }
-
-    /// Pops the current scope (exiting `let`, `fn`, etc.).
-    fn pop_scope(&mut self) {
-        let _: Option<BTreeMap<symbol::Id, u8>> = self.scopes.pop();
-    }
-
-    /// Defines a local variable in the current scope.
-    fn define(&mut self, name: symbol::Id, register: u8) {
-        if let Some(scope) = self.scopes.last_mut() {
-            let _: Option<u8> = scope.insert(name, register);
-        }
-    }
-
-    /// Looks up a local variable, searching from innermost to outermost scope.
-    fn lookup(&self, name: symbol::Id) -> Option<u8> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(&reg) = scope.get(&name) {
-                return Some(reg);
-            }
-        }
-        None
-    }
-}
-
-// =============================================================================
-// Upvalue Tracking for Closures
-// =============================================================================
-
-/// Tracks an upvalue captured by the function being compiled.
-#[derive(Debug, Clone)]
-pub(crate) struct UpvalueInfo {
-    /// The symbol being captured.
-    pub symbol: symbol::Id,
-    /// How to capture this upvalue at runtime.
-    pub source: UpvalueSource,
-}
-
-/// Information about a variable available for capture from a parent scope.
-#[derive(Debug, Clone)]
-pub(crate) struct ParentLocal {
-    /// The register in the parent where this variable is stored.
-    pub register: u8,
-}
-
-/// Context for capturing variables from enclosing scopes.
-///
-/// When compiling a nested function, this describes what variables are
-/// available for capture from the immediately enclosing function.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct CaptureContext {
-    /// Variables defined as locals in the parent function.
-    /// Maps symbol ID to register index.
-    pub parent_locals: BTreeMap<symbol::Id, ParentLocal>,
-    /// Upvalues available in the parent function.
-    /// Maps symbol ID to upvalue index in parent's upvalue array.
-    /// Used for nested closures capturing from grandparent+ scopes.
-    pub parent_upvalues: BTreeMap<symbol::Id, u8>,
-}
-
-impl CaptureContext {
-    /// Creates an empty capture context (for top-level or non-closure functions).
-    pub const fn new() -> Self {
-        Self {
-            parent_locals: BTreeMap::new(),
-            parent_upvalues: BTreeMap::new(),
-        }
-    }
-}
-
-/// Result of resolving a symbol during compilation.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum SymbolResolution {
-    /// Symbol is a local variable in the current function.
-    Local(u8),
-    /// Symbol is captured as an upvalue.
-    Upvalue(u8),
-    /// Symbol is a global variable.
-    Global,
-}
 
 /// Result of compiling an expression.
 ///
@@ -419,149 +332,6 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
     }
 
     // =========================================================================
-    // Upvalue Resolution
-    // =========================================================================
-
-    /// Resolves a symbol, returning how to access it.
-    ///
-    /// Resolution order:
-    /// 1. Local variables in the current function
-    /// 2. Already-captured upvalues
-    /// 3. Attempt to capture from parent scope
-    /// 4. Fall back to global lookup
-    pub(crate) fn resolve_symbol(&mut self, symbol: symbol::Id) -> SymbolResolution {
-        // 1. Check locals in current function
-        if let Some(reg) = self.locals.lookup(symbol) {
-            return SymbolResolution::Local(reg);
-        }
-
-        // 2. Check if already captured as upvalue
-        if let Some(idx) = self.lookup_upvalue(symbol) {
-            return SymbolResolution::Upvalue(idx);
-        }
-
-        // 3. Try to capture from enclosing scope
-        if let Some(idx) = self.try_capture_upvalue(symbol) {
-            return SymbolResolution::Upvalue(idx);
-        }
-
-        // 4. Must be a global
-        SymbolResolution::Global
-    }
-
-    /// Checks if a symbol is already captured as an upvalue.
-    ///
-    /// Returns the upvalue index if found.
-    fn lookup_upvalue(&self, symbol: symbol::Id) -> Option<u8> {
-        for (idx, upvalue) in self.upvalues.iter().enumerate() {
-            if upvalue.symbol == symbol {
-                return u8::try_from(idx).ok();
-            }
-        }
-        None
-    }
-
-    /// Attempts to capture a variable from an enclosing scope.
-    ///
-    /// Returns the upvalue index if the variable was successfully captured.
-    fn try_capture_upvalue(&mut self, symbol: symbol::Id) -> Option<u8> {
-        // First check if it's a local in the parent scope
-        if let Some(parent_local) = self.capture_context.parent_locals.get(&symbol) {
-            // Capture from parent's local register
-            return self.add_upvalue(symbol, UpvalueSource::Local(parent_local.register));
-        }
-
-        // Then check if it's an upvalue in the parent scope (for nested closures)
-        if let Some(&parent_upvalue_idx) = self.capture_context.parent_upvalues.get(&symbol) {
-            // Capture from parent's upvalue array
-            return self.add_upvalue(symbol, UpvalueSource::ParentUpvalue(parent_upvalue_idx));
-        }
-
-        None
-    }
-
-    /// Adds a new upvalue to the current function.
-    ///
-    /// Returns the upvalue index, or `None` if the upvalue array is full.
-    fn add_upvalue(&mut self, symbol: symbol::Id, source: UpvalueSource) -> Option<u8> {
-        // Check if already captured (shouldn't happen if called correctly, but be safe)
-        if let Some(idx) = self.lookup_upvalue(symbol) {
-            return Some(idx);
-        }
-
-        // Check limit (max 256 upvalues)
-        let idx = u8::try_from(self.upvalues.len()).ok()?;
-        self.upvalues.push(UpvalueInfo { symbol, source });
-        Some(idx)
-    }
-
-    /// Returns the collected upvalue sources for the current function.
-    ///
-    /// Called after compilation to get the upvalue descriptors for `FunctionBodyData`.
-    pub(crate) fn take_upvalue_sources(&self) -> Vec<UpvalueSource> {
-        self.upvalues.iter().map(|info| info.source).collect()
-    }
-
-    /// Builds a capture context from the current compiler's state.
-    ///
-    /// Used when creating a child compiler for a nested function.
-    /// The context includes all locals in the current function and any upvalues
-    /// that the current function has captured.
-    ///
-    /// For transitive closure support, this also preemptively captures any
-    /// variables available through our own capture context. This ensures that
-    /// deeply nested functions can access variables from grandparent+ scopes.
-    pub(crate) fn build_capture_context(&mut self) -> CaptureContext {
-        let mut parent_locals = BTreeMap::new();
-
-        // Collect all locals from all scopes in the current function
-        for scope in &self.locals.scopes {
-            for (&symbol, &register) in scope {
-                let _existing = parent_locals.insert(symbol, ParentLocal { register });
-            }
-        }
-
-        // Preemptively capture variables from our capture_context that we haven't
-        // captured yet. This enables transitive capture for nested closures.
-        // For example, in (fn [a] (fn [] (fn [] a))):
-        //   - The middle function (fn [] ...) has access to `a` via its capture_context
-        //   - The inner function (fn [] a) needs to capture `a` from the middle function
-        //   - So the middle function must first capture `a` to make it available
-        for (&symbol, parent_local) in &self.capture_context.parent_locals.clone() {
-            if !parent_locals.contains_key(&symbol) {
-                // Capture from our parent's local register
-                let _idx = self.add_upvalue(symbol, UpvalueSource::Local(parent_local.register));
-            }
-        }
-        for (&symbol, &upvalue_idx) in &self.capture_context.parent_upvalues.clone() {
-            if !parent_locals.contains_key(&symbol) && self.lookup_upvalue(symbol).is_none() {
-                // Capture from our parent's upvalue array
-                let _idx = self.add_upvalue(symbol, UpvalueSource::ParentUpvalue(upvalue_idx));
-            }
-        }
-
-        // Now collect all upvalues (including newly captured ones)
-        let mut parent_upvalues = BTreeMap::new();
-        for (idx, upvalue) in self.upvalues.iter().enumerate() {
-            if let Ok(idx_u8) = u8::try_from(idx) {
-                let _existing = parent_upvalues.insert(upvalue.symbol, idx_u8);
-            }
-        }
-
-        CaptureContext {
-            parent_locals,
-            parent_upvalues,
-        }
-    }
-
-    /// Sets the capture context for this compiler.
-    ///
-    /// Called when creating a child compiler to enable upvalue capture.
-    pub(crate) fn set_capture_context(&mut self, context: CaptureContext) {
-        self.capture_context = context;
-    }
-
-    // =========================================================================
     // Register Management
     // =========================================================================
 
@@ -623,204 +393,4 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
         self.in_tail_position = prev;
         result
     }
-}
-
-// =============================================================================
-// Public API
-// =============================================================================
-
-/// Error type for high-level compilation that includes parse errors.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum CompileError {
-    /// Error during parsing.
-    Parse(lonala_parser::Error),
-    /// Error during compilation.
-    Compile(Error),
-}
-
-impl core::fmt::Display for CompileError {
-    #[inline]
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // Use variant_name() for basic display. Rich formatting with context
-        // and help text is provided by the Diagnostic trait in lonala-human.
-        match *self {
-            Self::Parse(ref err) => write!(f, "parse error: {}", err.kind.variant_name()),
-            Self::Compile(ref err) => write!(f, "compile error: {}", err.kind.variant_name()),
-        }
-    }
-}
-
-impl From<lonala_parser::Error> for CompileError {
-    #[inline]
-    fn from(err: lonala_parser::Error) -> Self {
-        Self::Parse(err)
-    }
-}
-
-impl From<Error> for CompileError {
-    #[inline]
-    fn from(err: Error) -> Self {
-        Self::Compile(err)
-    }
-}
-
-/// Parses and compiles Lonala source code to bytecode.
-///
-/// Convenience function that combines parsing and compilation.
-///
-/// # Arguments
-///
-/// * `source` - The Lonala source code to compile.
-/// * `source_id` - Identifies the source for error reporting.
-/// * `interner` - Symbol interner for interning identifiers.
-///
-/// # Errors
-///
-/// Returns `CompileError::Parse` if parsing fails, or
-/// `CompileError::Compile` if compilation fails.
-///
-/// # Example
-///
-/// ```
-/// use lona_core::source;
-/// use lona_core::symbol::Interner;
-/// use lonala_compiler::compile;
-///
-/// let mut interner = Interner::new();
-/// let source_id = source::Id::new(0);
-/// let chunk = compile("(+ 1 2)", source_id, &mut interner).unwrap();
-/// ```
-#[inline]
-pub fn compile(
-    source: &str,
-    source_id: source::Id,
-    interner: &mut symbol::Interner,
-) -> Result<Chunk, CompileError> {
-    let mut registry = MacroRegistry::new();
-    compile_with_registry(source, source_id, interner, &mut registry)
-}
-
-/// Compiles Lonala source code to bytecode with a persistent macro registry.
-///
-/// This is the full-featured compilation function that accepts an external
-/// macro registry. Use this for REPL sessions where macros should persist
-/// across evaluations.
-///
-/// # Arguments
-///
-/// * `source` - The Lonala source code to compile.
-/// * `source_id` - Identifies the source for error reporting.
-/// * `interner` - Symbol interner for interning identifiers.
-/// * `registry` - Macro registry for persistent macro definitions.
-///
-/// # Errors
-///
-/// Returns `CompileError::Parse` if parsing fails, or
-/// `CompileError::Compile` if compilation fails.
-///
-/// # Example
-///
-/// ```
-/// use lona_core::source;
-/// use lona_core::symbol::Interner;
-/// use lonala_compiler::{compile_with_registry, MacroRegistry};
-///
-/// let mut interner = Interner::new();
-/// let mut registry = MacroRegistry::new();
-/// let source_id = source::Id::new(0);
-///
-/// // Define a macro
-/// let chunk1 = compile_with_registry(
-///     "(defmacro double [x] (list '+ x x))",
-///     source_id,
-///     &mut interner,
-///     &mut registry
-/// ).unwrap();
-///
-/// // Use the macro (it persists in the registry)
-/// let chunk2 = compile_with_registry(
-///     "(double 5)",
-///     source_id,
-///     &mut interner,
-///     &mut registry
-/// ).unwrap();
-/// ```
-#[inline]
-pub fn compile_with_registry(
-    source: &str,
-    source_id: source::Id,
-    interner: &mut symbol::Interner,
-    registry: &mut MacroRegistry,
-) -> Result<Chunk, CompileError> {
-    let exprs = lonala_parser::parse(source, source_id)?;
-    let mut compiler = Compiler::new(interner, registry, source_id);
-    let chunk = compiler.compile_program(&exprs)?;
-    Ok(chunk)
-}
-
-/// Compiles Lonala source code with macro expansion capability.
-///
-/// This is the most complete compilation function that supports:
-/// - Persistent macro registry for cross-session macro definitions
-/// - Compile-time macro expansion using the provided expander
-///
-/// Use this for REPL sessions where you want macros to be expanded at
-/// compile time rather than called at runtime.
-///
-/// # Arguments
-///
-/// * `source` - The Lonala source code to compile.
-/// * `source_id` - Identifies the source for error reporting.
-/// * `interner` - Symbol interner for interning identifiers.
-/// * `registry` - Macro registry for persistent macro definitions.
-/// * `expander` - Macro expander for compile-time expansion.
-///
-/// # Errors
-///
-/// Returns `CompileError::Parse` if parsing fails, or
-/// `CompileError::Compile` if compilation or macro expansion fails.
-///
-/// # Example
-///
-/// ```ignore
-/// use lona_core::source;
-/// use lona_core::symbol::Interner;
-/// use lonala_compiler::{compile_with_expansion, MacroRegistry, MacroExpander};
-///
-/// let mut interner = Interner::new();
-/// let mut registry = MacroRegistry::new();
-/// let mut expander = MyMacroExpander::new(); // Implements MacroExpander
-/// let source_id = source::Id::new(0);
-///
-/// // Define a macro
-/// let chunk1 = compile_with_expansion(
-///     "(defmacro double [x] `(+ ~x ~x))",
-///     source_id,
-///     &mut interner,
-///     &mut registry,
-///     &mut expander
-/// ).unwrap();
-///
-/// // Use the macro - it will be expanded at compile time
-/// let chunk2 = compile_with_expansion(
-///     "(double 5)",
-///     source_id,
-///     &mut interner,
-///     &mut registry,
-///     &mut expander
-/// ).unwrap();
-/// ```
-#[inline]
-pub fn compile_with_expansion(
-    source: &str,
-    source_id: source::Id,
-    interner: &mut symbol::Interner,
-    registry: &mut MacroRegistry,
-    expander: &mut dyn MacroExpander,
-) -> Result<Chunk, CompileError> {
-    let exprs = lonala_parser::parse(source, source_id)?;
-    let mut compiler = Compiler::with_expander(interner, registry, source_id, expander);
-    let chunk = compiler.compile_program(&exprs)?;
-    Ok(chunk)
 }

@@ -28,7 +28,6 @@ lona/
 ├── CLAUDE.md                     # AI agent instructions (this file)
 ├── AGENTS.md                     # Symlink to CLAUDE.md (for other agents)
 ├── README.md                     # Project README
-├── PLAN.md                       # Current development plan
 ├── mkdocs.yml                    # Documentation site configuration
 ├── docker-compose.yml            # Docker Compose configuration
 ├── rust-toolchain.toml           # Rust toolchain specification
@@ -39,52 +38,50 @@ lona/
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── allocator.rs      # Bump allocator traits
-│   │       ├── allocator_tests.rs
 │   │       ├── binary.rs         # Binary data handling
-│   │       ├── chunk/            # Bytecode chunk format
 │   │       ├── error_context.rs  # Error context tracking
 │   │       ├── fnv.rs            # FNV hash algorithm
-│   │       ├── hamt/             # Hash Array Mapped Trie (persistent maps)
-│   │       ├── integer/          # Arbitrary-precision integers
 │   │       ├── list.rs           # Cons cell lists
-│   │       ├── list_tests.rs
-│   │       ├── map/              # Persistent hash maps
 │   │       ├── meta.rs           # Metadata handling
-│   │       ├── opcode/           # VM instruction encoding
-│   │       ├── pvec/             # Persistent vectors
-│   │       ├── ratio/            # Arbitrary-precision ratios
-│   │       ├── set/              # Persistent sets
 │   │       ├── source.rs         # Source tracking
 │   │       ├── span.rs           # Source spans
 │   │       ├── string.rs         # Immutable string type
 │   │       ├── symbol.rs         # Interned symbols
-│   │       ├── value/            # Core value types
 │   │       ├── vector.rs         # Vector utilities
-│   │       └── vector_tests.rs
+│   │       ├── chunk/            # Bytecode chunk format
+│   │       ├── hamt/             # Hash Array Mapped Trie (persistent maps)
+│   │       ├── integer/          # Arbitrary-precision integers
+│   │       ├── map/              # Persistent hash maps
+│   │       ├── opcode/           # VM instruction encoding
+│   │       ├── pvec/             # Persistent vectors
+│   │       ├── ratio/            # Arbitrary-precision ratios
+│   │       ├── set/              # Persistent sets
+│   │       └── value/            # Core value types (accessors, var, conversions)
 │   │
 │   ├── lona-kernel/              # VM and runtime abstractions (host-testable)
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       └── vm/               # Bytecode virtual machine
 │   │           ├── mod.rs
-│   │           ├── collections/  # Collection operations
 │   │           ├── error.rs      # Runtime errors
 │   │           ├── frame.rs      # Call frames
 │   │           ├── globals.rs    # Global variable storage
 │   │           ├── helpers.rs    # Interpreter helper functions
-│   │           ├── interpreter/  # Bytecode execution
 │   │           ├── introspection.rs # Runtime introspection
 │   │           ├── macro_expander.rs # Macro expansion
-│   │           ├── natives.rs    # Native function registry
-│   │           ├── numeric.rs    # Numeric operations
+│   │           ├── pattern.rs    # Pattern matching
 │   │           ├── primitives.rs # Built-in functions
-│   │           └── tests/        # VM tests
+│   │           ├── collections/  # Collection operations
+│   │           ├── interpreter/  # Bytecode execution (ops_arithmetic, ops_control, ops_data)
+│   │           ├── natives/      # Native function registry (arithmetic, comparison, predicates)
+│   │           ├── numeric/      # Numeric operations (arithmetic, comparison)
+│   │           └── tests/        # VM tests (arithmetic, call, pattern matching)
 │   │
 │   ├── lona-runtime/             # seL4 root task (QEMU-tested only)
 │   │   └── src/
 │   │       ├── main.rs           # Entry point, receives bootinfo
 │   │       ├── repl.rs           # Interactive REPL (bootstrap)
-│   │       ├── integration_tests.rs # QEMU integration tests
+│   │       ├── integration_tests/ # QEMU integration tests
 │   │       ├── memory/           # seL4 memory management
 │   │       └── platform/         # Hardware abstraction (UART, FDT)
 │   │
@@ -92,29 +89,55 @@ lona/
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── ast.rs            # Abstract syntax tree types
+│   │       ├── error.rs          # Parser errors
+│   │       ├── token.rs          # Token types
 │   │       ├── lexer/            # Tokenizer
-│   │       └── parser/           # S-expression parser
+│   │       └── parser/           # S-expression parser (collections, metadata)
 │   │
 │   ├── lonala-compiler/          # Bytecode compiler (100% host-testable)
 │   │   └── src/
 │   │       ├── lib.rs
 │   │       ├── error.rs          # Compiler errors
 │   │       └── compiler/         # AST to bytecode compiler
+│   │           ├── mod.rs
+│   │           ├── api.rs        # Public compiler API
+│   │           ├── calls.rs      # Function call compilation
+│   │           ├── closures.rs   # Closure compilation
+│   │           ├── expressions.rs # Expression compilation
+│   │           ├── let_form.rs   # Let binding compilation
+│   │           ├── locals.rs     # Local variable management
+│   │           ├── operators.rs  # Operator compilation
+│   │           ├── quote.rs      # Quote form compilation
+│   │           ├── quasiquote.rs # Syntax-quote compilation
+│   │           ├── special_forms.rs # Special form compilation
+│   │           ├── destructure/  # Destructuring (sequential, map)
+│   │           ├── functions/    # Function compilation (params, macros)
+│   │           └── tests/        # Compiler tests
 │   │
 │   ├── lonala-human/             # Human-readable output formatting
 │   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── compiler_errors.rs # Compiler error formatting
+│   │       ├── diagnostic.rs     # Diagnostic formatting
+│   │       ├── format.rs         # General formatting
+│   │       ├── line_index.rs     # Line/column calculation
+│   │       ├── parser_errors.rs  # Parser error formatting
+│   │       └── vm_errors.rs      # VM error formatting
 │   │
 │   ├── lona-spec-tests/          # Language specification tests
 │   │   └── src/
-│   │       ├── builtins/         # Built-in function tests
-│   │       ├── data_types/       # Data type tests
+│   │       ├── lib.rs
+│   │       ├── context.rs        # Test context helpers
 │   │       ├── evaluation.rs     # Evaluation tests
-│   │       ├── functions.rs      # Function tests
 │   │       ├── literals.rs       # Literal tests
 │   │       ├── macros.rs         # Macro tests
-│   │       ├── operators.rs      # Operator tests
 │   │       ├── reader_macros.rs  # Reader macro tests
-│   │       └── special_forms.rs  # Special form tests
+│   │       ├── tco.rs            # Tail call optimization tests
+│   │       ├── builtins/         # Built-in function tests
+│   │       ├── data_types/       # Data type tests
+│   │       ├── functions/        # Function tests (multi-arity, destructuring)
+│   │       ├── operators/        # Operator tests (arithmetic, comparison, bitwise)
+│   │       └── special_forms/    # Special form tests (let, planned)
 │   │
 │   └── lona-test/                # Test harness for QEMU tests
 │       └── src/
@@ -135,6 +158,13 @@ lona/
 │   ├── overrides/                # MkDocs theme overrides
 │   │   └── stylesheets/          # Custom CSS
 │   │
+│   ├── architecture/             # Technical architecture documents
+│   │   ├── defnative.md          # Native function guidelines
+│   │   ├── lisp-machine.md       # LISP machine philosophy
+│   │   ├── minimal-rust.md       # Lonala-first principle
+│   │   ├── process-communication.md # Process communication design
+│   │   └── tco.md                # Tail call optimization design
+│   │
 │   ├── goals/                    # Project vision and design philosophy
 │   │   ├── index.md              # Vision + 4 pillars overview
 │   │   ├── pillar-sel4.md        # seL4 security foundation
@@ -147,13 +177,9 @@ lona/
 │   │
 │   ├── development/              # Development guidelines
 │   │   ├── principles.md         # Governing development principles
-│   │   ├── defnative.md          # Native function guidelines
 │   │   ├── editor-plan.md        # Editor integration plan
-│   │   ├── lisp-machine.md       # LISP machine philosophy
 │   │   ├── lonala-coding-guidelines.md
-│   │   ├── minimal-rust.md       # Lonala-first principle
 │   │   ├── rust-coding-guidelines.md
-│   │   ├── tco.md                # Tail call optimization design
 │   │   └── testing-strategy.md
 │   │
 │   ├── lonala/                   # Lonala language specification
@@ -170,12 +196,15 @@ lona/
 │   │   ├── macros.md             # defmacro
 │   │   ├── namespaces.md         # Module system (planned)
 │   │   ├── concurrency.md        # Process model (planned)
+│   │   ├── error-handling.md     # Error handling patterns
+│   │   ├── debugging.md          # Debugging and introspection
 │   │   ├── builtins/             # Built-in function reference
 │   │   └── appendices/           # Grammar, bytecode, Clojure differences
 │   │
 │   └── roadmap/                  # Implementation roadmap
 │       ├── index.md              # Roadmap overview and task status
-│       └── milestone-*.md        # Individual milestone details
+│       ├── milestone-*.md        # Individual milestone details
+│       └── milestone-01-rust-foundation/ # Detailed phase breakdowns
 │
 ├── docker/
 │   ├── Dockerfile.base           # Base image with seL4 SDK
