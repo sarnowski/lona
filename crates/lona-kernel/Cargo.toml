@@ -22,5 +22,8 @@ lonala-compiler = { path = "../lonala-compiler", default-features = false }
 lonala-parser = { path = "../lonala-parser", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 
+[dev-dependencies]
+proptest = "1.6"
+
 [lints]
 workspace = true

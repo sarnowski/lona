@@ -36,6 +36,7 @@ pub mod introspection;
 mod macro_expander;
 pub mod natives;
 mod numeric;
+pub mod pattern;
 pub mod primitives;
 
 #[cfg(test)]
