@@ -138,7 +138,7 @@ Complete core language features required for idiomatic Lonala.
 
 ### Task 1.2.6: Proper Tail Calls - Compiler
 
-**Description**: Add tail position tracking to the compiler and emit `TailCall` opcode for calls in tail position. See [docs/development/tco.md](../../development/tco.md) for full design.
+**Description**: Add tail position tracking to the compiler and emit `TailCall` opcode for calls in tail position. See [docs/architecture/tco.md](../../architecture/tco.md) for full design.
 
 **Files to modify**:
 - `crates/lonala-compiler/src/compiler/mod.rs`
@@ -164,7 +164,7 @@ Complete core language features required for idiomatic Lonala.
 
 ### Task 1.2.7: Proper Tail Calls - VM Trampoline
 
-**Description**: Restructure the VM interpreter to use a trampoline loop, enabling tail calls without Rust stack growth. See [docs/development/tco.md](../../development/tco.md) for full design.
+**Description**: Restructure the VM interpreter to use a trampoline loop, enabling tail calls without Rust stack growth. See [docs/architecture/tco.md](../../architecture/tco.md) for full design.
 
 **Files to modify**:
 - `crates/lona-kernel/src/vm/interpreter/mod.rs`
@@ -190,7 +190,7 @@ Complete core language features required for idiomatic Lonala.
 
 ### Task 1.2.8: Proper Tail Calls - Integration Tests
 
-**Description**: Comprehensive integration tests for proper tail calls. See [docs/development/tco.md](../../development/tco.md) for full design.
+**Description**: Comprehensive integration tests for proper tail calls. See [docs/architecture/tco.md](../../architecture/tco.md) for full design.
 
 **Files to modify**:
 - `crates/lona-spec-tests/src/tco.rs` (new)

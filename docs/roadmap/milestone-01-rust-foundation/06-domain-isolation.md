@@ -187,7 +187,7 @@ Implement seL4-based security domains and inter-domain communication.
 - Notify target domain
 - Transparent to Lonala code (same `send` API)
 
-> ✅ **DESIGN RESOLVED**: See [Process Communication](../../development/process-communication.md) for the complete design. Summary: Tiered hybrid model — intra-domain reference sharing, inter-domain copy for small messages (<1KB), arena-based zero-copy for large data with capability-controlled access.
+> ✅ **DESIGN RESOLVED**: See [Process Communication](../../architecture/process-communication.md) for the complete design. Summary: Tiered hybrid model — intra-domain reference sharing, inter-domain copy for small messages (<1KB), arena-based zero-copy for large data with capability-controlled access.
 
 **Tests**:
 - Cross-domain send

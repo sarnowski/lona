@@ -130,16 +130,18 @@ nav:
                 - Reserved Words: lonala/appendices/reserved-words.md
                 - Error Idioms: lonala/appendices/error-idioms.md
 
+    - Architecture:
+          - LISP Machine Philosophy: architecture/lisp-machine.md
+          - Minimal Rust Runtime: architecture/minimal-rust.md
+          - Process Communication: architecture/process-communication.md
+          - Tail Call Optimization: architecture/tco.md
+          - Defining Natives: architecture/defnative.md
+
     - Development:
           - Development Principles: development/principles.md
-          - LISP Machine Philosophy: development/lisp-machine.md
-          - Minimal Rust Runtime: development/minimal-rust.md
-          - Process Communication: development/process-communication.md
           - Testing Strategy: development/testing-strategy.md
           - Lonala Coding Guidelines: development/lonala-coding-guidelines.md
           - Rust Coding Guidelines: development/rust-coding-guidelines.md
-          - Defining Natives: development/defnative.md
-          - Tail Call Optimization: development/tco.md
           - Editor Plan: development/editor-plan.md
 
     - Roadmap:

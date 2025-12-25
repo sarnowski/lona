@@ -28,7 +28,7 @@ This document provides a detailed, task-level breakdown of the Lona operating sy
 
 | Decision | Status | Affects | Notes |
 |----------|--------|---------|-------|
-| **Cross-Domain Zero-Copy IPC** | 🟢 RESOLVED | Task 1.6.5-1.6.7 | See [Process Communication](../development/process-communication.md). Design: Tiered hybrid model with intra-domain reference sharing, inter-domain copy for small messages, and arena-based zero-copy for large data. |
+| **Cross-Domain Zero-Copy IPC** | 🟢 RESOLVED | Task 1.6.5-1.6.7 | See [Process Communication](../architecture/process-communication.md). Design: Tiered hybrid model with intra-domain reference sharing, inter-domain copy for small messages, and arena-based zero-copy for large data. |
 
 ### Architecture Layers
 
@@ -136,9 +136,9 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.3 | Sequential Destructuring | done |
 | 1.2.4 | Associative Destructuring | done |
 | 1.2.5 | Nested Destructuring | done |
-| 1.2.6 | [Proper Tail Calls - Compiler](../development/tco.md) | done |
-| 1.2.7 | [Proper Tail Calls - VM Trampoline](../development/tco.md) | done |
-| 1.2.8 | [Proper Tail Calls - Integration Tests](../development/tco.md) | done |
+| 1.2.6 | [Proper Tail Calls - Compiler](../architecture/tco.md) | done |
+| 1.2.7 | [Proper Tail Calls - VM Trampoline](../architecture/tco.md) | done |
+| 1.2.8 | [Proper Tail Calls - Integration Tests](../architecture/tco.md) | done |
 | 1.2.9 | Pattern Matching - Core Infrastructure | done |
 | 1.2.10 | Case Special Form | open |
 | 1.2.11 | Gensym Implementation | open |

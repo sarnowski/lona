@@ -55,7 +55,7 @@ Implement namespaces for code organization.
 - `(var-set! #'x new-val)` updates value (dynamic vars only)
 - Var quote with qualified symbol: `#'ns/name`
 
-**Note**: This task enables `defnative` for native function registration with metadata. See [defnative design](../../development/defnative.md).
+**Note**: This task enables `defnative` for native function registration with metadata. See [defnative design](../../architecture/defnative.md).
 
 **Estimated effort**: 1 context window
 
@@ -187,7 +187,7 @@ Implement namespaces for code organization.
 
 **Description**: Implement `defnative` for registering native functions with full metadata support.
 
-**Design**: See [defnative design](../../development/defnative.md) for full rationale.
+**Design**: See [defnative design](../../architecture/defnative.md) for full rationale.
 
 **Files to modify**:
 - `crates/lonala-compiler/src/compiler/mod.rs`

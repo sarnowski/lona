@@ -28,7 +28,7 @@ Read these documents completely before any planning:
 - `docs/lonala/index.md` - Language specification
 
 **Read based on scope:**
-- `docs/development/minimal-rust.md` - If feature might require Rust code
+- `docs/architecture/minimal-rust.md` - If feature might require Rust code
 - `docs/development/rust-coding-guidelines.md` - If writing Rust
 - `docs/development/lonala-coding-guidelines.md` - If writing Lonala
 - `docs/development/testing-strategy.md` - For test planning
@@ -93,7 +93,7 @@ Read these files completely:
 - docs/goals/index.md (vision and four pillars)
 - docs/development/principles.md (governing principles)
 - docs/lonala/index.md (language specification)
-- docs/development/minimal-rust.md (what belongs in Rust vs Lonala)
+- docs/architecture/minimal-rust.md (what belongs in Rust vs Lonala)
 - docs/roadmap/index.md (current state and dependencies)
 
 {ADDITIONAL_FILES_TO_READ}
@@ -152,7 +152,82 @@ Create a synthesis noting:
 
 ---
 
-## Step 6: Finalize Plan
+## Step 6: Documentation Planning
+
+Before finalizing the plan, explicitly evaluate documentation requirements:
+
+### 6.1 Goals Alignment Check
+
+Review `docs/goals/` and verify the implementation aligns with:
+- The four-pillar vision (seL4, BEAM/OTP, LISP machine, Clojure)
+- Core concepts and abstractions defined in `docs/goals/core-concepts.md`
+- System design principles in `docs/goals/system-design.md`
+
+Document any tensions or deviations that need discussion.
+
+### 6.2 Language Feature Documentation
+
+If the implementation adds or modifies **Lonala language features**, each must be documented in `docs/lonala/`:
+
+| Feature Type | Required Documentation |
+|--------------|----------------------|
+| New special form | Add to `special-forms.md` with syntax, semantics, examples |
+| New built-in function | Add to appropriate file in `builtins/` |
+| New data type | Add to `data-types.md` and `literals.md` |
+| New reader macro | Add to `reader-macros.md` |
+| New macro | Add to `macros.md` |
+| Changed evaluation rules | Update `evaluation.md` |
+| New concurrency primitive | Add to `concurrency.md` |
+| New error handling construct | Add to `error-handling.md` |
+
+**Requirement**: Every language feature accessible to users MUST have reference documentation before the feature is considered complete.
+
+### 6.3 Architecture Documentation
+
+If the implementation introduces **new architectural concepts** not covered by existing documentation, create a new document in `docs/architecture/`:
+
+New architecture docs are required when introducing:
+- New runtime subsystems (e.g., garbage collector, scheduler)
+- New cross-cutting concerns (e.g., capability model, IPC design)
+- New abstractions that span multiple components
+- Design decisions with significant trade-offs
+
+Document format for `docs/architecture/{concept}.md`:
+```markdown
+# {Concept Name}
+
+## Overview
+{What this is and why it exists}
+
+## Design Goals
+{What properties we're trying to achieve}
+
+## Design
+{How it works at a conceptual level}
+
+## Implementation
+{Key implementation details and file locations}
+
+## Trade-offs
+{Decisions made and alternatives considered}
+
+## References
+{Related documents, external resources}
+```
+
+### 6.4 Documentation Plan Summary
+
+Create a documentation checklist for the implementation:
+- [ ] Goals alignment verified (no conflicts or conflicts documented)
+- [ ] Language features listed with target documentation files
+- [ ] Architecture documents identified (if needed)
+- [ ] Existing docs that need updates identified
+
+This checklist becomes part of the final phase's exit conditions.
+
+---
+
+## Step 7: Finalize Plan
 
 Revise your plan incorporating insights from all sources. The final plan must:
 
@@ -160,6 +235,7 @@ Revise your plan incorporating insights from all sources. The final plan must:
 2. **Justify Rust code**: Any native primitives must pass the minimal-rust checklist
 3. **Be properly phased**: Each phase MUST fit in one context window
 4. **Be self-contained per phase**: A fresh agent with only PLAN.md can execute any phase
+5. **Include documentation requirements**: Documentation is part of the implementation, not an afterthought
 
 ### Phase Sizing Guidance
 
@@ -185,7 +261,7 @@ If a phase feels like "do X, Y, and Z", consider splitting into separate phases.
 
 ---
 
-## Step 7: Write to PLAN.md
+## Step 8: Write to PLAN.md
 
 Write the finalized plan to `PLAN.md` at repo root.
 
@@ -229,6 +305,23 @@ This allows quick scanning to find the next phase to work on.
 ## Lonala-First Analysis
 {Justification for any Rust code, or confirmation it's all Lonala}
 
+## Documentation Requirements
+
+### Goals Alignment
+{Confirmation that implementation aligns with docs/goals/, or documented tensions}
+
+### Language Documentation
+| Feature | Type | Target File | Status |
+|---------|------|-------------|--------|
+| {feature name} | {special form/builtin/etc} | `docs/lonala/{file}.md` | pending |
+
+### Architecture Documentation
+| Concept | File | Status |
+|---------|------|--------|
+| {concept name} | `docs/architecture/{file}.md` | pending |
+
+*(If no new architecture concepts: "None required - uses existing abstractions")*
+
 ---
 
 ## Phase 1: {Descriptive Name} [OPEN]
@@ -255,6 +348,7 @@ This allows quick scanning to find the next phase to work on.
 - [ ] {Checkable condition}
 - [ ] {Another condition}
 - [ ] `make test` passes
+- [ ] Documentation updated (if this phase adds user-facing features)
 
 ---
 
@@ -265,6 +359,36 @@ This allows quick scanning to find the next phase to work on.
 - {Additional requirements}
 
 {Same structure as Phase 1}
+
+---
+
+## Phase N: Documentation [OPEN]
+
+*(Include this phase if the feature adds user-facing functionality)*
+
+**Entry Conditions:**
+- All implementation phases complete
+- Feature is working and tested
+
+**Scope:**
+Complete all documentation requirements identified in the Documentation Requirements section.
+
+**Files to Create/Modify:**
+- `docs/lonala/{file}.md` - {feature documentation}
+- `docs/architecture/{file}.md` - {architecture documentation, if needed}
+
+**Implementation Steps:**
+1. Write reference documentation for each language feature
+2. Add examples demonstrating usage
+3. Create architecture documentation for new concepts
+4. Update cross-references in related documents
+5. Verify documentation builds correctly
+
+**Exit Conditions:**
+- [ ] All language features documented in `docs/lonala/`
+- [ ] Architecture documents created (if required)
+- [ ] Documentation checklist from planning phase complete
+- [ ] `make test` passes (includes doc build if configured)
 
 ---
 
@@ -285,7 +409,7 @@ This allows quick scanning to find the next phase to work on.
 
 ---
 
-## Step 8: Present to User
+## Step 9: Present to User
 
 Present the plan summary to the user:
 
@@ -305,5 +429,7 @@ Planning is complete when:
 2. Existing code has been researched
 3. Gemini and Codex have provided independent plans
 4. Insights have been synthesized
-5. Final plan is written to PLAN.md with properly scoped phases
-6. User has approved the plan
+5. Documentation requirements have been identified and included in the plan
+6. Final plan is written to PLAN.md with properly scoped phases
+7. Plan includes a documentation phase (if user-facing features are added)
+8. User has approved the plan

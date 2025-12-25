@@ -58,7 +58,7 @@ pub fn native_hash_map(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value
 /// This is a native primitive because:
 /// - It requires inspecting runtime type tags to distinguish Map from other types
 /// - It requires direct access to the HAMT internals for efficient O(log32 n) lookup
-/// - Listed in `docs/development/minimal-rust.md` under "Map Operations"
+/// - Listed in `docs/architecture/minimal-rust.md` under "Map Operations"
 ///
 /// # Current Limitations
 ///

@@ -6,7 +6,7 @@ For coding style details, see:
 - [Rust Coding Guidelines](rust-coding-guidelines.md)
 - [Lonala Coding Guidelines](lonala-coding-guidelines.md)
 - [Testing Strategy](testing-strategy.md)
-- [Minimal Rust Runtime](minimal-rust.md)
+- [Minimal Rust Runtime](../architecture/minimal-rust.md)
 
 ---
 
@@ -65,7 +65,7 @@ See [Non-Goals](../goals/non-goals.md) for the complete list.
 
 If functionality CAN be implemented in Lonala using existing primitives, it MUST be implemented in Lonala. The Rust runtime exists only to provide what Lonala cannot provide for itself.
 
-Before adding any native primitive, consult the [Minimal Rust Runtime](minimal-rust.md) checklist and ask:
+Before adding any native primitive, consult the [Minimal Rust Runtime](../architecture/minimal-rust.md) checklist and ask:
 
 1. Can this be derived from existing primitives? → **Implement in Lonala**
 2. Does this require hardware access (MMIO, IRQ)? → Native is acceptable
@@ -74,7 +74,7 @@ Before adding any native primitive, consult the [Minimal Rust Runtime](minimal-r
 
 ### Primitive Budget
 
-Every addition to the native runtime requires written justification. The [Minimal Rust Runtime](minimal-rust.md) document defines the allowed categories:
+Every addition to the native runtime requires written justification. The [Minimal Rust Runtime](../architecture/minimal-rust.md) document defines the allowed categories:
 
 - Core data structure operations
 - Type predicates
@@ -564,7 +564,7 @@ When making a design choice, record:
 - [Non-Goals](../goals/non-goals.md) — What we explicitly don't build
 - [Core Concepts](../goals/core-concepts.md) — Unified abstractions
 - [System Design](../goals/system-design.md) — Implementation mechanics
-- [Minimal Rust Runtime](minimal-rust.md) — Native primitive checklist
+- [Minimal Rust Runtime](../architecture/minimal-rust.md) — Native primitive checklist
 - [Rust Coding Guidelines](rust-coding-guidelines.md) — Detailed Rust patterns
 - [Lonala Coding Guidelines](lonala-coding-guidelines.md) — Detailed Lonala patterns
 - [Testing Strategy](testing-strategy.md) — Testing pyramid and practices
