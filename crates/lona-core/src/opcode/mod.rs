@@ -227,11 +227,24 @@ pub enum Opcode {
     /// 2. Copying captured values according to `upvalue_sources`
     /// 3. Storing the new Function in R\[A\]
     Closure = 28,
+
+    // =========================================================================
+    // Pattern Matching
+    // =========================================================================
+    /// Case dispatch failure: triggers runtime error when no clause matches.
+    ///
+    /// Format: iABC (B, C unused)
+    /// - A: register containing the value that failed to match
+    ///
+    /// Used by the `case` special form when no pattern matches and no `:else`
+    /// default is provided. The runtime error includes the value's type for
+    /// diagnostic purposes.
+    CaseFail = 29,
 }
 
 impl Opcode {
     /// Maximum valid opcode value.
-    pub const MAX: u8 = 28;
+    pub const MAX: u8 = 29;
 
     /// Converts a byte to an opcode, returning `None` for invalid values.
     #[inline]
@@ -267,6 +280,7 @@ impl Opcode {
             26 => Some(Self::GetGlobalVar),
             27 => Some(Self::GetUpvalue),
             28 => Some(Self::Closure),
+            29 => Some(Self::CaseFail),
             _ => None,
         }
     }
@@ -305,6 +319,7 @@ impl Opcode {
             Self::GetGlobalVar => "GetGlobalVar",
             Self::GetUpvalue => "GetUpvalue",
             Self::Closure => "Closure",
+            Self::CaseFail => "CaseFail",
         }
     }
 }

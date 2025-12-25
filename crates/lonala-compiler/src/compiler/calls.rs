@@ -64,6 +64,7 @@ impl Compiler<'_, '_, '_> {
                 "fn" => return self.compile_fn(args, span),
                 "defmacro" => return self.compile_defmacro(args, span),
                 "var" => return self.compile_var(args, span),
+                "case" => return self.compile_case(args, span),
                 _ => {}
             }
 

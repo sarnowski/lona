@@ -103,6 +103,12 @@ impl Diagnostic for Error {
             Kind::NotImplemented { feature } => {
                 format!("feature not yet implemented: {feature}")
             }
+            Kind::NoMatchingCase { value_type } => {
+                format!(
+                    "no matching clause in case expression for value of type {}",
+                    value_type.name()
+                )
+            }
             // Non-exhaustive pattern: future variants
             _ => String::from("runtime error"),
         }
@@ -185,6 +191,11 @@ impl Diagnostic for Error {
                 notes.push(Note::text(format!(
                     "this function accepts {min} to {max} arguments"
                 )));
+            }
+            Kind::NoMatchingCase { .. } => {
+                notes.push(Note::help_static(
+                    "add an :else clause to handle unmatched values",
+                ));
             }
             // No extra notes for: suggestion-less undefined symbols, operand-less type errors,
             // exact arity (message says the count), and future variants

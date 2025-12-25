@@ -423,11 +423,110 @@ Template quoting with unquote support.
 
 See [Reader Macros](reader-macros.md) for details on unquote operators.
 
-## 6.8 Condition System *(Planned)*
+## 6.8 `case`
+
+Value-based dispatch on compile-time constants.
+
+**Syntax**: `(case expr pattern1 result1 pattern2 result2 ... :else default?)`
+
+**Parameters**:
+- `expr` — Expression to evaluate and match against patterns
+- `pattern` — Compile-time constant: integer, keyword, string, boolean, or `nil`
+- `result` — Expression to evaluate when pattern matches
+- `:else` — Optional default clause marker
+- `default` — Expression to evaluate when no pattern matches
+
+**Returns**: The value of the matching result expression, or the default if no match
+
+**Semantics**:
+1. The dispatch expression `expr` is evaluated once
+2. Patterns are compared against the result using value equality
+3. The first matching pattern's result is evaluated and returned
+4. If no pattern matches and `:else` is present, the default is evaluated
+5. If no pattern matches and no `:else`, a `NoMatchingCase` runtime error occurs
+
+**Valid Patterns**:
+- Integers: `1`, `-42`, `0`
+- Keywords: `:foo`, `:bar`
+- Strings: `"hello"`, `""`
+- Booleans: `true`, `false`
+- Nil: `nil`
+
+**Invalid Patterns** (compile-time error):
+- Symbols (would be ambiguous with bindings)
+- Lists, vectors, maps, sets (use `cond` or pattern matching instead)
+- Floats (NaN/precision issues)
+
+```clojure
+; Integer dispatch
+(case (get-status)
+  0 "pending"
+  1 "running"
+  2 "complete"
+  :else "unknown")
+
+; Keyword dispatch
+(case direction
+  :north "up"
+  :south "down"
+  :east  "right"
+  :west  "left")
+
+; Mixed pattern types
+(case value
+  nil     "nothing"
+  true    "yes"
+  false   "no"
+  0       "zero"
+  :else   "something else")
+
+; String matching
+(case command
+  "start" (start-system)
+  "stop"  (stop-system)
+  "help"  (show-help)
+  :else   (unknown-command command))
+```
+
+**Error Behavior**:
+```clojure
+; Without :else, unmatched values cause runtime error
+(case 99
+  1 "one"
+  2 "two")
+; => NoMatchingCase error: no clause matched for Integer
+```
+
+**Comparison to `cond`**:
+
+| Feature | `case` | `cond` |
+|---------|--------|--------|
+| Patterns | Compile-time constants only | Arbitrary predicates |
+| Validation | Compile-time | Runtime |
+| Duplicate detection | Compile-time error | No check |
+| Use case | Known, fixed values | Complex conditions |
+
+Use `case` when dispatching on fixed values. Use `cond` when conditions require computation:
+
+```clojure
+; Use case: fixed dispatch values
+(case status-code
+  200 :ok
+  404 :not-found
+  500 :error)
+
+; Use cond: computed conditions
+(cond
+  (< n 0) :negative
+  (= n 0) :zero
+  (> n 0) :positive)
+```
+
+## 6.9 Condition System *(Planned)*
 
 Lonala provides a condition system inspired by Common Lisp that separates error detection from error handling. Unlike exceptions that immediately unwind the stack, conditions preserve full context and allow recovery.
 
-### 6.8.1 `signal` *(Planned)*
+### 6.9.1 `signal` *(Planned)*
 
 Signals a condition without unwinding the stack.
 
@@ -457,7 +556,7 @@ Signals a condition without unwinding the stack.
                              :reason "Invalid format"})
 ```
 
-### 6.8.2 `restart-case` *(Planned)*
+### 6.9.2 `restart-case` *(Planned)*
 
 Establishes restarts around a protected expression.
 
@@ -497,7 +596,7 @@ Establishes restarts around a protected expression.
       config)))
 ```
 
-### 6.8.3 `handler-bind` *(Planned)*
+### 6.9.3 `handler-bind` *(Planned)*
 
 Establishes handlers for conditions.
 
@@ -535,7 +634,7 @@ Establishes handlers for conditions.
   (start-application))
 ```
 
-### 6.8.4 `invoke-restart` *(Planned)*
+### 6.9.4 `invoke-restart` *(Planned)*
 
 Invokes a restart established by `restart-case`.
 
@@ -558,11 +657,11 @@ Invokes a restart established by `restart-case`.
 (invoke-restart :retry)
 ```
 
-## 6.9 Process Termination *(Planned)*
+## 6.10 Process Termination *(Planned)*
 
 For truly unrecoverable errors—bugs, invariant violations, fatal hardware failures—Lonala provides `panic!`.
 
-### 6.9.1 `panic!` *(Planned)*
+### 6.10.1 `panic!` *(Planned)*
 
 Signals an unrecoverable condition.
 
@@ -602,7 +701,7 @@ Signals an unrecoverable condition.
     data))
 ```
 
-### 6.9.2 Production Mode Behavior
+### 6.10.2 Production Mode Behavior
 
 In production mode (no debugger attached):
 - Process exits with reason `{:panic {:message msg :data data}}`
@@ -620,7 +719,7 @@ In production mode (no debugger attached):
 ;; If worker-1 panics, supervisor restarts only worker-1
 ```
 
-### 6.9.3 Debug Mode Behavior
+### 6.10.3 Debug Mode Behavior
 
 In debug mode (debugger attached):
 - Execution pauses at the panic point
@@ -641,7 +740,7 @@ Restarts:
 proc-debug[0]> _
 ```
 
-### 6.9.4 When to Use `panic!`
+### 6.10.4 When to Use `panic!`
 
 | Situation | Use `panic!`? | Instead |
 |-----------|---------------|---------|
@@ -658,7 +757,7 @@ proc-debug[0]> _
 
 See [Error Handling](error-handling.md) for the complete error handling philosophy.
 
-### 6.9.5 `assert!` *(Planned)*
+### 6.10.5 `assert!` *(Planned)*
 
 Convenience macro for invariant checking.
 
@@ -678,7 +777,7 @@ Convenience macro for invariant checking.
 
 ---
 
-## 6.10 `receive` *(Planned)*
+## 6.11 `receive` *(Planned)*
 
 Pattern-matched message receive for process mailboxes.
 

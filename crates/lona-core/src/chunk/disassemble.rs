@@ -359,28 +359,13 @@ impl Chunk {
             // iAsBx format (jumps)
             Opcode::Jump => {
                 let _result = write!(output, "{sbx}");
-                // Show target address
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_possible_wrap,
-                    reason = "[approved] instruction offset is small; used for display only"
-                )]
-                let target = (offset as i64)
-                    .saturating_add(1)
-                    .saturating_add(i64::from(sbx));
+                let target = Self::jump_target(offset, sbx);
                 let _result = write!(output, "        ; -> {target}");
             }
 
             Opcode::JumpIf | Opcode::JumpIfNot => {
                 let _result = write!(output, "R{reg_a}, {sbx}");
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_possible_wrap,
-                    reason = "[approved] instruction offset is small; used for display only"
-                )]
-                let target = (offset as i64)
-                    .saturating_add(1)
-                    .saturating_add(i64::from(sbx));
+                let target = Self::jump_target(offset, sbx);
                 let _result = write!(output, "        ; -> {target}");
             }
 
@@ -409,6 +394,12 @@ impl Chunk {
                 let _result = write!(output, "R{reg_a}, U{reg_b}");
                 let _result = write!(output, "        ; upvalue[{reg_b}]");
             }
+
+            // Pattern matching
+            Opcode::CaseFail => {
+                let _result = write!(output, "R{reg_a}");
+                let _result = write!(output, "        ; no match for value in R{reg_a}");
+            }
         }
     }
 
@@ -420,6 +411,16 @@ impl Chunk {
         } else {
             let _result = write!(output, "R{rk}");
         }
+    }
+
+    /// Calculates jump target address for display.
+    #[expect(
+        clippy::as_conversions,
+        clippy::cast_possible_wrap,
+        reason = "[approved] instruction offset is small; used for display only"
+    )]
+    const fn jump_target(offset: usize, sbx: i16) -> i64 {
+        (offset as i64).saturating_add(1).saturating_add(sbx as i64)
     }
 }
 

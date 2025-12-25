@@ -126,7 +126,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.7 | [Proper Tail Calls - VM Trampoline](../architecture/tco.md) | done |
 | 1.2.8 | [Proper Tail Calls - Integration Tests](../architecture/tco.md) | done |
 | 1.2.9 | Pattern Matching - Core Infrastructure | done |
-| 1.2.10 | Case Special Form | open |
+| 1.2.10 | Case Special Form | done |
 | 1.2.11 | Gensym Implementation | open |
 | 1.2.12 | Anonymous Function Reader Macro (`#()`) | open |
 | 1.2.13 | Discard Reader Macro (`#_`) | open |

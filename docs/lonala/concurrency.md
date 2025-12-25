@@ -72,7 +72,7 @@ Lonala provides Erlang-style lightweight processes and message passing.
 
 ## 13.5 Process Recovery
 
-See [Special Forms: Process Termination](special-forms.md#69-process-termination-planned) for how `panic!` interacts with supervision.
+See [Special Forms: Process Termination](special-forms.md#610-process-termination-planned) for how `panic!` interacts with supervision.
 
 ---
 

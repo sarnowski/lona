@@ -687,6 +687,6 @@ Lonala deliberately omits exception-based error handling (`try`/`catch`/`throw`)
 4. **BEAM alignment**: Matches Erlang/Elixir idioms and "let it crash" philosophy
 5. **Performance**: No stack unwinding machinery in the VM
 
-For truly unrecoverable errors, see [Process Termination](special-forms.md#69-process-termination-planned).
+For truly unrecoverable errors, see [Process Termination](special-forms.md#610-process-termination-planned).
 
 ---

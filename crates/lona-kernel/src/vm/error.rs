@@ -123,6 +123,15 @@ pub enum Kind {
         /// Description of the unimplemented feature.
         feature: &'static str,
     },
+
+    /// No matching clause in a `case` expression.
+    ///
+    /// Occurs when a `case` expression has no matching pattern and no
+    /// `:else` default clause is provided.
+    NoMatchingCase {
+        /// The type of the value that failed to match.
+        value_type: value::Kind,
+    },
 }
 
 impl Kind {
@@ -146,6 +155,7 @@ impl Kind {
             Self::ArityMismatch { .. } => "ArityMismatch",
             Self::InvalidUpvalue { .. } => "InvalidUpvalue",
             Self::NotImplemented { .. } => "NotImplemented",
+            Self::NoMatchingCase { .. } => "NoMatchingCase",
         }
     }
 }

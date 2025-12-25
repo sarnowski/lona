@@ -402,6 +402,11 @@ impl<'interner> Vm<'interner> {
             Opcode::GetUpvalue => self.op_get_upvalue(instruction, frame)?,
             Opcode::Closure => self.op_closure(instruction, frame)?,
 
+            // Pattern Matching
+            Opcode::CaseFail => {
+                return self.op_case_fail(instruction, frame);
+            }
+
             // Handle future Opcode variants (Opcode is #[non_exhaustive])
             _ => {
                 return Err(Error::new(

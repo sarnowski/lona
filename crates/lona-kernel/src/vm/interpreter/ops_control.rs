@@ -24,6 +24,26 @@ impl Vm<'_> {
     // Control Flow Operations
     // =========================================================================
 
+    /// `CaseFail`: triggers runtime error when no `case` clause matches.
+    ///
+    /// R[A] contains the value that failed to match. The error includes
+    /// the value's type for diagnostic purposes.
+    pub(super) fn op_case_fail(
+        &self,
+        instruction: u32,
+        frame: &Frame<'_>,
+    ) -> Result<DispatchResult, Error> {
+        let value_reg = decode_a(instruction);
+        let value = self.get_register(value_reg, frame)?;
+
+        Err(Error::new(
+            ErrorKind::NoMatchingCase {
+                value_type: value.kind(),
+            },
+            frame.current_location(),
+        ))
+    }
+
     /// `Jump`: `PC += sBx`
     pub(super) const fn op_jump(instruction: u32, frame: &mut Frame<'_>) {
         let sbx = decode_sbx(instruction);

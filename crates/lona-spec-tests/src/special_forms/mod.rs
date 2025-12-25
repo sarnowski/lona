@@ -10,7 +10,9 @@
 //!
 //! This module is split into submodules:
 //! - `let_tests`: Section 6.2 - let with destructuring
+//! - `case_tests`: Section 6.X - case special form
 
+mod case_tests;
 mod let_tests;
 mod planned;
 

@@ -13,11 +13,13 @@
 //! - `macro_tests` - defmacro and macro expansion
 //! - `destructure` - destructuring pattern parsing and bytecode compilation
 //! - `tail_call_tests` - tail call optimization (TailCall opcode emission)
+//! - `case_tests` - case special form pattern matching
 
 extern crate alloc;
 
 mod binding_form_tests;
 mod call_tests;
+mod case_tests;
 mod destructure;
 mod literal_tests;
 mod macro_tests;
