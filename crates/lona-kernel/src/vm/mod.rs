@@ -55,3 +55,7 @@ pub use natives::{
     register_arithmetic_primitives, register_comparison_primitives, register_metadata_primitives,
     register_symbol_primitives, register_type_predicates,
 };
+
+// Re-export namespace types for convenience
+#[cfg(feature = "alloc")]
+pub use super::namespace::{Namespace, Registry as NamespaceRegistry};

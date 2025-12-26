@@ -135,7 +135,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 
 | Task | Name | Status |
 |------|------|--------|
-| 1.3.1 | Namespace Data Structure | open |
+| 1.3.1 | Namespace Data Structure | done |
 | 1.3.2 | Var System - Namespace Extension and Var Quote | open |
 | 1.3.3 | Namespace Declaration (`ns`) | open |
 | 1.3.4 | Require/Use/Refer Implementation | open |

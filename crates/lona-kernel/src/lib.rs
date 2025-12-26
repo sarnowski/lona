@@ -7,8 +7,10 @@
 //! language implementation (parser, compiler) and the seL4-specific runtime.
 //! Most components are 100% host-testable without seL4 dependencies.
 //!
-//! Current components:
-//! - `vm`: The bytecode virtual machine (register-based, like Lua)
+//! # Components
+//!
+//! - [`namespace`]: Namespace system for organizing code into named modules
+//! - [`vm`]: The bytecode virtual machine (register-based, like Lua)
 //!
 //! Future components will include the scheduler, process management,
 //! and garbage collector.
@@ -22,4 +24,6 @@
 #[cfg(feature = "alloc")]
 extern crate alloc;
 
+#[cfg(feature = "alloc")]
+pub mod namespace;
 pub mod vm;

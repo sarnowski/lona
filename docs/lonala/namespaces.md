@@ -1,7 +1,7 @@
 # Namespaces
-> **Status**: *Planned for Phase 6*
+> **Status**: *Data structures implemented (Task 1.3.1). Language integration planned.*
 
-Namespaces organize code and prevent name collisions.
+Namespaces organize code and prevent name collisions. The runtime maintains a registry of namespaces, each containing vars (defined symbols) and references to vars from other namespaces.
 
 ## 12.1 Namespace Declaration (Planned)
 
