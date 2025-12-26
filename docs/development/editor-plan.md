@@ -1,10 +1,12 @@
 # Editor Support Implementation Plan
 
-**Version**: 2.0.0
+**Version**: 3.0.0
 **Status**: Draft
-**Last Updated**: 2025-12-20
+**Last Updated**: 2025-12-26
 
 This document defines the roadmap for implementing Language Server Protocol (LSP) support and editor integrations for the Lonala programming language.
+
+> **Key Dependency**: Full documentation support (Milestone 7: Hover) requires the `defnative` special form from [Task 1.3.8](../roadmap/milestone-01-rust-foundation/03-namespace-system.md#task-138-defnative-special-form). This enables uniform `:doc` metadata access for all functions, macros, and native primitives.
 
 ---
 
@@ -83,13 +85,14 @@ The key architectural insight: **both the REPL and LSP need human-readable outpu
 │                                                                         │
 │  THE ONLY PLACE THAT GENERATES HUMAN-READABLE TEXT                      │
 │                                                                         │
-│  - LineIndex: SourceLocation → line:column                              │
-│  - format_error(): Error + SourceRegistry → formatted error message     │
-│  - format_hover(): SymbolInfo → hover text                              │
-│  - format_completion(): CompletionItem → detail text                    │
-│  - format_signature(): FnInfo → signature string                        │
-│  - special_form_docs(): name → documentation                            │
-│  - builtin_docs(): name → documentation                                 │
+│  - LineIndex: offset → line:column conversion                           │
+│  - Diagnostic trait: unified error rendering for all error types        │
+│  - render(): Diagnostic + source → formatted error message              │
+│  - special_form_doc(): name → documentation (hardcoded, ~12 forms)      │
+│  - is_special_form(): name → bool (for semantic token classification)   │
+│                                                                         │
+│  NOTE: Docs for functions/macros/natives come from :doc metadata,       │
+│  NOT hardcoded. Requires defnative (Task 1.3.8) for full support.       │
 │                                                                         │
 └─────────────────────────────────────┬───────────────────────────────────┘
                                       │
@@ -112,36 +115,40 @@ The key architectural insight: **both the REPL and LSP need human-readable outpu
 
 ### 2.2 Source Location Tracking
 
-Every token and AST node tracks its source location:
+Every token and AST node tracks its source location. The types are defined in `lona-core::source`:
 
 ```rust
-// lona-core
+// crates/lona-core/src/source.rs
 
 /// Identifies a source (file, REPL input, etc.)
-pub struct SourceId(pub u32);
+/// Exported as `source::Id` (aliased as `SourceId` in lonala-parser)
+pub struct Id(u32);
 
-/// Byte range within a source
-pub struct Span {
-    pub start: usize,
-    pub end: usize,
-}
-
-/// Complete source location
-pub struct SourceLocation {
-    pub source: SourceId,
+/// Complete source location (source + byte range)
+/// Exported as `source::Location` (aliased as `SourceLocation` in lonala-parser)
+pub struct Location {
+    pub source: Id,
     pub span: Span,
 }
 
 /// Metadata about a source
-pub struct Source {
-    pub name: String,      // "<repl>", "main.lona", "initrd:/init.lona"
-    pub content: String,   // The actual source text
+/// Exported as `source::Entry`
+pub struct Entry {
+    name: String,      // "<repl>", "main.lona", "initrd:/init.lona"
+    content: String,   // The actual source text
 }
 
 /// Registry of all sources
-pub struct SourceRegistry {
-    sources: Vec<Source>,
+/// Exported as `source::Registry`
+pub struct Registry {
+    sources: Vec<Entry>,
 }
+```
+
+**Note**: The parser re-exports these with familiar names:
+```rust
+// lonala-parser/src/error.rs
+pub use lona_core::source::{self, Id as SourceId, Location as SourceLocation};
 ```
 
 **Source name examples:**
@@ -322,16 +329,17 @@ lona/
 │   │       ├── ast.rs              # Spanned<T> with span + full_span
 │   │       └── ...
 │   │
-│   ├── lonala-human/               # Human-readable output (NEW)
+│   ├── lonala-human/               # Human-readable output (IMPLEMENTED)
 │   │   ├── Cargo.toml              # no_std + alloc
 │   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── line_index.rs       # Span → line:column conversion
-│   │       ├── error.rs            # Error formatting
-│   │       ├── hover.rs            # Hover content generation
-│   │       ├── completion.rs       # Completion detail text
-│   │       ├── signature.rs        # Function signature display
-│   │       └── docs.rs             # Special form & builtin documentation
+│   │       ├── lib.rs              # Exports render(), Config, Diagnostic
+│   │       ├── line_index.rs       # LineIndex, LineCol - offset conversion
+│   │       ├── diagnostic.rs       # Diagnostic trait definition
+│   │       ├── format.rs           # render() implementation
+│   │       ├── parser_errors.rs    # Diagnostic impl for parser::Error
+│   │       ├── compiler_errors.rs  # Diagnostic impl for compiler::Error
+│   │       ├── vm_errors.rs        # Diagnostic impl for vm::Error
+│   │       └── docs.rs             # special_form_doc(), is_special_form()
 │   │
 │   ├── lonala-lsp/                 # LSP server (NEW, std only)
 │   │   ├── Cargo.toml
@@ -434,18 +442,20 @@ lonala-parser = { path = "../lonala-parser" }
 
 | # | Milestone | Deliverables | Dependencies |
 |---|-----------|--------------|--------------|
-| **0** | **Foundation** | Source tracking, comment capture, lonala-human crate | None |
+| **0** | **Foundation** ✓ | Source tracking, Diagnostic trait, lonala-human crate | None |
 | 1 | LSP + Semantic Tokens | Working LSP with syntax highlighting | M0 |
 | 2 | Tree-sitter Grammar | Syntax highlighting for Zed/Neovim | None |
 | 3 | Zed Extension | Full Zed integration | M1, M2 |
 | 4 | VS Code Extension | Full VS Code integration | M1 |
 | 5 | Neovim/Vim Support | Neovim and Vim integration | M1, M2 |
 | 6 | LSP Diagnostics | Real-time error reporting | M1 |
-| 7 | Hover | Documentation on hover | M1, M6 |
+| 7 | Hover | Documentation on hover | M1, M6, **defnative** |
 | 8 | Go to Definition | Navigate to symbol definitions | M1, M6 |
 | 9 | Document Symbols | Outline view, breadcrumbs | M1 |
-| 10 | Code Completion | Intelligent autocomplete | M1, M6, M8 |
+| 10 | Code Completion | Intelligent autocomplete | M1, M6, M8, **defnative** |
 | 11 | Advanced Features | Rename, references, code actions | M1-M10 |
+
+**Critical Dependency**: Milestones 7 and 10 require [Task 1.3.8: defnative](../roadmap/milestone-01-rust-foundation/03-namespace-system.md#task-138-defnative-special-form) from the Rust Foundation roadmap. Without `defnative`, documentation is limited to hardcoded special forms only.
 
 ```
 Timeline (suggested order):
@@ -469,17 +479,21 @@ M0 (Foundation)
 
 **Rationale**: This infrastructure enables consistent human-readable output across all user-facing components. It must be completed before any editor integration.
 
-> **Status (verified 2025-12-20)**: The core foundation work has been completed as part of the **Standardized Error Handling** initiative.
+> **Status (verified 2025-12-26)**: Milestone 0 is **COMPLETE**. The core foundation work has been completed as part of the **Standardized Error Handling** initiative.
 >
 > **Completed**:
-> - Task 0.1 (Source Tracking) - `SourceId`, `SourceRegistry` implemented
+> - Task 0.1 (Source Tracking) - `source::Id`, `source::Registry` implemented in `lona-core`
 > - Task 0.2 (Parser API) - Parser accepts `SourceId`, errors include `SourceLocation`
 > - Task 0.3 (Full Span Tracking) - `Spanned<T>` has `full_span`, parser uses `trivia_start()` (20+ tests)
 > - Task 0.4 (Compiler Source Tracking) - Compiler errors include `SourceLocation`
-> - Task 0.5 (lonala-human Crate) - Error formatting with context lines
-> - Task 0.6 (REPL Integration) - REPL uses `lonala-human` for output
+> - Task 0.5 (lonala-human Crate) - `Diagnostic` trait with `render()` function, supports parser/compiler/VM errors
+> - Task 0.6 (REPL Integration) - REPL uses `lonala_human::render()` for all error output
+> - Task 0.7 (Foundation Tests) - Comprehensive tests exist in all relevant crates
 >
-> **Remaining**: Task 0.7 (Foundation Tests)
+> **Implementation Notes**:
+> - The actual implementation uses a `Diagnostic` trait system rather than simple `format_*` functions
+> - VM error formatting (`vm_errors.rs`) was added beyond original scope
+> - Type names use module-qualified form: `source::Id`, `source::Registry`, `source::Entry`
 
 ### 5.1 Tasks
 
@@ -1022,97 +1036,65 @@ error: undefined symbol 'fooo'
    |    ^^^^
 ```
 
-**Documentation**:
+**Documentation** (`docs.rs`):
+
+The `docs.rs` module provides documentation **only for special forms**, which are compiler primitives that don't have Vars and therefore can't carry `:doc` metadata.
+
+**All other documentation** (functions, macros, natives) comes from `:doc` metadata on Vars:
+- User functions: `(defn foo "docstring" [x] ...)`
+- Macros: `(defmacro bar "docstring" [x] ...)`
+- Native functions: `(defnative cons "docstring" [x coll])` (see [defnative design](../architecture/defnative.md))
+
 ```rust
 // crates/lonala-human/src/docs.rs
 
-use alloc::string::String;
-
-/// Get documentation for a special form
+/// Documentation for special forms (compiler primitives without Vars).
+/// This is the ONLY hardcoded documentation in the system.
 pub fn special_form_doc(name: &str) -> Option<&'static str> {
     match name {
-        "def" => Some(
-            "Binds a value to a global variable.\n\n\
-             Syntax: (def name value)\n\n\
-             Returns: The symbol name"
-        ),
-        "let" => Some(
-            "Creates local bindings for a body of expressions.\n\n\
-             Syntax: (let [bindings*] body*)\n\n\
-             Bindings are evaluated left-to-right. Each binding can \
-             refer to previously bound names."
-        ),
-        "fn" => Some(
-            "Creates a function.\n\n\
-             Syntax: (fn name? [params*] body*)\n\n\
-             The optional name enables recursion and debugging."
-        ),
-        "if" => Some(
-            "Conditional branching.\n\n\
-             Syntax: (if test then else?)\n\n\
-             Evaluates test. If truthy, evaluates and returns then. \
-             Otherwise evaluates and returns else (or nil if omitted)."
-        ),
-        "do" => Some(
-            "Sequential execution of multiple expressions.\n\n\
-             Syntax: (do exprs*)\n\n\
-             Returns the value of the last expression, or nil if empty."
-        ),
-        "quote" => Some(
-            "Returns its argument unevaluated.\n\n\
-             Syntax: (quote form) or 'form\n\n\
-             Prevents evaluation, returning the form as data."
-        ),
-        "defmacro" => Some(
-            "Defines a macro.\n\n\
-             Syntax: (defmacro name [params*] body+)\n\n\
-             Macros receive unevaluated arguments and return code \
-             to be compiled in their place."
-        ),
-        "syntax-quote" => Some(
-            "Template quoting with unquote support.\n\n\
-             Syntax: `form\n\n\
-             Like quote, but allows selective evaluation with ~ (unquote) \
-             and ~@ (unquote-splicing)."
-        ),
+        "def" => Some("Binds a value to a symbol.\n\nSyntax: (def name value)\n       (def name \"docstring\" value)"),
+        "let" => Some("Creates local bindings.\n\nSyntax: (let [bindings*] body*)"),
+        "if" => Some("Conditional branching.\n\nSyntax: (if test then else?)"),
+        "do" => Some("Sequential execution.\n\nSyntax: (do exprs*)"),
+        "fn" => Some("Creates a function.\n\nSyntax: (fn name? [params*] body*)"),
+        "loop" => Some("Loop with recur target.\n\nSyntax: (loop [bindings*] body*)"),
+        "recur" => Some("Jump to nearest loop/fn.\n\nSyntax: (recur exprs*)"),
+        "quote" => Some("Returns form unevaluated.\n\nSyntax: 'form"),
+        "syntax-quote" => Some("Template quoting.\n\nSyntax: `form"),
+        "unquote" => Some("Evaluate within syntax-quote.\n\nSyntax: ~form"),
+        "unquote-splicing" => Some("Splice into syntax-quote.\n\nSyntax: ~@form"),
+        "case" => Some("Value-based dispatch.\n\nSyntax: (case expr clauses* default?)"),
+        "try" => Some("Exception handling.\n\nSyntax: (try expr* (catch type binding expr*)*)"),
+        "throw" => Some("Throws an exception.\n\nSyntax: (throw expr)"),
         _ => None,
     }
 }
 
-/// Get documentation for a built-in function
-pub fn builtin_doc(name: &str) -> Option<&'static str> {
-    match name {
-        "print" => Some(
-            "Prints values to output.\n\n\
-             Syntax: (print args*)\n\n\
-             Prints each argument separated by spaces, followed by newline. \
-             Returns nil."
-        ),
-        // Future built-ins...
-        _ => None,
-    }
-}
-
-/// Check if a symbol is a special form
+/// Check if a symbol is a special form (for semantic token classification)
 pub fn is_special_form(name: &str) -> bool {
-    matches!(name,
-        "def" | "defmacro" | "let" | "fn" | "if" | "do" |
-        "quote" | "syntax-quote" | "unquote" | "unquote-splicing"
-    )
+    special_form_doc(name).is_some()
 }
 
-/// Check if a symbol is a built-in function
-pub fn is_builtin(name: &str) -> bool {
-    matches!(name, "print")
-}
+// NOTE: No builtin_doc() or is_builtin() functions!
+// Native function docs come from :doc metadata via defnative.
+// The LSP/REPL should use: (:doc (meta (resolve symbol)))
+```
+
+**Unified Documentation Lookup** (in LSP or REPL):
+```clojure
+(defn doc [sym]
+  (if (special-form? sym)
+    (special-form-doc sym)           ; Hardcoded in lonala-human
+    (:doc (meta (resolve sym)))))    ; From Var metadata
 ```
 
 **Acceptance criteria**:
 - [x] `lonala-human` crate created with `no_std` + `alloc` support
 - [x] `LineIndex` correctly converts offsets to line/column
-- [x] `format_parse_error` produces properly formatted error messages
-- [x] `format_compile_error` produces properly formatted error messages
-- [ ] Documentation functions return correct content *(partially done)*
+- [x] `Diagnostic` trait implemented for parser, compiler, and VM errors
+- [x] `render()` function produces Rust-style formatted error messages
+- [x] `special_form_doc()` returns documentation for all special forms
+- [x] `is_special_form()` correctly identifies special forms
 - [x] Unit tests for all formatting functions
 
 ---
@@ -1163,21 +1145,24 @@ fn handle_parse_error(&self, error: ParseError) {
 6. `full_source()` returns exact original text
 
 **Acceptance criteria**:
-- [ ] All tests pass
-- [ ] Edge cases covered (empty input, unicode, CRLF line endings)
-- [ ] Error messages match expected Rust-style format
-- [ ] Tests run in both `std` and `no_std` environments
+- [x] All tests pass
+- [x] Edge cases covered (empty input, unicode, various line endings)
+- [x] Error messages match expected Rust-style format
+- [x] Tests run in `std` environment (no_std tested via QEMU integration)
 
 ---
 
 ### 5.2 Milestone 0 Deliverables
 
-- [x] Source tracking in `lona-core` (`SourceId`, `SourceRegistry`)
-- [x] Parser updated with `full_span` tracking *(Task 0.3 - verified 2025-12-20)*
-- [x] Compiler updated for source tracking
-- [x] `lonala-human` crate with error formatting and documentation
-- [x] REPL updated to use `lonala-human`
-- [ ] Comprehensive test coverage
+- [x] Source tracking in `lona-core` (`source::Id`, `source::Registry`, `source::Entry`)
+- [x] Parser updated with `full_span` tracking *(20+ tests in full_span_tests.rs)*
+- [x] Compiler updated for source tracking (`SourceLocation` in all errors)
+- [x] `lonala-human` crate with `Diagnostic` trait and `render()` function
+- [x] `special_form_doc()` and `is_special_form()` for editor integration
+- [x] REPL updated to use `lonala_human::render()` for all errors
+- [x] Comprehensive test coverage across all crates
+
+**Milestone 0 is COMPLETE.** Ready for Milestone 1 (LSP).
 
 ---
 
@@ -1418,20 +1403,19 @@ use tower_lsp::lsp_types::{
     SemanticTokensOptions, SemanticTokensFullOptions,
 };
 use lonala_parser::{Lexer, TokenKind};
-use lonala_human::docs::{is_special_form, is_builtin};
+use lonala_human::docs::is_special_form;
 use crate::document::Document;
-use crate::convert::line_col_to_position;
 
 /// Token type indices (must match legend order)
 pub mod types {
-    pub const KEYWORD: u32 = 0;
-    pub const FUNCTION: u32 = 1;
-    pub const VARIABLE: u32 = 2;
+    pub const KEYWORD: u32 = 0;       // Special forms (def, let, if, fn, etc.)
+    pub const FUNCTION: u32 = 1;      // Functions (requires runtime info)
+    pub const VARIABLE: u32 = 2;      // Symbols (default for unknown)
     pub const NUMBER: u32 = 3;
     pub const STRING: u32 = 4;
-    pub const ENUM_MEMBER: u32 = 5;  // Keywords like :foo
+    pub const ENUM_MEMBER: u32 = 5;   // Keywords like :foo
     pub const COMMENT: u32 = 6;
-    pub const OPERATOR: u32 = 7;
+    pub const OPERATOR: u32 = 7;      // Quote operators ', `, ~, ~@
 }
 
 pub fn legend() -> SemanticTokensLegend {
@@ -1508,9 +1492,10 @@ fn classify(token: &lonala_parser::Token, _source: &str) -> Option<u32> {
             let lexeme = token.lexeme;
             if is_special_form(lexeme) {
                 Some(types::KEYWORD)
-            } else if is_builtin(lexeme) {
-                Some(types::FUNCTION)
             } else {
+                // Without runtime info, we can't distinguish functions from variables.
+                // All non-special-form symbols are classified as VARIABLE.
+                // Future: With defnative metadata, could enhance classification.
                 Some(types::VARIABLE)
             }
         }
@@ -1522,7 +1507,8 @@ fn classify(token: &lonala_parser::Token, _source: &str) -> Option<u32> {
 **Acceptance criteria**:
 - [ ] All token types correctly classified
 - [ ] Delta encoding is correct
-- [ ] Uses `lonala-human` for special form/builtin detection
+- [ ] Uses `lonala-human::is_special_form()` for keyword detection
+- [ ] Symbols default to VARIABLE (function detection requires runtime)
 
 ---
 
@@ -1784,9 +1770,9 @@ lsp-clean:  ## Clean LSP build artifacts
 
 1. **File extension**: Use `.lona` instead of `.lonala`
 2. **Grammar name**: Use `lona` instead of `lonala`
-3. **LSP capabilities**: Call `lonala-human` functions for all text generation
-4. **Hover content**: Use `lonala_human::docs::special_form_doc()` and `builtin_doc()`
-5. **Error formatting**: Use `lonala_human::error::format_parse_error()` etc.
+3. **LSP capabilities**: Call `lonala-human` functions for error formatting
+4. **Hover content**: Use `lonala_human::docs::special_form_doc()` for special forms, `:doc` metadata for everything else
+5. **Error formatting**: Use `lonala_human::render()` with `Diagnostic` trait
 
 ### Key Changes in Later Milestones
 
@@ -1794,17 +1780,17 @@ lsp-clean:  ## Clean LSP build artifacts
 
 ```rust
 // In lonala-lsp diagnostic handling
-use lonala_human::error::format_parse_error;
+use lonala_human::{render, Config};
 
-fn create_diagnostic(error: &ParseError, doc: &Document) -> Diagnostic {
-    // Use lonala-human for message text
-    let message = format_parse_error(error, &self.registry());
+fn create_diagnostic(error: &parser::Error, doc: &Document, registry: &source::Registry) -> Diagnostic {
+    // Use lonala-human's Diagnostic trait for message text
+    let message = render(error, registry, &Config::default());
 
     Diagnostic {
-        range: span_to_range(error.location.span, &doc.line_index),
+        range: span_to_range(error.location.span, &doc.line_index, &doc.content),
         severity: Some(DiagnosticSeverity::ERROR),
         source: Some("lonala".to_string()),
-        message,  // From lonala-human
+        message,  // From lonala-human::render()
         ..Default::default()
     }
 }
@@ -1812,16 +1798,33 @@ fn create_diagnostic(error: &ParseError, doc: &Document) -> Diagnostic {
 
 #### Milestone 7 (Hover)
 
+**Dependency**: Requires [Task 1.3.8: defnative](../roadmap/milestone-01-rust-foundation/03-namespace-system.md#task-138-defnative-special-form) for full documentation support.
+
 ```rust
 // In lonala-lsp hover handling
-use lonala_human::docs::{special_form_doc, builtin_doc};
+use lonala_human::docs::special_form_doc;
 
-fn hover_for_symbol(name: &str) -> Option<String> {
-    special_form_doc(name)
-        .or_else(|| builtin_doc(name))
-        .map(|s| s.to_string())
+fn hover_for_symbol(name: &str, vm: &VM) -> Option<String> {
+    // 1. Check special forms (hardcoded in lonala-human)
+    if let Some(doc) = special_form_doc(name) {
+        return Some(doc.to_string());
+    }
+
+    // 2. Everything else: look up :doc metadata from Var
+    // This requires defnative to be implemented for natives
+    if let Some(var) = vm.resolve_var(name) {
+        if let Some(meta) = var.meta() {
+            if let Some(doc) = meta.get(":doc") {
+                return Some(doc.to_string());
+            }
+        }
+    }
+
+    None
 }
 ```
+
+**Without defnative**: Only special forms will have hover documentation.
 
 ---
 
@@ -1885,13 +1888,16 @@ fn error_message_consistency() {
 
 ## Appendix A: LSP Capability Matrix
 
-| Capability | Milestone | Uses lonala-human |
-|------------|-----------|-------------------|
-| Semantic Tokens | M1 | docs::is_special_form |
-| Diagnostics | M6 | error::format_* |
-| Hover | M7 | docs::*_doc |
-| Completion | M10 | completion::* |
-| Signature Help | M11 | signature::* |
+| Capability | Milestone | Uses lonala-human | Runtime Required |
+|------------|-----------|-------------------|------------------|
+| Semantic Tokens | M1 | `is_special_form()` | No |
+| Diagnostics | M6 | `Diagnostic` trait, `render()` | No |
+| Hover (special forms) | M7 | `special_form_doc()` | No |
+| Hover (functions/natives) | M7 | — (uses `:doc` metadata) | Yes (+ defnative) |
+| Completion | M10 | — (uses Var metadata) | Yes (+ defnative) |
+| Signature Help | M11 | — (uses `:arglists` metadata) | Yes (+ defnative) |
+
+**Note**: Features marked "Runtime Required" need access to the Lonala runtime to resolve Vars and read metadata. The `defnative` special form (Task 1.3.8) must be implemented for native function documentation to be available.
 
 ---
 
@@ -1908,6 +1914,11 @@ fn error_message_consistency() {
 
 ## Appendix C: References
 
+**Lona Project Documents**:
+- [defnative Design](../architecture/defnative.md) - Native function registration with metadata
+- [Task 1.3.8: defnative](../roadmap/milestone-01-rust-foundation/03-namespace-system.md#task-138-defnative-special-form) - Implementation task
+
+**External Documentation**:
 - [LSP Specification 3.17](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/)
 - [tower-lsp Documentation](https://docs.rs/tower-lsp)
 - [Tree-sitter Documentation](https://tree-sitter.github.io/tree-sitter/)

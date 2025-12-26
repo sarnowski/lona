@@ -50,8 +50,8 @@ This document provides a detailed, task-level breakdown of the Lona operating sy
 | 1 |   | [Rust Foundation](milestone-01-rust-foundation.md) (complete all Rust code for the runtime) |
 | 1.0 | ✓ | ↳ [Arithmetic](milestone-01-rust-foundation/00-arithmetic.md) (+, -, *, /, mod, comparisons) |
 | 1.1 | ✓ | ↳ [Core Value Types](milestone-01-rust-foundation/01-core-value-types.md) (Keyword, Set, Binary, Metadata) |
-| 1.2 | → | ↳ [Language Features](milestone-01-rust-foundation/02-language-features.md) (closures, destructuring, TCO) |
-| 1.3 |   | ↳ [Namespace System](milestone-01-rust-foundation/03-namespace-system.md) (Namespaces, Vars, defnative) |
+| 1.2 | ✓ | ↳ [Language Features](milestone-01-rust-foundation/02-language-features.md) (closures, destructuring, TCO) |
+| 1.3 | → | ↳ [Namespace System](milestone-01-rust-foundation/03-namespace-system.md) (Namespaces, Vars, defnative) |
 | 1.4 |   | ↳ [Process Model](milestone-01-rust-foundation/04-process-model.md) (scheduler, spawn/send/receive) |
 | 1.5 |   | ↳ [Garbage Collection](milestone-01-rust-foundation/05-garbage-collection.md) (tri-color, generational GC) |
 | 1.6 |   | ↳ [Domain Isolation](milestone-01-rust-foundation/06-domain-isolation.md) (seL4 VSpace/CSpace, IPC) |
@@ -130,7 +130,6 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.11 | Gensym Implementation | done |
 | 1.2.12 | Anonymous Function Reader Macro (`#()`) | done |
 | 1.2.13 | Discard Reader Macro (`#_`) | done |
-| 1.2.14 | Regex Literal Syntax (`#""`) | open |
 
 #### Phase 1.3: Namespace System
 

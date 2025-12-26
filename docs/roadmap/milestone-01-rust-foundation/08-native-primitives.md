@@ -442,22 +442,35 @@ When a Binary is sent via `(send pid msg)`:
 
 ## Task 1.8.17: Regular Expressions - Compilation
 
-**Description**: Implement regex pattern compilation.
+**Description**: Implement regex value type, pattern compilation, and reader syntax.
 
 **Files to modify**:
 - `crates/lona-core/src/value/regex.rs` (new)
 - `crates/lona-kernel/src/vm/natives.rs`
+- `crates/lonala-parser/src/lexer/mod.rs`
 - `crates/lonala-parser/src/parser/mod.rs`
 
 **Requirements**:
-- `(re-pattern str)` - compile regex
-- `#"pattern"` reader syntax
-- Use Rust regex crate (no_std compatible)
+
+*Regex Value Type:*
+- Add `Regex` variant to Value enum
+- Wrap compiled regex from Rust `regex` crate (no_std compatible)
+
+*Runtime Function:*
+- `(re-pattern str)` - compile regex from string at runtime
+
+*Reader Syntax:*
+- `#"pattern"` creates a compiled regex value
+- Standard regex syntax (like Rust `regex` crate)
+- Regex is compiled at read time (not runtime)
+- Invalid regex patterns are read-time errors
 
 **Tests**:
-- Pattern compilation
-- Reader syntax
-- Invalid pattern error
+- Pattern compilation via `re-pattern`
+- Simple regex literal `#"foo"`
+- Regex with escapes `#"\d+"`
+- Invalid regex error at read time
+- Invalid pattern error at runtime via `re-pattern`
 
 **Estimated effort**: 1-2 context windows
 

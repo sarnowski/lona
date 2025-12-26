@@ -337,28 +337,3 @@ Complete core language features required for idiomatic Lonala.
 - Chained discards
 
 **Estimated effort**: 0.5 context windows
-
----
-
-## Task 1.2.14: Regex Literal Syntax
-
-**Description**: Implement `#"pattern"` reader macro for regex literals.
-
-**Files to modify**:
-- `crates/lonala-parser/src/lexer/mod.rs`
-- `crates/lonala-parser/src/parser/mod.rs`
-
-**Requirements**:
-- `#"pattern"` creates a compiled regex value
-- Standard regex syntax (like Rust `regex` crate)
-- Regex is compiled at read time
-- Invalid regex patterns are read-time errors
-
-**Dependencies**: Requires regex primitives (Task 1.8.17) for the compiled type.
-
-**Tests**:
-- Simple regex literal
-- Regex with escapes
-- Invalid regex error at read time
-
-**Estimated effort**: 0.5 context windows
