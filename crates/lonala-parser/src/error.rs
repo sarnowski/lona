@@ -77,6 +77,11 @@ pub enum Kind {
         /// Description of what was found instead.
         found: &'static str,
     },
+    /// Nested anonymous function `#()` is not allowed.
+    ///
+    /// Unlike Clojure, Lonala forbids `#(... #(...) ...)` because the
+    /// placeholder scope would be ambiguous.
+    NestedAnonFn,
 }
 
 impl Kind {
@@ -100,6 +105,7 @@ impl Kind {
             Self::DuplicateMapKey => "DuplicateMapKey",
             Self::ReaderMacroMissingExpr => "ReaderMacroMissingExpr",
             Self::InvalidMetadataForm { .. } => "InvalidMetadataForm",
+            Self::NestedAnonFn => "NestedAnonFn",
         }
     }
 }
@@ -148,6 +154,9 @@ impl fmt::Display for Kind {
             }
             Self::InvalidMetadataForm { found } => {
                 write!(f, "metadata must be a map or keyword, found {found}")
+            }
+            Self::NestedAnonFn => {
+                write!(f, "nested anonymous function #() is not allowed")
             }
         }
     }

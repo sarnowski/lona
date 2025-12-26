@@ -68,6 +68,7 @@ impl Diagnostic for Error {
             Kind::InvalidMetadataForm { found } => {
                 format!("metadata must be a map or keyword, found {found}")
             }
+            Kind::NestedAnonFn => String::from("nested anonymous function #() is not allowed"),
             // Non-exhaustive pattern: future variants
             _ => String::from("parse error"),
         }
@@ -147,6 +148,11 @@ impl Diagnostic for Error {
             Kind::ReaderMacroMissingExpr => {
                 notes.push(Note::help_static(
                     "reader macros like ' (quote) must be followed by an expression",
+                ));
+            }
+            Kind::NestedAnonFn => {
+                notes.push(Note::help_static(
+                    "use explicit (fn [...] ...) for nested anonymous functions",
                 ));
             }
             // No additional notes for these variants (including future ones)

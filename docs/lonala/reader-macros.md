@@ -86,7 +86,7 @@ Syntax-quote can be nested. Each level of nesting requires an additional unquote
   `(a `(b ~~x)))      ; => (a (syntax-quote (b (unquote 1))))
 ```
 
-## 10.6 Anonymous Function: `#()` *(Planned)*
+## 10.6 Anonymous Function: `#()`
 
 **Syntax**: `#(body)`
 
@@ -111,6 +111,8 @@ Creates an anonymous function. Arguments are referenced using `%`, `%1`, `%2`, e
 - `%` or `%1` — first argument
 - `%2`, `%3`, ... — second, third, etc. arguments
 - `%&` — rest arguments (as a sequence)
+
+**Note**: Unlike Clojure, nested `#()` forms are not allowed in Lonala. Use explicit `fn` for nested anonymous functions.
 
 ## 10.7 Var Quote: `#'` *(Planned)*
 

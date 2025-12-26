@@ -516,3 +516,55 @@ fn multiple_carets() {
         Some(TokenKind::Caret)
     );
 }
+
+// ==================== Anonymous Function Tests ====================
+
+#[test]
+fn anon_fn_start() {
+    let tokens = lex("#(");
+    assert_eq!(tokens.len(), 1_usize);
+    assert_eq!(
+        tokens.first().map(|token| token.kind),
+        Some(TokenKind::AnonFnStart)
+    );
+    assert_eq!(tokens.first().map(|token| token.lexeme), Some("#("));
+}
+
+#[test]
+fn anon_fn_with_content() {
+    // #(+ % 1) produces 5 tokens: #(, +, %, 1, )
+    let tokens = lex("#(+ % 1)");
+    assert_eq!(tokens.len(), 5_usize);
+    assert_eq!(
+        tokens.first().map(|token| token.kind),
+        Some(TokenKind::AnonFnStart)
+    );
+    assert_eq!(
+        tokens.get(1_usize).map(|token| token.kind),
+        Some(TokenKind::Symbol)
+    );
+    assert_eq!(
+        tokens.last().map(|token| token.kind),
+        Some(TokenKind::RightParen)
+    );
+}
+
+#[test]
+fn set_start_still_works() {
+    // Ensure #{ still produces SetStart (no regression)
+    let tokens = lex("#{1 2}");
+    assert_eq!(tokens.len(), 4_usize);
+    assert_eq!(
+        tokens.first().map(|token| token.kind),
+        Some(TokenKind::SetStart)
+    );
+    assert_eq!(tokens.first().map(|token| token.lexeme), Some("#{"));
+}
+
+#[test]
+fn special_floats_still_work() {
+    // Ensure ##NaN, ##Inf, ##-Inf still work (no regression)
+    let tokens = lex("##NaN ##Inf ##-Inf");
+    assert_eq!(tokens.len(), 3_usize);
+    assert!(tokens.iter().all(|token| token.kind == TokenKind::Float));
+}

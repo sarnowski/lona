@@ -279,17 +279,15 @@ fn test_10_5_three_levels() {
 }
 
 // ============================================================================
-// Section 10.6: Anonymous Function (Planned)
+// Section 10.6: Anonymous Function
 // Reference: docs/lonala.md#106-anonymous-function
 // ============================================================================
 
-/// [IGNORED] Spec 10.6: #() creates anonymous function
-/// Tracking: Anonymous function reader macro not yet implemented
+/// Spec 10.6: #() creates anonymous function
 #[test]
-#[ignore]
 fn test_10_6_anonymous_fn_basic() {
     let mut ctx = SpecTestContext::new();
-    // #(+ % 1) is sugar for (fn [x] (+ x 1))
+    // #(+ % 1) is sugar for (fn [p1] (+ p1 1))
     ctx.assert_int(
         "(#(+ % 1) 5)",
         6,
@@ -297,13 +295,11 @@ fn test_10_6_anonymous_fn_basic() {
     );
 }
 
-/// [IGNORED] Spec 10.6: Multiple arguments with %1, %2
-/// Tracking: Anonymous function reader macro not yet implemented
+/// Spec 10.6: Multiple arguments with %1, %2
 #[test]
-#[ignore]
 fn test_10_6_anonymous_fn_multiple_args() {
     let mut ctx = SpecTestContext::new();
-    // #(+ %1 %2) is sugar for (fn [x y] (+ x y))
+    // #(+ %1 %2) is sugar for (fn [p1 p2] (+ p1 p2))
     ctx.assert_int(
         "(#(+ %1 %2) 3 4)",
         7,
@@ -311,13 +307,12 @@ fn test_10_6_anonymous_fn_multiple_args() {
     );
 }
 
-/// [IGNORED] Spec 10.6: Rest arguments with %&
-/// Tracking: Anonymous function reader macro not yet implemented
+/// Spec 10.6: Rest arguments with %&
 #[test]
-#[ignore]
 fn test_10_6_anonymous_fn_rest() {
     let mut ctx = SpecTestContext::new();
-    // #(apply + %&) is sugar for (fn [& args] (apply + args))
+    // #(list %&) is sugar for (fn [& rest] (list rest))
+    // The result is a list containing one element (the rest list)
     ctx.assert_list_len(
         "(#(list %&) 1 2 3)",
         1,

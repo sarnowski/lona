@@ -34,6 +34,9 @@ pub struct Parser<'src> {
     source: &'src str,
     /// Identifier for this source (for error reporting).
     source_id: SourceId,
+    /// Whether we are currently parsing inside an anonymous function `#()`.
+    /// Used to detect and reject nested `#()` forms.
+    in_anon_fn: bool,
 }
 
 impl<'src> Parser<'src> {
@@ -47,6 +50,7 @@ impl<'src> Parser<'src> {
             lexer: Lexer::new(source, source_id),
             source,
             source_id,
+            in_anon_fn: false,
         }
     }
 
@@ -140,6 +144,7 @@ impl<'src> Parser<'src> {
             TokenKind::LeftBracket => self.parse_vector(trivia_start),
             TokenKind::LeftBrace => self.parse_map(trivia_start),
             TokenKind::SetStart => self.parse_set(trivia_start),
+            TokenKind::AnonFnStart => self.parse_anon_fn(trivia_start),
 
             // Reader macros
             TokenKind::Quote => self.parse_reader_macro("quote", trivia_start),
@@ -258,6 +263,7 @@ impl<'src> Parser<'src> {
             | TokenKind::LeftBracket
             | TokenKind::LeftBrace
             | TokenKind::SetStart
+            | TokenKind::AnonFnStart
             | TokenKind::RightParen
             | TokenKind::RightBracket
             | TokenKind::RightBrace

@@ -31,6 +31,8 @@ pub enum Kind {
     RightBrace,
     /// Set start `#{`.
     SetStart,
+    /// Anonymous function start `#(`.
+    AnonFnStart,
 
     // Literals
     /// Integer literal (e.g., `42`, `-17`, `0xFF`, `0b1010`, `0o755`).
@@ -78,6 +80,7 @@ impl Kind {
             Self::LeftBrace => "left brace",
             Self::RightBrace => "right brace",
             Self::SetStart => "set start",
+            Self::AnonFnStart => "anonymous function start",
             Self::Integer => "integer",
             Self::Float => "float",
             Self::String => "string",

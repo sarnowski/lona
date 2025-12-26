@@ -128,7 +128,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 | 1.2.9 | Pattern Matching - Core Infrastructure | done |
 | 1.2.10 | Case Special Form | done |
 | 1.2.11 | Gensym Implementation | done |
-| 1.2.12 | Anonymous Function Reader Macro (`#()`) | open |
+| 1.2.12 | Anonymous Function Reader Macro (`#()`) | done |
 | 1.2.13 | Discard Reader Macro (`#_`) | open |
 | 1.2.14 | Regex Literal Syntax (`#""`) | open |
 

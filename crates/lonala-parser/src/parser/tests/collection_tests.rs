@@ -243,3 +243,159 @@ fn map_string_vs_integer_key_ok() {
     let result = parse_one("{\"1\" :a 1 :b}", TEST_SOURCE_ID);
     assert!(result.is_ok());
 }
+
+// ==================== Anonymous Functions #() ====================
+
+#[test]
+fn anon_fn_basic() {
+    // #(+ % 1) should expand to (fn [p1] (+ p1 1))
+    let ast = parse_ast("#(+ % 1)");
+    match ast {
+        Ast::List(elements) => {
+            assert_eq!(elements.len(), 3_usize);
+            // First element: fn symbol
+            assert_eq!(
+                elements.first().map(|spanned| &spanned.node),
+                Some(&Ast::Symbol("fn".to_string()))
+            );
+            // Second element: [p1] vector
+            match elements.get(1_usize).map(|spanned| &spanned.node) {
+                Some(Ast::Vector(params)) => {
+                    assert_eq!(params.len(), 1_usize);
+                    assert_eq!(
+                        params.first().map(|spanned| &spanned.node),
+                        Some(&Ast::Symbol("p1".to_string()))
+                    );
+                }
+                _ => panic!("expected Vector for params"),
+            }
+            // Third element: (+ p1 1) body
+            match elements.get(2_usize).map(|spanned| &spanned.node) {
+                Some(Ast::List(body)) => {
+                    assert_eq!(body.len(), 3_usize);
+                    assert_eq!(
+                        body.get(1_usize).map(|spanned| &spanned.node),
+                        Some(&Ast::Symbol("p1".to_string()))
+                    );
+                }
+                _ => panic!("expected List for body"),
+            }
+        }
+        _ => panic!("expected List"),
+    }
+}
+
+#[test]
+fn anon_fn_multiple_args() {
+    // #(+ %1 %2) should expand to (fn [p1 p2] (+ p1 p2))
+    let ast = parse_ast("#(+ %1 %2)");
+    match ast {
+        Ast::List(elements) => {
+            assert_eq!(elements.len(), 3_usize);
+            match elements.get(1_usize).map(|spanned| &spanned.node) {
+                Some(Ast::Vector(params)) => {
+                    assert_eq!(params.len(), 2_usize);
+                    assert_eq!(
+                        params.first().map(|spanned| &spanned.node),
+                        Some(&Ast::Symbol("p1".to_string()))
+                    );
+                    assert_eq!(
+                        params.get(1_usize).map(|spanned| &spanned.node),
+                        Some(&Ast::Symbol("p2".to_string()))
+                    );
+                }
+                _ => panic!("expected Vector"),
+            }
+        }
+        _ => panic!("expected List"),
+    }
+}
+
+#[test]
+fn anon_fn_gap_in_args() {
+    // #(%3) should expand to (fn [p1 p2 p3] (p3)) - fills in gaps
+    let ast = parse_ast("#(%3)");
+    match ast {
+        Ast::List(elements) => match elements.get(1_usize).map(|spanned| &spanned.node) {
+            Some(Ast::Vector(params)) => {
+                assert_eq!(params.len(), 3_usize);
+                assert_eq!(
+                    params.first().map(|spanned| &spanned.node),
+                    Some(&Ast::Symbol("p1".to_string()))
+                );
+                assert_eq!(
+                    params.get(2_usize).map(|spanned| &spanned.node),
+                    Some(&Ast::Symbol("p3".to_string()))
+                );
+            }
+            _ => panic!("expected Vector"),
+        },
+        _ => panic!("expected List"),
+    }
+}
+
+#[test]
+fn anon_fn_rest_args() {
+    // #(first %&) should expand to (fn [& rest] (first rest))
+    let ast = parse_ast("#(first %&)");
+    match ast {
+        Ast::List(elements) => match elements.get(1_usize).map(|spanned| &spanned.node) {
+            Some(Ast::Vector(params)) => {
+                assert_eq!(params.len(), 2_usize);
+                assert_eq!(
+                    params.first().map(|spanned| &spanned.node),
+                    Some(&Ast::Symbol("&".to_string()))
+                );
+                assert_eq!(
+                    params.get(1_usize).map(|spanned| &spanned.node),
+                    Some(&Ast::Symbol("rest".to_string()))
+                );
+            }
+            _ => panic!("expected Vector"),
+        },
+        _ => panic!("expected List"),
+    }
+}
+
+#[test]
+fn anon_fn_no_args() {
+    // #(+ 1 2) should expand to (fn [] (+ 1 2))
+    let ast = parse_ast("#(+ 1 2)");
+    match ast {
+        Ast::List(elements) => match elements.get(1_usize).map(|spanned| &spanned.node) {
+            Some(Ast::Vector(params)) => {
+                assert_eq!(params.len(), 0_usize);
+            }
+            _ => panic!("expected Vector"),
+        },
+        _ => panic!("expected List"),
+    }
+}
+
+#[test]
+fn anon_fn_nested_error() {
+    // Nested #() should be an error
+    let result = parse_one("#(#(%)))", TEST_SOURCE_ID);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(err.kind, ErrorKind::NestedAnonFn));
+}
+
+#[test]
+fn anon_fn_with_metadata_placeholder() {
+    // #(^:tag %) should work - placeholder with metadata
+    let ast = parse_ast("#(^:tag %)");
+    match ast {
+        Ast::List(elements) => {
+            // Should have fn, [p1], and body with metadata-wrapped p1
+            assert_eq!(elements.len(), 3_usize);
+            match elements.get(1_usize).map(|spanned| &spanned.node) {
+                Some(Ast::Vector(params)) => {
+                    assert_eq!(params.len(), 1_usize);
+                }
+                _ => panic!("expected Vector"),
+            }
+        }
+        _ => panic!("expected List"),
+    }
+}

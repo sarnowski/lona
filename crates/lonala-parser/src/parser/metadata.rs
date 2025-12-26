@@ -103,6 +103,7 @@ impl Parser<'_> {
             | TokenKind::RightBracket
             | TokenKind::RightBrace
             | TokenKind::SetStart
+            | TokenKind::AnonFnStart
             | TokenKind::Integer
             | TokenKind::Float
             | TokenKind::String

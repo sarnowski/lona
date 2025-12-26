@@ -15,7 +15,7 @@ Lona is an operating system for developers who want full transparency and contro
 
 - **[Goals](goals/index.md)** — The vision, philosophy, and architecture of Lona
 - **[Installation](installation.md)** — Run Lona on QEMU or physical hardware
-- **[GitHub](https://github.com/sarnowsk/lona)** — Source code, issues, and contributions
+- **[Codeberg](https://codeberg.org/sarnowski/lona)** — Source code, issues, and contributions
 
 ## License
 
