@@ -181,11 +181,29 @@ help: ## Show this help
 	@echo "  docs          Build documentation site for deployment"
 	@echo "  docs-local    Serve docs locally with live reload (no search)"
 	@echo ""
+	@echo "LSP targets (runs locally):"
+	@echo "  lsp             Build LSP release binary"
+	@echo "  lsp-install     Install LSP to ~/.cargo/bin"
+	@echo ""
 	@echo "Utility targets:"
 	@echo "  docker          Build all Docker images"
 	@echo "  shell-aarch64   Interactive shell (aarch64)"
 	@echo "  shell-x86_64    Interactive shell (x86_64)"
 	@echo "  mcp             Start Lona dev REPL MCP server"
+
+# ==============================================================================
+# LSP Targets (runs locally, not in Docker)
+# ==============================================================================
+
+.PHONY: lsp
+lsp: ## Build LSP server (release binary)
+	cargo build --release -p lonala-lsp
+	@echo ""
+	@echo "LSP binary built: target/release/lonala-lsp"
+
+.PHONY: lsp-install
+lsp-install: ## Install LSP to ~/.cargo/bin
+	cargo install --path crates/lonala-lsp
 
 # ==============================================================================
 # Python Tooling

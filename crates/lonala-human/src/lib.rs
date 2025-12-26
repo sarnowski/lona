@@ -19,6 +19,7 @@
 //! # Modules
 //!
 //! - [`diagnostic`] - Trait and types for error diagnostics
+//! - [`docs`] - Special form detection and documentation
 //! - [`format`] - Error formatting system
 //! - [`line_index`] - Byte offset to line/column conversion
 //!
@@ -37,6 +38,7 @@ extern crate alloc;
 pub mod compiler_errors;
 #[cfg(feature = "alloc")]
 pub mod diagnostic;
+pub mod docs;
 #[cfg(feature = "alloc")]
 pub mod format;
 pub mod line_index;

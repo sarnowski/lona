@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+#
+# Cargo.toml - Language Server Protocol implementation for Lonala
+
+[package]
+name = "lonala-lsp"
+description = "Language Server Protocol implementation for Lonala"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "lonala-lsp"
+path = "src/main.rs"
+
+[dependencies]
+# LSP framework
+tower-lsp = "0.20"
+tokio = { version = "1", features = ["full"] }
+
+# Lonala crates (with alloc features - they run on host, not seL4)
+lona-core = { path = "../lona-core", features = ["alloc"] }
+lonala-parser = { path = "../lonala-parser", features = ["alloc"] }
+lonala-human = { path = "../lonala-human", features = ["alloc"] }
+
+# Utilities
+dashmap = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

@@ -90,6 +90,10 @@ unseparated_literal_suffix = "allow"  # 1usize is fine, no underscore needed
 # Internal project - not published to crates.io
 cargo_common_metadata = "allow"   # repository/readme/keywords/categories not needed
 
+# Workspace has diverse dependencies with different version requirements
+# (e.g., tower-lsp uses bitflags 1.x, proptest uses bitflags 2.x)
+multiple_crate_versions = "allow"
+
 [profile.release]
 opt-level = 3       # Optimize for speed
 lto = true          # Link-time optimization
