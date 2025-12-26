@@ -3,6 +3,7 @@
 
 //! Tests for the Lonala lexer.
 
+mod discard_tests;
 mod error_tests;
 mod token_tests;
 

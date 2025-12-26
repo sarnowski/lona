@@ -131,7 +131,7 @@ map                   ; => <function>
 #'map                 ; => <var>
 ```
 
-## 10.8 Discard: `#_` *(Planned)*
+## 10.8 Discard: `#_`
 
 **Syntax**: `#_form`
 

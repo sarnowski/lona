@@ -243,11 +243,22 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Handles `#` which starts set literals, anonymous functions, or special float literals.
+    /// Handles `#` which starts set literals, anonymous functions, discards, or special float literals.
     fn hash_token(&mut self, start: usize) -> Result<Token<'src>, Error> {
         let remaining = self.remaining();
 
-        // Check for #( (anonymous function) first
+        // Check for #_ (discard) - must come before #( since _ is a symbol char
+        if remaining.starts_with("#_") {
+            self.skip_bytes(2_usize);
+            let lexeme = self.source.get(start..self.position).unwrap_or("");
+            return Ok(Token::new(
+                TokenKind::Discard,
+                lexeme,
+                Span::new(start, self.position),
+            ));
+        }
+
+        // Check for #( (anonymous function)
         if remaining.starts_with("#(") {
             self.skip_bytes(2_usize);
             let lexeme = self.source.get(start..self.position).unwrap_or("");

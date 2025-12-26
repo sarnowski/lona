@@ -356,6 +356,9 @@ impl Parser<'_> {
         let mut elements = Vec::new();
 
         loop {
+            // Handle any discard tokens before checking for closing delimiter
+            self.skip_discards()?;
+
             match self.lexer.peek() {
                 None => {
                     return Err(Error::new(

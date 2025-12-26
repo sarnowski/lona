@@ -342,14 +342,12 @@ fn test_10_7_var_quote() {
 }
 
 // ============================================================================
-// Section 10.8: Discard (Planned)
+// Section 10.8: Discard
 // Reference: docs/lonala.md#108-discard
 // ============================================================================
 
-/// [IGNORED] Spec 10.8: #_ discards the next form
-/// Tracking: Discard reader macro not yet implemented
+/// Spec 10.8: #_ discards the next form
 #[test]
-#[ignore]
 fn test_10_8_discard() {
     let mut ctx = SpecTestContext::new();
     // #_form reads and discards the form
@@ -360,16 +358,37 @@ fn test_10_8_discard() {
     );
 }
 
-/// [IGNORED] Spec 10.8: Discard in collection
-/// Tracking: Discard reader macro not yet implemented
+/// Spec 10.8: Discard in collection
 #[test]
-#[ignore]
 fn test_10_8_discard_in_collection() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_vector_len(
         "[1 #_2 3 4]",
         3,
         &spec_ref("10.8", "#_", "vector has 3 elements after discard"),
+    );
+}
+
+/// Spec 10.8: Chained discards
+#[test]
+fn test_10_8_discard_chained() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_vector_len(
+        "[1 #_#_2 3 4]",
+        2,
+        &spec_ref("10.8", "#_", "chained discards remove both 2 and 3"),
+    );
+}
+
+/// Spec 10.8: Discard complex form
+#[test]
+fn test_10_8_discard_complex() {
+    let mut ctx = SpecTestContext::new();
+    // (+ 1 #_(* 2 3) 4) discards (* 2 3), evaluates (+ 1 4) = 5
+    ctx.assert_int(
+        "(+ 1 #_(* 2 3) 4)",
+        5,
+        &spec_ref("10.8", "#_", "discards entire nested form"),
     );
 }
 

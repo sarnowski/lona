@@ -97,6 +97,12 @@ impl<'src> Parser<'src> {
     pub fn parse(&mut self) -> Result<Vec<Spanned<Ast>>, Error> {
         let mut exprs = Vec::new();
         while self.lexer.peek().is_some() {
+            // Skip any leading/intermediate discards at top level
+            self.skip_discards()?;
+            // Check if we consumed all remaining input via discards
+            if self.lexer.peek().is_none() {
+                break;
+            }
             exprs.push(self.parse_expr()?);
         }
         Ok(exprs)
@@ -119,8 +125,46 @@ impl<'src> Parser<'src> {
         self.parse_expr()
     }
 
+    /// Consumes any `#_` discard tokens and their associated forms.
+    ///
+    /// Each `#_` causes the following form to be parsed and discarded.
+    /// Handles chained discards like `#_#_1 2` (discards both 1 and 2).
+    fn skip_discards(&mut self) -> Result<(), Error> {
+        while matches!(self.lexer.peek(), Some(&Ok(ref tok)) if tok.kind == TokenKind::Discard) {
+            let discard_token = self.advance()?;
+            // Check that an expression follows
+            match self.lexer.peek() {
+                None => {
+                    return Err(Error::new(
+                        ErrorKind::ReaderMacroMissingExpr,
+                        self.location(discard_token.span),
+                    ));
+                }
+                Some(&Err(ref err)) => return Err(err.clone()),
+                Some(&Ok(ref token)) => {
+                    // Closing delimiters are not valid after #_
+                    if matches!(
+                        token.kind,
+                        TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace
+                    ) {
+                        return Err(Error::new(
+                            ErrorKind::ReaderMacroMissingExpr,
+                            self.location(discard_token.span),
+                        ));
+                    }
+                }
+            }
+            // Parse and discard the following form (recursive, handles nested #_)
+            let _: Spanned<Ast> = self.parse_expr()?;
+        }
+        Ok(())
+    }
+
     /// Parses a single expression.
     pub(super) fn parse_expr(&mut self) -> Result<Spanned<Ast>, Error> {
+        // Handle any leading discard tokens
+        self.skip_discards()?;
+
         // Peek triggers trivia skip, so capture trivia_start after peek
         let token = match self.lexer.peek() {
             Some(&Ok(ref token)) => token.clone(),
@@ -162,6 +206,15 @@ impl<'src> Parser<'src> {
             | TokenKind::Nil
             | TokenKind::Symbol
             | TokenKind::Keyword => self.parse_atom(trivia_start),
+
+            // Discard should never be reached - skip_discards() handles this above
+            TokenKind::Discard => Err(Error::new(
+                ErrorKind::UnexpectedToken {
+                    expected: "expression",
+                    found: token.kind.description(),
+                },
+                self.location(token.span),
+            )),
 
             // Unexpected closing delimiters
             TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
@@ -264,6 +317,7 @@ impl<'src> Parser<'src> {
             | TokenKind::LeftBrace
             | TokenKind::SetStart
             | TokenKind::AnonFnStart
+            | TokenKind::Discard
             | TokenKind::RightParen
             | TokenKind::RightBracket
             | TokenKind::RightBrace

@@ -33,6 +33,8 @@ pub enum Kind {
     SetStart,
     /// Anonymous function start `#(`.
     AnonFnStart,
+    /// Discard `#_` (discards the next form).
+    Discard,
 
     // Literals
     /// Integer literal (e.g., `42`, `-17`, `0xFF`, `0b1010`, `0o755`).
@@ -81,6 +83,7 @@ impl Kind {
             Self::RightBrace => "right brace",
             Self::SetStart => "set start",
             Self::AnonFnStart => "anonymous function start",
+            Self::Discard => "discard",
             Self::Integer => "integer",
             Self::Float => "float",
             Self::String => "string",

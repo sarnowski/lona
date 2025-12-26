@@ -104,6 +104,7 @@ impl Parser<'_> {
             | TokenKind::RightBrace
             | TokenKind::SetStart
             | TokenKind::AnonFnStart
+            | TokenKind::Discard
             | TokenKind::Integer
             | TokenKind::Float
             | TokenKind::String
