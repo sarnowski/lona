@@ -64,10 +64,9 @@ impl Compiler<'_, '_, '_> {
                 Ok(Constant::Symbol(id))
             }
             Ast::Keyword(ref name) => {
-                // Keywords are stored as symbols with a : prefix
-                let keyword_name = alloc::format!(":{name}");
-                let id = self.interner.intern(&keyword_name);
-                Ok(Constant::Symbol(id))
+                // Keywords use Constant::Keyword (name without : prefix)
+                let id = self.interner.intern(name);
+                Ok(Constant::Keyword(id))
             }
             Ast::List(ref elements) => {
                 let constants: Result<Vec<Constant>, Error> = elements

@@ -21,7 +21,7 @@ const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
 /// Helper to evaluate source with persistent state (like the REPL does).
 fn eval_with_state(source: &str, interner: &Interner, globals: &mut Globals) -> Result<Value, ()> {
     let chunk = compile(source, TEST_SOURCE_ID, interner).map_err(|err| {
-        println!("Compile error: {err}");
+        println!("Compile error: {err:?}");
     })?;
 
     let mut vm = Vm::new(interner);
@@ -101,7 +101,8 @@ pub fn test_incomplete_input_error() -> Status {
 
     // This input has unbalanced parentheses - it's incomplete
     match repl_instance.eval("(def x") {
-        Err(ref msg) if msg.contains("Compile error") => Status::Pass,
+        // lonala-human formats parse errors as "error[VariantName]: ..."
+        Err(ref msg) if msg.contains("error[") => Status::Pass,
         Ok(value) => {
             println!("test_incomplete_input_error: expected error, got value: {value:?}");
             Status::Fail

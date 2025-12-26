@@ -22,16 +22,24 @@ x               ; => looks up x in environment
 
 ## 5.2 Symbol Resolution
 
-Symbols are resolved by searching:
+Symbols are resolved by searching in order:
 
-1. **Local bindings**: Parameters and `let`-bound variables
-2. **Global definitions**: Values bound with `def`
+1. **Local bindings**: Parameters and `let`-bound variables (innermost first)
+2. **Upvalues**: Captured variables from enclosing closures
+3. **Current namespace defs**: Vars defined with `def` in the current namespace
+4. **Referred vars**: Symbols imported via `:require :refer` or `:use`
+5. **Implicit `lona.core`**: All namespaces implicitly refer `lona.core` (like Clojure's `clojure.core`)
+
+Current namespace defs **shadow** referred vars. If you define `(def first ...)` in your namespace, it shadows `lona.core/first`.
 
 ```clojure
-(def x 10)              ; global binding
+(def x 10)              ; global binding in current ns
 
 (let [y 20]             ; local binding
-  (+ x y))              ; x from global, y from local
+  (+ x y))              ; y from local, x from current ns, + from lona.core
+
+(def first 42)          ; shadows lona.core/first
+first                   ; => 42 (not lona.core/first)
 ```
 
 ## 5.3 Qualified Symbols
@@ -43,7 +51,7 @@ user/foo                ; symbol foo in namespace user
 clojure.core/map        ; symbol map in namespace clojure.core
 ```
 
-> **Note**: Full namespace support is planned for Phase 6.
+> **Note**: Namespace system implemented in Phase 1.3. See [Namespaces](namespaces.md) for details.
 
 ## 5.4 Preventing Evaluation
 

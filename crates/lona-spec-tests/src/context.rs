@@ -25,20 +25,25 @@ const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
 /// This context provides a REPL-like environment where:
 /// - Global bindings persist between evaluations
 /// - Macro definitions persist between evaluations
+/// - Current namespace persists between evaluations
 /// - Collection primitives are pre-registered
 pub struct SpecTestContext {
     interner: Interner,
     globals: Globals,
     macros: MacroRegistry,
+    current_namespace: lona_core::symbol::Id,
 }
 
 impl SpecTestContext {
     /// Creates a new test context with collection primitives registered.
     pub fn new() -> Self {
+        let interner = Interner::new();
+        let default_ns = interner.intern("user");
         Self {
-            interner: Interner::new(),
+            interner,
             globals: Globals::new(),
             macros: MacroRegistry::new(),
+            current_namespace: default_ns,
         }
     }
 
@@ -47,13 +52,14 @@ impl SpecTestContext {
         // Create macro expander
         let mut expander = MacroExpander::new();
 
-        // Compile with macro expansion
-        let chunk = lonala_compiler::compile_with_expansion(
+        // Compile with macro expansion in the current namespace
+        let chunk = lonala_compiler::compile_with_expansion_in_ns(
             source,
             TEST_SOURCE_ID,
-            &mut self.interner,
+            &self.interner,
             &mut self.macros,
             &mut expander,
+            self.current_namespace,
         )
         .map_err(|err| alloc::format!("compile error: {err:?}"))?;
 
@@ -102,8 +108,9 @@ impl SpecTestContext {
             .execute(&chunk)
             .map_err(|err| alloc::format!("runtime error: {err:?}"))?;
 
-        // Save globals back
+        // Save globals and namespace back
         self.globals = vm.globals().clone();
+        self.current_namespace = vm.current_namespace();
 
         Ok(result)
     }

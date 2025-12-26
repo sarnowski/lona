@@ -400,6 +400,14 @@ impl Chunk {
                 let _result = write!(output, "R{reg_a}");
                 let _result = write!(output, "        ; no match for value in R{reg_a}");
             }
+
+            // Namespace operations
+            Opcode::SetNamespace => {
+                let _result = write!(output, "K{bx}");
+                if let Some(constant) = self.get_constant(bx) {
+                    let _result = write!(output, "        ; switch to {constant}");
+                }
+            }
         }
     }
 

@@ -29,7 +29,9 @@ mod functions;
 mod let_form;
 mod locals;
 pub mod macros;
+mod namespace;
 mod nary;
+mod ns_forms;
 mod operators;
 mod quasiquote;
 mod quote;
@@ -38,9 +40,13 @@ mod special_forms;
 // Re-export closure types for internal use
 use closures::{CaptureContext, SymbolResolution, UpvalueInfo};
 use locals::LocalEnv;
+use namespace::Context as NamespaceContext;
 
 // Re-export public API
-pub use api::{CompileError, compile, compile_with_expansion, compile_with_registry};
+pub use api::{
+    CompileError, compile, compile_with_expansion, compile_with_expansion_in_ns,
+    compile_with_registry,
+};
 pub use macros::{MacroBody, MacroDefinition, MacroExpander, MacroExpansionError, MacroRegistry};
 
 #[cfg(test)]
@@ -112,6 +118,12 @@ pub struct Compiler<'interner, 'registry, 'expander> {
     /// instead of `Call` so the VM can replace the current frame rather than
     /// pushing a new one.
     in_tail_position: bool,
+    /// Namespace context for symbol resolution.
+    ///
+    /// Tracks the current namespace, aliases, and referred symbols during
+    /// compilation. This enables compile-time resolution of qualified symbols
+    /// and namespace-relative global lookups.
+    namespace_ctx: NamespaceContext,
 }
 
 impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> {
@@ -126,6 +138,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
         registry: &'registry mut MacroRegistry,
         source_id: source::Id,
     ) -> Self {
+        let default_ns = interner.intern("user");
         Self {
             chunk: Chunk::new(),
             interner,
@@ -139,6 +152,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
             capture_context: CaptureContext::new(),
             upvalues: Vec::new(),
             in_tail_position: false,
+            namespace_ctx: NamespaceContext::new(default_ns),
         }
     }
 
@@ -154,6 +168,7 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
         source_id: source::Id,
         expander: &'expander mut dyn MacroExpander,
     ) -> Self {
+        let default_ns = interner.intern("user");
         Self {
             chunk: Chunk::new(),
             interner,
@@ -167,7 +182,17 @@ impl<'interner, 'registry, 'expander> Compiler<'interner, 'registry, 'expander> 
             capture_context: CaptureContext::new(),
             upvalues: Vec::new(),
             in_tail_position: false,
+            namespace_ctx: NamespaceContext::new(default_ns),
         }
+    }
+
+    /// Sets the current namespace for compilation.
+    ///
+    /// Use this to start compilation in a specific namespace (e.g., for REPL
+    /// sessions where the namespace persists between evaluations).
+    #[inline]
+    pub const fn set_namespace(&mut self, namespace: symbol::Id) {
+        self.namespace_ctx.set_current(namespace);
     }
 
     /// Creates a source location from a span.

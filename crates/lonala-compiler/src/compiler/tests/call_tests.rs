@@ -40,9 +40,9 @@ fn compile_function_call() {
     assert_eq!(decode_b(instr2), 1); // 1 argument
     assert_eq!(decode_c(instr2), 1); // 1 result
 
-    // Verify symbol constant
+    // Verify symbol constant (namespace-qualified)
     if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(0) {
-        assert_eq!(interner.resolve(*sym_id), "print");
+        assert_eq!(interner.resolve(*sym_id), "user/print");
     } else {
         panic!("expected Symbol constant");
     }
@@ -53,7 +53,7 @@ fn compile_print_addition() {
     let (chunk, interner) = compile_with_interner("(print (+ 1 2))");
     let code = chunk.code();
 
-    // GetGlobal R0, K0 (print)
+    // GetGlobal R0, K0 (user/print)
     // Add R1, K1, K2 (1 + 2)
     // Call R0, 1, 1
     // Return R0, 1
@@ -69,9 +69,9 @@ fn compile_print_addition() {
     let instr2 = *code.get(2_usize).unwrap();
     assert_eq!(decode_op(instr2), Some(Opcode::Call));
 
-    // Verify print symbol
+    // Verify print symbol (namespace-qualified)
     if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(0) {
-        assert_eq!(interner.resolve(*sym_id), "print");
+        assert_eq!(interner.resolve(*sym_id), "user/print");
     } else {
         panic!("expected Symbol constant");
     }
@@ -82,7 +82,7 @@ fn compile_print_string() {
     let (chunk, interner) = compile_with_interner("(print \"hello\")");
     let code = chunk.code();
 
-    // GetGlobal R0, K0 (print)
+    // GetGlobal R0, K0 (user/print)
     // LoadK R1, K1 ("hello")
     // Call R0, 1, 1
     // Return R0, 1
@@ -98,9 +98,9 @@ fn compile_print_string() {
     let instr2 = *code.get(2_usize).unwrap();
     assert_eq!(decode_op(instr2), Some(Opcode::Call));
 
-    // Verify constants
+    // Verify constants (namespace-qualified)
     if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(0) {
-        assert_eq!(interner.resolve(*sym_id), "print");
+        assert_eq!(interner.resolve(*sym_id), "user/print");
     } else {
         panic!("expected Symbol constant at K0");
     }

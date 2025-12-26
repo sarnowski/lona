@@ -522,11 +522,80 @@ Use `case` when dispatching on fixed values. Use `cond` when conditions require 
   (> n 0) :positive)
 ```
 
-## 6.9 Condition System *(Planned)*
+## 6.9 `ns`
+
+Declares the current namespace and sets up references to other namespaces.
+
+**Syntax**: `(ns name clauses*)`
+
+**Parameters**:
+- `name` — A symbol naming the namespace (e.g., `my.app`, `my.app.core`)
+- `clauses` — Zero or more clause forms
+
+**Returns**: The namespace name symbol
+
+**Semantics**: Switches to the specified namespace, creating it if needed. All subsequent `def` forms will define vars in this namespace. Clauses configure aliases and refers for symbol resolution.
+
+```clojure
+;; Basic form
+(ns my.app)
+
+;; With require clause
+(ns my.app
+  (:require [other.ns :as o]           ; alias for qualified access
+            [other.ns :refer [foo]]))  ; import specific symbols
+
+;; With use clause (loading deferred)
+(ns my.app
+  (:use other.ns))
+```
+
+### Supported Clauses
+
+| Clause | Purpose |
+|--------|---------|
+| `:require` | Load and reference other namespaces |
+| `:use` | Load and refer all public symbols (loading deferred) |
+
+### `:require` Clause
+
+The `:require` clause loads namespaces and optionally creates aliases or refers:
+
+```clojure
+;; Create alias for qualified access
+(:require [some.long.namespace :as short])
+short/foo  ; => some.long.namespace/foo
+
+;; Import specific symbols
+(:require [other.ns :refer [foo bar]])
+foo        ; => other.ns/foo
+
+;; Combined
+(:require [other.ns :as o :refer [foo]])
+foo        ; => other.ns/foo
+o/bar      ; => other.ns/bar
+```
+
+**Note**: Aliases and refers are compile-time constructs. They affect symbol resolution within the same compilation unit.
+
+### Implicit `lona.core` Refer
+
+Every namespace implicitly has access to `lona.core` symbols (like Clojure's `clojure.core`). Currently implemented via VM fallback for primitive lookup.
+
+```clojure
+(ns my.app)
+(first [1 2 3])    ; => 1 (finds lona.core/first)
+```
+
+See [Namespaces](namespaces.md) for more details on symbol resolution order.
+
+---
+
+## 6.10 Condition System *(Planned)*
 
 Lonala provides a condition system inspired by Common Lisp that separates error detection from error handling. Unlike exceptions that immediately unwind the stack, conditions preserve full context and allow recovery.
 
-### 6.9.1 `signal` *(Planned)*
+### 6.10.1 `signal` *(Planned)*
 
 Signals a condition without unwinding the stack.
 
@@ -556,7 +625,7 @@ Signals a condition without unwinding the stack.
                              :reason "Invalid format"})
 ```
 
-### 6.9.2 `restart-case` *(Planned)*
+### 6.10.2 `restart-case` *(Planned)*
 
 Establishes restarts around a protected expression.
 
@@ -596,7 +665,7 @@ Establishes restarts around a protected expression.
       config)))
 ```
 
-### 6.9.3 `handler-bind` *(Planned)*
+### 6.10.3 `handler-bind` *(Planned)*
 
 Establishes handlers for conditions.
 
@@ -634,7 +703,7 @@ Establishes handlers for conditions.
   (start-application))
 ```
 
-### 6.9.4 `invoke-restart` *(Planned)*
+### 6.10.4 `invoke-restart` *(Planned)*
 
 Invokes a restart established by `restart-case`.
 
@@ -657,11 +726,11 @@ Invokes a restart established by `restart-case`.
 (invoke-restart :retry)
 ```
 
-## 6.10 Process Termination *(Planned)*
+## 6.11 Process Termination *(Planned)*
 
 For truly unrecoverable errors—bugs, invariant violations, fatal hardware failures—Lonala provides `panic!`.
 
-### 6.10.1 `panic!` *(Planned)*
+### 6.11.1 `panic!` *(Planned)*
 
 Signals an unrecoverable condition.
 
@@ -701,7 +770,7 @@ Signals an unrecoverable condition.
     data))
 ```
 
-### 6.10.2 Production Mode Behavior
+### 6.11.2 Production Mode Behavior
 
 In production mode (no debugger attached):
 - Process exits with reason `{:panic {:message msg :data data}}`
@@ -719,7 +788,7 @@ In production mode (no debugger attached):
 ;; If worker-1 panics, supervisor restarts only worker-1
 ```
 
-### 6.10.3 Debug Mode Behavior
+### 6.11.3 Debug Mode Behavior
 
 In debug mode (debugger attached):
 - Execution pauses at the panic point
@@ -740,7 +809,7 @@ Restarts:
 proc-debug[0]> _
 ```
 
-### 6.10.4 When to Use `panic!`
+### 6.11.4 When to Use `panic!`
 
 | Situation | Use `panic!`? | Instead |
 |-----------|---------------|---------|
@@ -757,7 +826,7 @@ proc-debug[0]> _
 
 See [Error Handling](error-handling.md) for the complete error handling philosophy.
 
-### 6.10.5 `assert!` *(Planned)*
+### 6.11.5 `assert!` *(Planned)*
 
 Convenience macro for invariant checking.
 
@@ -777,7 +846,7 @@ Convenience macro for invariant checking.
 
 ---
 
-## 6.11 `receive` *(Planned)*
+## 6.12 `receive` *(Planned)*
 
 Pattern-matched message receive for process mailboxes.
 

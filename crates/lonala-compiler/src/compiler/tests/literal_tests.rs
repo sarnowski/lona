@@ -95,16 +95,17 @@ fn compile_symbol_global_lookup() {
     let (chunk, interner) = compile_with_interner("foo");
     let code = chunk.code();
 
-    // GetGlobal R0, K0 (where K0 is sym#foo)
+    // GetGlobal R0, K0 (where K0 is qualified sym#user/foo)
     assert_eq!(code.len(), 2);
 
     let instr0 = *code.get(0_usize).unwrap();
     assert_eq!(decode_op(instr0), Some(Opcode::GetGlobal));
     assert_eq!(decode_a(instr0), 0);
 
+    // Symbol lookup is qualified with current namespace (user/foo)
     let k_idx = decode_bx(instr0);
     if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(k_idx) {
-        assert_eq!(interner.resolve(*sym_id), "foo");
+        assert_eq!(interner.resolve(*sym_id), "user/foo");
     } else {
         panic!("expected Symbol constant");
     }
@@ -342,13 +343,13 @@ fn compile_empty_program() {
 // =========================================================================
 
 #[test]
-fn compile_error_display() {
+fn compile_error_debug() {
     let err = CompileError::Compile(Error::new(
         ErrorKind::EmptyCall,
         SourceLocation::new(TEST_SOURCE_ID, Span::new(0_usize, 2_usize)),
     ));
-    let msg = alloc::format!("{}", err);
-    // CompileError uses variant_name() for display; rich formatting is in lonala-human
+    // CompileError uses Debug for basic identification; rich formatting is in lonala-human
+    let msg = alloc::format!("{:?}", err);
     assert!(msg.contains("EmptyCall"));
 }
 

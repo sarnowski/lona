@@ -240,11 +240,23 @@ pub enum Opcode {
     /// default is provided. The runtime error includes the value's type for
     /// diagnostic purposes.
     CaseFail = 29,
+
+    // =========================================================================
+    // Namespace Operations
+    // =========================================================================
+    /// Set current namespace: `current_ns = K[Bx]`
+    ///
+    /// Format: iABx (A unused)
+    /// - Bx: constant index of Symbol naming the namespace
+    ///
+    /// Switches the VM's current namespace. This affects how subsequent `def`
+    /// operations are resolved in REPL sessions across multiple evaluations.
+    SetNamespace = 30,
 }
 
 impl Opcode {
     /// Maximum valid opcode value.
-    pub const MAX: u8 = 29;
+    pub const MAX: u8 = 30;
 
     /// Converts a byte to an opcode, returning `None` for invalid values.
     #[inline]
@@ -281,6 +293,7 @@ impl Opcode {
             27 => Some(Self::GetUpvalue),
             28 => Some(Self::Closure),
             29 => Some(Self::CaseFail),
+            30 => Some(Self::SetNamespace),
             _ => None,
         }
     }
@@ -320,6 +333,7 @@ impl Opcode {
             Self::GetUpvalue => "GetUpvalue",
             Self::Closure => "Closure",
             Self::CaseFail => "CaseFail",
+            Self::SetNamespace => "SetNamespace",
         }
     }
 }

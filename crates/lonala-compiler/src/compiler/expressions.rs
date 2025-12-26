@@ -213,7 +213,11 @@ impl Compiler<'_, '_, '_> {
     /// Resolution order:
     /// 1. Local variables in the current function (`Move` instruction)
     /// 2. Captured upvalues (`GetUpvalue` instruction)
-    /// 3. Global lookup (`GetGlobal` instruction)
+    /// 3. Global lookup with namespace resolution (`GetGlobal` instruction)
+    ///
+    /// For global lookups:
+    /// - Qualified symbols (`alias/name`) resolve the alias through namespace mappings
+    /// - Unqualified symbols check refers first, then qualify with current namespace
     pub(super) fn compile_symbol(&mut self, name: &str, span: Span) -> Result<ExprResult, Error> {
         let sym_id = self.interner.intern(name);
 
@@ -235,13 +239,54 @@ impl Compiler<'_, '_, '_> {
                 Ok(ExprResult { register: dest })
             }
             SymbolResolution::Global => {
-                // Global variable lookup
+                // Global variable lookup with namespace resolution
+                let lookup_sym_id = self.resolve_global_symbol(name, sym_id);
+
                 let dest = self.alloc_register(span)?;
-                let const_idx = self.add_constant(Constant::Symbol(sym_id), span)?;
+                let const_idx = self.add_constant(Constant::Symbol(lookup_sym_id), span)?;
                 self.chunk
                     .emit(encode_abx(Opcode::GetGlobal, dest, const_idx), span);
                 Ok(ExprResult { register: dest })
             }
+        }
+    }
+
+    /// Resolves a global symbol to its fully qualified form.
+    ///
+    /// Resolution order for qualified symbols (`alias/name`):
+    /// 1. Check if `alias` is a namespace alias → resolve to `full.ns/name`
+    /// 2. Otherwise, use the symbol as-is (assume it's already a full namespace)
+    ///
+    /// Resolution order for unqualified symbols:
+    /// 1. Check refers map → return qualified symbol if found
+    /// 2. Qualify with current namespace → `current_ns/name`
+    ///
+    /// Used by `compile_symbol` and `compile_var` to ensure consistent resolution.
+    pub(super) fn resolve_global_symbol(
+        &self,
+        name: &str,
+        sym_id: lona_core::symbol::Id,
+    ) -> lona_core::symbol::Id {
+        if let Some((alias_part, local_part)) = name.split_once('/') {
+            // Qualified symbol: check if alias_part is a registered alias
+            let alias_sym_id = self.interner.intern(alias_part);
+            self.namespace_ctx
+                .resolve_alias(alias_sym_id)
+                .map_or(sym_id, |resolved_ns| {
+                    // Resolve alias to full namespace
+                    let resolved_ns_name = self.interner.resolve(resolved_ns);
+                    let qualified_name = alloc::format!("{resolved_ns_name}/{local_part}");
+                    self.interner.intern(&qualified_name)
+                })
+        } else {
+            // Unqualified symbol: check refers, then qualify with current namespace
+            self.namespace_ctx.resolve_refer(sym_id).unwrap_or_else(|| {
+                // Qualify with current namespace
+                let current_ns = self.namespace_ctx.current();
+                let current_ns_name = self.interner.resolve(current_ns);
+                let qualified_name = alloc::format!("{current_ns_name}/{name}");
+                self.interner.intern(&qualified_name)
+            })
         }
     }
 }

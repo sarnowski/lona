@@ -27,17 +27,7 @@ pub enum CompileError {
     Compile(Error),
 }
 
-impl core::fmt::Display for CompileError {
-    #[inline]
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        // Use variant_name() for basic display. Rich formatting with context
-        // and help text is provided by the Diagnostic trait in lonala-human.
-        match *self {
-            Self::Parse(ref err) => write!(f, "parse error: {}", err.kind.variant_name()),
-            Self::Compile(ref err) => write!(f, "compile error: {}", err.kind.variant_name()),
-        }
-    }
-}
+// Note: No Display impl - rich formatting is provided by Diagnostic trait in lonala-human.
 
 impl From<lonala_parser::Error> for CompileError {
     #[inline]
@@ -209,6 +199,26 @@ pub fn compile_with_expansion(
 ) -> Result<Chunk, CompileError> {
     let exprs = lonala_parser::parse(source, source_id)?;
     let mut compiler = Compiler::with_expander(interner, registry, source_id, expander);
+    let chunk = compiler.compile_program(&exprs)?;
+    Ok(chunk)
+}
+
+/// Compiles source code with macro expansion in a specific namespace.
+///
+/// Same as [`compile_with_expansion`] but starts in the given namespace.
+/// Use this for REPL sessions where the namespace persists between evaluations.
+#[inline]
+pub fn compile_with_expansion_in_ns(
+    source: &str,
+    source_id: source::Id,
+    interner: &symbol::Interner,
+    registry: &mut MacroRegistry,
+    expander: &mut dyn MacroExpander,
+    namespace: symbol::Id,
+) -> Result<Chunk, CompileError> {
+    let exprs = lonala_parser::parse(source, source_id)?;
+    let mut compiler = Compiler::with_expander(interner, registry, source_id, expander);
+    compiler.set_namespace(namespace);
     let chunk = compiler.compile_program(&exprs)?;
     Ok(chunk)
 }

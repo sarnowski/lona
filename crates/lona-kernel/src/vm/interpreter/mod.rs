@@ -52,6 +52,9 @@ pub struct Vm<'interner> {
     call_depth: usize,
     /// Current source ID for error reporting.
     current_source: source::Id,
+    /// Current namespace for symbol resolution in REPL sessions.
+    /// Defaults to "user" namespace.
+    current_namespace: symbol::Id,
 }
 
 impl<'interner> Vm<'interner> {
@@ -59,6 +62,7 @@ impl<'interner> Vm<'interner> {
     #[inline]
     #[must_use]
     pub fn new(interner: &'interner Interner) -> Self {
+        let default_ns = interner.intern("user");
         Self {
             registers: vec![Value::Nil; DEFAULT_REGISTER_COUNT],
             globals: Globals::new(),
@@ -67,6 +71,7 @@ impl<'interner> Vm<'interner> {
             macro_registry: None,
             call_depth: 0,
             current_source: source::Id::new(0_u32),
+            current_namespace: default_ns,
         }
     }
 
@@ -132,6 +137,16 @@ impl<'interner> Vm<'interner> {
     #[inline]
     pub const fn set_source(&mut self, source: source::Id) {
         self.current_source = source;
+    }
+
+    /// Returns the current namespace symbol.
+    ///
+    /// This reflects the namespace set by the most recent `(ns ...)` form
+    /// executed. Defaults to "user" for new VMs.
+    #[inline]
+    #[must_use]
+    pub const fn current_namespace(&self) -> symbol::Id {
+        self.current_namespace
     }
 
     /// Executes a chunk of bytecode and returns the result.
@@ -406,6 +421,9 @@ impl<'interner> Vm<'interner> {
             Opcode::CaseFail => {
                 return self.op_case_fail(instruction, frame);
             }
+
+            // Namespace Operations
+            Opcode::SetNamespace => self.op_set_namespace(instruction, frame)?,
 
             // Handle future Opcode variants (Opcode is #[non_exhaustive])
             _ => {

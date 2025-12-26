@@ -38,12 +38,12 @@ fn compile_def_simple() {
         Some(&Constant::Integer(42))
     );
 
-    // Second instruction is SetGlobal
+    // Second instruction is SetGlobal (symbol is namespace-qualified)
     let instr1 = *code.get(1_usize).unwrap();
     assert_eq!(decode_op(instr1), Some(Opcode::SetGlobal));
     let sym_const = decode_bx(instr1);
     if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(sym_const) {
-        assert_eq!(interner.resolve(*sym_id), "x");
+        assert_eq!(interner.resolve(*sym_id), "user/x");
     } else {
         panic!("expected Symbol constant for def name");
     }
@@ -78,9 +78,9 @@ fn compile_def_with_expression() {
     let instr0 = *code.get(0_usize).unwrap();
     assert_eq!(decode_op(instr0), Some(Opcode::Add));
 
-    // Check symbol name
+    // Check symbol name (namespace-qualified)
     if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(2) {
-        assert_eq!(interner.resolve(*sym_id), "y");
+        assert_eq!(interner.resolve(*sym_id), "user/y");
     } else {
         panic!("expected Symbol constant at K2");
     }
@@ -104,9 +104,10 @@ fn compile_def_then_use() {
     let get_global = *code.get(5_usize).unwrap();
     assert_eq!(decode_op(get_global), Some(Opcode::GetGlobal));
 
+    // Symbol lookup is qualified with current namespace (user/x)
     let sym_const = decode_bx(get_global);
     if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(sym_const) {
-        assert_eq!(interner.resolve(*sym_id), "x");
+        assert_eq!(interner.resolve(*sym_id), "user/x");
     } else {
         panic!("expected Symbol constant");
     }

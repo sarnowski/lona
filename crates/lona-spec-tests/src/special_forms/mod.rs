@@ -11,9 +11,11 @@
 //! This module is split into submodules:
 //! - `let_tests`: Section 6.2 - let with destructuring
 //! - `case_tests`: Section 6.X - case special form
+//! - `ns_tests`: Section 6.X - namespace declaration
 
 mod case_tests;
 mod let_tests;
+mod ns_tests;
 mod planned;
 
 use crate::{SpecTestContext, spec_ref};
@@ -24,13 +26,16 @@ use crate::{SpecTestContext, spec_ref};
 // ============================================================================
 
 /// Spec 6.1: "Returns: The symbol name"
+///
+/// Note: In the namespace system, def returns a qualified symbol.
+/// E.g., in the `user` namespace, `(def x 42)` returns `user/x`.
 #[test]
 fn test_6_1_def_returns_symbol() {
     let mut ctx = SpecTestContext::new();
     ctx.assert_symbol_eq(
         "(def x 42)",
-        "x",
-        &spec_ref("6.1", "def", "returns the symbol 'x'"),
+        "user/x",
+        &spec_ref("6.1", "def", "returns the qualified symbol 'user/x'"),
     );
 }
 

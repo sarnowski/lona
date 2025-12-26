@@ -70,16 +70,16 @@ fn compile_do_with_side_effects() {
     let (chunk, interner) = compile_with_interner("(do (print 1) (+ 2 3))");
     let code = chunk.code();
 
-    // GetGlobal R0, K0 (print)
+    // GetGlobal R0, K0 (user/print)
     // LoadK R1, K1 (1)
     // Call R0, 1, 1
     // Add R0, K2, K3 (2 + 3)
     // Return R0, 1
     assert_eq!(code.len(), 5);
 
-    // Verify print symbol
+    // Verify print symbol (namespace-qualified)
     if let Some(Constant::Symbol(sym_id)) = chunk.get_constant(0) {
-        assert_eq!(interner.resolve(*sym_id), "print");
+        assert_eq!(interner.resolve(*sym_id), "user/print");
     } else {
         panic!("expected Symbol constant");
     }

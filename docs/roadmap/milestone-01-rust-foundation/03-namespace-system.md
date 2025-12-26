@@ -120,8 +120,9 @@ Implement namespaces for code organization.
 
 **Requirements**:
 - `foo/bar` resolves in namespace `foo`
-- Unqualified symbols resolve in current namespace, then refers
-- Auto-resolve to `lona.core` for core functions
+- Unqualified symbols resolve: current namespace defs → refers (current ns defs shadow refers)
+- `lona.core` is implicitly referred in every namespace (like Clojure's `clojure.core`)
+- All primitives registered in `lona.core` namespace
 - Compile-time resolution when possible
 
 **Tests**:

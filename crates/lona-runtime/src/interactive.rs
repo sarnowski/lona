@@ -264,8 +264,9 @@ impl<I: ConsoleIo> InteractiveRepl<I> {
                 self.display_compile_error(&source_text, compile_err);
             }
             Err(ref err) => {
+                // Catch-all for future CompileError variants (non_exhaustive)
                 self.accumulated.clear();
-                self.io.write_fmt(format_args!("Error: {err}\n"));
+                self.io.write_fmt(format_args!("Error: {err:?}\n"));
             }
         }
     }

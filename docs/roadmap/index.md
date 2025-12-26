@@ -137,7 +137,7 @@ This section provides a complete index of all tasks across all milestones. Use t
 |------|------|--------|
 | 1.3.1 | Namespace Data Structure | done |
 | 1.3.2 | Var System - Namespace Extension and Var Quote | done |
-| 1.3.3 | Namespace Declaration (`ns`) | open |
+| 1.3.3 | Namespace Declaration (`ns`) | done |
 | 1.3.4 | Require/Use/Refer Implementation | open |
 | 1.3.5 | Qualified Symbol Resolution | open |
 | 1.3.6 | Private Vars | open |

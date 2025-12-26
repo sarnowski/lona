@@ -112,6 +112,34 @@ impl Repl {
         &self.interner
     }
 
+    /// Formats a `CompileError` for display using `lonala-human`.
+    fn format_compile_error(
+        &self,
+        err: &lonala_compiler::CompileError,
+        source_id: source::Id,
+    ) -> String {
+        use lonala_compiler::CompileError;
+        let config = FormatConfig::new();
+        match *err {
+            CompileError::Parse(ref parse_err) => {
+                let err_with_source = lonala_parser::Error::new(
+                    parse_err.kind.clone(),
+                    source::Location::new(source_id, parse_err.location.span),
+                );
+                render_error(&err_with_source, &self.sources, &self.interner, &config)
+            }
+            CompileError::Compile(ref compile_err) => {
+                let err_with_source = lonala_compiler::error::Error::new(
+                    compile_err.kind.clone(),
+                    source::Location::new(source_id, compile_err.location.span),
+                );
+                render_error(&err_with_source, &self.sources, &self.interner, &config)
+            }
+            // Future variants (non_exhaustive) - use Debug
+            _ => format!("{err:?}"),
+        }
+    }
+
     /// Returns both the interner and macros for simultaneous access.
     ///
     /// This is needed when calling functions that require both an immutable
@@ -154,14 +182,16 @@ impl Repl {
         let mut expander = MacroExpander::new();
 
         // Compile the core library with macro expansion
-        let chunk = compile_with_expansion(
+        let chunk = match compile_with_expansion(
             CORE_LIBRARY,
             source_id,
             &self.interner,
             &mut self.macros,
             &mut expander,
-        )
-        .map_err(|err| format!("Core library error: {err}"))?;
+        ) {
+            Ok(chunk) => chunk,
+            Err(err) => return Err(self.format_compile_error(&err, source_id)),
+        };
 
         // Pre-intern primitive symbols before creating VM
         let collection_symbols = intern_collection_primitives(&self.interner);
@@ -248,14 +278,16 @@ impl Repl {
         let mut expander = MacroExpander::new();
 
         // Compile the source with macro expansion
-        let chunk = compile_with_expansion(
+        let chunk = match compile_with_expansion(
             source_text,
             source_id,
             &self.interner,
             &mut self.macros,
             &mut expander,
-        )
-        .map_err(|err| format!("Compile error: {err}"))?;
+        ) {
+            Ok(chunk) => chunk,
+            Err(err) => return Err(self.format_compile_error(&err, source_id)),
+        };
 
         // Pre-intern primitive symbols before creating VM
         let collection_symbols = intern_collection_primitives(&self.interner);

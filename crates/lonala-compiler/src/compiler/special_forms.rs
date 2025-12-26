@@ -214,8 +214,19 @@ impl Compiler<'_, '_, '_> {
         let checkpoint = self.next_register;
         let value_result = self.compile_expr(value_expr)?;
 
-        // Intern the symbol and add to constants
-        let symbol_id = self.interner.intern(&name);
+        // Qualify the symbol with the current namespace if needed
+        let symbol_id = if name.contains('/') {
+            // Already qualified, use as-is
+            self.interner.intern(&name)
+        } else {
+            // Qualify with current namespace
+            let current_ns = self.namespace_ctx.current();
+            let current_ns_name = self.interner.resolve(current_ns);
+            let qualified_name = alloc::format!("{current_ns_name}/{name}");
+            self.interner.intern(&qualified_name)
+        };
+
+        // Add qualified symbol to constants
         let symbol_const = self.add_constant(Constant::Symbol(symbol_id), span)?;
 
         // Emit SetGlobal
@@ -376,16 +387,16 @@ impl Compiler<'_, '_, '_> {
         let line = 1_i64;
         let column = 1_i64;
 
-        let line_kw = self.interner.intern(":line");
-        let col_kw = self.interner.intern(":column");
-        meta_pairs.push((Constant::Symbol(line_kw), Constant::Integer(line)));
-        meta_pairs.push((Constant::Symbol(col_kw), Constant::Integer(column)));
+        let line_kw = self.interner.intern("line");
+        let col_kw = self.interner.intern("column");
+        meta_pairs.push((Constant::Keyword(line_kw), Constant::Integer(line)));
+        meta_pairs.push((Constant::Keyword(col_kw), Constant::Integer(column)));
 
         // Add docstring if present
         if let Some(doc) = docstring {
-            let doc_kw = self.interner.intern(":doc");
+            let doc_kw = self.interner.intern("doc");
             meta_pairs.push((
-                Constant::Symbol(doc_kw),
+                Constant::Keyword(doc_kw),
                 Constant::String(alloc::string::String::from(doc)),
             ));
         }
@@ -457,6 +468,10 @@ impl Compiler<'_, '_, '_> {
         Ok(())
     }
 
+    // =========================================================================
+    // ns form compilation is in ns_forms.rs
+    // =========================================================================
+
     /// Compiles a `var` special form.
     ///
     /// Syntax: `(var name)` or reader macro `#'name`
@@ -490,8 +505,12 @@ impl Compiler<'_, '_, '_> {
             ));
         };
 
-        let symbol_id = self.interner.intern(name);
-        let symbol_const = self.add_constant(Constant::Symbol(symbol_id), span)?;
+        // Resolve symbol using the same logic as compile_symbol
+        // (handles aliases and refers correctly)
+        let sym_id = self.interner.intern(name);
+        let lookup_sym_id = self.resolve_global_symbol(name, sym_id);
+
+        let symbol_const = self.add_constant(Constant::Symbol(lookup_sym_id), span)?;
 
         let dest = self.alloc_register(span)?;
         self.chunk
