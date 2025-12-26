@@ -195,6 +195,7 @@ impl<'src> Parser<'src> {
             TokenKind::SyntaxQuote => self.parse_reader_macro("syntax-quote", trivia_start),
             TokenKind::Unquote => self.parse_reader_macro("unquote", trivia_start),
             TokenKind::UnquoteSplice => self.parse_reader_macro("unquote-splicing", trivia_start),
+            TokenKind::VarQuote => self.parse_reader_macro("var", trivia_start),
             TokenKind::Caret => self.parse_metadata(trivia_start),
 
             // Atoms
@@ -325,6 +326,7 @@ impl<'src> Parser<'src> {
             | TokenKind::SyntaxQuote
             | TokenKind::Unquote
             | TokenKind::UnquoteSplice
+            | TokenKind::VarQuote
             | TokenKind::Caret => {
                 return Err(Error::new(
                     ErrorKind::UnexpectedToken {

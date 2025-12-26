@@ -116,6 +116,7 @@ impl Parser<'_> {
             | TokenKind::SyntaxQuote
             | TokenKind::Unquote
             | TokenKind::UnquoteSplice
+            | TokenKind::VarQuote
             | TokenKind::Caret => Err(Error::new(
                 ErrorKind::InvalidMetadataForm {
                     found: token.kind.description(),
@@ -149,16 +150,12 @@ impl Parser<'_> {
 
         // Iterate in reverse over key-value pairs
         let pairs_vec: Vec<_> = all_pairs.into_iter().collect();
-        let mut idx = pairs_vec.len();
-        while idx >= 2_usize {
-            idx = idx.saturating_sub(2_usize);
-            // These gets are safe because idx is always < pairs_vec.len() - 1
-            // and we control idx to always be a valid even index
-            if let (Some(key), Some(val)) = (
-                pairs_vec.get(idx),
-                pairs_vec.get(idx.saturating_add(1_usize)),
-            ) && !seen_keys.contains(&key.node)
-            {
+        for pair in pairs_vec.chunks(2_usize).rev() {
+            // Only process complete key-value pairs (skip trailing odd element if any)
+            let &[ref key, ref val] = pair else {
+                continue;
+            };
+            if !seen_keys.contains(&key.node) {
                 seen_keys.push(key.node.clone());
                 // Push value then key so that after final reverse they're in correct order
                 deduped.push(val.clone());

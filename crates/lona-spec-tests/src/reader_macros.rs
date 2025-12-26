@@ -321,29 +321,96 @@ fn test_10_6_anonymous_fn_rest() {
 }
 
 // ============================================================================
-// Section 10.7: Var Quote (Planned)
-// Reference: docs/lonala.md#107-var-quote
+// Section 10.7: Var Quote
+// Reference: docs/lonala/reader-macros.md#var-quote
 // ============================================================================
 
-/// [IGNORED] Spec 10.7: #'symbol returns the var
-/// Tracking: The (var name) special form is implemented, but the #' reader
-/// macro syntax is not yet implemented in the lexer. Currently #'x gives
-/// "unexpected character '#'" error.
+/// Spec 10.7: #'symbol returns the var
 #[test]
-#[ignore]
 fn test_10_7_var_quote() {
+    use lona_core::value::Value;
+
     let mut ctx = SpecTestContext::new();
     let _res = ctx.eval("(def my-var 42)").unwrap();
-    // #'my-var returns the var object, not the value
-    ctx.assert_map(
-        "(meta #'my-var)",
-        &spec_ref("10.7", "#'", "var quote returns var with metadata"),
+    // #'my-var expands to (var my-var) and returns the var object
+    let result = ctx.eval("#'my-var");
+    assert!(
+        matches!(result, Ok(Value::Var(_))),
+        "var quote should return a Var value: {:?}",
+        result
+    );
+}
+
+/// Spec 10.7: #' with qualified symbol
+#[test]
+fn test_10_7_var_quote_qualified() {
+    use lona_core::value::Value;
+
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def foo/bar 100)").unwrap();
+    // #'foo/bar expands to (var foo/bar)
+    let result = ctx.eval("#'foo/bar");
+    assert!(
+        matches!(result, Ok(Value::Var(_))),
+        "var quote with qualified symbol should return a Var value: {:?}",
+        result
+    );
+}
+
+/// Spec 10.7: var-get retrieves the value bound to a var
+#[test]
+fn test_10_7_var_get() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def x 42)").unwrap();
+    ctx.assert_int(
+        "(var-get #'x)",
+        42_i64,
+        &spec_ref("10.7", "#'", "var-get retrieves var value"),
+    );
+}
+
+/// Spec 10.7: var-set! updates the value bound to a var
+#[test]
+fn test_10_7_var_set() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def y 1)").unwrap();
+    // var-set! returns the new value
+    ctx.assert_int(
+        "(var-set! #'y 100)",
+        100_i64,
+        &spec_ref("10.7", "#'", "var-set! returns new value"),
+    );
+    // The var is now updated
+    ctx.assert_int(
+        "y",
+        100_i64,
+        &spec_ref("10.7", "#'", "var-set! updates var"),
+    );
+}
+
+/// Spec 10.7: var-get with non-var produces type error
+#[test]
+fn test_10_7_var_get_type_error() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_error(
+        "(var-get 42)",
+        &spec_ref("10.7", "#'", "var-get requires Var argument"),
+    );
+}
+
+/// Spec 10.7: var-set! with non-var produces type error
+#[test]
+fn test_10_7_var_set_type_error() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_error(
+        "(var-set! 42 100)",
+        &spec_ref("10.7", "#'", "var-set! requires Var argument"),
     );
 }
 
 // ============================================================================
 // Section 10.8: Discard
-// Reference: docs/lonala.md#108-discard
+// Reference: docs/lonala/reader-macros.md#discard
 // ============================================================================
 
 /// Spec 10.8: #_ discards the next form

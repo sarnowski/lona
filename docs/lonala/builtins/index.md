@@ -27,7 +27,8 @@ See [docs/architecture/minimal-rust.md](../../architecture/minimal-rust.md) for 
 | [Type Predicates](type-predicates.md) | `nil?`, `list?`, `fn?`, `type-of`, etc. | *(Planned)* |
 | [Collections](collections.md) | `cons`, `first`, `rest`, `conj`, `assoc`, etc. | Partial |
 | [Binary Operations](binary.md) | Raw byte buffer operations | *(Planned)* |
-| [Symbols](symbols.md) | `symbol`, `gensym` | *(Planned)* |
+| [Symbols](symbols.md) | `symbol`, `gensym` | Implemented |
+| [Var Operations](#var-operations) | `var-get`, `var-set!` | Implemented |
 | [Metadata](metadata.md) | `meta`, `with-meta`, `vary-meta` | Partial (`meta`/`with-meta` done) |
 | [Sorted Collections](sorted-collections.md) | `sorted-map`, `sorted-set` | *(Planned)* |
 | [Hardware Access](hardware.md) | MMIO, DMA, IRQ primitives | *(Planned)* |
@@ -45,6 +46,37 @@ See [docs/architecture/minimal-rust.md](../../architecture/minimal-rust.md) for 
 | [Atoms](atoms.md) (Lonala) | `swap!`, `add-watch`, `set-validator!` | *(Planned)* |
 | [Collections](collections.md) | `vector`, `hash-map`, `vec`, set operations | *(Planned)* |
 | [Error Handling](error-handling.md) | `ok?`, `unwrap!`, `map-ok` | *(Planned)* |
+
+---
+
+## Var Operations
+
+Functions for programmatic access to Var objects. See also [Reader Macros: Var Quote](../reader-macros.md#107-var-quote) for the `#'` syntax.
+
+### `var-get`
+
+Returns the current value bound to a var.
+
+**Signature**: `(var-get var) → value`
+
+```clojure
+(def x 42)
+(var-get #'x)     ; => 42
+```
+
+### `var-set!`
+
+Sets the root binding of a var. Returns the new value.
+
+**Signature**: `(var-set! var value) → value`
+
+```clojure
+(def y 1)
+(var-set! #'y 100)  ; => 100
+y                   ; => 100
+```
+
+**Note**: This mutates the root binding directly. Dynamic var semantics (requiring `:dynamic` metadata for safe process-local binding) will be enforced when binding stacks are implemented.
 
 ---
 

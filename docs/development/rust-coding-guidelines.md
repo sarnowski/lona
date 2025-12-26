@@ -541,6 +541,7 @@ match ast.node {
 // Good - explicit variants plus wildcard for future variants
 match ast.node {
     Ast::Symbol(ref name) => { /* ... */ }
+    // Other node types handled uniformly (wildcard covers future variants)
     Ast::Integer(_)
     | Ast::Float(_)
     | Ast::String(_)
@@ -555,6 +556,12 @@ match ast.node {
     | _ => { /* ... */ }
 }
 ```
+
+This pattern satisfies both constraints:
+- `clippy::wildcard_enum_match_arm` requires explicit handling of known variants
+- `#[non_exhaustive]` requires a wildcard `_` for compiler exhaustiveness
+
+**Before modifying existing match patterns, check how other code in the same file or module handles the same enum type.**
 
 **Public types require `#[non_exhaustive]`**:
 

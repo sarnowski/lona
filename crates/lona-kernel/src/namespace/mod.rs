@@ -86,7 +86,7 @@ impl Namespace {
     ///
     /// If the symbol already exists in mappings, updates the Var's value
     /// and returns the existing Var (preserving identity). If not,
-    /// creates a new Var and inserts it.
+    /// creates a new Var with this namespace's name and inserts it.
     #[inline]
     pub fn intern(&mut self, sym: symbol::Id, value: Value) -> Var {
         if let Some(var) = self.mappings.get(&sym) {
@@ -94,7 +94,7 @@ impl Namespace {
             return var.clone();
         }
 
-        let var = Var::new(sym, value, None);
+        let var = Var::new(sym, Some(self.name), value, None);
         let _previous = self.mappings.insert(sym, var.clone());
         var
     }
@@ -276,7 +276,7 @@ mod tests {
 
         let sym = interner.intern("x");
         let value = Value::Integer(Integer::from_i64(42));
-        let var = Var::new(sym, value.clone(), None);
+        let var = Var::new(sym, None, value.clone(), None);
         ns.add_refer(sym, var);
 
         assert_eq!(ns.lookup(sym), Some(value));
@@ -293,7 +293,7 @@ mod tests {
         let mapping_value = Value::Integer(Integer::from_i64(2));
 
         // Add refer first
-        let refer_var = Var::new(sym, refer_value, None);
+        let refer_var = Var::new(sym, None, refer_value, None);
         ns.add_refer(sym, refer_var);
 
         // Then add mapping
@@ -337,7 +337,7 @@ mod tests {
 
         let sym = interner.intern("x");
         let value = Value::Integer(Integer::from_i64(42));
-        let var = Var::new(sym, value, None);
+        let var = Var::new(sym, None, value, None);
         ns.add_refer(sym, var);
 
         // get_var only checks mappings, not refers
@@ -423,13 +423,28 @@ mod tests {
 
         let sym_a = interner.intern("map");
         let sym_b = interner.intern("filter");
-        let var_a = Var::new(sym_a, Value::Integer(Integer::from_i64(1)), None);
-        let var_b = Var::new(sym_b, Value::Integer(Integer::from_i64(2)), None);
+        let var_a = Var::new(sym_a, None, Value::Integer(Integer::from_i64(1)), None);
+        let var_b = Var::new(sym_b, None, Value::Integer(Integer::from_i64(2)), None);
 
         ns.add_refer(sym_a, var_a);
         ns.add_refer(sym_b, var_b);
 
         let refers: Vec<_> = ns.refers().collect();
         assert_eq!(refers.len(), 2);
+    }
+
+    #[test]
+    fn test_intern_sets_namespace_on_var() {
+        let interner = Interner::new();
+        let ns_name = interner.intern("my.namespace");
+        let mut ns = Namespace::new(ns_name);
+
+        let sym = interner.intern("x");
+        let value = Value::Integer(Integer::from_i64(42));
+        let var = ns.intern(sym, value);
+
+        // Var should have the namespace set
+        assert_eq!(var.namespace(), Some(ns_name));
+        assert_eq!(var.name(), sym);
     }
 }

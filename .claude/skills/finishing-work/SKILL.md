@@ -7,7 +7,7 @@ description: Mandatory workflow to complete any implementation work. Use this sk
 
 You MUST NOT claim success or completion without following this workflow.
 
-**Core principle: We always leave code better than we found it.** During review, ALL issues found must be resolved—including pre-existing issues unrelated to your current task. "Out of scope" is never an acceptable reason to ignore a problem.
+**Core principle: We always leave code better than we found it.** During review, ALL issues found must be resolved—including pre-existing issues unrelated to your current task. Finding an issue late is lucky—better late than never. "Out of scope" is never an acceptable reason to ignore a problem.
 
 ---
 
@@ -111,6 +111,8 @@ Read these files completely before reviewing:
 3. Read related files (imports, callers, tests) to understand full context
 4. Evaluate against ALL review dimensions below
 
+**IMPORTANT: Report ALL issues you find, including pre-existing issues in the reviewed files.** If you spot a problem that existed before these changes, report it anyway. Finding issues late is valuable—better late than never. Do not filter issues based on whether they were introduced by these changes.
+
 ## Review Dimensions
 
 1. **Conceptual Alignment**: Does it align with Lona's goals and vision?
@@ -206,7 +208,7 @@ This includes:
 - **Pre-existing issues** found during review (even if they existed before your work began)
 - Issues in related files the reviewers examined for context
 
-**We always leave code better than we found it.** If a reviewer flags an issue, it gets fixed—regardless of when it was introduced.
+**We always leave code better than we found it.** If a reviewer flags an issue, it gets fixed—regardless of when it was introduced. Pre-existing issues are opportunities, not excuses—we're lucky to catch them now rather than never.
 
 Resolution approach:
 - **Obvious fix**: Fix immediately
@@ -299,4 +301,4 @@ Work is complete when:
 5. Roadmap updated
 6. **All source and markdown files are under 600 lines**
 
-If you skipped any issue for any reason (scope, pre-existing, minor, etc.), work is NOT complete.
+**If you skipped any issue for any reason, work is NOT complete.** This includes issues dismissed as "out of scope", "pre-existing", "minor", or "to be fixed later". Pre-existing issues discovered during review are lucky finds—fix them now.

@@ -25,8 +25,10 @@ use crate::value::Value;
 /// Internal data for a Var, stored behind a shared reference.
 #[derive(Debug)]
 pub struct VarData {
-    /// The symbol name of this var (without namespace for now).
+    /// The symbol name of this var.
     name: symbol::Id,
+    /// The namespace this var belongs to, or None for global bootstrap vars.
+    namespace: Option<symbol::Id>,
     /// The current value bound to this var.
     value: Value,
     /// Metadata attached to this var (separate from value metadata).
@@ -50,11 +52,28 @@ pub struct VarData {
 pub struct Var(Rc<RefCell<VarData>>);
 
 impl Var {
-    /// Creates a new Var with the given name, value, and optional metadata.
+    /// Creates a new Var with the given name, namespace, value, and optional metadata.
+    ///
+    /// # Arguments
+    ///
+    /// * `name` - The symbol name of this var
+    /// * `namespace` - The namespace this var belongs to, or `None` for global bootstrap vars
+    /// * `value` - The initial value bound to this var
+    /// * `meta` - Optional metadata for this var
     #[inline]
     #[must_use]
-    pub fn new(name: symbol::Id, value: Value, meta: Option<Map>) -> Self {
-        Self(Rc::new(RefCell::new(VarData { name, value, meta })))
+    pub fn new(
+        name: symbol::Id,
+        namespace: Option<symbol::Id>,
+        value: Value,
+        meta: Option<Map>,
+    ) -> Self {
+        Self(Rc::new(RefCell::new(VarData {
+            name,
+            namespace,
+            value,
+            meta,
+        })))
     }
 
     /// Returns the var's name.
@@ -62,6 +81,13 @@ impl Var {
     #[must_use]
     pub fn name(&self) -> symbol::Id {
         self.0.borrow().name
+    }
+
+    /// Returns the var's namespace, or `None` for global bootstrap vars.
+    #[inline]
+    #[must_use]
+    pub fn namespace(&self) -> Option<symbol::Id> {
+        self.0.borrow().namespace
     }
 
     /// Returns the current value (cloned).
@@ -117,6 +143,13 @@ impl Var {
     ///
     /// This is used by `ValueKey`'s `Ord` implementation to ensure consistency
     /// with `PartialEq` and `Hash`, which also use the `Rc` pointer.
+    ///
+    /// # Note
+    ///
+    /// Pointer-based ordering is non-deterministic across program runs since
+    /// memory addresses vary. This is acceptable for runtime ordering (e.g.,
+    /// in `BTreeMap` keys) but should not be used for serialization or
+    /// cross-process comparison.
     #[inline]
     #[must_use]
     pub fn as_ptr(&self) -> *const () {
@@ -152,7 +185,7 @@ mod tests {
     fn var_identity_preserved_on_clone() {
         let interner = Interner::new();
         let name = interner.intern("x");
-        let var = Var::new(name, Value::Integer(Integer::from_i64(42)), None);
+        let var = Var::new(name, None, Value::Integer(Integer::from_i64(42)), None);
         let var_clone = var.clone();
 
         assert!(var.is_same(&var_clone));
@@ -162,7 +195,7 @@ mod tests {
     fn var_value_get_set() {
         let interner = Interner::new();
         let name = interner.intern("x");
-        let var = Var::new(name, Value::Integer(Integer::from_i64(1)), None);
+        let var = Var::new(name, None, Value::Integer(Integer::from_i64(1)), None);
 
         assert_eq!(var.value(), Value::Integer(Integer::from_i64(1)));
 
@@ -178,15 +211,17 @@ mod tests {
     fn var_metadata_get_set() {
         let interner = Interner::new();
         let name = interner.intern("x");
-        let var = Var::new(name, Value::Nil, None);
+        let var = Var::new(name, None, Value::Nil, None);
 
         assert!(var.meta().is_none());
 
         let meta = Map::empty().assoc(Value::from(1_i32), Value::from(2_i32));
         var.set_meta(Some(meta.clone()));
 
-        assert!(var.meta().is_some());
-        assert_eq!(var.meta().unwrap(), meta);
+        let Some(stored_meta) = var.meta() else {
+            panic!("expected Some(meta)")
+        };
+        assert_eq!(stored_meta, meta);
     }
 
     #[test]
@@ -195,7 +230,7 @@ mod tests {
         let name = interner.intern("x");
 
         let meta_a = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));
-        let var = Var::new(name, Value::Nil, Some(meta_a));
+        let var = Var::new(name, None, Value::Nil, Some(meta_a));
 
         let meta_b = Map::empty()
             .assoc(Value::from(2_i32), Value::from(20_i32))
@@ -203,7 +238,9 @@ mod tests {
 
         var.merge_meta(meta_b);
 
-        let result = var.meta().unwrap();
+        let Some(result) = var.meta() else {
+            panic!("expected Some(meta)")
+        };
         // Key 1 should be overwritten to 100
         assert_eq!(result.get(&Value::from(1_i32)), Some(&Value::from(100_i32)));
         // Key 2 should be added
@@ -214,7 +251,7 @@ mod tests {
     fn var_metadata_merge_when_none() {
         let interner = Interner::new();
         let name = interner.intern("x");
-        let var = Var::new(name, Value::Nil, None);
+        let var = Var::new(name, None, Value::Nil, None);
 
         let meta = Map::empty().assoc(Value::from(1_i32), Value::from(10_i32));
         var.merge_meta(meta.clone());
@@ -226,7 +263,7 @@ mod tests {
     fn var_name() {
         let interner = Interner::new();
         let name = interner.intern("my-var");
-        let var = Var::new(name, Value::Nil, None);
+        let var = Var::new(name, None, Value::Nil, None);
 
         assert_eq!(var.name(), name);
     }
@@ -236,8 +273,8 @@ mod tests {
         let interner = Interner::new();
         let name = interner.intern("x");
 
-        let var1 = Var::new(name, Value::Integer(Integer::from_i64(42)), None);
-        let var2 = Var::new(name, Value::Integer(Integer::from_i64(42)), None);
+        let var1 = Var::new(name, None, Value::Integer(Integer::from_i64(42)), None);
+        let var2 = Var::new(name, None, Value::Integer(Integer::from_i64(42)), None);
 
         // Same content, different Vars
         assert!(!var1.is_same(&var2));
@@ -257,8 +294,8 @@ mod tests {
         let interner = Interner::new();
         let name = interner.intern("x");
 
-        let var1 = Var::new(name, Value::Integer(Integer::from_i64(42)), None);
-        let var2 = Var::new(name, Value::Integer(Integer::from_i64(42)), None);
+        let var1 = Var::new(name, None, Value::Integer(Integer::from_i64(42)), None);
+        let var2 = Var::new(name, None, Value::Integer(Integer::from_i64(42)), None);
 
         let mut h1 = FnvHasher::default();
         let mut h2 = FnvHasher::default();
@@ -277,5 +314,36 @@ mod tests {
         var1.hash(&mut h1_again);
 
         assert_eq!(h1_again.finish(), h3.finish());
+    }
+
+    #[test]
+    fn var_namespace_returns_none_when_not_set() {
+        let interner = Interner::new();
+        let name = interner.intern("x");
+        let var = Var::new(name, None, Value::Nil, None);
+
+        assert!(var.namespace().is_none());
+    }
+
+    #[test]
+    fn var_namespace_returns_some_when_set() {
+        let interner = Interner::new();
+        let name = interner.intern("x");
+        let ns = interner.intern("my.namespace");
+        let var = Var::new(name, Some(ns), Value::Nil, None);
+
+        assert_eq!(var.namespace(), Some(ns));
+    }
+
+    #[test]
+    fn var_namespace_is_preserved_on_clone() {
+        let interner = Interner::new();
+        let name = interner.intern("x");
+        let ns = interner.intern("lona.core");
+        let var = Var::new(name, Some(ns), Value::Integer(Integer::from_i64(42)), None);
+        let var_clone = var.clone();
+
+        assert_eq!(var_clone.namespace(), Some(ns));
+        assert_eq!(var_clone.name(), name);
     }
 }

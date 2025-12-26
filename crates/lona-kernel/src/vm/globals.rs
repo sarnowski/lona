@@ -55,12 +55,15 @@ impl Globals {
     ///
     /// Creates a new Var if the global doesn't exist.
     /// If the global exists, updates only the value (preserves metadata).
+    /// New vars created via Globals have no namespace (bootstrap context).
     #[inline]
     pub fn set(&mut self, symbol: symbol::Id, value: Value) {
         if let Some(var) = self.vars.get(&symbol) {
             var.set_value(value);
         } else {
-            let _previous = self.vars.insert(symbol, Var::new(symbol, value, None));
+            let _previous = self
+                .vars
+                .insert(symbol, Var::new(symbol, None, value, None));
         }
     }
 
@@ -68,6 +71,7 @@ impl Globals {
     ///
     /// Creates a new Var if the global doesn't exist.
     /// If the global exists, updates the value and merges the metadata.
+    /// New vars created via Globals have no namespace (bootstrap context).
     #[inline]
     pub fn set_with_meta(&mut self, symbol: symbol::Id, value: Value, meta: Option<Map>) {
         if let Some(var) = self.vars.get(&symbol) {
@@ -76,7 +80,9 @@ impl Globals {
                 var.merge_meta(new_meta);
             }
         } else {
-            let _previous = self.vars.insert(symbol, Var::new(symbol, value, meta));
+            let _previous = self
+                .vars
+                .insert(symbol, Var::new(symbol, None, value, meta));
         }
     }
 
@@ -216,10 +222,9 @@ mod tests {
         let mut globals = Globals::new();
         globals.set(sym, Value::Integer(Integer::from_i64(42)));
 
-        let var = globals.get_var(sym);
-        assert!(var.is_some());
-
-        let var = var.unwrap();
+        let Some(var) = globals.get_var(sym) else {
+            panic!("expected Some(var)")
+        };
         assert_eq!(var.name(), sym);
         assert_eq!(var.value(), Value::Integer(Integer::from_i64(42)));
         assert!(var.meta().is_none());
@@ -253,7 +258,9 @@ mod tests {
 
         assert_eq!(globals.get(sym), Some(Value::Integer(Integer::from_i64(2))));
 
-        let var = globals.get_var(sym).unwrap();
+        let Some(var) = globals.get_var(sym) else {
+            panic!("expected Some(var)")
+        };
         assert_eq!(var.meta(), Some(meta));
     }
 
@@ -271,7 +278,9 @@ mod tests {
             Some(meta.clone()),
         );
 
-        let var = globals.get_var(sym).unwrap();
+        let Some(var) = globals.get_var(sym) else {
+            panic!("expected Some(var)")
+        };
         assert_eq!(var.value(), Value::Integer(Integer::from_i64(42)));
         assert_eq!(var.meta(), Some(meta));
     }
@@ -290,10 +299,14 @@ mod tests {
         globals.set_with_meta(sym, Value::Integer(Integer::from_i64(1)), Some(meta_a));
         globals.set_with_meta(sym, Value::Integer(Integer::from_i64(2)), Some(meta_b));
 
-        let var = globals.get_var(sym).unwrap();
+        let Some(var) = globals.get_var(sym) else {
+            panic!("expected Some(var)")
+        };
         assert_eq!(var.value(), Value::Integer(Integer::from_i64(2)));
 
-        let result = var.meta().unwrap();
+        let Some(result) = var.meta() else {
+            panic!("expected Some(meta)")
+        };
         assert_eq!(result.get(&Value::from(1_i32)), Some(&Value::from(100_i32)));
         assert_eq!(result.get(&Value::from(2_i32)), Some(&Value::from(20_i32)));
     }
@@ -315,7 +328,9 @@ mod tests {
         // Set with None meta should NOT clear existing metadata
         globals.set_with_meta(sym, Value::Integer(Integer::from_i64(2)), None);
 
-        let var = globals.get_var(sym).unwrap();
+        let Some(var) = globals.get_var(sym) else {
+            panic!("expected Some(var)")
+        };
         assert_eq!(var.meta(), Some(meta));
     }
 
@@ -331,8 +346,12 @@ mod tests {
         globals.set_with_meta(sym, Value::Integer(Integer::from_i64(42)), Some(meta_a));
         globals.merge_meta(sym, meta_b);
 
-        let var = globals.get_var(sym).unwrap();
-        let result = var.meta().unwrap();
+        let Some(var) = globals.get_var(sym) else {
+            panic!("expected Some(var)")
+        };
+        let Some(result) = var.meta() else {
+            panic!("expected Some(meta)")
+        };
         assert_eq!(result.get(&Value::from(1_i32)), Some(&Value::from(10_i32)));
         assert_eq!(result.get(&Value::from(2_i32)), Some(&Value::from(20_i32)));
     }

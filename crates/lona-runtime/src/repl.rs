@@ -36,8 +36,9 @@ use lona_kernel::vm::introspection::{
 use lona_kernel::vm::{
     Globals, MacroExpander, Vm, intern_arithmetic_primitives, intern_comparison_primitives,
     intern_metadata_primitives, intern_symbol_primitives, intern_type_predicates,
-    register_arithmetic_primitives, register_comparison_primitives, register_metadata_primitives,
-    register_symbol_primitives, register_type_predicates,
+    intern_var_primitives, register_arithmetic_primitives, register_comparison_primitives,
+    register_metadata_primitives, register_symbol_primitives, register_type_predicates,
+    register_var_primitives,
 };
 use lonala_compiler::{MacroRegistry, compile_with_expansion};
 use lonala_human::{Config as FormatConfig, render as render_error};
@@ -170,6 +171,7 @@ impl Repl {
         let type_predicate_symbols = intern_type_predicates(&self.interner);
         let metadata_symbols = intern_metadata_primitives(&self.interner);
         let symbol_symbols = intern_symbol_primitives(&self.interner);
+        let var_symbols = intern_var_primitives(&self.interner);
 
         // Create a VM for core library initialization
         let mut vm = Vm::new(&self.interner);
@@ -195,6 +197,9 @@ impl Repl {
 
         // Register symbol primitives (symbol, gensym)
         register_symbol_primitives(&mut vm, &symbol_symbols);
+
+        // Register var primitives (var-get, var-set!)
+        register_var_primitives(&mut vm, &var_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
@@ -260,6 +265,7 @@ impl Repl {
         let type_predicate_symbols = intern_type_predicates(&self.interner);
         let metadata_symbols = intern_metadata_primitives(&self.interner);
         let symbol_symbols = intern_symbol_primitives(&self.interner);
+        let var_symbols = intern_var_primitives(&self.interner);
 
         // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
@@ -287,6 +293,9 @@ impl Repl {
 
         // Register symbol primitives (symbol, gensym)
         register_symbol_primitives(&mut vm, &symbol_symbols);
+
+        // Register var primitives (var-get, var-set!)
+        register_var_primitives(&mut vm, &var_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);

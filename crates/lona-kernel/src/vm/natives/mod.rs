@@ -18,6 +18,7 @@ mod comparison;
 mod metadata;
 mod predicates;
 mod symbols;
+mod vars;
 
 pub use arithmetic::{
     ARITHMETIC_PRIMITIVE_NAMES, intern_arithmetic_primitives, lookup_arithmetic_primitives,
@@ -38,6 +39,10 @@ pub use predicates::{
 pub use symbols::{
     SYMBOL_PRIMITIVE_NAMES, intern_symbol_primitives, lookup_symbol_primitives, native_gensym,
     native_symbol, register_symbol_primitives,
+};
+pub use vars::{
+    VAR_PRIMITIVE_NAMES, intern_var_primitives, lookup_var_primitives, native_var_get,
+    native_var_set, register_var_primitives,
 };
 
 use alloc::collections::BTreeMap;
@@ -209,35 +214,7 @@ mod tests {
     use lona_core::integer::Integer;
     use lona_core::symbol::Interner;
 
-    /// Simple native function for testing.
-    fn test_add(args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
-        if args.len() != 2_usize {
-            return Err(NativeError::ArityMismatch {
-                expected: ArityExpectation::Exact(2_u8),
-                got: u8::try_from(args.len()).unwrap_or(u8::MAX),
-            });
-        }
-
-        let a_val = args.first().ok_or(NativeError::Error("missing argument"))?;
-        let left = a_val.as_integer().ok_or(NativeError::TypeError {
-            expected: TypeExpectation::Single(value::Kind::Integer),
-            got: a_val.kind(),
-            arg_index: 0_u8,
-        })?;
-
-        let b_val = args
-            .get(1_usize)
-            .ok_or(NativeError::Error("missing argument"))?;
-        let right = b_val.as_integer().ok_or(NativeError::TypeError {
-            expected: TypeExpectation::Single(value::Kind::Integer),
-            got: b_val.kind(),
-            arg_index: 1_u8,
-        })?;
-
-        Ok(Value::Integer(left + right))
-    }
-
-    /// Native function that returns nil.
+    /// Native function that returns nil (test fixture).
     fn test_nil(_args: &[Value], _ctx: &NativeContext<'_>) -> Result<Value, NativeError> {
         Ok(Value::Nil)
     }
@@ -248,7 +225,7 @@ mod tests {
         let mut registry = Registry::new();
 
         let add_sym = interner.intern("add");
-        registry.register(add_sym, test_add);
+        registry.register(add_sym, arithmetic::native_add);
 
         assert!(registry.get(add_sym).is_some());
     }
@@ -268,53 +245,22 @@ mod tests {
         let mut registry = Registry::new();
 
         let add_sym = interner.intern("add");
-        registry.register(add_sym, test_add);
+        registry.register(add_sym, arithmetic::native_add);
 
-        let native_fn = registry.get(add_sym).unwrap();
+        let Some(native_fn) = registry.get(add_sym) else {
+            panic!("expected Some(native_fn)");
+        };
         let args = [
             Value::Integer(Integer::from_i64(1)),
             Value::Integer(Integer::from_i64(2)),
         ];
         let ctx = NativeContext::new(&interner, None);
-        let result = native_fn(&args, &ctx).unwrap();
+        let result = native_fn(&args, &ctx);
 
-        assert_eq!(result, Value::Integer(Integer::from_i64(3)));
-    }
-
-    #[test]
-    fn native_arity_error() {
-        let interner = Interner::new();
-        let ctx = NativeContext::new(&interner, None);
-        let result = test_add(&[Value::Integer(Integer::from_i64(1))], &ctx);
-        assert!(matches!(
-            result,
-            Err(NativeError::ArityMismatch {
-                expected: ArityExpectation::Exact(2_u8),
-                got: 1_u8
-            })
-        ));
-    }
-
-    #[test]
-    fn native_type_error() {
-        let interner = Interner::new();
-        let ctx = NativeContext::new(&interner, None);
-        let result = test_add(
-            &[Value::Bool(true), Value::Integer(Integer::from_i64(2))],
-            &ctx,
-        );
-        match result {
-            Err(NativeError::TypeError {
-                expected,
-                got,
-                arg_index,
-            }) => {
-                assert_eq!(expected, TypeExpectation::Single(value::Kind::Integer));
-                assert_eq!(got, value::Kind::Bool);
-                assert_eq!(arg_index, 0_u8);
-            }
-            _ => panic!("Expected TypeError"),
-        }
+        let Ok(value) = result else {
+            panic!("expected Ok(value)");
+        };
+        assert_eq!(value, Value::Integer(Integer::from_i64(3)));
     }
 
     #[test]
@@ -338,16 +284,20 @@ mod tests {
         let mut registry = Registry::new();
 
         let sym = interner.intern("test");
-        registry.register(sym, test_add);
+        registry.register(sym, arithmetic::native_add);
         registry.register(sym, test_nil);
 
         // Should have replaced, not added
         assert_eq!(registry.len(), 1);
 
         // Should use the new function
-        let native_fn = registry.get(sym).unwrap();
+        let Some(native_fn) = registry.get(sym) else {
+            panic!("expected Some(native_fn)");
+        };
         let ctx = NativeContext::new(&interner, None);
-        let result = native_fn(&[], &ctx).unwrap();
+        let Ok(result) = native_fn(&[], &ctx) else {
+            panic!("expected Ok(result)");
+        };
         assert_eq!(result, Value::Nil);
     }
 

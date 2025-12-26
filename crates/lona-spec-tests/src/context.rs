@@ -66,6 +66,7 @@ impl SpecTestContext {
         let type_predicate_symbols = lona_kernel::vm::intern_type_predicates(&self.interner);
         let metadata_symbols = lona_kernel::vm::intern_metadata_primitives(&self.interner);
         let symbol_symbols = lona_kernel::vm::intern_symbol_primitives(&self.interner);
+        let var_symbols = lona_kernel::vm::intern_var_primitives(&self.interner);
 
         // Create VM and restore persistent globals
         let mut vm = Vm::new(&self.interner);
@@ -88,6 +89,9 @@ impl SpecTestContext {
 
         // Register symbol primitives (symbol, gensym)
         lona_kernel::vm::register_symbol_primitives(&mut vm, &symbol_symbols);
+
+        // Register var primitives (var-get, var-set!)
+        lona_kernel::vm::register_var_primitives(&mut vm, &var_symbols);
 
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
@@ -501,13 +505,13 @@ impl SpecTestContext {
     }
 
     /// Asserts that an expression evaluates to a binary buffer.
-    /// Note: Binary type not yet implemented - placeholder for future use.
     pub fn assert_binary(&mut self, source: &str, spec_ref: &str) {
         match self.eval(source) {
-            Ok(value) => {
-                // Binary type not yet in Value enum - check when implemented
-                // For now, check if it's something that could be binary
-                panic!("{spec_ref}: Binary type not yet implemented, got {value:?}");
+            Ok(Value::Binary(_binary)) => {
+                // Expected - got a binary
+            }
+            Ok(other) => {
+                panic!("{spec_ref}: expected binary, got {other:?}");
             }
             Err(err) => {
                 panic!("{spec_ref}: evaluation failed: {err}");

@@ -40,7 +40,13 @@ impl Display for Value {
             #[cfg(feature = "alloc")]
             Self::Function(ref func) => write!(f, "{func}"),
             #[cfg(feature = "alloc")]
-            Self::Var(ref var) => write!(f, "#<var:{}>", var.name().as_u32()),
+            Self::Var(ref var) => {
+                if let Some(ns) = var.namespace() {
+                    write!(f, "#<var:{}/{}>", ns.as_u32(), var.name().as_u32())
+                } else {
+                    write!(f, "#<var:{}>", var.name().as_u32())
+                }
+            }
         }
     }
 }
@@ -83,7 +89,11 @@ pub(super) fn format_float(value: f64, formatter: &mut fmt::Formatter<'_>) -> fm
 
 /// Writes a string with quotes and escape sequences.
 ///
-/// Escapes backslashes, double quotes, newlines, carriage returns, and tabs.
+/// Escapes:
+/// - Backslash (`\\`)
+/// - Double quote (`\"`)
+/// - Standard control characters: newline (`\n`), carriage return (`\r`), tab (`\t`)
+/// - Other ASCII control characters (0x00-0x1F, 0x7F) as hex escapes (`\xNN`)
 #[cfg(feature = "alloc")]
 pub(super) fn write_escaped_string(
     string: &str,
@@ -97,6 +107,11 @@ pub(super) fn write_escaped_string(
             '\n' => formatter.write_str("\\n")?,
             '\r' => formatter.write_str("\\r")?,
             '\t' => formatter.write_str("\\t")?,
+            // Other ASCII control characters (0x00-0x1F except \t\n\r, and 0x7F)
+            '\x00'..='\x08' | '\x0b'..='\x0c' | '\x0e'..='\x1f' | '\x7f' => {
+                // Safe: matched chars are all ≤ 0x7F, so u32::from fits in 2 hex digits
+                write!(formatter, "\\x{:02x}", u32::from(ch))?;
+            }
             other => formatter.write_char(other)?,
         }
     }
@@ -146,7 +161,16 @@ impl Display for Displayable<'_> {
             Value::Binary(ref binary) => write!(f, "{binary}"),
             Value::Function(ref func) => write!(f, "{func}"),
             Value::Var(ref var) => {
-                write!(f, "#<var:{}>", self.interner.resolve(var.name()))
+                if let Some(ns) = var.namespace() {
+                    write!(
+                        f,
+                        "#<var:{}/{}>",
+                        self.interner.resolve(ns),
+                        self.interner.resolve(var.name())
+                    )
+                } else {
+                    write!(f, "#<var:{}>", self.interner.resolve(var.name()))
+                }
             }
         }
     }

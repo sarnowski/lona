@@ -114,22 +114,42 @@ Creates an anonymous function. Arguments are referenced using `%`, `%1`, `%2`, e
 
 **Note**: Unlike Clojure, nested `#()` forms are not allowed in Lonala. Use explicit `fn` for nested anonymous functions.
 
-## 10.7 Var Quote: `#'` *(Planned)*
+## 10.7 Var Quote: `#'`
 
 **Syntax**: `#'symbol`
 
 **Expands to**: `(var symbol)`
 
-Returns the var object itself, rather than its value. Useful for introspection and passing functions by reference.
+Returns the var object itself, rather than its value. Useful for introspection and metaprogramming.
 
 ```clojure
-#'map                 ; => #'lona.core/map
-(meta #'map)          ; => {:doc "..." :arglists ...}
+(def x 42)
+#'x                   ; => #<var:x>
+x                     ; => 42
 
-;; Getting var vs value
-map                   ; => <function>
-#'map                 ; => <var>
+;; With qualified symbols
+(def my-ns/foo 100)
+#'my-ns/foo           ; => #<var:my-ns/foo>
 ```
+
+### Related Functions
+
+**`var-get`**: Returns the current value bound to a var.
+
+```clojure
+(def x 42)
+(var-get #'x)         ; => 42
+```
+
+**`var-set!`**: Sets the root binding of a var. Returns the new value.
+
+```clojure
+(def y 1)
+(var-set! #'y 100)    ; => 100
+y                     ; => 100
+```
+
+**Note**: `var-set!` mutates the root binding. Dynamic var semantics (requiring `:dynamic` metadata for safe process-local binding) will be enforced when binding stacks are implemented.
 
 ## 10.8 Discard: `#_`
 
