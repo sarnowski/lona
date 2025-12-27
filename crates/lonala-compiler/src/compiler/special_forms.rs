@@ -210,6 +210,11 @@ impl Compiler<'_, '_, '_> {
         let (name, name_span, explicit_meta, docstring, value_expr) =
             self.parse_def_args(args, span)?;
 
+        // Register the unqualified symbol as defined in the current namespace.
+        // This enables shadowing of referred symbols (including lona.core).
+        let unqualified_sym_id = self.interner.intern(&name);
+        self.namespace_ctx.define_symbol(unqualified_sym_id);
+
         // Compile value expression
         let checkpoint = self.next_register;
         let value_result = self.compile_expr(value_expr)?;

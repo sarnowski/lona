@@ -487,3 +487,58 @@ fn test_alias_works_in_same_compilation() {
         &spec_ref("6.X", "ns", "alias works in same compilation"),
     );
 }
+
+// ============================================================================
+// Symbol Shadowing
+// ============================================================================
+
+/// Defining a symbol shadows lona.core.
+///
+/// Section 5.2: "Current namespace defs shadow referred vars"
+#[test]
+fn test_def_shadows_core() {
+    let mut ctx = SpecTestContext::new();
+    // Define 'first' to shadow lona.core/first
+    ctx.assert_int(
+        "(do (def first 42) first)",
+        42,
+        &spec_ref("5.2", "evaluation", "current ns defs shadow refers"),
+    );
+}
+
+/// Shadowed core function still accessible via qualified name.
+///
+/// Section 5.2: Qualified symbols always resolve to the specified namespace.
+#[test]
+fn test_shadowed_core_accessible_qualified() {
+    let mut ctx = SpecTestContext::new();
+    let _res = ctx.eval("(def first 42)").unwrap();
+    // lona.core/first should still be the function
+    ctx.assert_int(
+        "(lona.core/first [1 2 3])",
+        1,
+        &spec_ref("5.2", "evaluation", "qualified access bypasses shadowing"),
+    );
+}
+
+/// Multiple core symbols can be shadowed.
+#[test]
+fn test_multiple_shadows() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def first 1) (def rest 2) (+ first rest))",
+        3,
+        &spec_ref("5.2", "evaluation", "multiple shadows work"),
+    );
+}
+
+/// Symbol defined before use resolves to definition.
+#[test]
+fn test_def_before_use() {
+    let mut ctx = SpecTestContext::new();
+    ctx.assert_int(
+        "(do (def x 100) x)",
+        100,
+        &spec_ref("5.2", "evaluation", "def before use works"),
+    );
+}

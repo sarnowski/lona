@@ -33,6 +33,8 @@
 
             "Bash(docker:*)",
 
+            "Bash(npm:*)",
+
             "Bash(git add:*)",
             "Bash(git status:*)",
             "Bash(git diff:*)",

@@ -258,8 +258,9 @@ impl Compiler<'_, '_, '_> {
     /// 2. Otherwise, use the symbol as-is (assume it's already a full namespace)
     ///
     /// Resolution order for unqualified symbols:
-    /// 1. Check refers map → return qualified symbol if found
-    /// 2. Qualify with current namespace → `current_ns/name`
+    /// 1. Check if defined in current namespace → `current_ns/name` (enables shadowing)
+    /// 2. Check refers map → return qualified symbol if found
+    /// 3. Default to current namespace → `current_ns/name` (for forward refs)
     ///
     /// Used by `compile_symbol` and `compile_var` to ensure consistent resolution.
     pub(super) fn resolve_global_symbol(
@@ -279,14 +280,27 @@ impl Compiler<'_, '_, '_> {
                     self.interner.intern(&qualified_name)
                 })
         } else {
-            // Unqualified symbol: check refers, then qualify with current namespace
-            self.namespace_ctx.resolve_refer(sym_id).unwrap_or_else(|| {
-                // Qualify with current namespace
+            // Unqualified symbol resolution order:
+            // 1. Check if defined in current namespace (enables shadowing)
+            // 2. Check refers (including lona.core)
+            // 3. Default to current namespace (for forward refs, runtime resolution)
+            if self.namespace_ctx.is_defined(sym_id) {
+                // Symbol is defined in current namespace - qualify it
                 let current_ns = self.namespace_ctx.current();
                 let current_ns_name = self.interner.resolve(current_ns);
                 let qualified_name = alloc::format!("{current_ns_name}/{name}");
                 self.interner.intern(&qualified_name)
-            })
+            } else if let Some(referred) = self.namespace_ctx.resolve_refer(sym_id) {
+                // Symbol is referred from another namespace
+                referred
+            } else {
+                // Not defined, not referred - qualify with current namespace
+                // (handles forward references, will be resolved at runtime)
+                let current_ns = self.namespace_ctx.current();
+                let current_ns_name = self.interner.resolve(current_ns);
+                let qualified_name = alloc::format!("{current_ns_name}/{name}");
+                self.interner.intern(&qualified_name)
+            }
         }
     }
 }

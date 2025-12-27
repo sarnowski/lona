@@ -11,7 +11,7 @@
 //! This mirrors the runtime `Namespace` structure but is maintained during
 //! compilation for symbol resolution.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 
 use lona_core::symbol;
 
@@ -46,8 +46,14 @@ pub struct Context {
     /// Namespaces marked for `:use` (refer-all).
     ///
     /// These namespaces should have all their public symbols referred
-    /// when they are loaded. Actual loading is deferred to Task 1.3.4.
+    /// when they are loaded.
     pending_uses: alloc::vec::Vec<symbol::Id>,
+    /// Symbols defined via `def` in the current compilation unit.
+    ///
+    /// This enables the compiler to check if a symbol is defined in the
+    /// current namespace before checking refers, ensuring that local
+    /// definitions shadow referred symbols (including those from `lona.core`).
+    defined: BTreeSet<symbol::Id>,
 }
 
 impl Context {
@@ -62,6 +68,7 @@ impl Context {
             aliases: BTreeMap::new(),
             refers: BTreeMap::new(),
             pending_uses: alloc::vec::Vec::new(),
+            defined: BTreeSet::new(),
         }
     }
 
@@ -126,7 +133,29 @@ impl Context {
         self.refers.get(&symbol).copied()
     }
 
-    /// Clears aliases, refers, and pending uses when switching to a new namespace.
+    /// Registers a symbol as defined in the current namespace.
+    ///
+    /// Called when a `def` form is compiled. This enables the resolution
+    /// logic to check `is_defined` before checking `resolve_refer`, so
+    /// that local definitions shadow referred symbols.
+    #[inline]
+    pub fn define_symbol(&mut self, symbol: symbol::Id) {
+        let _was_new = self.defined.insert(symbol);
+    }
+
+    /// Checks if a symbol is defined in the current namespace.
+    ///
+    /// Returns `true` if the symbol was registered via `define_symbol`.
+    /// Used during symbol resolution to prioritize local definitions
+    /// over referred symbols.
+    #[inline]
+    #[must_use]
+    pub fn is_defined(&self, symbol: symbol::Id) -> bool {
+        self.defined.contains(&symbol)
+    }
+
+    /// Clears aliases, refers, pending uses, and defined symbols when switching
+    /// to a new namespace.
     ///
     /// Called at the start of an `(ns ...)` form to reset the context
     /// for the new namespace. The current namespace is set separately
@@ -136,12 +165,13 @@ impl Context {
         self.aliases.clear();
         self.refers.clear();
         self.pending_uses.clear();
+        self.defined.clear();
     }
 
     /// Adds a namespace to the pending `:use` list.
     ///
     /// Namespaces in this list should have all their public symbols referred
-    /// when they are loaded. Actual loading is deferred to Task 1.3.4.
+    /// when they are loaded.
     #[inline]
     pub fn add_pending_use(&mut self, namespace: symbol::Id) {
         self.pending_uses.push(namespace);
@@ -293,5 +323,72 @@ mod tests {
 
         ctx.add_alias(alias, ns2);
         assert_eq!(ctx.resolve_alias(alias), Some(ns2));
+    }
+
+    #[test]
+    fn define_symbol_marks_as_defined() {
+        let interner = symbol::Interner::new();
+        let user = intern(&interner, "user");
+        let sym = intern(&interner, "my-var");
+
+        let mut ctx = Context::new(user);
+        assert!(!ctx.is_defined(sym));
+
+        ctx.define_symbol(sym);
+        assert!(ctx.is_defined(sym));
+    }
+
+    #[test]
+    fn is_defined_returns_false_for_unknown_symbol() {
+        let interner = symbol::Interner::new();
+        let user = intern(&interner, "user");
+        let unknown = intern(&interner, "unknown");
+
+        let ctx = Context::new(user);
+        assert!(!ctx.is_defined(unknown));
+    }
+
+    #[test]
+    fn multiple_symbols_can_be_defined() {
+        let interner = symbol::Interner::new();
+        let user = intern(&interner, "user");
+        let sym_a = intern(&interner, "a");
+        let sym_b = intern(&interner, "b");
+        let sym_c = intern(&interner, "c");
+
+        let mut ctx = Context::new(user);
+        ctx.define_symbol(sym_a);
+        ctx.define_symbol(sym_b);
+
+        assert!(ctx.is_defined(sym_a));
+        assert!(ctx.is_defined(sym_b));
+        assert!(!ctx.is_defined(sym_c));
+    }
+
+    #[test]
+    fn clear_mappings_clears_defined() {
+        let interner = symbol::Interner::new();
+        let user = intern(&interner, "user");
+        let sym = intern(&interner, "my-var");
+
+        let mut ctx = Context::new(user);
+        ctx.define_symbol(sym);
+        assert!(ctx.is_defined(sym));
+
+        ctx.clear_mappings();
+        assert!(!ctx.is_defined(sym));
+    }
+
+    #[test]
+    fn define_symbol_is_idempotent() {
+        let interner = symbol::Interner::new();
+        let user = intern(&interner, "user");
+        let sym = intern(&interner, "x");
+
+        let mut ctx = Context::new(user);
+        ctx.define_symbol(sym);
+        ctx.define_symbol(sym); // Define again
+
+        assert!(ctx.is_defined(sym));
     }
 }

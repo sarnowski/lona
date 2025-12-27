@@ -107,13 +107,14 @@ impl Vm<'_> {
             return Ok(());
         }
 
-        // 2. If symbol is qualified (ns/name), check namespace refers
+        // 2. If symbol is qualified (ns/name), look up in the specified namespace
         let symbol_name = self.interner.resolve(symbol);
-        if let Some((_ns, unqualified)) = symbol_name.rsplit_once('/') {
+        if let Some((ns_name, unqualified)) = symbol_name.rsplit_once('/') {
+            let ns_sym = self.interner.intern(ns_name);
             let unqualified_sym = self.interner.intern(unqualified);
 
-            // Check current namespace's refers for the unqualified name
-            if let Some(ns) = self.namespace_registry.current()
+            // Look up in the specified namespace (not current namespace)
+            if let Some(ns) = self.namespace_registry.get(ns_sym)
                 && let Some(value) = ns.lookup(unqualified_sym)
             {
                 self.set_register(dest, value, frame)?;
