@@ -6,6 +6,7 @@
 mod discard_tests;
 mod error_tests;
 mod token_tests;
+mod utf8_tests;
 mod var_quote_tests;
 
 extern crate alloc;

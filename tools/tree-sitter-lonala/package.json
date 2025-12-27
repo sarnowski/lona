@@ -1,0 +1,49 @@
+{
+  "name": "tree-sitter-lonala",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for Lonala (Lona programming language)",
+  "license": "GPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://codeberg.org/sarnowski/lona.git"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.lona",
+      "file-types": [
+        "lona"
+      ],
+      "injection-regex": "lonala"
+    }
+  ],
+  "devDependencies": {
+    "tree-sitter-cli": "^0.22.0",
+    "prebuildify": "^6.0.0"
+  },
+  "scripts": {
+    "build": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "install": "node-gyp-build",
+    "prebuildify": "prebuildify --napi --strip"
+  },
+  "dependencies": {
+    "node-gyp-build": "^4.8.0"
+  },
+  "peerDependencies": {
+    "tree-sitter": "^0.21.0"
+  },
+  "peerDependenciesMeta": {
+    "tree-sitter": {
+      "optional": true
+    }
+  },
+  "types": "bindings/node",
+  "files": [
+    "grammar.js",
+    "binding.gyp",
+    "prebuilds/**",
+    "bindings/node/*",
+    "queries/*",
+    "src/**"
+  ]
+}

@@ -28,6 +28,12 @@ pub enum Kind {
     // ========== Lexer errors ==========
     /// Encountered a character that cannot start any token.
     UnexpectedCharacter(char),
+    /// Dangerous Unicode character that could be used for attacks.
+    ///
+    /// This includes zero-width characters, bidirectional text controls,
+    /// and other invisible formatting characters that could hide malicious
+    /// code or cause visual confusion (Trojan Source attack).
+    DangerousUnicode(char),
     /// String literal reached end of input without closing quote.
     UnterminatedString,
     /// Invalid escape sequence in string (e.g., `\q`).
@@ -93,6 +99,7 @@ impl Kind {
     pub const fn variant_name(&self) -> &'static str {
         match *self {
             Self::UnexpectedCharacter(_) => "UnexpectedCharacter",
+            Self::DangerousUnicode(_) => "DangerousUnicode",
             Self::UnterminatedString => "UnterminatedString",
             Self::InvalidEscapeSequence(_) => "InvalidEscapeSequence",
             Self::InvalidNumber => "InvalidNumber",
@@ -116,6 +123,9 @@ impl fmt::Display for Kind {
         match *self {
             // Lexer errors
             Self::UnexpectedCharacter(ch) => write!(f, "unexpected character '{ch}'"),
+            Self::DangerousUnicode(ch) => {
+                write!(f, "dangerous unicode character U+{:04X}", u32::from(ch))
+            }
             Self::UnterminatedString => write!(f, "unterminated string literal"),
             Self::InvalidEscapeSequence(ch) => {
                 write!(f, "invalid escape sequence '\\{ch}'")

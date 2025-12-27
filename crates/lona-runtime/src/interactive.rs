@@ -15,7 +15,7 @@
 
 use crate::repl::Repl;
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::fmt::Write;
 use lona_core::source;
@@ -44,6 +44,9 @@ const CTRL_C: u8 = 0x03;
 const MAX_LINE_LENGTH: usize = 1024;
 
 /// Buffer for accumulating a single line of input.
+///
+/// Handles UTF-8 input by accepting raw bytes and properly handling
+/// backspace for multi-byte characters.
 struct LineBuffer {
     buffer: Vec<u8>,
 }
@@ -62,17 +65,46 @@ impl LineBuffer {
         }
     }
 
+    /// Removes the last UTF-8 character from the buffer.
+    ///
+    /// UTF-8 continuation bytes start with `10xxxxxx` (0x80-0xBF).
+    /// We keep popping until we remove a non-continuation byte (the start byte).
     fn backspace(&mut self) -> bool {
-        self.buffer.pop().is_some()
+        if self.buffer.is_empty() {
+            return false;
+        }
+
+        // Pop bytes until we've removed a complete UTF-8 character
+        // UTF-8 continuation bytes have the pattern 10xxxxxx (0x80-0xBF)
+        loop {
+            let Some(byte) = self.buffer.pop() else {
+                return true; // Buffer became empty
+            };
+
+            // If this is NOT a continuation byte, we've removed the start of the character
+            // ASCII bytes (0x00-0x7F) and UTF-8 lead bytes (0xC0-0xFF) are not continuation bytes
+            if !is_utf8_continuation_byte(byte) {
+                return true;
+            }
+
+            // If buffer is now empty, we're done
+            if self.buffer.is_empty() {
+                return true;
+            }
+        }
     }
 
-    fn as_str(&self) -> Option<&str> {
-        core::str::from_utf8(&self.buffer).ok()
-    }
-
+    /// Returns the buffer content as a string, replacing invalid UTF-8 with the replacement character.
     fn to_string_lossy(&self) -> String {
-        self.as_str().map_or_else(String::new, ToString::to_string)
+        String::from_utf8_lossy(&self.buffer).into_owned()
     }
+}
+
+/// Returns true if the byte is a UTF-8 continuation byte (10xxxxxx pattern).
+const fn is_utf8_continuation_byte(byte: u8) -> bool {
+    // Continuation bytes have the pattern 10xxxxxx
+    // This means the top two bits are 10, i.e., byte & 0xC0 == 0x80
+    (byte & 0xC0) == 0x80
 }
 
 /// Result of reading a line from the console.
@@ -88,6 +120,12 @@ pub trait ConsoleIo {
 
     /// Writes a string to output.
     fn write_str(&mut self, text: &str);
+
+    /// Writes a single byte to output.
+    ///
+    /// This is used for echoing raw bytes, including UTF-8 lead and continuation bytes.
+    /// The terminal accumulates bytes and renders complete UTF-8 characters.
+    fn write_byte(&mut self, byte: u8);
 
     /// Writes a formatted string to output.
     fn write_fmt(&mut self, args: core::fmt::Arguments<'_>) {
@@ -115,6 +153,10 @@ impl ConsoleIo for UartConsole {
 
     fn write_str(&mut self, text: &str) {
         crate::print!("{text}");
+    }
+
+    fn write_byte(&mut self, byte: u8) {
+        crate::platform::arch::write_byte(byte);
     }
 }
 
@@ -205,15 +247,24 @@ impl<I: ConsoleIo> InteractiveRepl<I> {
                 }
                 BACKSPACE | CTRL_H => {
                     if buffer.backspace() {
+                        // For multi-byte UTF-8, we need to erase the visual character
+                        // This sends: move cursor back, write space, move cursor back
                         self.write("\x08 \x08");
                     }
                 }
-                ch_byte if is_printable_ascii(ch_byte) => {
-                    if buffer.push(ch_byte) {
-                        let ch = char::from(ch_byte);
-                        self.io.write_fmt(format_args!("{ch}"));
+                // Accept all printable bytes (both ASCII and UTF-8)
+                // Control characters (0x00-0x1F except handled above, and 0x7F) are ignored
+                byte if is_printable_byte(byte) => {
+                    if buffer.push(byte) {
+                        // Echo the raw byte to the terminal.
+                        // For ASCII bytes (0x20-0x7E), this displays the character.
+                        // For UTF-8 multi-byte sequences (lead and continuation bytes >= 0x80),
+                        // the terminal accumulates bytes and renders complete characters.
+                        // We write using a single-byte slice to preserve the exact byte value.
+                        self.io.write_byte(byte);
                     }
                 }
+                // Ignore control characters
                 _ => {}
             }
         }
@@ -346,8 +397,18 @@ impl<I: ConsoleIo> InteractiveRepl<I> {
     }
 }
 
-const fn is_printable_ascii(byte: u8) -> bool {
-    byte >= 0x20 && byte < 0x7F
+/// Returns true if the byte is a printable character or part of a UTF-8 sequence.
+///
+/// Accepts:
+/// - ASCII printable characters (0x20-0x7E)
+/// - All UTF-8 bytes (0x80-0xFF) - lead bytes and continuation bytes
+///
+/// Rejects:
+/// - ASCII control characters (0x00-0x1F and 0x7F)
+const fn is_printable_byte(byte: u8) -> bool {
+    // ASCII printable range (space through tilde)
+    // OR any byte >= 0x80 (UTF-8 multi-byte sequences)
+    (byte >= 0x20 && byte < 0x7F) || byte >= 0x80
 }
 
 const fn needs_more_input(kind: &ParseErrorKind) -> bool {

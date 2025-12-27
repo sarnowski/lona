@@ -352,29 +352,32 @@ lona/
 │   ├── lonala-compiler/            # (existing)
 │   └── lona-runtime/               # (existing, uses lonala-human)
 │
-├── tree-sitter-lona/               # Tree-sitter grammar (renamed)
-│   ├── grammar.js
-│   ├── package.json
-│   └── queries/
-│       ├── highlights.scm
-│       └── ...
-│
-└── editors/
-    ├── vscode/
+└── tools/                          # Developer tooling (not part of OS)
+    ├── lona_dev_repl/              # MCP server for REPL access
+    ├── pygments-lonala/            # Pygments syntax highlighter
+    │
+    ├── tree-sitter-lonala/         # Tree-sitter grammar
+    │   ├── grammar.js
     │   ├── package.json
-    │   ├── language-configuration.json
-    │   └── src/extension.ts
+    │   └── queries/
+    │       └── highlights.scm
     │
-    ├── zed/
-    │   ├── extension.toml
-    │   ├── Cargo.toml
-    │   ├── src/lib.rs
-    │   └── languages/lona/
-    │       └── config.toml
-    │
-    └── neovim/
-        ├── lua/lona/
-        └── queries/lona/
+    └── editors/                    # Editor extensions
+        ├── vscode/
+        │   ├── package.json
+        │   ├── language-configuration.json
+        │   └── src/extension.ts
+        │
+        ├── zed/
+        │   ├── extension.toml
+        │   ├── Cargo.toml
+        │   ├── src/lib.rs
+        │   └── languages/lona/
+        │       └── config.toml
+        │
+        └── neovim/
+            ├── lua/lona/
+            └── queries/lona/
 ```
 
 ### 2.6 Component Responsibilities
@@ -387,7 +390,7 @@ lona/
 | `lonala-human` | **All human-readable text generation** (byte offsets) | Yes |
 | `lonala-lsp` | LSP protocol, document management, **UTF-16 conversion** | No |
 | `lona-runtime` | REPL, uses lonala-human for output | Yes |
-| `tree-sitter-lona` | Grammar for Zed/Neovim highlighting | N/A |
+| `tree-sitter-lonala` | Grammar for Zed/Neovim highlighting | N/A |
 
 **Note on UTF-16**: The LSP protocol requires UTF-16 code units for column positions. This conversion is handled entirely in `lonala-lsp/src/convert.rs`, keeping the core crates (`lonala-human`, `lona-core`) free of UTF-16 concerns and `no_std` compatible.
 
@@ -443,8 +446,8 @@ lonala-parser = { path = "../lonala-parser" }
 | # | Milestone | Deliverables | Dependencies |
 |---|-----------|--------------|--------------|
 | **0** | **Foundation** ✓ | Source tracking, Diagnostic trait, lonala-human crate | None |
-| 1 | LSP + Semantic Tokens | Working LSP with syntax highlighting | M0 |
-| 2 | Tree-sitter Grammar | Syntax highlighting for Zed/Neovim | None |
+| **1** | **LSP + Semantic Tokens** ✓ | Working LSP with syntax highlighting | M0 |
+| **2** | **Tree-sitter Grammar** ✓ | Syntax highlighting for Zed/Neovim | None |
 | 3 | Zed Extension | Full Zed integration | M1, M2 |
 | 4 | VS Code Extension | Full VS Code integration | M1 |
 | 5 | Neovim/Vim Support | Neovim and Vim integration | M1, M2 |
@@ -460,13 +463,13 @@ lonala-parser = { path = "../lonala-parser" }
 ```
 Timeline (suggested order):
 
-M0 (Foundation)
+M0 (Foundation) ✓
  │
- ├──► M1 (LSP) ──► M6 ──► M7 ──► M8 ──► M9 ──► M10 ──► M11
+ ├──► M1 (LSP) ✓ ──► M6 ──► M7 ──► M8 ──► M9 ──► M10 ──► M11
  │         │
  │         └──► M4 (VS Code)
  │
- └──► M2 (Tree-sitter) ──► M3 (Zed)
+ └──► M2 (Tree-sitter) ✓ ──► M3 (Zed)
                 │
                 └──► M5 (Neovim)
 ```
@@ -1713,18 +1716,18 @@ lsp-clean:  ## Clean LSP build artifacts
 
 **Goal**: Create a Tree-sitter grammar for Lonala.
 
-**Note**: File extension is `.lona`, grammar name is `lona`.
+**Note**: File extension is `.lona`, grammar name is `lonala`.
 
 ### 7.1 Tasks
 
 #### Task 2.1: Initialize Tree-sitter Project
 
-**Directory**: `tree-sitter-lona/`
+**Directory**: `tools/tree-sitter-lonala/`
 
 **package.json**:
 ```json
 {
-  "name": "tree-sitter-lona",
+  "name": "tree-sitter-lonala",
   "version": "0.1.0",
   "description": "Tree-sitter grammar for Lonala (Lona programming language)",
   "main": "bindings/node",
@@ -1743,24 +1746,26 @@ lsp-clean:  ## Clean LSP build artifacts
 
 #### Task 2.2: Implement Core Grammar
 
-**File**: `tree-sitter-lona/grammar.js`
+**File**: `tools/tree-sitter-lonala/grammar.js`
 
-(Same as before, but with `name: 'lona'`)
+(Grammar with `name: 'lonala'`)
 
 ---
 
 #### Task 2.3-2.6: Create Queries and Tests
 
-(Same as before, but using `.lona` extension and `lona` name)
+(Same as before, but using `.lona` extension and `lonala` grammar name)
 
 ---
 
 ### 7.2 Milestone 2 Deliverables
 
-- [ ] Complete Tree-sitter grammar for Lonala
-- [ ] Highlight queries
-- [ ] Test corpus
-- [ ] Makefile targets
+- [x] Complete Tree-sitter grammar for Lonala
+- [x] Highlight queries
+- [x] Test corpus
+- [x] Makefile targets
+
+**Milestone 2 is COMPLETE.** Ready for Milestone 3 (Zed Extension) or Milestone 4 (VS Code Extension).
 
 ---
 
@@ -1769,7 +1774,7 @@ lsp-clean:  ## Clean LSP build artifacts
 *The remaining milestones (3-11) follow the same structure as before, with these key differences:*
 
 1. **File extension**: Use `.lona` instead of `.lonala`
-2. **Grammar name**: Use `lona` instead of `lonala`
+2. **Grammar name**: Use `lonala` (the full language name)
 3. **LSP capabilities**: Call `lonala-human` functions for error formatting
 4. **Hover content**: Use `lonala_human::docs::special_form_doc()` for special forms, `:doc` metadata for everything else
 5. **Error formatting**: Use `lonala_human::render()` with `Diagnostic` trait
@@ -1907,7 +1912,7 @@ fn error_message_consistency() {
 |---------|-----------|---------|
 | Source files | `.lona` | `main.lona` |
 | Namespace path | → | `lona/core.lona` → `lona.core` |
-| Tree-sitter | `lona` | `tree-sitter-lona` |
+| Tree-sitter | `lonala` | `tree-sitter-lonala` |
 | Language ID | `lona` | VS Code, Zed, etc. |
 
 ---

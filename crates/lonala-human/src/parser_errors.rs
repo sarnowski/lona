@@ -39,6 +39,9 @@ impl Diagnostic for Error {
             Kind::UnexpectedCharacter(ch) => {
                 format!("unexpected character '{ch}'")
             }
+            Kind::DangerousUnicode(ch) => {
+                format!("dangerous unicode character U+{:04X}", u32::from(ch))
+            }
             Kind::UnterminatedString => String::from("unterminated string literal"),
             Kind::InvalidEscapeSequence(ch) => {
                 format!("invalid escape sequence '\\{ch}'")
@@ -86,6 +89,14 @@ impl Diagnostic for Error {
                         u32::from(ch)
                     )));
                 }
+            }
+            Kind::DangerousUnicode(_ch) => {
+                notes.push(Note::text_static(
+                    "this character is invisible or could be used to hide malicious code",
+                ));
+                notes.push(Note::help_static(
+                    "remove this character from the source code",
+                ));
             }
             Kind::UnterminatedString => {
                 notes.push(Note::text_static(
@@ -155,8 +166,8 @@ impl Diagnostic for Error {
                     "use explicit (fn [...] ...) for nested anonymous functions",
                 ));
             }
-            // No additional notes for these variants (including future ones)
-            Kind::UnexpectedToken { .. } | _ => {}
+            // Other variants don't need additional notes (wildcard covers future variants)
+            Kind::UnexpectedToken { .. } | Kind::InvalidMetadataForm { .. } | _ => {}
         }
 
         notes

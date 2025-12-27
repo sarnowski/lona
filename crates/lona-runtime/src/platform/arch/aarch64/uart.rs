@@ -222,3 +222,17 @@ pub fn print_fmt(args: fmt::Arguments) {
         // Nothing to do - UART errors are silent
     }
 }
+
+/// Writes a single byte to the UART.
+///
+/// Used for echoing raw bytes, including UTF-8 lead and continuation bytes.
+/// The terminal accumulates bytes and renders complete UTF-8 characters.
+#[cfg(not(feature = "integration-test"))]
+#[inline]
+pub fn write_byte(byte: u8) {
+    // SAFETY: Accessing global state in single-threaded context
+    let driver = unsafe { &*UART_DRIVER.inner.get() };
+    if let Some(uart) = driver.as_ref() {
+        uart.write_byte(byte);
+    }
+}

@@ -185,6 +185,12 @@ help: ## Show this help
 	@echo "  lsp             Build LSP release binary"
 	@echo "  lsp-install     Install LSP to ~/.cargo/bin"
 	@echo ""
+	@echo "Tree-sitter targets (runs locally):"
+	@echo "  tree-sitter          Build and test Tree-sitter grammar"
+	@echo "  tree-sitter-generate Generate Tree-sitter parser"
+	@echo "  tree-sitter-test     Run Tree-sitter tests"
+	@echo "  tree-sitter-clean    Clean Tree-sitter build artifacts"
+	@echo ""
 	@echo "Utility targets:"
 	@echo "  docker          Build all Docker images"
 	@echo "  shell-aarch64   Interactive shell (aarch64)"
@@ -204,6 +210,36 @@ lsp: ## Build LSP server (release binary)
 .PHONY: lsp-install
 lsp-install: ## Install LSP to ~/.cargo/bin
 	cargo install --path crates/lonala-lsp
+
+# ==============================================================================
+# Tree-sitter Grammar (runs locally, not in Docker)
+# ==============================================================================
+
+TREE_SITTER_DIR := tools/tree-sitter-lonala
+
+.PHONY: tree-sitter tree-sitter-generate tree-sitter-test tree-sitter-clean
+
+tree-sitter: tree-sitter-generate tree-sitter-test ## Build and test Tree-sitter grammar
+
+tree-sitter-generate: ## Generate Tree-sitter parser
+	@if [ ! -d "$(TREE_SITTER_DIR)/node_modules" ]; then \
+		echo "==> Installing Tree-sitter dependencies..."; \
+		rm -f $(TREE_SITTER_DIR)/binding.gyp; \
+		cd $(TREE_SITTER_DIR) && npm install; \
+	fi
+	@echo "==> Generating Tree-sitter parser..."
+	cd $(TREE_SITTER_DIR) && npm run build
+	@echo ""
+	@echo "Tree-sitter grammar generated successfully"
+
+tree-sitter-test: ## Run Tree-sitter tests
+	@echo "==> Running Tree-sitter tests..."
+	cd $(TREE_SITTER_DIR) && npm run test
+	@echo ""
+	@echo "Tree-sitter tests passed"
+
+tree-sitter-clean: ## Clean Tree-sitter build artifacts
+	rm -rf $(TREE_SITTER_DIR)/node_modules $(TREE_SITTER_DIR)/src $(TREE_SITTER_DIR)/bindings
 
 # ==============================================================================
 # Python Tooling

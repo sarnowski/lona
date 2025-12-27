@@ -139,7 +139,10 @@ impl<'src> Lexer<'src> {
     ///
     /// Records the position before skipping in `trivia_start` for use by
     /// the parser when calculating `full_span`.
-    fn skip_whitespace_and_comments(&mut self) {
+    ///
+    /// Returns `Some(Error)` if a dangerous Unicode character is found in a comment,
+    /// `None` otherwise.
+    fn skip_whitespace_and_comments(&mut self) -> Option<Error> {
         self.trivia_start = self.position;
 
         loop {
@@ -149,8 +152,17 @@ impl<'src> Lexer<'src> {
                     self.advance();
                 }
                 // Comment: ; to end of line
+                // Check for dangerous Unicode inside comments (Trojan Source protection)
                 Some(';') => {
                     while let Some(ch) = self.current_char() {
+                        if is_dangerous_unicode(ch) {
+                            let start = self.position;
+                            self.advance();
+                            return Some(Error::new(
+                                ErrorKind::DangerousUnicode(ch),
+                                self.location_from(start, self.position),
+                            ));
+                        }
                         self.advance();
                         if ch == '\n' {
                             break;
@@ -160,14 +172,27 @@ impl<'src> Lexer<'src> {
                 _ => break,
             }
         }
+        None
     }
 
     /// Produces the next token from the source.
     fn next_token(&mut self) -> Option<Result<Token<'src>, Error>> {
-        self.skip_whitespace_and_comments();
+        // Skip whitespace and comments, checking for dangerous Unicode
+        if let Some(err) = self.skip_whitespace_and_comments() {
+            return Some(Err(err));
+        }
 
         let start = self.position;
         let ch = self.current_char()?;
+
+        // Check for dangerous Unicode characters before processing
+        if is_dangerous_unicode(ch) {
+            self.advance();
+            return Some(Err(Error::new(
+                ErrorKind::DangerousUnicode(ch),
+                self.location_from(start, self.position),
+            )));
+        }
 
         let result = match ch {
             // Delimiters
@@ -412,8 +437,12 @@ impl<'src> Iterator for Lexer<'src> {
 }
 
 /// Returns true if `ch` can start a symbol.
-const fn is_symbol_start(ch: char) -> bool {
-    ch.is_ascii_alphabetic()
+///
+/// Accepts Unicode letters (any script) and specific ASCII punctuation.
+/// This enables identifiers like `café`, `λ`, `日本語`.
+#[inline]
+fn is_symbol_start(ch: char) -> bool {
+    ch.is_alphabetic()
         || matches!(
             ch,
             '_' | '+' | '-' | '*' | '/' | '<' | '>' | '=' | '!' | '?' | '&' | '%' | '.'
@@ -421,8 +450,55 @@ const fn is_symbol_start(ch: char) -> bool {
 }
 
 /// Returns true if `ch` can continue a symbol.
-const fn is_symbol_continue(ch: char) -> bool {
-    is_symbol_start(ch) || ch.is_ascii_digit()
+///
+/// Accepts Unicode letters, Unicode digits, and symbol-start characters.
+#[inline]
+fn is_symbol_continue(ch: char) -> bool {
+    is_symbol_start(ch) || ch.is_numeric()
+}
+
+/// Returns true if `ch` is a dangerous Unicode character that should be rejected.
+///
+/// These characters are either invisible or can be used to disguise malicious code
+/// (e.g., bidirectional text controls for Trojan Source attacks).
+#[inline]
+const fn is_dangerous_unicode(ch: char) -> bool {
+    matches!(
+        ch,
+        // Zero-width characters (invisible)
+        '\u{200B}' // ZERO WIDTH SPACE
+        | '\u{200C}' // ZERO WIDTH NON-JOINER
+        | '\u{200D}' // ZERO WIDTH JOINER
+        | '\u{FEFF}' // BYTE ORDER MARK / ZERO WIDTH NO-BREAK SPACE
+        | '\u{2060}' // WORD JOINER
+
+        // Bidirectional text controls (Trojan Source attack vectors)
+        | '\u{200E}' // LEFT-TO-RIGHT MARK
+        | '\u{200F}' // RIGHT-TO-LEFT MARK
+        | '\u{202A}' // LEFT-TO-RIGHT EMBEDDING
+        | '\u{202B}' // RIGHT-TO-LEFT EMBEDDING
+        | '\u{202C}' // POP DIRECTIONAL FORMATTING
+        | '\u{202D}' // LEFT-TO-RIGHT OVERRIDE
+        | '\u{202E}' // RIGHT-TO-LEFT OVERRIDE
+        | '\u{2066}' // LEFT-TO-RIGHT ISOLATE
+        | '\u{2067}' // RIGHT-TO-LEFT ISOLATE
+        | '\u{2068}' // FIRST STRONG ISOLATE
+        | '\u{2069}' // POP DIRECTIONAL ISOLATE
+
+        // Other invisible/formatting characters
+        | '\u{00AD}' // SOFT HYPHEN
+        | '\u{034F}' // COMBINING GRAPHEME JOINER
+        | '\u{061C}' // ARABIC LETTER MARK
+        | '\u{115F}' // HANGUL CHOSEONG FILLER
+        | '\u{1160}' // HANGUL JUNGSEONG FILLER
+        | '\u{17B4}' // KHMER VOWEL INHERENT AQ
+        | '\u{17B5}' // KHMER VOWEL INHERENT AA
+        | '\u{180E}' // MONGOLIAN VOWEL SEPARATOR
+
+        // Line/paragraph separators (can break visual display)
+        | '\u{2028}' // LINE SEPARATOR
+        | '\u{2029}' // PARAGRAPH SEPARATOR
+    )
 }
 
 /// Tokenizes the entire source into a vector of tokens.

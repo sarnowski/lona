@@ -71,3 +71,12 @@ pub fn read_byte() -> Option<u8> {
 pub fn print_fmt(args: fmt::Arguments) {
     uart::print_fmt(args);
 }
+
+/// Writes a single byte to the UART.
+///
+/// Used for echoing raw bytes, including UTF-8 lead and continuation bytes.
+#[cfg(not(feature = "integration-test"))]
+#[inline]
+pub fn write_byte(byte: u8) {
+    uart::write_byte(byte);
+}

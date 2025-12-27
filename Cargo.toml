@@ -12,7 +12,7 @@ version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 authors = ["Tobias Sarnowski <tobias@sarnowski.cloud>"]
-repository = "https://github.com/sarnowski/lona"
+repository = "https://codeberg.org/sarnowski/lona"
 
 [workspace.lints.rust]
 # Deny all warnings - build fails if any warning occurs
