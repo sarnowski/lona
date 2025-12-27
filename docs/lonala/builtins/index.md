@@ -29,6 +29,7 @@ See [docs/architecture/minimal-rust.md](../../architecture/minimal-rust.md) for 
 | [Binary Operations](binary.md) | Raw byte buffer operations | *(Planned)* |
 | [Symbols](symbols.md) | `symbol`, `gensym` | Implemented |
 | [Var Operations](#var-operations) | `var-get`, `var-set!` | Implemented |
+| [Namespace Operations](#namespace-operations) | `ns-publics` | Implemented |
 | [Metadata](metadata.md) | `meta`, `with-meta`, `vary-meta` | Partial (`meta`/`with-meta` done) |
 | [Sorted Collections](sorted-collections.md) | `sorted-map`, `sorted-set` | *(Planned)* |
 | [Hardware Access](hardware.md) | MMIO, DMA, IRQ primitives | *(Planned)* |
@@ -77,6 +78,42 @@ y                   ; => 100
 ```
 
 **Note**: This mutates the root binding directly. Dynamic var semantics (requiring `:dynamic` metadata for safe process-local binding) will be enforced when binding stacks are implemented.
+
+---
+
+## Namespace Operations
+
+Functions for querying namespace contents. See also [Namespaces](../namespaces.md) for the full namespace system documentation.
+
+### `ns-publics`
+
+Returns a map of public vars in a namespace.
+
+**Signature**: `(ns-publics ns-symbol) → {symbol var, ...}`
+
+```clojure
+(ns my.app)
+(def foo 1)
+(def bar 2)
+(def ^:private internal 3)
+
+(ns-publics 'my.app)
+; => {foo #'my.app/foo, bar #'my.app/bar}
+; Note: internal is excluded (private)
+```
+
+**Returns**: A map where keys are symbols and values are vars. Private vars (those with `^:private` metadata) are excluded.
+
+**Returns nil**: If the namespace is not found.
+
+```clojure
+(ns-publics 'nonexistent.ns)  ; => nil
+```
+
+**Use cases**:
+- Introspection and debugging
+- Building REPL completion
+- Implementing `:use` semantics (refer all public vars)
 
 ---
 

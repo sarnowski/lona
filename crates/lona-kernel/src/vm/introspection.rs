@@ -176,6 +176,9 @@ fn expand_once_internal(
     let mut vm = Vm::new(interner);
     register_collection_primitives(&mut vm, &collection_symbols);
 
+    // Propagate lona.core vars to all namespaces (auto-refer)
+    vm.namespace_registry_mut().refer_core_to_all();
+
     // Build effective arguments (handling rest parameters)
     let effective_args = build_effective_macro_args(&macro_args, body.arity, body.has_rest);
 
@@ -315,7 +318,8 @@ pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
         vm.register_native(*sym, *func);
-        vm.set_global(*sym, Value::NativeFunction(*sym));
+        // Register in lona.core namespace for auto-refer
+        vm.register_core_primitive(*sym, Value::NativeFunction(*sym));
     }
 }
 

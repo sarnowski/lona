@@ -14,6 +14,7 @@ use lona_core::ratio::Ratio;
 use lona_core::source;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
+use lona_kernel::namespace::Registry as NamespaceRegistry;
 use lona_kernel::vm::{Globals, MacroExpander, Vm};
 use lonala_compiler::MacroRegistry;
 
@@ -27,11 +28,13 @@ const TEST_SOURCE_ID: source::Id = source::Id::new(0_u32);
 /// - Macro definitions persist between evaluations
 /// - Current namespace persists between evaluations
 /// - Collection primitives are pre-registered
+/// - Namespace primitives are pre-registered
 pub struct SpecTestContext {
     interner: Interner,
     globals: Globals,
     macros: MacroRegistry,
     current_namespace: lona_core::symbol::Id,
+    namespace_registry: NamespaceRegistry,
 }
 
 impl SpecTestContext {
@@ -39,11 +42,13 @@ impl SpecTestContext {
     pub fn new() -> Self {
         let interner = Interner::new();
         let default_ns = interner.intern("user");
+        let namespace_registry = NamespaceRegistry::new(&interner);
         Self {
             interner,
             globals: Globals::new(),
             macros: MacroRegistry::new(),
             current_namespace: default_ns,
+            namespace_registry,
         }
     }
 
@@ -73,10 +78,14 @@ impl SpecTestContext {
         let metadata_symbols = lona_kernel::vm::intern_metadata_primitives(&self.interner);
         let symbol_symbols = lona_kernel::vm::intern_symbol_primitives(&self.interner);
         let var_symbols = lona_kernel::vm::intern_var_primitives(&self.interner);
+        let namespace_symbols = lona_kernel::vm::intern_namespace_primitives(&self.interner);
 
         // Create VM and restore persistent globals
         let mut vm = Vm::new(&self.interner);
         *vm.globals_mut() = self.globals.clone();
+
+        // Restore namespace registry
+        *vm.namespace_registry_mut() = self.namespace_registry.clone();
 
         // Register collection primitives
         lona_kernel::vm::collections::register_primitives(&mut vm, &collection_symbols);
@@ -99,9 +108,15 @@ impl SpecTestContext {
         // Register var primitives (var-get, var-set!)
         lona_kernel::vm::register_var_primitives(&mut vm, &var_symbols);
 
+        // Register namespace primitives (require, namespace-add-alias, etc.)
+        lona_kernel::vm::register_namespace_primitives(&mut vm, &namespace_symbols);
+
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
         lona_kernel::vm::introspection::register_primitives(&mut vm, &introspection_symbols);
+
+        // Propagate lona.core vars to all namespaces (auto-refer)
+        vm.namespace_registry_mut().refer_core_to_all();
 
         // Execute
         let result = vm
@@ -111,6 +126,7 @@ impl SpecTestContext {
         // Save globals and namespace back
         self.globals = vm.globals().clone();
         self.current_namespace = vm.current_namespace();
+        self.namespace_registry = vm.namespace_registry().clone();
 
         Ok(result)
     }

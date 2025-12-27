@@ -49,11 +49,12 @@ pub use interpreter::Vm;
 pub use macro_expander::Expander as MacroExpander;
 pub use natives::{
     NativeContext, NativeError, NativeFn, Registry as NativeRegistry, intern_arithmetic_primitives,
-    intern_comparison_primitives, intern_metadata_primitives, intern_symbol_primitives,
-    intern_type_predicates, intern_var_primitives, lookup_arithmetic_primitives,
-    lookup_comparison_primitives, lookup_metadata_primitives, lookup_symbol_primitives,
-    lookup_type_predicates, lookup_var_primitives, register_arithmetic_primitives,
-    register_comparison_primitives, register_metadata_primitives, register_symbol_primitives,
+    intern_comparison_primitives, intern_metadata_primitives, intern_namespace_primitives,
+    intern_symbol_primitives, intern_type_predicates, intern_var_primitives,
+    lookup_arithmetic_primitives, lookup_comparison_primitives, lookup_metadata_primitives,
+    lookup_namespace_primitives, lookup_symbol_primitives, lookup_type_predicates,
+    lookup_var_primitives, register_arithmetic_primitives, register_comparison_primitives,
+    register_metadata_primitives, register_namespace_primitives, register_symbol_primitives,
     register_type_predicates, register_var_primitives,
 };
 

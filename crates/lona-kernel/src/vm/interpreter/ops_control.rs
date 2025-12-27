@@ -362,7 +362,19 @@ impl Vm<'_> {
         argc: u8,
         frame: &Frame<'_>,
     ) -> Result<(), Error> {
-        // Look up native function
+        // Collect arguments from R[base+1] .. R[base+argc]
+        let arguments = self.collect_args(base, argc, frame)?;
+
+        // Check for VM-native function first (these need mutable VM access)
+        if let Some(vm_native_fn) = self.mut_natives.get(symbol) {
+            // Call VM-native function with mutable VM access
+            let result = vm_native_fn(self, &arguments)?;
+            // Store result in R[base]
+            self.set_register(base, result, frame)?;
+            return Ok(());
+        }
+
+        // Look up regular native function
         let native_fn = self.natives.get(symbol).ok_or_else(|| {
             Error::new(
                 ErrorKind::UndefinedFunction {
@@ -372,9 +384,6 @@ impl Vm<'_> {
                 frame.current_location(),
             )
         })?;
-
-        // Collect arguments from R[base+1] .. R[base+argc]
-        let arguments = self.collect_args(base, argc, frame)?;
 
         // Create native context with interner and macro registry
         let ctx = NativeContext::new(self.interner, self.macro_registry);

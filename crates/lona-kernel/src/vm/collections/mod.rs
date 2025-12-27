@@ -94,6 +94,12 @@ pub fn lookup_primitives(interner: &symbol::Interner) -> Option<alloc::vec::Vec<
 /// Registers all collection primitives with the VM using pre-interned symbols.
 ///
 /// `symbols` must be the result of calling `intern_primitives` with the same interner.
+///
+/// Primitives are registered in the `lona.core` namespace and in the native
+/// function registry. Call [`vm.namespace_registry_mut().refer_core_to_all()`]
+/// after registering all primitives to propagate them to other namespaces.
+///
+/// [`vm.namespace_registry_mut().refer_core_to_all()`]: crate::namespace::Registry::refer_core_to_all
 #[inline]
 pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
     let funcs: &[super::natives::NativeFn] = &[
@@ -116,6 +122,6 @@ pub fn register_primitives(vm: &mut Vm<'_>, symbols: &[symbol::Id]) {
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
         vm.register_native(*sym, *func);
-        vm.set_global(*sym, Value::NativeFunction(*sym));
+        vm.register_core_primitive(*sym, Value::NativeFunction(*sym));
     }
 }

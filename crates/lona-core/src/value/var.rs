@@ -139,6 +139,32 @@ impl Var {
         Rc::ptr_eq(&self.0, &other.0)
     }
 
+    /// Returns true if this Var is private.
+    ///
+    /// A Var is private if its metadata contains `{:private true}`.
+    /// Private vars are not referred when using `:use` or auto-refer.
+    ///
+    /// This requires the interner to resolve the `:private` keyword.
+    /// If the interner doesn't have `:private` interned, returns `false`.
+    #[inline]
+    #[must_use]
+    pub fn is_private(&self, interner: &crate::symbol::Interner) -> bool {
+        let data = self.0.borrow();
+        let Some(ref meta) = data.meta else {
+            return false;
+        };
+        // Try to get the :private keyword ID. If not interned, it can't be in metadata.
+        let Some(private_id) = interner.get("private") else {
+            return false;
+        };
+        // Check for :private key with truthy value
+        let private_key = Value::Keyword(private_id);
+        if let Some(val) = meta.get(&private_key) {
+            return val.is_truthy();
+        }
+        false
+    }
+
     /// Returns the pointer to the shared `VarData` for identity-based ordering.
     ///
     /// This is used by `ValueKey`'s `Ord` implementation to ensure consistency
@@ -345,5 +371,47 @@ mod tests {
 
         assert_eq!(var_clone.namespace(), Some(ns));
         assert_eq!(var_clone.name(), name);
+    }
+
+    #[test]
+    fn var_is_private_returns_false_without_metadata() {
+        let interner = Interner::new();
+        let name = interner.intern("x");
+        let var = Var::new(name, None, Value::Nil, None);
+
+        assert!(!var.is_private(&interner));
+    }
+
+    #[test]
+    fn var_is_private_returns_false_without_private_key() {
+        let interner = Interner::new();
+        let name = interner.intern("x");
+        let doc_id = interner.intern("doc");
+        let meta = Map::empty().assoc(Value::Keyword(doc_id), Value::from("a docstring"));
+        let var = Var::new(name, None, Value::Nil, Some(meta));
+
+        assert!(!var.is_private(&interner));
+    }
+
+    #[test]
+    fn var_is_private_returns_true_with_private_true() {
+        let interner = Interner::new();
+        let name = interner.intern("x");
+        let private_id = interner.intern("private");
+        let meta = Map::empty().assoc(Value::Keyword(private_id), Value::Bool(true));
+        let var = Var::new(name, None, Value::Nil, Some(meta));
+
+        assert!(var.is_private(&interner));
+    }
+
+    #[test]
+    fn var_is_private_returns_false_with_private_false() {
+        let interner = Interner::new();
+        let name = interner.intern("x");
+        let private_id = interner.intern("private");
+        let meta = Map::empty().assoc(Value::Keyword(private_id), Value::Bool(false));
+        let var = Var::new(name, None, Value::Nil, Some(meta));
+
+        assert!(!var.is_private(&interner));
     }
 }

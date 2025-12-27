@@ -16,6 +16,7 @@
 mod arithmetic;
 mod comparison;
 mod metadata;
+mod namespace;
 mod predicates;
 mod symbols;
 mod vars;
@@ -31,6 +32,11 @@ pub use comparison::{
 pub use metadata::{
     METADATA_PRIMITIVE_NAMES, intern_metadata_primitives, lookup_metadata_primitives, native_meta,
     native_with_meta, register_metadata_primitives,
+};
+pub use namespace::{
+    NAMESPACE_PRIMITIVE_NAMES, intern_namespace_primitives, lookup_namespace_primitives,
+    native_namespace_add_alias, native_namespace_add_refer, native_ns_publics, native_require,
+    register_namespace_primitives,
 };
 pub use predicates::{
     TYPE_PREDICATE_NAMES, intern_type_predicates, lookup_type_predicates, native_keyword_p,
@@ -103,6 +109,23 @@ impl<'vm> NativeContext<'vm> {
 ///
 /// The function result or an error.
 pub type NativeFn = fn(args: &[Value], ctx: &NativeContext<'_>) -> Result<Value, NativeError>;
+
+/// Signature for VM-native functions that need mutable VM access.
+///
+/// Unlike [`NativeFn`], VM-native functions receive mutable access to the VM
+/// itself, allowing them to modify VM state like the namespace registry.
+/// These are used for primitives like `require`, `namespace-add-alias`, etc.
+///
+/// # Arguments
+///
+/// * `vm` - Mutable reference to the virtual machine
+/// * `args` - Slice of argument values passed to the function
+///
+/// # Returns
+///
+/// The function result or a VM error.
+pub type VmNativeFn =
+    fn(vm: &mut super::interpreter::Vm<'_>, args: &[Value]) -> Result<Value, super::Error>;
 
 /// Errors that can occur in native functions.
 ///
@@ -202,6 +225,66 @@ impl Registry {
 }
 
 impl Default for Registry {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Registry mapping symbol IDs to VM-native function implementations.
+///
+/// Unlike [`Registry`], this stores functions that need mutable VM access.
+/// Used for primitives like `require`, `namespace-add-alias`, etc.
+#[non_exhaustive]
+pub struct VmNativeRegistry {
+    /// Map from symbol ID to VM-native function.
+    functions: BTreeMap<symbol::Id, VmNativeFn>,
+}
+
+impl VmNativeRegistry {
+    /// Creates a new empty VM-native function registry.
+    #[inline]
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            functions: BTreeMap::new(),
+        }
+    }
+
+    /// Registers a VM-native function for a symbol.
+    ///
+    /// If a function was already registered for this symbol, it is replaced.
+    #[inline]
+    pub fn register(&mut self, symbol: symbol::Id, func: VmNativeFn) {
+        let _previous = self.functions.insert(symbol, func);
+    }
+
+    /// Looks up a VM-native function by symbol ID.
+    ///
+    /// Returns `Some(func)` if a VM-native function is registered for the symbol,
+    /// `None` otherwise.
+    #[inline]
+    #[must_use]
+    pub fn get(&self, symbol: symbol::Id) -> Option<VmNativeFn> {
+        self.functions.get(&symbol).copied()
+    }
+
+    /// Returns the number of registered VM-native functions.
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.functions.len()
+    }
+
+    /// Returns `true` if no VM-native functions are registered.
+    #[inline]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.functions.is_empty()
+    }
+}
+
+impl Default for VmNativeRegistry {
     #[inline]
     fn default() -> Self {
         Self::new()

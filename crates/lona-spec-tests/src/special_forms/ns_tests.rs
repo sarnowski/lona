@@ -303,14 +303,17 @@ fn test_ns_require_vector_needs_ns() {
 }
 
 // ============================================================================
-// :use clause (marks for future loading)
+// :use clause (refers all public vars from namespace)
 // ============================================================================
 
-/// :use clause is accepted (actual loading deferred to Task 1.3.4).
+/// :use clause refers all public vars from namespace.
 #[test]
 fn test_ns_use_clause_accepted() {
     let mut ctx = SpecTestContext::new();
-    // This should compile without error, even though loading is deferred
+    // Define vars in source namespace
+    let _res = ctx.eval("(ns bar) (def x 1) (def y 2)").unwrap();
+
+    // Use :use to refer all public vars
     ctx.assert_symbol_eq(
         "(ns foo (:use bar))",
         "foo",
@@ -322,6 +325,11 @@ fn test_ns_use_clause_accepted() {
 #[test]
 fn test_ns_use_multiple() {
     let mut ctx = SpecTestContext::new();
+    // Define vars in source namespaces
+    let _res = ctx.eval("(ns bar) (def a 1)").unwrap();
+    let _res = ctx.eval("(ns baz) (def b 2)").unwrap();
+    let _res = ctx.eval("(ns qux) (def c 3)").unwrap();
+
     ctx.assert_symbol_eq(
         "(ns foo (:use bar baz qux))",
         "foo",
@@ -373,5 +381,109 @@ fn test_var_resolves_refer() {
         result.is_ok(),
         "[Spec 6.X var] #' should resolve refers: {:?}",
         result.err()
+    );
+}
+
+// ============================================================================
+// Direct primitive tests
+// ============================================================================
+
+/// require returns nil for already-loaded namespaces.
+#[test]
+fn test_require_returns_nil_for_loaded() {
+    let mut ctx = SpecTestContext::new();
+    // user and lona.core are bootstrapped
+    ctx.assert_nil(
+        "(require 'user)",
+        &spec_ref("6.X", "require", "returns nil for loaded namespace"),
+    );
+    ctx.assert_nil(
+        "(require 'lona.core)",
+        &spec_ref("6.X", "require", "returns nil for lona.core"),
+    );
+}
+
+/// namespace-add-alias registers an alias in current namespace (runtime effect).
+/// Note: The alias is registered at runtime in the namespace registry, but
+/// alias resolution in the compiler happens at compile-time. This test verifies
+/// the primitive works without compile-time errors; actual alias usage requires
+/// the compiler to know about the alias (via ns form compilation).
+#[test]
+fn test_namespace_add_alias_primitive() {
+    let mut ctx = SpecTestContext::new();
+    // Define a var in source namespace
+    let _res = ctx.eval("(ns source.ns) (def val 42)").unwrap();
+
+    // Call the primitive - it should not error
+    let result = ctx.eval("(do (ns my.ns) (namespace-add-alias 'src 'source.ns) nil)");
+    assert!(
+        result.is_ok(),
+        "[Spec 6.X namespace-add-alias] primitive should not error: {:?}",
+        result.err()
+    );
+}
+
+/// namespace-add-refer imports a var into current namespace (runtime effect).
+/// Note: The refer is registered at runtime in the namespace registry, but
+/// refer resolution in the compiler happens at compile-time. This test verifies
+/// the primitive works without compile-time errors; actual refer usage requires
+/// the compiler to know about the refer (via ns form compilation).
+#[test]
+fn test_namespace_add_refer_primitive() {
+    let mut ctx = SpecTestContext::new();
+    // Define a var in source namespace
+    let _res = ctx.eval("(ns source.ns) (def imported 100)").unwrap();
+
+    // Call the primitive - it should not error
+    let result =
+        ctx.eval("(do (ns my.ns) (namespace-add-refer 'imported #'source.ns/imported) nil)");
+    assert!(
+        result.is_ok(),
+        "[Spec 6.X namespace-add-refer] primitive should not error: {:?}",
+        result.err()
+    );
+}
+
+// ============================================================================
+// Namespace persistence tests
+// ============================================================================
+
+/// Namespace registry persists across evals in the same context.
+#[test]
+fn test_namespace_persistence_across_evals() {
+    let mut ctx = SpecTestContext::new();
+
+    // Create namespace and define var
+    let _res = ctx.eval("(ns persistent.ns)").unwrap();
+    let _res = ctx.eval("(def persist-val 999)").unwrap();
+
+    // Switch to different namespace
+    let _res = ctx.eval("(ns other.ns)").unwrap();
+
+    // Switch back and verify value is still there
+    let _res = ctx.eval("(ns persistent.ns)").unwrap();
+    ctx.assert_int(
+        "persist-val",
+        999,
+        &spec_ref("6.X", "ns", "namespace persists across evals"),
+    );
+}
+
+/// Aliases work within the same compilation unit.
+/// Note: Aliases are resolved at compile-time, so they work within a single
+/// compilation (same `do` block or same ns form). Cross-eval alias usage
+/// requires the compiler to re-learn the aliases on each eval.
+#[test]
+fn test_alias_works_in_same_compilation() {
+    let mut ctx = SpecTestContext::new();
+
+    // Create source namespace with var
+    let _res = ctx.eval("(ns source.ns) (def x 42)").unwrap();
+
+    // Create namespace with alias and use it in same compilation
+    ctx.assert_int(
+        "(do (ns my.ns (:require [source.ns :as s])) s/x)",
+        42,
+        &spec_ref("6.X", "ns", "alias works in same compilation"),
     );
 }

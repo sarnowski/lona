@@ -24,8 +24,12 @@
 //! to shadow imported names.
 
 #[cfg(feature = "alloc")]
+mod loader;
+#[cfg(feature = "alloc")]
 mod registry;
 
+#[cfg(feature = "alloc")]
+pub use loader::{MemorySourceLoader, SourceLoader};
 #[cfg(feature = "alloc")]
 pub use registry::Registry;
 
@@ -42,6 +46,7 @@ use lona_core::value::{Value, Var};
 /// Each namespace has a unique name (e.g., `lona.core`, `user`) and
 /// contains a set of Vars that can be looked up by symbol.
 #[cfg(feature = "alloc")]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct Namespace {
     /// Namespace name (e.g., symbol for "lona.core").
@@ -148,6 +153,16 @@ impl Namespace {
     #[inline]
     pub fn add_refer(&mut self, sym: symbol::Id, var: Var) {
         let _previous = self.refers.insert(sym, var);
+    }
+
+    /// Gets a reference to a referred Var by symbol, if it exists.
+    ///
+    /// This is for introspection and var lookup; it returns the Var itself
+    /// rather than its value. Only checks refers, not mappings.
+    #[inline]
+    #[must_use]
+    pub fn get_refer(&self, sym: symbol::Id) -> Option<&Var> {
+        self.refers.get(&sym)
     }
 
     /// Returns an iterator over all mappings (symbol → Var).

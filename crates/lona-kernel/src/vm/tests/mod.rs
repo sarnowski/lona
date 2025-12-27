@@ -13,6 +13,7 @@ mod call_tests;
 mod comparison_tests;
 mod control_flow_tests;
 mod literal_tests;
+mod namespace_tests;
 mod pattern;
 
 /// Creates a VM with a fresh interner for testing.

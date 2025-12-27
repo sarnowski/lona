@@ -17,6 +17,7 @@ use lona_core::symbol::Interner;
 use lona_kernel::vm::{Error, ErrorKind as Kind, NativeError};
 
 use crate::diagnostic::{Diagnostic, Note, Severity};
+use crate::namespace_errors::{add_namespace_and_case_notes, format_compile_error};
 
 impl Diagnostic for Error {
     #[inline]
@@ -109,6 +110,25 @@ impl Diagnostic for Error {
                     value_type.name()
                 )
             }
+            Kind::CircularDependency {
+                namespace,
+                ref stack,
+            } => {
+                let ns_name = interner.resolve(namespace);
+                let chain: Vec<_> = stack.iter().map(|ns| interner.resolve(*ns)).collect();
+                format!(
+                    "circular dependency: '{ns_name}' is already being loaded (dependency chain: {})",
+                    chain.join(" -> ")
+                )
+            }
+            Kind::NamespaceNotFound { namespace } => {
+                let ns_name = interner.resolve(namespace);
+                format!("namespace '{ns_name}' not found")
+            }
+            Kind::NoSourceLoader => {
+                String::from("no source loader configured for namespace loading")
+            }
+            Kind::CompileError { ref message } => format_compile_error(message),
             // Non-exhaustive pattern: future variants
             _ => String::from("runtime error"),
         }
@@ -192,10 +212,11 @@ impl Diagnostic for Error {
                     "this function accepts {min} to {max} arguments"
                 )));
             }
-            Kind::NoMatchingCase { .. } => {
-                notes.push(Note::help_static(
-                    "add an :else clause to handle unmatched values",
-                ));
+            Kind::NoMatchingCase { .. }
+            | Kind::CircularDependency { .. }
+            | Kind::NamespaceNotFound { .. }
+            | Kind::NoSourceLoader => {
+                add_namespace_and_case_notes(&mut notes, &self.kind);
             }
             // No extra notes for: suggestion-less undefined symbols, operand-less type errors,
             // exact arity (message says the count), and future variants
@@ -222,9 +243,9 @@ impl Diagnostic for Error {
 fn format_native_error(error: &NativeError) -> String {
     match *error {
         NativeError::ArityMismatch { expected, got, .. } => {
-            let expected_str = format_arity(expected);
             format!(
-                "native function called with wrong number of arguments: expected {expected_str}, got {got}"
+                "native function called with wrong number of arguments: expected {}, got {got}",
+                format_arity(expected)
             )
         }
         NativeError::TypeError {
@@ -233,9 +254,9 @@ fn format_native_error(error: &NativeError) -> String {
             arg_index,
         } => {
             let ordinal = match arg_index {
-                0_u8 => "first",
-                1_u8 => "second",
-                2_u8 => "third",
+                0 => "first",
+                1 => "second",
+                2 => "third",
                 _ => "an",
             };
             format!(
@@ -245,11 +266,8 @@ fn format_native_error(error: &NativeError) -> String {
             )
         }
         NativeError::DivisionByZero => String::from("division by zero"),
-        NativeError::Error(msg) => {
-            format!("native function error: {msg}")
-        }
-        // Non-exhaustive pattern
-        _ => String::from("native function error"),
+        NativeError::Error(msg) => format!("native function error: {msg}"),
+        _ => String::from("native function error"), // Non-exhaustive
     }
 }
 
@@ -273,28 +291,24 @@ fn add_native_notes(notes: &mut Vec<Note>, error: &NativeError) {
             expected: ArityExpectation::AtLeast(min),
             ..
         } => {
-            notes.push(Note::text(format!(
-                "this native function requires at least {min} argument(s)"
-            )));
+            notes.push(Note::text(format!("requires at least {min} argument(s)")));
         }
         NativeError::ArityMismatch {
             expected: ArityExpectation::Range { min, max },
             ..
         } => {
-            notes.push(Note::text(format!(
-                "this native function accepts {min} to {max} arguments"
-            )));
+            notes.push(Note::text(format!("accepts {min} to {max} arguments")));
         }
         NativeError::TypeError { arg_index, .. } => {
-            let position = arg_index.saturating_add(1_u8);
             notes.push(Note::text(format!(
-                "argument {position} has the wrong type"
+                "argument {} has the wrong type",
+                arg_index.saturating_add(1)
             )));
         }
         NativeError::DivisionByZero => {
             notes.push(Note::text_static("division or modulo by zero is undefined"));
         }
-        // No extra note needed for Exact arity, generic errors, and future variants
+        // No extra notes for Exact arity, generic errors, etc.
         NativeError::ArityMismatch {
             expected: ArityExpectation::Exact(_),
             ..

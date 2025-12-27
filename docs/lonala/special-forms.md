@@ -545,9 +545,9 @@ Declares the current namespace and sets up references to other namespaces.
   (:require [other.ns :as o]           ; alias for qualified access
             [other.ns :refer [foo]]))  ; import specific symbols
 
-;; With use clause (loading deferred)
+;; With use clause
 (ns my.app
-  (:use other.ns))
+  (:use other.ns))                     ; refer all public symbols
 ```
 
 ### Supported Clauses
@@ -555,11 +555,11 @@ Declares the current namespace and sets up references to other namespaces.
 | Clause | Purpose |
 |--------|---------|
 | `:require` | Load and reference other namespaces |
-| `:use` | Load and refer all public symbols (loading deferred) |
+| `:use` | Load and refer all public symbols |
 
 ### `:require` Clause
 
-The `:require` clause loads namespaces and optionally creates aliases or refers:
+The `:require` clause loads namespaces at runtime and optionally creates aliases or refers:
 
 ```clojure
 ;; Create alias for qualified access
@@ -574,17 +574,72 @@ foo        ; => other.ns/foo
 (:require [other.ns :as o :refer [foo]])
 foo        ; => other.ns/foo
 o/bar      ; => other.ns/bar
+
+;; Multiple namespaces
+(:require [ns1 :as a]
+          [ns2 :as b :refer [x y]])
 ```
 
-**Note**: Aliases and refers are compile-time constructs. They affect symbol resolution within the same compilation unit.
+**Runtime Loading**: When the `ns` form is evaluated, the runtime:
+
+1. Checks if the namespace is already loaded in the registry
+2. If not loaded, retrieves the source code via the source loader
+3. Compiles and executes the namespace source (which may recursively load dependencies)
+4. Registers aliases and refers in the current namespace
+
+**Idempotent Loading**: A namespace is loaded at most once. Subsequent `:require` calls for an already-loaded namespace simply set up aliases/refers without reloading.
+
+### `:use` Clause
+
+The `:use` clause loads a namespace and refers all its public symbols:
+
+```clojure
+;; Refer all public symbols from other.ns
+(:use other.ns)
+```
+
+This loads the namespace and refers all its public symbols into the current namespace.
+
+**Private Vars**: Vars marked with `^:private` metadata are not referred by `:use`.
+
+```clojure
+;; In other.ns
+(def ^:private internal-fn ...)  ; not referred by :use
+(def public-fn ...)              ; referred by :use
+```
+
+**Caution**: `:use` imports many symbols and can cause name collisions. Prefer `:require` with explicit `:refer` for clarity.
+
+### Circular Dependency Detection
+
+The runtime detects circular dependencies and reports an error:
+
+```clojure
+;; a.clj
+(ns a (:require [b]))
+
+;; b.clj
+(ns b (:require [a]))  ; Error: circular dependency a → b → a
+```
+
+**Error message**: Reports the dependency chain showing how the cycle was formed.
 
 ### Implicit `lona.core` Refer
 
-Every namespace implicitly has access to `lona.core` symbols (like Clojure's `clojure.core`). Currently implemented via VM fallback for primitive lookup.
+Every namespace implicitly refers all public symbols from `lona.core` (like Clojure's `clojure.core`). This provides access to core primitives without explicit requires:
 
 ```clojure
 (ns my.app)
 (first [1 2 3])    ; => 1 (finds lona.core/first)
+```
+
+**Shadowing**: Defining a var with the same name in your namespace shadows the `lona.core` var:
+
+```clojure
+(ns my.app)
+(def first 42)      ; shadows lona.core/first
+first               ; => 42
+lona.core/first     ; => the original first function
 ```
 
 See [Namespaces](namespaces.md) for more details on symbol resolution order.

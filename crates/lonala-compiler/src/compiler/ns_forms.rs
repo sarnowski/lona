@@ -4,15 +4,22 @@
 //! Namespace form compilation.
 //!
 //! This module handles compilation of the `ns` special form and its clauses:
-//! - `(:require [ns :as alias])` - namespace aliasing
-//! - `(:require [ns :refer [symbols]])` - symbol importing
-//! - `(:use ns)` - refer all (loading deferred)
+//! - `(:require [ns :as alias])` - namespace aliasing with runtime loading
+//! - `(:require [ns :refer [symbols]])` - symbol importing with runtime loading
+//! - `(:use ns)` - refer all with runtime loading
+//!
+//! The compiler emits calls to native primitives that perform actual namespace
+//! loading at runtime:
+//! - `require` - loads a namespace if not already loaded
+//! - `namespace-add-alias` - adds an alias to the current namespace
+//! - `namespace-add-refer` - adds a referred var to the current namespace
 
 extern crate alloc;
 
 use lona_core::chunk::Constant;
-use lona_core::opcode::{Opcode, encode_abx};
+use lona_core::opcode::{Opcode, encode_abc, encode_abx};
 use lona_core::span::Span;
+use lona_core::symbol;
 use lonala_parser::ast::{Ast, Spanned};
 
 use super::{Compiler, ExprResult};
@@ -170,12 +177,15 @@ impl Compiler<'_, '_, '_> {
     /// - `[ns.name :refer [sym1 sym2]]`
     /// - `[ns.name :as alias :refer [sym1 sym2]]`
     /// - `ns.name` (simple form - just namespace name, no aliases or refers)
+    ///
+    /// Emits bytecode to load the namespace at runtime.
     fn parse_require_libspec(&mut self, libspec: &Spanned<Ast>) -> Result<(), Error> {
         match libspec.node {
             // Simple form: just a namespace symbol
             Ast::Symbol(ref ns_name) => {
-                // No alias or refers, just record for loading (Task 1.3.4)
-                let _ns_id = self.interner.intern(ns_name);
+                // Emit runtime require call
+                let ns_id = self.interner.intern(ns_name);
+                self.emit_require_call(ns_id, libspec.span)?;
                 Ok(())
             }
             // Vector form: [ns.name :as alias :refer [...]]
@@ -202,6 +212,8 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Parses a vector libspec like `[ns.name :as alias :refer [sym1 sym2]]`.
+    ///
+    /// Emits bytecode to load the namespace and set up aliases/refers at runtime.
     fn parse_require_vector_libspec(
         &mut self,
         elements: &[Spanned<Ast>],
@@ -229,6 +241,9 @@ impl Compiler<'_, '_, '_> {
         };
 
         let ns_id = self.interner.intern(ns_name);
+
+        // Emit runtime require call FIRST to ensure namespace is loaded
+        self.emit_require_call(ns_id, ns_expr.span)?;
 
         // Parse options (key-value pairs after namespace)
         let mut index = 1_usize;
@@ -277,7 +292,12 @@ impl Compiler<'_, '_, '_> {
                     };
 
                     let alias_id = self.interner.intern(alias_name);
+
+                    // Track at compile-time for symbol resolution
                     self.namespace_ctx.add_alias(alias_id, ns_id);
+
+                    // Emit runtime alias call
+                    self.emit_add_alias_call(alias_id, ns_id, alias_expr.span)?;
                 }
                 "refer" => {
                     index = index.saturating_add(1_usize);
@@ -291,7 +311,7 @@ impl Compiler<'_, '_, '_> {
                         )
                     })?;
 
-                    self.parse_refer_list(refer_expr, ns_name)?;
+                    self.parse_refer_list(refer_expr, ns_name, ns_id)?;
                 }
                 other => {
                     return Err(Error::new(
@@ -317,7 +337,14 @@ impl Compiler<'_, '_, '_> {
     }
 
     /// Parses a `:refer` list and adds refers to the namespace context.
-    fn parse_refer_list(&mut self, refer_expr: &Spanned<Ast>, ns_name: &str) -> Result<(), Error> {
+    ///
+    /// Emits bytecode to register each referred symbol at runtime.
+    fn parse_refer_list(
+        &mut self,
+        refer_expr: &Spanned<Ast>,
+        ns_name: &str,
+        _ns_id: symbol::Id,
+    ) -> Result<(), Error> {
         let Ast::Vector(ref syms) = refer_expr.node else {
             return Err(Error::new(
                 ErrorKind::InvalidSpecialForm {
@@ -342,7 +369,12 @@ impl Compiler<'_, '_, '_> {
             let sym_id = self.interner.intern(sym_name);
             let qualified_name = alloc::format!("{ns_name}/{sym_name}");
             let qualified_id = self.interner.intern(&qualified_name);
+
+            // Track at compile-time for symbol resolution
             self.namespace_ctx.add_refer(sym_id, qualified_id);
+
+            // Emit runtime refer call
+            self.emit_add_refer_call(sym_id, qualified_id, sym_expr.span)?;
         }
 
         Ok(())
@@ -352,8 +384,8 @@ impl Compiler<'_, '_, '_> {
     ///
     /// Syntax: `(:use ns.name ns.name2 ...)`
     ///
-    /// Marks namespaces for "refer all" when loaded. Actual loading is
-    /// deferred to Task 1.3.4.
+    /// Loads the namespace and refers all its public symbols.
+    /// `:use` is essentially `(:require [ns :refer :all])`.
     fn parse_use_clause(&mut self, elements: &[Spanned<Ast>], _span: Span) -> Result<(), Error> {
         // Process each namespace after the :use keyword
         for ns_expr in elements.get(1_usize..).unwrap_or(&[]) {
@@ -369,7 +401,161 @@ impl Compiler<'_, '_, '_> {
 
             let ns_id = self.interner.intern(ns_name);
             self.namespace_ctx.add_pending_use(ns_id);
+
+            // Emit runtime require call
+            self.emit_require_call(ns_id, ns_expr.span)?;
+
+            // Emit runtime use-all call to refer all public symbols
+            // This is implemented by calling a special native that iterates
+            // over ns-publics and adds each as a refer
+            self.emit_use_all_call(ns_id, ns_expr.span)?;
         }
+        Ok(())
+    }
+
+    // =========================================================================
+    // Helper Methods for Emitting Runtime Calls
+    // =========================================================================
+
+    /// Emits bytecode to call `(require 'ns)`.
+    ///
+    /// This loads the namespace at runtime if not already loaded.
+    fn emit_require_call(&mut self, ns_id: symbol::Id, span: Span) -> Result<(), Error> {
+        let checkpoint = self.next_register;
+
+        // Load the `require` function (registered as unqualified name)
+        let require_sym = self.interner.intern("require");
+        let require_const = self.add_constant(Constant::Symbol(require_sym), span)?;
+        let func_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobal, func_reg, require_const), span);
+
+        // Load the namespace symbol as argument
+        let ns_const = self.add_constant(Constant::Symbol(ns_id), span)?;
+        let arg_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, arg_reg, ns_const), span);
+
+        // Call require with 1 argument
+        self.chunk
+            .emit(encode_abc(Opcode::Call, func_reg, 1_u8, 1_u8), span);
+
+        // Free registers
+        self.free_registers_to(checkpoint);
+
+        Ok(())
+    }
+
+    /// Emits bytecode to call `(namespace-add-alias 'alias 'ns)`.
+    ///
+    /// This registers an alias in the current namespace at runtime.
+    fn emit_add_alias_call(
+        &mut self,
+        alias_id: symbol::Id,
+        ns_id: symbol::Id,
+        span: Span,
+    ) -> Result<(), Error> {
+        let checkpoint = self.next_register;
+
+        // Load the `namespace-add-alias` function (registered as unqualified name)
+        let func_sym = self.interner.intern("namespace-add-alias");
+        let func_const = self.add_constant(Constant::Symbol(func_sym), span)?;
+        let func_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobal, func_reg, func_const), span);
+
+        // Load the alias symbol as first argument
+        let alias_const = self.add_constant(Constant::Symbol(alias_id), span)?;
+        let alias_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, alias_reg, alias_const), span);
+
+        // Load the namespace symbol as second argument
+        let ns_const = self.add_constant(Constant::Symbol(ns_id), span)?;
+        let ns_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, ns_reg, ns_const), span);
+
+        // Call with 2 arguments
+        self.chunk
+            .emit(encode_abc(Opcode::Call, func_reg, 2_u8, 1_u8), span);
+
+        // Free registers
+        self.free_registers_to(checkpoint);
+
+        Ok(())
+    }
+
+    /// Emits bytecode to call `(namespace-add-refer 'sym #'ns/sym)`.
+    ///
+    /// This refers a var from another namespace into the current namespace.
+    fn emit_add_refer_call(
+        &mut self,
+        sym_id: symbol::Id,
+        qualified_id: symbol::Id,
+        span: Span,
+    ) -> Result<(), Error> {
+        let checkpoint = self.next_register;
+
+        // Load the `namespace-add-refer` function (registered as unqualified name)
+        let func_sym = self.interner.intern("namespace-add-refer");
+        let func_const = self.add_constant(Constant::Symbol(func_sym), span)?;
+        let func_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobal, func_reg, func_const), span);
+
+        // Load the local symbol name as first argument
+        let sym_const = self.add_constant(Constant::Symbol(sym_id), span)?;
+        let sym_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, sym_reg, sym_const), span);
+
+        // Load the var reference (using GetGlobalVar to get the Var, not its value)
+        let qualified_const = self.add_constant(Constant::Symbol(qualified_id), span)?;
+        let var_reg = self.alloc_register(span)?;
+        self.chunk.emit(
+            encode_abx(Opcode::GetGlobalVar, var_reg, qualified_const),
+            span,
+        );
+
+        // Call with 2 arguments
+        self.chunk
+            .emit(encode_abc(Opcode::Call, func_reg, 2_u8, 1_u8), span);
+
+        // Free registers
+        self.free_registers_to(checkpoint);
+
+        Ok(())
+    }
+
+    /// Emits bytecode to implement `:use` (refer all public vars).
+    ///
+    /// This calls `(namespace-use-all 'ns)` which iterates over `ns-publics`
+    /// and adds each public var as a refer. This is a dedicated native to
+    /// avoid needing runtime iteration in bytecode.
+    fn emit_use_all_call(&mut self, ns_id: symbol::Id, span: Span) -> Result<(), Error> {
+        let checkpoint = self.next_register;
+
+        // Load the `namespace-use-all` function (registered as unqualified name)
+        let func_sym = self.interner.intern("namespace-use-all");
+        let func_const = self.add_constant(Constant::Symbol(func_sym), span)?;
+        let func_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::GetGlobal, func_reg, func_const), span);
+
+        // Load the namespace symbol as argument
+        let ns_const = self.add_constant(Constant::Symbol(ns_id), span)?;
+        let arg_reg = self.alloc_register(span)?;
+        self.chunk
+            .emit(encode_abx(Opcode::LoadK, arg_reg, ns_const), span);
+
+        // Call with 1 argument
+        self.chunk
+            .emit(encode_abc(Opcode::Call, func_reg, 1_u8, 1_u8), span);
+
+        // Free registers
+        self.free_registers_to(checkpoint);
+
         Ok(())
     }
 }

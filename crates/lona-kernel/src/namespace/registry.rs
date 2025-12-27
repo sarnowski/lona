@@ -25,7 +25,16 @@ use super::Namespace;
 ///
 /// The registry is the central authority for namespace management. It tracks
 /// all namespaces by name and maintains the "current" namespace context.
+///
+/// # Auto-Refer `lona.core`
+///
+/// Like Clojure, all namespaces automatically refer `lona.core`. This means
+/// that core functions like `first`, `rest`, `+`, etc. are available without
+/// qualification in all namespaces. When a new namespace is created via
+/// [`get_or_create`](Self::get_or_create), all public vars from `lona.core`
+/// are automatically referred into it.
 #[cfg(feature = "alloc")]
+#[derive(Clone)]
 #[non_exhaustive]
 pub struct Registry {
     /// All namespaces (namespace name → Namespace).
@@ -33,6 +42,9 @@ pub struct Registry {
 
     /// Current namespace (the context for `def` and unqualified lookups).
     current: symbol::Id,
+
+    /// The `lona.core` namespace name, cached for auto-refer.
+    core_name: symbol::Id,
 }
 
 #[cfg(feature = "alloc")]
@@ -41,11 +53,12 @@ impl Registry {
     ///
     /// This creates:
     /// - `lona.core` namespace (empty, will be populated with builtins)
-    /// - `user` namespace (set as current)
+    /// - `user` namespace (set as current, with auto-refer of `lona.core`)
     ///
-    /// Both namespaces start empty. When `lona.core` is populated with
-    /// builtins (in a later initialization phase), callers should use
-    /// `add_refer` to make those vars available in `user`.
+    /// The `user` namespace automatically refers all public vars from
+    /// `lona.core`, making core functions available without qualification.
+    /// New namespaces created via [`get_or_create`](Self::get_or_create) also
+    /// get this auto-refer behavior.
     #[inline]
     #[must_use]
     pub fn new(interner: &Interner) -> Self {
@@ -62,7 +75,15 @@ impl Registry {
         Self {
             namespaces,
             current: user_name,
+            core_name,
         }
+    }
+
+    /// Returns the `lona.core` namespace name.
+    #[inline]
+    #[must_use]
+    pub const fn core_name(&self) -> symbol::Id {
+        self.core_name
     }
 
     /// Returns a reference to the current namespace.
@@ -110,12 +131,90 @@ impl Registry {
 
     /// Gets a mutable reference to a namespace, creating it if it doesn't exist.
     ///
-    /// This is useful for `ns` declarations that may create new namespaces.
+    /// When a new namespace is created, all public vars from `lona.core` are
+    /// automatically referred into it (unless the namespace is `lona.core` itself).
+    /// This makes core functions available without qualification.
     #[inline]
     pub fn get_or_create(&mut self, name: symbol::Id) -> &mut Namespace {
-        self.namespaces
+        // First, collect vars to refer if we're creating a new namespace (not lona.core)
+        let vars_to_refer: alloc::vec::Vec<_> =
+            if !self.namespaces.contains_key(&name) && name != self.core_name {
+                // Collect vars from lona.core before modifying the map
+                self.namespaces
+                    .get(&self.core_name)
+                    .map(|core_ns| {
+                        core_ns
+                            .mappings()
+                            .map(|(sym, var)| (*sym, var.clone()))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                alloc::vec::Vec::new()
+            };
+
+        // Use entry API to get or create the namespace
+        let ns = self
+            .namespaces
             .entry(name)
-            .or_insert_with(|| Namespace::new(name))
+            .or_insert_with(|| Namespace::new(name));
+
+        // Add refers if we collected any (this happens for newly created namespaces)
+        for (sym, var) in vars_to_refer {
+            ns.add_refer(sym, var);
+        }
+
+        ns
+    }
+
+    /// Refers all vars from `lona.core` into the given namespace.
+    ///
+    /// This is called automatically when namespaces are created, but can also
+    /// be called manually to refresh refers after `lona.core` is populated
+    /// with new vars (e.g., after registering primitives).
+    ///
+    /// Note: All core primitives are public, so we don't check `is_private`.
+    /// Private var support can be added later when needed.
+    #[inline]
+    pub fn refer_core_to(&mut self, target_name: symbol::Id) {
+        // Don't refer lona.core into itself
+        if target_name == self.core_name {
+            return;
+        }
+
+        // Collect the vars to refer (to avoid borrow conflicts)
+        let mut vars_to_refer = alloc::vec::Vec::new();
+        if let Some(core_ns) = self.namespaces.get(&self.core_name) {
+            for (sym, var) in core_ns.mappings() {
+                vars_to_refer.push((*sym, var.clone()));
+            }
+        }
+
+        // Add the refers to the target namespace
+        if let Some(target_ns) = self.namespaces.get_mut(&target_name) {
+            for (sym, var) in vars_to_refer {
+                target_ns.add_refer(sym, var);
+            }
+        }
+    }
+
+    /// Refers all public vars from `lona.core` into all existing namespaces.
+    ///
+    /// Call this after populating `lona.core` with primitives to make them
+    /// available in all namespaces (including those created before registration).
+    #[inline]
+    pub fn refer_core_to_all(&mut self) {
+        // Collect namespace names first to avoid borrow conflicts
+        let ns_names: alloc::vec::Vec<_> = self
+            .namespaces
+            .keys()
+            .filter(|name| **name != self.core_name)
+            .copied()
+            .collect();
+
+        for ns_name in ns_names {
+            self.refer_core_to(ns_name);
+        }
     }
 
     /// Switches the current namespace to the given name.

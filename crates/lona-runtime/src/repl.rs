@@ -25,6 +25,7 @@ use alloc::string::String;
 use lona_core::source;
 use lona_core::symbol::Interner;
 use lona_core::value::Value;
+use lona_kernel::namespace::Registry as NamespaceRegistry;
 use lona_kernel::vm::collections::{
     intern_primitives as intern_collection_primitives,
     register_primitives as register_collection_primitives,
@@ -35,12 +36,12 @@ use lona_kernel::vm::introspection::{
 };
 use lona_kernel::vm::{
     Globals, MacroExpander, Vm, intern_arithmetic_primitives, intern_comparison_primitives,
-    intern_metadata_primitives, intern_symbol_primitives, intern_type_predicates,
-    intern_var_primitives, register_arithmetic_primitives, register_comparison_primitives,
-    register_metadata_primitives, register_symbol_primitives, register_type_predicates,
-    register_var_primitives,
+    intern_metadata_primitives, intern_namespace_primitives, intern_symbol_primitives,
+    intern_type_predicates, intern_var_primitives, register_arithmetic_primitives,
+    register_comparison_primitives, register_metadata_primitives, register_namespace_primitives,
+    register_symbol_primitives, register_type_predicates, register_var_primitives,
 };
-use lonala_compiler::{MacroRegistry, compile_with_expansion};
+use lonala_compiler::{MacroRegistry, compile_with_expansion_in_ns};
 use lonala_human::{Config as FormatConfig, render as render_error};
 
 // =============================================================================
@@ -83,6 +84,10 @@ pub struct Repl {
     sources: source::Registry,
     /// Counter for naming REPL inputs (incremented per evaluation).
     input_counter: u32,
+    /// Namespace registry that persists between evaluations.
+    namespace_registry: Option<NamespaceRegistry>,
+    /// Current namespace for compilation (tracks `(ns ...)` changes).
+    current_namespace: Option<lona_core::symbol::Id>,
 }
 
 /// The core standard library source, embedded at compile time.
@@ -103,6 +108,8 @@ impl Repl {
             macros: MacroRegistry::new(),
             sources: source::Registry::new(),
             input_counter: 0_u32,
+            namespace_registry: None,
+            current_namespace: None,
         }
     }
 
@@ -181,13 +188,17 @@ impl Repl {
         // Create a macro expander
         let mut expander = MacroExpander::new();
 
+        // Default to "user" namespace for core library initialization
+        let user_ns = self.interner.intern("user");
+
         // Compile the core library with macro expansion
-        let chunk = match compile_with_expansion(
+        let chunk = match compile_with_expansion_in_ns(
             CORE_LIBRARY,
             source_id,
             &self.interner,
             &mut self.macros,
             &mut expander,
+            user_ns,
         ) {
             Ok(chunk) => chunk,
             Err(err) => return Err(self.format_compile_error(&err, source_id)),
@@ -202,6 +213,7 @@ impl Repl {
         let metadata_symbols = intern_metadata_primitives(&self.interner);
         let symbol_symbols = intern_symbol_primitives(&self.interner);
         let var_symbols = intern_var_primitives(&self.interner);
+        let namespace_symbols = intern_namespace_primitives(&self.interner);
 
         // Create a VM for core library initialization
         let mut vm = Vm::new(&self.interner);
@@ -209,6 +221,11 @@ impl Repl {
 
         // Restore persistent globals into the VM
         *vm.globals_mut() = self.globals.clone();
+
+        // Restore namespace registry if we have one
+        if let Some(ref registry) = self.namespace_registry {
+            *vm.namespace_registry_mut() = registry.clone();
+        }
 
         // Register collection primitives with pre-interned symbols
         register_collection_primitives(&mut vm, &collection_symbols);
@@ -231,16 +248,23 @@ impl Repl {
         // Register var primitives (var-get, var-set!)
         register_var_primitives(&mut vm, &var_symbols);
 
+        // Register namespace primitives (require, namespace-add-alias, etc.)
+        register_namespace_primitives(&mut vm, &namespace_symbols);
+
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
         register_introspection_primitives(&mut vm, &introspection_symbols);
+
+        // Propagate lona.core vars to all namespaces (auto-refer)
+        vm.namespace_registry_mut().refer_core_to_all();
 
         // Execute the core library
         vm.execute(&chunk)
             .map_err(|err| format!("Core library execution error: {err:?}"))?;
 
-        // Save globals back to persistent storage
+        // Save globals and namespace registry back to persistent storage
         self.globals = vm.globals().clone();
+        self.namespace_registry = Some(vm.namespace_registry().clone());
 
         Ok(())
     }
@@ -277,13 +301,19 @@ impl Repl {
         // Create a macro expander
         let mut expander = MacroExpander::new();
 
-        // Compile the source with macro expansion
-        let chunk = match compile_with_expansion(
+        // Get the current namespace for compilation (default to "user")
+        let current_ns = self
+            .current_namespace
+            .unwrap_or_else(|| self.interner.intern("user"));
+
+        // Compile the source with macro expansion in the current namespace
+        let chunk = match compile_with_expansion_in_ns(
             source_text,
             source_id,
             &self.interner,
             &mut self.macros,
             &mut expander,
+            current_ns,
         ) {
             Ok(chunk) => chunk,
             Err(err) => return Err(self.format_compile_error(&err, source_id)),
@@ -298,6 +328,7 @@ impl Repl {
         let metadata_symbols = intern_metadata_primitives(&self.interner);
         let symbol_symbols = intern_symbol_primitives(&self.interner);
         let var_symbols = intern_var_primitives(&self.interner);
+        let namespace_symbols = intern_namespace_primitives(&self.interner);
 
         // Create a VM for this evaluation
         let mut vm = Vm::new(&self.interner);
@@ -307,6 +338,14 @@ impl Repl {
 
         // Restore persistent globals into the VM
         *vm.globals_mut() = self.globals.clone();
+
+        // Restore namespace registry if we have one
+        if let Some(ref registry) = self.namespace_registry {
+            *vm.namespace_registry_mut() = registry.clone();
+        }
+
+        // Set the VM's current namespace to match the saved namespace
+        vm.set_current_namespace(current_ns);
 
         // Register collection primitives with pre-interned symbols
         register_collection_primitives(&mut vm, &collection_symbols);
@@ -329,9 +368,15 @@ impl Repl {
         // Register var primitives (var-get, var-set!)
         register_var_primitives(&mut vm, &var_symbols);
 
+        // Register namespace primitives (require, namespace-add-alias, etc.)
+        register_namespace_primitives(&mut vm, &namespace_symbols);
+
         // Set up macro introspection functions
         vm.set_macro_registry(&self.macros);
         register_introspection_primitives(&mut vm, &introspection_symbols);
+
+        // Propagate lona.core vars to all namespaces (auto-refer)
+        vm.namespace_registry_mut().refer_core_to_all();
 
         // Execute
         let result = vm.execute(&chunk).map_err(|err| {
@@ -340,8 +385,10 @@ impl Repl {
             render_error(&err, &self.sources, &self.interner, &config)
         })?;
 
-        // Save globals back to persistent storage
+        // Save globals, namespace registry, and current namespace back to persistent storage
         self.globals = vm.globals().clone();
+        self.namespace_registry = Some(vm.namespace_registry().clone());
+        self.current_namespace = Some(vm.current_namespace());
 
         Ok(result)
     }

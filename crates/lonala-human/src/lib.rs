@@ -41,6 +41,8 @@ pub mod diagnostic;
 pub mod format;
 pub mod line_index;
 #[cfg(feature = "alloc")]
+mod namespace_errors;
+#[cfg(feature = "alloc")]
 pub mod parser_errors;
 #[cfg(feature = "alloc")]
 pub mod vm_errors;

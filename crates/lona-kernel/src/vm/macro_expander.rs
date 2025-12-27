@@ -111,6 +111,9 @@ impl MacroExpander for Expander {
         // These are needed for quasiquote expansion
         register_primitives(&mut vm, &collection_symbols);
 
+        // Propagate lona.core vars to all namespaces (auto-refer)
+        vm.namespace_registry_mut().refer_core_to_all();
+
         // Execute the macro's chunk with the arguments as initial register values
         let result = vm
             .execute_with_args(&body.chunk, &effective_args)

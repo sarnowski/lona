@@ -40,7 +40,8 @@ pub fn register_symbol_primitives(vm: &mut crate::vm::interpreter::Vm<'_>, symbo
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
         vm.register_native(*sym, *func);
-        vm.set_global(*sym, Value::NativeFunction(*sym));
+        // Register in lona.core namespace for auto-refer
+        vm.register_core_primitive(*sym, Value::NativeFunction(*sym));
     }
 }
 

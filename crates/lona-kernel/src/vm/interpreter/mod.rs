@@ -13,10 +13,12 @@ use lona_core::symbol::{self, Interner};
 use lona_core::value::Value;
 use lonala_compiler::MacroRegistry;
 
+use crate::namespace::{Registry as NamespaceRegistry, SourceLoader};
+
 use super::error::{Error, Kind as ErrorKind};
 use super::frame::Frame;
 use super::globals::Globals;
-use super::natives::{NativeFn, Registry as NativeRegistry};
+use super::natives::{NativeFn, Registry as NativeRegistry, VmNativeFn, VmNativeRegistry};
 
 mod helpers;
 mod ops_arithmetic;
@@ -45,6 +47,8 @@ pub struct Vm<'interner> {
     interner: &'interner Interner,
     /// Registry of native functions.
     natives: NativeRegistry,
+    /// Registry of mutable-access native functions (those needing `&mut Vm`).
+    mut_natives: VmNativeRegistry,
     /// Optional macro registry for introspection functions.
     /// Passed to native functions via `NativeContext`.
     macro_registry: Option<&'interner MacroRegistry>,
@@ -55,6 +59,15 @@ pub struct Vm<'interner> {
     /// Current namespace for symbol resolution in REPL sessions.
     /// Defaults to "user" namespace.
     current_namespace: symbol::Id,
+    /// Optional source loader for namespace loading.
+    /// When set, enables `require` to load namespace source code.
+    loader: Option<&'interner dyn SourceLoader>,
+    /// Stack of namespaces currently being loaded, for cycle detection.
+    /// Used by `require_namespace` to detect circular dependencies.
+    loading_stack: Vec<symbol::Id>,
+    /// Namespace registry for tracking loaded namespaces.
+    /// Used by `require_namespace` to avoid reloading and for symbol resolution.
+    namespace_registry: NamespaceRegistry,
 }
 
 impl<'interner> Vm<'interner> {
@@ -68,11 +81,66 @@ impl<'interner> Vm<'interner> {
             globals: Globals::new(),
             interner,
             natives: NativeRegistry::new(),
+            mut_natives: VmNativeRegistry::new(),
             macro_registry: None,
             call_depth: 0,
             current_source: source::Id::new(0_u32),
             current_namespace: default_ns,
+            loader: None,
+            loading_stack: vec![],
+            namespace_registry: NamespaceRegistry::new(interner),
         }
+    }
+
+    /// Sets the source loader for namespace loading.
+    ///
+    /// When set, the VM can load namespaces via `require`. Without a loader,
+    /// `require` will fail with a `NoSourceLoader` error.
+    #[inline]
+    pub const fn set_loader(&mut self, loader: &'interner dyn SourceLoader) {
+        self.loader = Some(loader);
+    }
+
+    /// Returns a reference to the source loader, if set.
+    #[inline]
+    #[must_use]
+    pub const fn loader(&self) -> Option<&'interner dyn SourceLoader> {
+        self.loader
+    }
+
+    /// Checks if a namespace is currently being loaded (cycle detection).
+    ///
+    /// Returns `true` if the namespace is in the loading stack, indicating
+    /// a circular dependency would occur if we tried to load it.
+    #[inline]
+    #[must_use]
+    pub fn is_loading(&self, ns: symbol::Id) -> bool {
+        self.loading_stack.contains(&ns)
+    }
+
+    /// Pushes a namespace onto the loading stack.
+    ///
+    /// Call this before loading a namespace to enable cycle detection.
+    #[inline]
+    pub fn push_loading(&mut self, ns: symbol::Id) {
+        self.loading_stack.push(ns);
+    }
+
+    /// Pops a namespace from the loading stack.
+    ///
+    /// Call this after a namespace has been loaded (successfully or not).
+    #[inline]
+    pub fn pop_loading(&mut self) {
+        let _popped = self.loading_stack.pop();
+    }
+
+    /// Returns a slice of the current loading stack.
+    ///
+    /// Used for error reporting when a circular dependency is detected.
+    #[inline]
+    #[must_use]
+    pub fn loading_stack(&self) -> &[symbol::Id] {
+        &self.loading_stack
     }
 
     /// Registers a native function for a symbol.
@@ -81,6 +149,25 @@ impl<'interner> Vm<'interner> {
     #[inline]
     pub fn register_native(&mut self, symbol: symbol::Id, func: NativeFn) {
         self.natives.register(symbol, func);
+    }
+
+    /// Registers a VM-native function for a symbol.
+    ///
+    /// VM-native functions have access to mutable VM state, unlike regular
+    /// native functions. Used for primitives like `require`, `namespace-add-alias`, etc.
+    #[inline]
+    pub fn register_vm_native(&mut self, symbol: symbol::Id, func: VmNativeFn) {
+        self.mut_natives.register(symbol, func);
+    }
+
+    /// Looks up a VM-native function by symbol ID.
+    ///
+    /// Returns `Some(func)` if a VM-native function is registered for the symbol,
+    /// `None` otherwise.
+    #[inline]
+    #[must_use]
+    pub fn get_vm_native(&self, symbol: symbol::Id) -> Option<VmNativeFn> {
+        self.mut_natives.get(symbol)
     }
 
     /// Sets the macro registry for introspection functions.
@@ -99,6 +186,26 @@ impl<'interner> Vm<'interner> {
     #[inline]
     pub fn set_global(&mut self, symbol: symbol::Id, value: Value) {
         self.globals.set(symbol, value);
+    }
+
+    /// Registers a primitive in the `lona.core` namespace.
+    ///
+    /// This creates a Var for the primitive in `lona.core`, making it available
+    /// for auto-refer into other namespaces. Also sets the value in globals
+    /// for backward compatibility with the native function dispatch.
+    ///
+    /// Call [`namespace_registry_mut().refer_core_to_all()`](crate::namespace::Registry::refer_core_to_all)
+    /// after registering all primitives to propagate them to other namespaces.
+    #[inline]
+    pub fn register_core_primitive(&mut self, symbol: symbol::Id, value: Value) {
+        // Set in globals for native function dispatch
+        self.globals.set(symbol, value.clone());
+
+        // Intern as a Var in lona.core namespace
+        let core_name = self.namespace_registry.core_name();
+        if let Some(core_ns) = self.namespace_registry.get_mut(core_name) {
+            let _var = core_ns.intern(symbol, value);
+        }
     }
 
     /// Returns a reference to the symbol interner.
@@ -147,6 +254,82 @@ impl<'interner> Vm<'interner> {
     #[must_use]
     pub const fn current_namespace(&self) -> symbol::Id {
         self.current_namespace
+    }
+
+    /// Sets the current namespace for symbol resolution.
+    ///
+    /// This is used by the REPL to restore the namespace context between
+    /// evaluations. Also updates the namespace registry's current namespace.
+    #[inline]
+    pub fn set_current_namespace(&mut self, ns: symbol::Id) {
+        self.current_namespace = ns;
+        self.namespace_registry.switch_to(ns);
+    }
+
+    /// Returns a reference to the namespace registry.
+    #[inline]
+    #[must_use]
+    pub const fn namespace_registry(&self) -> &NamespaceRegistry {
+        &self.namespace_registry
+    }
+
+    /// Returns a mutable reference to the namespace registry.
+    #[inline]
+    #[must_use]
+    pub const fn namespace_registry_mut(&mut self) -> &mut NamespaceRegistry {
+        &mut self.namespace_registry
+    }
+
+    /// Prepares to load a namespace, performing all pre-load checks.
+    ///
+    /// Returns `Ok(None)` if already loaded, `Ok(Some(source))` if loading needed.
+    /// After calling, caller should: `push_loading` → compile/execute → `pop_loading`.
+    ///
+    /// # Errors
+    ///
+    /// Returns error for: circular dependency, no loader configured, namespace not found.
+    #[inline]
+    pub fn prepare_require<'source>(
+        &self,
+        ns_name: symbol::Id,
+    ) -> Result<Option<&'source str>, Error>
+    where
+        'interner: 'source,
+    {
+        // 1. Check if namespace is already loaded
+        if self.namespace_registry.contains(ns_name) {
+            return Ok(None);
+        }
+
+        // 2. Check for circular dependency
+        if self.loading_stack.contains(&ns_name) {
+            return Err(Error::new(
+                ErrorKind::CircularDependency {
+                    namespace: ns_name,
+                    stack: self.loading_stack.clone(),
+                },
+                source::Location::new(self.current_source, lona_core::span::Span::default()),
+            ));
+        }
+
+        // 3. Check if source loader is configured
+        let Some(loader) = self.loader else {
+            return Err(Error::new(
+                ErrorKind::NoSourceLoader,
+                source::Location::new(self.current_source, lona_core::span::Span::default()),
+            ));
+        };
+
+        // 4. Load the source code
+        let ns_str = self.interner.resolve(ns_name);
+        let Some(source_code) = loader.load_source(&ns_str) else {
+            return Err(Error::new(
+                ErrorKind::NamespaceNotFound { namespace: ns_name },
+                source::Location::new(self.current_source, lona_core::span::Span::default()),
+            ));
+        };
+
+        Ok(Some(source_code))
     }
 
     /// Executes a chunk of bytecode and returns the result.

@@ -14,6 +14,8 @@
 //! - **Typed context**: Use `value::Kind` and `TypeExpectation` instead of `&'static str`
 //! - **Source locations always**: Every error includes `SourceLocation` (aliased from `source::Location`)
 
+extern crate alloc;
+
 use lona_core::error_context::{ArityExpectation, TypeExpectation};
 use lona_core::source::{self, Location as SourceLocation};
 use lona_core::symbol;
@@ -132,6 +134,41 @@ pub enum Kind {
         /// The type of the value that failed to match.
         value_type: value::Kind,
     },
+
+    /// Circular dependency detected during namespace loading.
+    ///
+    /// Occurs when namespace A requires namespace B, and B (directly or
+    /// indirectly) requires A again, forming a dependency cycle.
+    CircularDependency {
+        /// The namespace that was requested, completing the cycle.
+        namespace: symbol::Id,
+        /// The stack of namespaces currently being loaded (the dependency chain).
+        stack: alloc::vec::Vec<symbol::Id>,
+    },
+
+    /// Namespace source not found.
+    ///
+    /// Occurs when `require` is called for a namespace that doesn't exist
+    /// in any configured source loader.
+    NamespaceNotFound {
+        /// The namespace that was requested.
+        namespace: symbol::Id,
+    },
+
+    /// No source loader configured.
+    ///
+    /// Occurs when `require` is called but no `SourceLoader` has been set
+    /// on the VM. Set a loader with `Vm::set_loader` before loading namespaces.
+    NoSourceLoader,
+
+    /// Compilation error during namespace loading.
+    ///
+    /// Occurs when `require` loads a namespace but compilation fails.
+    /// The error contains the underlying compiler error.
+    CompileError {
+        /// The compiler error that occurred.
+        message: lonala_compiler::CompileError,
+    },
 }
 
 impl Kind {
@@ -156,6 +193,10 @@ impl Kind {
             Self::InvalidUpvalue { .. } => "InvalidUpvalue",
             Self::NotImplemented { .. } => "NotImplemented",
             Self::NoMatchingCase { .. } => "NoMatchingCase",
+            Self::CircularDependency { .. } => "CircularDependency",
+            Self::NamespaceNotFound { .. } => "NamespaceNotFound",
+            Self::NoSourceLoader => "NoSourceLoader",
+            Self::CompileError { .. } => "CompileError",
         }
     }
 }
@@ -321,6 +362,52 @@ mod tests {
                 assert_eq!(suggestion.map(|id| id.as_u32()), Some(11_u32));
             }
             _ => panic!("Expected UndefinedGlobal"),
+        }
+    }
+
+    #[test]
+    fn kind_variant_name_circular_dependency() {
+        let kind = Kind::CircularDependency {
+            namespace: symbol::Id::new(1_u32),
+            stack: alloc::vec![symbol::Id::new(2_u32), symbol::Id::new(3_u32)],
+        };
+        assert_eq!(kind.variant_name(), "CircularDependency");
+    }
+
+    #[test]
+    fn kind_variant_name_namespace_not_found() {
+        let kind = Kind::NamespaceNotFound {
+            namespace: symbol::Id::new(1_u32),
+        };
+        assert_eq!(kind.variant_name(), "NamespaceNotFound");
+    }
+
+    #[test]
+    fn kind_variant_name_no_source_loader() {
+        let kind = Kind::NoSourceLoader;
+        assert_eq!(kind.variant_name(), "NoSourceLoader");
+    }
+
+    #[test]
+    fn circular_dependency_captures_stack() {
+        let ns = symbol::Id::new(1_u32);
+        let stack = alloc::vec![symbol::Id::new(2_u32), symbol::Id::new(3_u32), ns];
+
+        let kind = Kind::CircularDependency {
+            namespace: ns,
+            stack: stack.clone(),
+        };
+
+        match kind {
+            Kind::CircularDependency {
+                namespace,
+                stack: captured_stack,
+            } => {
+                assert_eq!(namespace.as_u32(), 1_u32);
+                assert_eq!(captured_stack.len(), 3);
+                assert_eq!(captured_stack.first().map(|id| id.as_u32()), Some(2_u32));
+            }
+            _ => panic!("Expected CircularDependency"),
         }
     }
 }

@@ -62,8 +62,8 @@ pub fn register_arithmetic_primitives(
 
     for (sym, func) in symbols.iter().zip(funcs.iter()) {
         vm.register_native(*sym, *func);
-        // Use NativeFunction for first-class function support
-        vm.set_global(*sym, Value::NativeFunction(*sym));
+        // Register in lona.core namespace for auto-refer
+        vm.register_core_primitive(*sym, Value::NativeFunction(*sym));
     }
 }
 

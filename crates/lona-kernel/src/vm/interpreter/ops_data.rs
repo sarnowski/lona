@@ -85,9 +85,12 @@ impl Vm<'_> {
     /// `GetGlobal`: `R[A] = globals[K[Bx]]`
     ///
     /// Lookup order:
-    /// 1. Try the symbol as-is (may be qualified like `user/x`)
-    /// 2. If not found and symbol is qualified, try the unqualified part
-    ///    (e.g., `user/first` falls back to `first` for primitives)
+    /// 1. Try the symbol as-is in globals (for user-defined vars like `user/x`)
+    /// 2. If not found and symbol is qualified, check the current namespace's
+    ///    refers for the unqualified name (for auto-referred primitives like `first`)
+    ///
+    /// This supports the `lona.core` auto-refer pattern: primitives are registered
+    /// in `lona.core` and automatically referred into all namespaces.
     pub(super) fn op_get_global(
         &mut self,
         instruction: u32,
@@ -98,50 +101,42 @@ impl Vm<'_> {
 
         let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
 
-        // Try qualified lookup first
-        let value = if let Some(val) = self.globals.get(symbol) {
-            val
-        } else {
-            // TEMPORARY FALLBACK (Phase 1.3.3): If symbol is qualified (ns/name),
-            // try just the name part. This allows primitives like `first`, `rest`
-            // to be found when the compiler emits `user/first`, etc.
-            //
-            // TODO(Phase 1.3.4): Remove this fallback when lona.core auto-refer is
-            // implemented. The proper solution is:
-            // 1. Register all primitives in `lona.core` namespace
-            // 2. Every namespace implicitly refers lona.core (like Clojure)
-            // 3. Resolution: current ns defs → referred vars (including lona.core)
-            //
-            // This fallback has issues:
-            // - Performance: string split + re-intern on every primitive call
-            // - Correctness: could mask typos (e.g., `usr/first` finds `first`)
-            let symbol_name = self.interner.resolve(symbol);
-            if let Some((_ns, unqualified)) = symbol_name.rsplit_once('/') {
-                let unqualified_sym = self.interner.intern(unqualified);
-                self.globals.get(unqualified_sym).ok_or_else(|| {
-                    Error::new(
-                        ErrorKind::UndefinedGlobal {
-                            symbol,
-                            suggestion: None,
-                        },
-                        frame.current_location(),
-                    )
-                })?
-            } else {
-                return Err(Error::new(
-                    ErrorKind::UndefinedGlobal {
-                        symbol,
-                        suggestion: None,
-                    },
-                    frame.current_location(),
-                ));
+        // 1. Try direct lookup in globals (handles user-defined vars)
+        if let Some(val) = self.globals.get(symbol) {
+            self.set_register(dest, val, frame)?;
+            return Ok(());
+        }
+
+        // 2. If symbol is qualified (ns/name), check namespace refers
+        let symbol_name = self.interner.resolve(symbol);
+        if let Some((_ns, unqualified)) = symbol_name.rsplit_once('/') {
+            let unqualified_sym = self.interner.intern(unqualified);
+
+            // Check current namespace's refers for the unqualified name
+            if let Some(ns) = self.namespace_registry.current()
+                && let Some(value) = ns.lookup(unqualified_sym)
+            {
+                self.set_register(dest, value, frame)?;
+                return Ok(());
             }
-        };
-        self.set_register(dest, value, frame)?;
-        Ok(())
+        }
+
+        // Not found anywhere
+        Err(Error::new(
+            ErrorKind::UndefinedGlobal {
+                symbol,
+                suggestion: None,
+            },
+            frame.current_location(),
+        ))
     }
 
     /// `SetGlobal`: `globals[K[Bx]] = R[A]`
+    ///
+    /// Defines a var in the namespace. The symbol is expected to be qualified
+    /// (e.g., "user/x"). The var is registered in both:
+    /// - The namespace registry (for introspection via `ns-publics`)
+    /// - The globals map (for execution lookup)
     pub(super) fn op_set_global(
         &mut self,
         instruction: u32,
@@ -152,6 +147,21 @@ impl Vm<'_> {
 
         let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
         let value = self.get_register(src, frame)?;
+
+        // Also register the var in the namespace registry for introspection.
+        // The symbol is qualified (e.g., "user/x"), so we extract the namespace
+        // and unqualified name.
+        let symbol_name = self.interner.resolve(symbol);
+        if let Some((ns_name, unqualified)) = symbol_name.rsplit_once('/') {
+            let ns_sym = self.interner.intern(ns_name);
+            let unqualified_sym = self.interner.intern(unqualified);
+
+            // Ensure the namespace exists and intern the var in it
+            let ns = self.namespace_registry.get_or_create(ns_sym);
+            let _var = ns.intern(unqualified_sym, value.clone());
+        }
+
+        // Also update globals for execution lookup (backward compatibility)
         self.globals.set(symbol, value);
         Ok(())
     }
@@ -210,8 +220,9 @@ impl Vm<'_> {
 
     /// `GetGlobalVar`: `R[A] = globals.get_var(K[Bx])`
     ///
-    /// Returns the Var itself (not its value), for metadata access.
-    /// Uses the same fallback logic as `GetGlobal` for primitives.
+    /// Returns the Var itself (not its value), for `#'symbol` syntax.
+    /// Uses the same lookup logic as `GetGlobal`: first globals, then
+    /// namespace refers for auto-referred primitives.
     pub(super) fn op_get_global_var(
         &mut self,
         instruction: u32,
@@ -222,38 +233,34 @@ impl Vm<'_> {
 
         let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
 
-        // Try qualified lookup first
-        let var = if let Some(val) = self.globals.get_var(symbol) {
-            val.clone()
-        } else {
-            // TEMPORARY FALLBACK: See TODO in op_get_global for details.
-            let symbol_name = self.interner.resolve(symbol);
-            if let Some((_ns, unqualified)) = symbol_name.rsplit_once('/') {
-                let unqualified_sym = self.interner.intern(unqualified);
-                self.globals
-                    .get_var(unqualified_sym)
-                    .ok_or_else(|| {
-                        Error::new(
-                            ErrorKind::UndefinedGlobal {
-                                symbol,
-                                suggestion: None,
-                            },
-                            frame.current_location(),
-                        )
-                    })?
-                    .clone()
-            } else {
-                return Err(Error::new(
-                    ErrorKind::UndefinedGlobal {
-                        symbol,
-                        suggestion: None,
-                    },
-                    frame.current_location(),
-                ));
+        // 1. Try direct lookup in globals (handles user-defined vars)
+        if let Some(var) = self.globals.get_var(symbol) {
+            self.set_register(dest, Value::Var(var.clone()), frame)?;
+            return Ok(());
+        }
+
+        // 2. If symbol is qualified (ns/name), check namespace refers for the var
+        let symbol_name = self.interner.resolve(symbol);
+        if let Some((_ns, unqualified)) = symbol_name.rsplit_once('/') {
+            let unqualified_sym = self.interner.intern(unqualified);
+
+            // Check current namespace's refers for the var
+            if let Some(ns) = self.namespace_registry.current()
+                && let Some(var) = ns.get_refer(unqualified_sym)
+            {
+                self.set_register(dest, Value::Var(var.clone()), frame)?;
+                return Ok(());
             }
-        };
-        self.set_register(dest, Value::Var(var), frame)?;
-        Ok(())
+        }
+
+        // Not found anywhere
+        Err(Error::new(
+            ErrorKind::UndefinedGlobal {
+                symbol,
+                suggestion: None,
+            },
+            frame.current_location(),
+        ))
     }
 
     // =========================================================================
@@ -293,7 +300,8 @@ impl Vm<'_> {
     /// `SetNamespace`: `current_ns = K[Bx]`
     ///
     /// Switches the current namespace. This affects how unqualified symbols
-    /// are resolved in subsequent REPL evaluations.
+    /// are resolved in subsequent REPL evaluations and where namespace
+    /// operations like `namespace-add-alias` and `namespace-add-refer` apply.
     pub(super) fn op_set_namespace(
         &mut self,
         instruction: u32,
@@ -303,6 +311,10 @@ impl Vm<'_> {
 
         let symbol = Self::get_symbol_from_constant(frame.chunk(), const_idx, frame)?;
         self.current_namespace = symbol;
+        // Also update the namespace registry's current namespace to ensure
+        // namespace operations like `namespace-add-alias` and `namespace-add-refer`
+        // operate on the correct namespace.
+        self.namespace_registry.switch_to(symbol);
         Ok(())
     }
 
