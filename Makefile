@@ -191,6 +191,10 @@ help: ## Show this help
 	@echo "  tree-sitter-test     Run Tree-sitter tests"
 	@echo "  tree-sitter-clean    Clean Tree-sitter build artifacts"
 	@echo ""
+	@echo "Zed plugin targets (runs locally):"
+	@echo "  zed-plugin           Build Zed extension"
+	@echo "  zed-plugin-clean     Clean Zed plugin build artifacts"
+	@echo ""
 	@echo "Utility targets:"
 	@echo "  docker          Build all Docker images"
 	@echo "  shell-aarch64   Interactive shell (aarch64)"
@@ -240,6 +244,44 @@ tree-sitter-test: ## Run Tree-sitter tests
 
 tree-sitter-clean: ## Clean Tree-sitter build artifacts
 	rm -rf $(TREE_SITTER_DIR)/node_modules $(TREE_SITTER_DIR)/src $(TREE_SITTER_DIR)/bindings
+
+# ==============================================================================
+# Zed Plugin (runs locally, not in Docker)
+# ==============================================================================
+
+ZED_PLUGIN_DIR := tools/zed-plugin
+ZED_PLUGIN_LANG_DIR := $(ZED_PLUGIN_DIR)/languages/lonala
+ZED_PLUGIN_WASM := $(ZED_PLUGIN_DIR)/target/wasm32-wasip1/release/zed_lonala.wasm
+
+# Query files to copy from tree-sitter-lonala to zed-plugin
+ZED_QUERY_SOURCES := $(wildcard $(TREE_SITTER_DIR)/queries/*.scm)
+ZED_QUERY_TARGETS := $(patsubst $(TREE_SITTER_DIR)/queries/%.scm,$(ZED_PLUGIN_LANG_DIR)/%.scm,$(ZED_QUERY_SOURCES))
+
+.PHONY: zed-plugin zed-plugin-clean
+
+zed-plugin: $(ZED_PLUGIN_WASM) ## Build Zed extension
+	@echo ""
+	@echo "Zed extension built: $(ZED_PLUGIN_WASM)"
+	@echo ""
+	@echo "To install as a dev extension in Zed:"
+	@echo "  1. Open Zed"
+	@echo "  2. Go to Extensions > Install Dev Extension"
+	@echo "  3. Select the tools/zed-plugin directory"
+
+$(ZED_PLUGIN_WASM): $(ZED_QUERY_TARGETS) $(ZED_PLUGIN_DIR)/src/lib.rs $(ZED_PLUGIN_DIR)/Cargo.toml
+	@if ! rustup target list --installed | grep -q wasm32-wasip1; then \
+		echo "Error: wasm32-wasip1 target not installed. Run: rustup target add wasm32-wasip1"; \
+		exit 1; \
+	fi
+	cd $(ZED_PLUGIN_DIR) && cargo build --release --target wasm32-wasip1
+
+# Copy query files from tree-sitter-lonala (source of truth) to zed-plugin
+$(ZED_PLUGIN_LANG_DIR)/%.scm: $(TREE_SITTER_DIR)/queries/%.scm
+	@mkdir -p $(ZED_PLUGIN_LANG_DIR)
+	cp $< $@
+
+zed-plugin-clean: ## Clean Zed plugin build artifacts
+	rm -rf $(ZED_PLUGIN_DIR)/target $(ZED_QUERY_TARGETS)
 
 # ==============================================================================
 # Python Tooling

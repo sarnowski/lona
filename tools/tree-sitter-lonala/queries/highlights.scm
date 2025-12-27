@@ -76,29 +76,39 @@
 ; =============================================================================
 
 ; Definition forms
+; Note: defprotocol/deftype/defrecord/defmulti/defmethod are Clojure Java-interop
+; features that are not planned for Lonala. defnative is Lonala-specific.
 (list
   . (symbol) @keyword
-  (#any-of? @keyword "def" "defn" "defn-" "defmacro" "defonce" "defprotocol" "deftype" "defrecord" "defmulti" "defmethod"))
+  (#any-of? @keyword "def" "defn" "defn-" "defmacro" "defonce" "defnative"))
 
 ; Binding forms
+; Note: with-local-vars is Clojure Java-threading specific, not applicable to Lonala.
 (list
   . (symbol) @keyword
-  (#any-of? @keyword "let" "fn" "fn*" "loop" "letfn" "binding" "with-local-vars"))
+  (#any-of? @keyword "let" "fn" "fn*" "loop" "letfn" "binding"))
 
 ; Control flow forms
 (list
   . (symbol) @keyword
   (#any-of? @keyword "if" "if-not" "if-let" "if-some" "when" "when-not" "when-let" "when-some" "when-first" "cond" "condp" "case"))
 
-; Exception handling
+; Error handling
+; Note: Lonala uses condition/restart system (LISP Machine style), not exceptions.
+; The try/catch/throw syntax is reserved but uses different semantics.
 (list
   . (symbol) @keyword
-  (#any-of? @keyword "try" "catch" "finally" "throw"))
+  (#any-of? @keyword "try" "catch" "throw"))
 
 ; Looping and recursion
 (list
   . (symbol) @keyword
   (#any-of? @keyword "recur" "while" "doseq" "dotimes" "for"))
+
+; Concurrency (Lonala/BEAM-style)
+(list
+  . (symbol) @keyword
+  (#any-of? @keyword "spawn" "send" "receive"))
 
 ; Quoting and evaluation
 (list
@@ -111,14 +121,20 @@
   (#any-of? @keyword "->" "->>" "as->" "cond->" "cond->>" "some->" "some->>"))
 
 ; Namespace forms
+; Note: import is Clojure's Java-interop, not applicable to Lonala (No FFI).
 (list
   . (symbol) @keyword
-  (#any-of? @keyword "ns" "in-ns" "require" "use" "import" "refer"))
+  (#any-of? @keyword "ns" "in-ns" "require" "use" "refer"))
 
 ; Assertion and debugging
 (list
   . (symbol) @keyword
   (#any-of? @keyword "assert" "comment"))
+
+; Error handling (Lonala-specific result threading)
+(list
+  . (symbol) @keyword
+  (#any-of? @keyword "panic!" "assert!" "with" "ok->" "ok->>"))
 
 ; Special operators (Lonala-specific, no FFI/Java interop)
 (list

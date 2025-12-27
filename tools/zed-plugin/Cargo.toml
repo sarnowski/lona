@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+
+[package]
+name = "zed-lonala"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+zed_extension_api = "0.7"
+
+# This extension is independent of the main Lona workspace because:
+# 1. It compiles to WASM (wasm32-wasip1), not the seL4 targets
+# 2. It uses different dependencies (zed_extension_api)
+# 3. It runs on developer machines, not on Lona/seL4
+[workspace]

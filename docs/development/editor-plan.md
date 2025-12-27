@@ -19,9 +19,9 @@ This document defines the roadmap for implementing Language Server Protocol (LSP
 5. [Milestone 0: Foundation Infrastructure](#5-milestone-0-foundation-infrastructure)
 6. [Milestone 1: LSP with Semantic Tokens](#6-milestone-1-lsp-with-semantic-tokens)
 7. [Milestone 2: Tree-sitter Grammar](#7-milestone-2-tree-sitter-grammar)
-8. [Milestones 3-11: Remaining Milestones](#8-16-remaining-milestones)
-9. [Build Infrastructure](#17-build-infrastructure)
-10. [Testing Strategy](#18-testing-strategy)
+8-16. [Milestones 3-11: Remaining Milestones](#8-16-remaining-milestones)
+17. [Build Infrastructure](#17-build-infrastructure)
+18. [Testing Strategy](#18-testing-strategy)
 
 ---
 
@@ -362,18 +362,18 @@ lona/
     │   └── queries/
     │       └── highlights.scm
     │
-    └── editors/                    # Editor extensions
+    ├── zed-plugin/                 # Zed extension (WASM)
+    │   ├── extension.toml
+    │   ├── Cargo.toml
+    │   ├── src/lib.rs
+    │   └── languages/lonala/
+    │       └── config.toml
+    │
+    └── editors/                    # Other editor extensions (future)
         ├── vscode/
         │   ├── package.json
         │   ├── language-configuration.json
         │   └── src/extension.ts
-        │
-        ├── zed/
-        │   ├── extension.toml
-        │   ├── Cargo.toml
-        │   ├── src/lib.rs
-        │   └── languages/lona/
-        │       └── config.toml
         │
         └── neovim/
             ├── lua/lona/
@@ -448,7 +448,7 @@ lonala-parser = { path = "../lonala-parser" }
 | **0** | **Foundation** ✓ | Source tracking, Diagnostic trait, lonala-human crate | None |
 | **1** | **LSP + Semantic Tokens** ✓ | Working LSP with syntax highlighting | M0 |
 | **2** | **Tree-sitter Grammar** ✓ | Syntax highlighting for Zed/Neovim | None |
-| 3 | Zed Extension | Full Zed integration | M1, M2 |
+| **3** | **Zed Extension** ✓ | Full Zed integration | M1, M2 |
 | 4 | VS Code Extension | Full VS Code integration | M1 |
 | 5 | Neovim/Vim Support | Neovim and Vim integration | M1, M2 |
 | 6 | LSP Diagnostics | Real-time error reporting | M1 |
@@ -469,7 +469,7 @@ M0 (Foundation) ✓
  │         │
  │         └──► M4 (VS Code)
  │
- └──► M2 (Tree-sitter) ✓ ──► M3 (Zed)
+ └──► M2 (Tree-sitter) ✓ ──► M3 (Zed) ✓
                 │
                 └──► M5 (Neovim)
 ```
@@ -1220,9 +1220,9 @@ tokio-test = "0.4"
 ```
 
 **Acceptance criteria**:
-- [ ] Crate compiles successfully
-- [ ] Dependencies resolve correctly
-- [ ] `cargo build -p lonala-lsp` produces binary
+- [x] Crate compiles successfully
+- [x] Dependencies resolve correctly
+- [x] `cargo build -p lonala-lsp` produces binary
 
 ---
 
@@ -1302,9 +1302,9 @@ impl DocumentManager {
 ```
 
 **Acceptance criteria**:
-- [ ] Thread-safe document storage
-- [ ] Integrates with `SourceRegistry`
-- [ ] Line index updated on content change
+- [x] Thread-safe document storage
+- [x] Integrates with `SourceRegistry`
+- [x] Line index updated on content change
 
 ---
 
@@ -1388,9 +1388,9 @@ pub fn range_to_span(range: Range, index: &LineIndex, source: &str) -> Span {
 ```
 
 **Acceptance criteria**:
-- [ ] Bidirectional conversion works correctly
-- [ ] UTF-16 conversion handles multi-byte characters (emoji, CJK, etc.)
-- [ ] Unit tests for conversion functions including Unicode edge cases
+- [x] Bidirectional conversion works correctly
+- [x] UTF-16 conversion handles multi-byte characters (emoji, CJK, etc.)
+- [x] Unit tests for conversion functions including Unicode edge cases
 
 ---
 
@@ -1508,10 +1508,10 @@ fn classify(token: &lonala_parser::Token, _source: &str) -> Option<u32> {
 ```
 
 **Acceptance criteria**:
-- [ ] All token types correctly classified
-- [ ] Delta encoding is correct
-- [ ] Uses `lonala-human::is_special_form()` for keyword detection
-- [ ] Symbols default to VARIABLE (function detection requires runtime)
+- [x] All token types correctly classified
+- [x] Delta encoding is correct
+- [x] Uses `lonala-human::is_special_form()` for keyword detection
+- [x] Symbols default to VARIABLE (function detection requires runtime)
 
 ---
 
@@ -1609,10 +1609,10 @@ impl LanguageServer for LonalaServer {
 ```
 
 **Acceptance criteria**:
-- [ ] Server initializes with correct capabilities
-- [ ] Document sync works
-- [ ] Semantic tokens returned
-- [ ] Server shuts down cleanly
+- [x] Server initializes with correct capabilities
+- [x] Document sync works
+- [x] Semantic tokens returned
+- [x] Server shuts down cleanly
 
 ---
 
@@ -1639,9 +1639,9 @@ async fn main() {
 ```
 
 **Acceptance criteria**:
-- [ ] Binary starts and listens on stdio
-- [ ] Responds to initialize request
-- [ ] Logging configurable via `RUST_LOG`
+- [x] Binary starts and listens on stdio
+- [x] Responds to initialize request
+- [x] Logging configurable via `RUST_LOG`
 
 ---
 
@@ -1652,34 +1652,24 @@ async fn main() {
 **File**: `Makefile` (additions)
 
 ```makefile
-# =============================================================================
-# LSP Targets (uses local cargo, not Docker)
-# =============================================================================
+# ==============================================================================
+# LSP Targets (runs locally, not in Docker)
+# ==============================================================================
 
-.PHONY: lsp lsp-test lsp-build lsp-install lsp-clean
-
-lsp: lsp-test lsp-build  ## Build LSP server (test + release binary)
-
-lsp-test:  ## Run LSP tests
-	cargo test -p lonala-human
-	cargo test -p lonala-lsp
-
-lsp-build:  ## Build LSP release binary
+.PHONY: lsp
+lsp: ## Build LSP server (release binary)
 	cargo build --release -p lonala-lsp
 	@echo ""
 	@echo "LSP binary built: target/release/lonala-lsp"
 
-lsp-install:  ## Install LSP to ~/.cargo/bin
+.PHONY: lsp-install
+lsp-install: ## Install LSP to ~/.cargo/bin
 	cargo install --path crates/lonala-lsp
-
-lsp-clean:  ## Clean LSP build artifacts
-	cargo clean -p lonala-lsp
-	cargo clean -p lonala-human
 ```
 
 **Acceptance criteria**:
-- [ ] `make lsp` runs tests and builds binary
-- [ ] `make lsp-install` installs to PATH
+- [x] `make lsp` builds release binary
+- [x] `make lsp-install` installs to PATH
 
 ---
 
@@ -1696,19 +1686,21 @@ lsp-clean:  ## Clean LSP build artifacts
 4. Semantic tokens for all token types
 
 **Acceptance criteria**:
-- [ ] All tests pass
-- [ ] Tests cover implemented functionality
+- [x] All tests pass
+- [x] Tests cover implemented functionality
 
 ---
 
 ### 6.2 Milestone 1 Deliverables
 
-- [ ] Working `lonala-lsp` binary
-- [ ] Semantic token highlighting
-- [ ] Document synchronization
-- [ ] Integration with `lonala-human` for text generation
-- [ ] Test suite
-- [ ] Makefile targets
+- [x] Working `lonala-lsp` binary
+- [x] Semantic token highlighting
+- [x] Document synchronization
+- [x] Integration with `lonala-human` for text generation
+- [x] Test suite
+- [x] Makefile targets
+
+**Milestone 1 is COMPLETE.** Ready for Milestone 3 (Zed Extension) or Milestone 4 (VS Code Extension).
 
 ---
 
@@ -1839,20 +1831,18 @@ fn hover_for_symbol(name: &str, vm: &VM) -> Option<String> {
 
 ```makefile
 # LSP targets (local cargo, not Docker)
-lsp              # Test and build LSP
-lsp-test         # Run lonala-human and LSP tests
-lsp-build        # Build release binary
+lsp              # Build LSP release binary
 lsp-install      # Install to ~/.cargo/bin
 
 # Tree-sitter targets
-tree-sitter      # Generate and test grammar
-tree-sitter-generate
-tree-sitter-test
+tree-sitter          # Generate and test grammar
+tree-sitter-generate # Generate parser
+tree-sitter-test     # Run grammar tests
+tree-sitter-clean    # Clean build artifacts
 
-# Editor targets
-editors          # Build all editors
-editors-zed      # Build Zed extension
-editors-vscode   # Build VS Code extension
+# Zed plugin targets
+zed-plugin       # Build Zed extension (copies queries, builds WASM)
+zed-plugin-clean # Clean Zed plugin build artifacts
 ```
 
 ---

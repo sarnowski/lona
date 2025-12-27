@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2025 Tobias Sarnowski <tobias@sarnowski.cloud>
+
+id = "lonala"
+name = "Lonala"
+description = "Lonala programming language support for Zed"
+version = "0.1.0"
+schema_version = 1
+authors = ["Lona Contributors"]
+repository = "https://codeberg.org/sarnowski/lona"
+
+[grammars.lonala]
+repository = "https://codeberg.org/sarnowski/lona"
+path = "tools/tree-sitter-lonala"
+# NOTE: Update this revision when grammar.js changes. Use tagged releases once available.
+rev = "7dc913ea92545a19651f99ff1151282602dd9189"

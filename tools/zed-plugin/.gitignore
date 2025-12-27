@@ -1,0 +1,5 @@
+target/
+
+# Query files copied from tree-sitter-lonala by Makefile
+# Source of truth: tools/tree-sitter-lonala/queries/*.scm
+languages/lonala/*.scm

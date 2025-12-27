@@ -61,10 +61,10 @@ Zed has built-in Tree-sitter support. To use this grammar:
    name = "Lonala"
    grammar = "lonala"
    path_suffixes = ["lona"]
-   line_comments = ["; "]
+   line_comments = [";"]
    ```
 
-*Note: These instructions are for manual setup. Zed extension support is planned for a future milestone, which will simplify installation.*
+*Note: For simpler installation, use the Zed extension in `tools/zed-plugin/` which integrates this grammar and the LSP server (requires `lonala-lsp` on PATH).*
 
 ### Neovim
 
@@ -100,17 +100,27 @@ Neovim uses [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter
    :TSInstall lonala
    ```
 
-4. Copy highlight queries to Neovim's runtime:
+4. Copy query files to Neovim's runtime:
    ```bash
    mkdir -p ~/.config/nvim/queries/lonala
-   cp tools/tree-sitter-lonala/queries/highlights.scm ~/.config/nvim/queries/lonala/
+   cp tools/tree-sitter-lonala/queries/*.scm ~/.config/nvim/queries/lonala/
    ```
+
+   This copies all query files:
+   - `highlights.scm` - Syntax highlighting
+   - `brackets.scm` - Bracket matching and auto-closing
+   - `indents.scm` - Auto-indentation rules
+   - `outline.scm` - Code outline/symbols view
 
 ### Other Editors
 
-For editors with Tree-sitter support, point them to the generated parser in:
+For editors with Tree-sitter support, point them to the generated parser and queries:
 - Parser: `tools/tree-sitter-lonala/src/parser.c`
-- Highlights: `tools/tree-sitter-lonala/queries/highlights.scm`
+- Query files in `tools/tree-sitter-lonala/queries/`:
+  - `highlights.scm` - Syntax highlighting
+  - `brackets.scm` - Bracket matching and auto-closing
+  - `indents.scm` - Auto-indentation rules
+  - `outline.scm` - Code outline/symbols view
 
 ## Usage
 
@@ -147,7 +157,7 @@ The grammar recognizes:
 | `number` | All numeric literals | `42`, `-3.14`, `0xFF`, `22/7` |
 | `string` | String literals | `"hello"`, `"line\nbreak"` |
 | `symbol` | Identifiers | `foo`, `my-fn`, `ns/name` |
-| `keyword` | Keywords | `:foo`, `::bar`, `:ns/key` |
+| `keyword` | Keywords | `:foo`, `:ns/key` |
 | `boolean` | Boolean values | `true`, `false` |
 | `nil` | Nil value | `nil` |
 | `list` | Parenthesized lists | `(+ 1 2)` |
