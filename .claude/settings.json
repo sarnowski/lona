@@ -1,0 +1,32 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make:*)",
+      "Bash(docker:*)",
+
+      "Bash(git add:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git describe:*)",
+
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(tee:*)",
+      "Bash(find:*)",
+      "Bash(tree:*)",
+
+      "Bash(gemini:*)",
+      "Bash(codex:*)",
+
+      "WebSearch"
+    ],
+
+    "ask": ["Bash(git commit:*)", "Bash(git push:*)"]
+  },
+
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}

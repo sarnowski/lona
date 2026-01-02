@@ -1,0 +1,16 @@
+# rust-toolchain.toml - Rust toolchain specification for Lona
+#
+# We use nightly Rust for bare-metal features required by seL4 root tasks:
+# - #![no_std] and #![no_main]
+# - Custom panic handlers
+# - Naked functions for exception handling
+# - Inline assembly with const parameters
+
+[toolchain]
+channel = "nightly-2025-10-20"
+components = [
+    "rustfmt",      # Code formatting
+    "clippy",       # Linting
+    "rust-src",     # Source for building core/alloc for custom targets
+    "llvm-tools",   # For binary inspection (objcopy, objdump)
+]

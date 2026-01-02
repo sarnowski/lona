@@ -1,0 +1,66 @@
+[package]
+name = "lona-vm"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["Tobias Sarnowski"]
+description = "Bytecode VM for the Lonala language on seL4"
+license = "GPL-3.0-or-later"
+repository = "https://codeberg.org/sarnowski/lona"
+readme = "README.md"
+keywords = ["vm", "bytecode", "sel4", "lisp"]
+categories = ["no-std", "embedded"]
+
+[lib]
+name = "lona_vm"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lona-root-task"
+path = "src/bin/root-task.rs"
+required-features = ["sel4"]
+
+[features]
+default = ["std"]
+std = []
+# seL4 target - enables seL4 bindings for root task binary
+sel4 = ["dep:sel4", "dep:sel4-root-task"]
+# E2E test mode - replaces normal boot with test runner
+e2e-test = ["sel4"]
+
+[dependencies]
+# seL4 bindings - pinned to version 3.0.0
+# Only enabled for root task binary
+sel4 = { git = "https://github.com/seL4/rust-sel4.git", tag = "v3.0.0", optional = true }
+sel4-root-task = { git = "https://github.com/seL4/rust-sel4.git", tag = "v3.0.0", optional = true }
+
+[dev-dependencies]
+proptest = "1.4"
+
+[profile.release]
+opt-level = "z"  # Optimize for size on embedded
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "deny"
+
+[lints.clippy]
+# All lint groups as deny
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+
+# Extra strict denies
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

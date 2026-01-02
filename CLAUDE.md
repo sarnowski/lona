@@ -1,0 +1,230 @@
+# Lona Project Guide
+
+Lona is a capability-secure operating system built on the seL4 microkernel, combining BEAM-style lightweight processes with a Clojure-inspired LISP dialect (Lonala).
+
+## IMPORTANT: Lonala Is Its Own Language
+
+**Lonala is NOT Clojure. Lonala is NOT Erlang/Elixir. It is its own language.**
+
+While heavily inspired by Clojure (syntax, persistent data structures, vars) and Erlang/Elixir (processes, message passing, supervisors), Lonala has its own design decisions and deviations.
+
+**Rules for working with this codebase:**
+
+1. **NEVER assume** any function, macro, or behavior exists unless documented in the specification
+2. **ALWAYS verify** in the Lonala specification before using any function or feature
+3. **What is not in the specification does not exist** - do not invent functions based on Clojure/Erlang knowledge
+4. **Check the docs** - if you need a function, look it up in [docs/lonala.md](docs/lonala.md) and related specs first
+
+**Key differences from Clojure:**
+- No `recur` (automatic TCO instead)
+- No `try`/`catch`/`finally` (tuple returns + "let it crash")
+- Different collection syntax: `[]` = tuple, `{}` = vector, `%{}` = map
+- Only 5 special forms: `def`, `fn*`, `match`, `do`, `quote`
+
+**Key differences from Erlang/Elixir:**
+- LISP syntax, not Erlang/Elixir syntax
+- Clojure-style vars and namespaces
+- Different standard library
+
+**When in doubt, read the specification. Do not guess.**
+
+## IMPORTANT: Quality Assuance Has One Command
+
+There is one canonical command to verify if changes work:
+
+    make verify
+  
+You MUST use that command to verify if changes actually happen. No other command counts.
+
+## Security Model: Zero Trust Between Realms
+
+**CRITICAL: Realms are the ONLY security boundary in Lona.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          SECURITY BOUNDARY                              │
+│                                                                         │
+│   ┌─────────────────┐      ┌─────────────────┐      ┌───────────────┐   │
+│   │    REALM A      │      │    REALM B      │      │   REALM C     │   │
+│   │  (potentially   │      │  (potentially   │      │  (potentially │   │
+│   │  compromised)   │      │  compromised)   │      │  compromised) │   │
+│   │                 │      │                 │      │               │   │
+│   │  Own VSpace     │      │  Own VSpace     │      │  Own VSpace   │   │
+│   │  Own CSpace     │      │  Own CSpace     │      │  Own CSpace   │   │
+│   │  Own Memory     │      │  Own Memory     │      │  Own Memory   │   │
+│   └────────┬────────┘      └────────┬────────┘      └───────┬───────┘   │
+│            │                        │                       │           │
+│            └────────────────────────┼───────────────────────┘           │
+│                                     │                                   │
+│                          seL4 KERNEL ENFORCES                           │
+│                          COMPLETE ISOLATION                             │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+### What This Means
+
+- **Always assume any realm is compromised** - design accordingly
+- **Zero trust between realms** - realms cannot access each other's memory or capabilities
+- **Kernel-enforced isolation** - VSpace (address space), CSpace (capabilities), and CPU budgets are enforced by seL4, not userspace
+- **Communication only via IPC endpoints** - no shared mutable state between realms
+
+### What Is NOT a Security Boundary
+
+**Process isolation within a realm is NOT a security boundary.** It exists for:
+- **Reliability** - crashes don't propagate, per-process GC
+- **Bug prevention** - no shared mutable state reduces race conditions
+- **Fault tolerance** - supervisors can restart failed processes
+
+Since all processes in a realm share the same VSpace (address space), any code running in the realm can theoretically access and modify any memory within that realm through low-level operations. Language constructs like isolated heaps and message passing prevent accidental bugs, not malicious actors.
+
+## Core Terminology
+
+| Term | Definition |
+|------|------------|
+| **seL4** | Formally verified microkernel providing capabilities, VSpaces, CSpaces, and MCS scheduling. Foundation of all security guarantees. |
+| **Realm** | Protection domain = own VSpace + CSpace + SchedContext. THE security boundary. Hardware-enforced isolation. |
+| **Process** | Lightweight execution unit within a realm. Own heap, mailbox. Pure userspace construct (no kernel objects). NOT a security boundary. |
+| **Capability** | Token granting specific rights to a kernel object. All access control in seL4 is capability-based. |
+| **VSpace** | Virtual address space. Each realm has its own, enforced by hardware MMU. |
+| **CSpace** | Capability space. Each realm has its own, cannot access others' capabilities. |
+| **BEAM** | Erlang's virtual machine. Lona adopts its process model (lightweight processes, per-process GC, message passing) but is NOT BEAM-compatible. |
+| **Lonala** | The LISP dialect for Lona. Clojure-inspired syntax with BEAM-style concurrency. |
+| **Root Realm** | The singular privileged realm (trusted computing base). Coordinates the system, manages resources. Only realm that is trusted. |
+
+## Memory Model
+
+### Per-Realm (Kernel-Enforced)
+
+| Resource | Description | Enforcement |
+|----------|-------------|-------------|
+| VSpace | Virtual address space | seL4 kernel, hardware MMU |
+| CSpace | Capability space | seL4 kernel |
+| Untyped Memory | Physical memory budget | seL4 capability system |
+| SchedContext | CPU time budget | seL4 MCS scheduler |
+| Endpoint | IPC channel for cross-realm communication | seL4 kernel |
+
+### Per-Process (Userspace, NOT Security)
+
+| Resource | Description | Purpose |
+|----------|-------------|---------|
+| Heap | Process-local allocation area | Reliability (independent GC) |
+| Stack | Call frames, locals | Normal execution |
+| Mailbox | FIFO message queue | Communication without shared state |
+| Reductions | Scheduling counter | Fairness within realm |
+
+**Remember:** All processes in a realm share the same VSpace. Process isolation is a programming model for reliability, not security.
+
+## Architecture Layers
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  APPLICATION CODE (Lonala)                                      │
+│  - Pattern matching, message passing, supervisors               │
+│  - Uses lona.process for process/realm management               │
+└───────────────────────────────────────┬─────────────────────────┘
+                                        │
+┌───────────────────────────────────────▼─────────────────────────┐
+│  LONALA VM RUNTIME                                              │
+│  - Scheduler (userspace, per-realm)                             │
+│  - Garbage collector (per-process)                              │
+│  - Uses lona.kernel for seL4 syscalls                           │
+└───────────────────────────────────────┬─────────────────────────┘
+                                        │
+┌───────────────────────────────────────▼─────────────────────────┐
+│  seL4 MICROKERNEL                                               │
+│  - Capabilities, VSpace, CSpace                                 │
+│  - MCS scheduling (CPU budgets)                                 │
+│  - IPC (endpoints, notifications)                               │
+│  - THE SECURITY ENFORCEMENT LAYER                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [docs/concept.md](docs/concept.md) | System architecture, design rationale, seL4 foundation, realm hierarchy, scheduling, resource management |
+| [docs/lonala.md](docs/lonala.md) | Language specification: special forms, types, pattern matching, binary/bit syntax |
+| [docs/lonala-process.md](docs/lonala-process.md) | Process and realm primitives: spawn, send/receive, supervisors, shared memory |
+| [docs/lonala-kernel.md](docs/lonala-kernel.md) | Low-level seL4 operations: IPC, TCB, CNode, VSpace (for VM implementers) |
+| [docs/lonala-io.md](docs/lonala-io.md) | Device driver primitives: MMIO, DMA, IRQ, ring buffers |
+
+## Key Design Decisions
+
+### Why Realms for Security, Processes for Concurrency
+
+- **Realm creation**: ~milliseconds (kernel objects, page tables)
+- **Process creation**: ~microseconds (pure userspace)
+- **Use realms** when you need security isolation (untrusted code, drivers, user applications)
+- **Use processes** when you need concurrency (workers, servers, handlers)
+
+### Hierarchical Resources
+
+```
+Root Realm (100% resources, trusted)
+├── Drivers Realm (30% CPU, 2GB) ← policy enforced by kernel
+│   └── children share parent's budget
+└── Apps Realm (70% CPU, 60GB) ← policy enforced by kernel
+    └── children share parent's budget
+```
+
+- Children cannot exceed parent's allocation
+- Creating child realms doesn't increase total resources (anti-Sybil)
+- Parent can revoke child's capabilities at any time
+
+### Message Passing
+
+- **Intra-realm**: Deep copy to receiver's heap, ~100-500 ns
+- **Inter-realm**: seL4 IPC, serialization, ~1-10 µs
+- **No shared mutable state** - messages are the only communication
+
+### Vars and Late Binding
+
+Clojure-style vars enable live code updates:
+- Parent realm updates var → child realms see new value immediately (shared RO mapping)
+- No restart required for code updates
+- Atomic namespace updates prevent inconsistent states
+
+## Quick Reference
+
+### Realm Operations
+```clojure
+(realm-create %{:name 'worker :policy %{:cpu %{:max 0.3} :memory %{:max (* 1 +GB+)}}})
+(realm-terminate realm-id)
+```
+
+### Process Operations
+```clojure
+(spawn (fn [] (worker-loop)))           ; New process in current realm
+(spawn-in realm-id (fn [] (work)))      ; New process in child realm
+(send pid [:message data])              ; Async message (local or remote)
+(receive [:ok result] result)           ; Pattern-matched receive
+```
+
+### Linking and Monitoring
+```clojure
+(spawn-link f)                          ; Bidirectional crash notification
+(spawn-monitor f)                       ; Unidirectional monitoring
+```
+
+## Consulting AI Agents
+
+Three AI agents are available for reviews, second opinions, and parallel consultation.
+
+### Agent Commands
+
+| Agent | Method |
+|-------|--------|
+| **Claude** | `Task(subagent_type="reviewer", run_in_background=true, prompt="<PROMPT>")` |
+| **Gemini** | `Bash(run_in_background=true, timeout=600000, command='gemini -m gemini-3-pro-preview "<PROMPT>"')` |
+| **Codex** | `Bash(run_in_background=true, timeout=600000, command='codex exec -m gpt-5.2-codex -c model_reasoning_effort=medium -c hide_agent_reasoning=true -s read-only "<PROMPT>"')` |
+
+The `reviewer` subagent is defined in `.claude/agents/reviewer.md`. Symlinks `AGENTS.md` and `GEMINI.md` point to this file so all agents use consistent instructions.
+
+For **Codex**: Use "-m gpt-5.2" model for conceptual reviews such as designs or plans. Use "-m gpt-5.2-codex" model for code reviews.
+
+### Running Agents in Parallel
+
+**CRITICAL:** Run all three agents IN PARALLEL using a single message with multiple tool calls. Do NOT run sequentially.
+
+Collect results with `TaskOutput` when complete.

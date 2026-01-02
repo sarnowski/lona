@@ -1,0 +1,30 @@
+# Build artifacts (now in Docker volume, but keep for safety)
+/target/
+/images/
+
+# Exported images from Docker volume
+/dist/
+
+# Build state markers
+/.build-markers/
+
+# Coverage
+lcov.info
+*.profraw
+*.profdata
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc

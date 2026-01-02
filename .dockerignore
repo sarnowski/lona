@@ -1,0 +1,7 @@
+# .dockerignore
+# Docker build context only includes docker/ directory
+# All other files accessed via bind mounts at runtime
+
+# Exclude everything except docker/
+*
+!docker/
