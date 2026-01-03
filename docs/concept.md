@@ -297,8 +297,8 @@ Root Realm (coordinator, 100% resources, trusted)
 (let [realm (realm-create
               %{:name     'webserver
                 :policy   %{:cpu    %{:min 0.20 :max 0.50}   ; 20-50% CPU
-                            :memory %{:min (* 4 +GB+)        ; 4 GB guaranteed
-                                      :max (* 16 +GB+)}}     ; 16 GB maximum
+                            :memory %{:min (* 4 1024 1024 1024)   ; 4 GB guaranteed
+                                      :max (* 16 1024 1024 1024)}} ; 16 GB maximum
                 :schedulers :auto})]                         ; One per available core
   (spawn-in realm (fn [] (webserver-main))))
 ```
@@ -393,7 +393,7 @@ Processes in Lona are modeled after BEAM/Erlang processes: lightweight, isolated
 │              HEAP                       │
 │         (grows downward ↓)              │
 │                                         │
-│   Cons cells, vectors, closures,        │
+│   Lists, vectors, closures,             │
 │   local bindings, message data...       │
 │                                         │
 ├─────────────────────────────────────────┤ ← heap-ptr (moves down)
@@ -718,19 +718,19 @@ Creating child realms cannot increase your CPU allocation:
 (realm-create
   %{:name   'network-driver
     :policy %{:cpu    %{:min 0.05 :max 0.15}
-              :memory %{:min (* 64 +MB+) :max (* 256 +MB+)}}})
+              :memory %{:min (* 64 1024 1024) :max (* 256 1024 1024)}}})
 
 ;; Database: high guaranteed resources, can burst
 (realm-create
   %{:name   'database
     :policy %{:cpu    %{:min 0.30 :max 0.70}
-              :memory %{:min (* 8 +GB+) :max (* 24 +GB+)}}})
+              :memory %{:min (* 8 1024 1024 1024) :max (* 24 1024 1024 1024)}}})
 
 ;; Background tasks: no guarantees, hard cap
 (realm-create
   %{:name   'background
     :policy %{:cpu    %{:min nil :max 0.10}
-              :memory %{:min nil :max (* 512 +MB+)}}})
+              :memory %{:min nil :max (* 512 1024 1024)}}})
 
 ;; Development sandbox: best-effort, no limits
 (realm-create
@@ -1171,7 +1171,7 @@ Large data can be shared between realms without copying:
 
 ```clojure
 ;; Owner creates shared region
-(def dataset (make-shared-region (* 1 +GB+) 'corpus))
+(def dataset (make-shared-region (* 1024 1024 1024) 'corpus))  ; 1 GB
 
 ;; Fill with data
 (load-into-region! dataset "/data/corpus.bin")
@@ -1488,7 +1488,7 @@ Realm isolation (between realms):
 (let [realm (realm-create
               %{:name   'my-realm
                 :policy %{:cpu %{:min 0.10 :max 0.30}
-                          :memory %{:min (* 1 +GB+) :max (* 4 +GB+)}}})]
+                          :memory %{:min (* 1024 1024 1024) :max (* 4 1024 1024 1024)}}})]
   (spawn-in realm (fn [] ...)))
 
 ;; Creation without policy (shares parent's budget)

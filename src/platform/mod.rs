@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 Tobias Sarnowski
+
 //! Platform abstraction layer.
 //!
 //! This module provides traits that abstract over platform-specific operations,
@@ -25,13 +28,25 @@
 //! └─────────────────────┘      └─────────────────────────────┘
 //! ```
 
+#[cfg(test)]
+mod mock_test;
+#[cfg(test)]
+mod traits_test;
+
 #[cfg(any(test, feature = "std"))]
 mod mock;
 mod traits;
 
+/// MMIO device mapping for aarch64 seL4.
+#[cfg(all(target_arch = "aarch64", not(any(test, feature = "std"))))]
+pub mod mmio;
+
 #[cfg(any(test, feature = "std"))]
 pub use mock::MockVSpace;
 pub use traits::{CacheAttr, MapError, MemorySpace, PagePerms, Platform};
+
+#[cfg(not(any(test, feature = "std")))]
+pub use traits::Sel4VSpace;
 
 /// `VSpace` layout constants matching `concept.md` Section 14.
 pub mod vspace_layout {

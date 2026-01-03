@@ -1,6 +1,12 @@
 {
   "permissions": {
     "allow": [
+      "Skill(develop-rust)",
+      "Skill(finishing-work)",
+
+      "mcp__lona-dev-repl__eval",
+      "mcp__lona-dev-repl__restart",
+
       "Bash(make:*)",
       "Bash(docker:*)",
 
@@ -23,6 +29,21 @@
     ],
 
     "ask": ["Bash(git commit:*)", "Bash(git push:*)"]
+  },
+
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate-clippy-rules.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   },
 
   "attribution": {

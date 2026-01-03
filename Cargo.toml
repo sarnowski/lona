@@ -47,8 +47,11 @@ panic = "abort"
 panic = "abort"
 
 [lints.rust]
-unsafe_code = "deny"
+warnings = "deny"
 missing_docs = "deny"
+
+# Operating system needs this all the time
+unsafe_code = "allow"
 
 [lints.clippy]
 # All lint groups as deny
@@ -64,3 +67,6 @@ panic = "deny"
 todo = "deny"
 unimplemented = "deny"
 unreachable = "deny"
+
+# Intentional allows
+cast_possible_truncation = "allow"  # 64-bit only target (seL4)

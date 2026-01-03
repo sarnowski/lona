@@ -6,9 +6,9 @@ A capability-secure operating system built on seL4, combining BEAM-style lightwe
 
 ### Prerequisites
 
-- Rust nightly toolchain
 - Docker (for cross-compilation and OS image builds)
-- cargo-llvm-cov (`cargo install cargo-llvm-cov`)
+- Make
+- Python 3.11+ (for MCP development tools)
 
 ### Build OS Images
 
@@ -48,15 +48,15 @@ make clean          # Remove all build artifacts
 | `env` | Build Docker build environment |
 | **`x86_64`** | Build x86_64 release image |
 | **`aarch64`** | Build aarch64 release image |
-| `x86_64-debug` | Build x86_64 debug image |
-| `aarch64-debug` | Build aarch64 debug image |
 | `run-x86_64` | Run x86_64 in QEMU |
 | `run-aarch64` | Run aarch64 in QEMU |
 | `x86_64-test` | Build and run E2E tests for x86_64 |
 | `aarch64-test` | Build and run E2E tests for aarch64 |
 | `integration-test` | Run E2E tests for all architectures |
 | **`verify`** | Run all checks including integration tests |
-| **`clean`** | Remove all build artifacts |
+| `venv` | Create Python virtual environment for MCP tools |
+| `mcp` | Run MCP development REPL server |
+| **`clean`** | Remove Rust build cache |
 
 ## Documentation
 
@@ -66,3 +66,9 @@ See `docs/` for detailed specifications:
 - `lonala-process.md` - Process primitives
 - `lonala-kernel.md` - seL4 operations
 - `lonala-io.md` - Device driver primitives
+
+## License
+
+Copyright 2026 Tobias Sarnowski
+
+This project is licensed under the GNU General Public License v3.0 or later — see [docs/license.md](docs/license.md) for details.

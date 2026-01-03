@@ -606,8 +606,8 @@ Create a new child realm.
 ```clojure
 %{:cpu %{:min 0.1      ; Guaranteed minimum (reserved immediately)
          :max 0.3}     ; Maximum allowed (ceiling)
-  :memory %{:min (* 100 +MB+)  ; Reserved immediately from parent's pool
-            :max (* 500 +MB+)}} ; Maximum requestable
+  :memory %{:min (* 100 1024 1024)  ; 100 MB reserved immediately
+            :max (* 500 1024 1024)}} ; 500 MB maximum
 ```
 
 **Returns:** `realm-id`
@@ -630,11 +630,11 @@ Create a new child realm.
 ;; With resource policy
 (realm-create %{:name 'database
                 :policy %{:cpu %{:min 0.2 :max 0.5}
-                          :memory %{:min (* 1 +GB+)
-                                    :max (* 8 +GB+)}}})
+                          :memory %{:min (* 1024 1024 1024)      ; 1 GB
+                                    :max (* 8 1024 1024 1024)}}}})  ; 8 GB
 
 ;; With shared memory region
-(let [data (make-shared-region (* 100 +MB+) 'dataset)]
+(let [data (make-shared-region (* 100 1024 1024) 'dataset)]  ; 100 MB
   (realm-create %{:name 'processor
                   :shared #{data}}))
 ```
@@ -731,7 +731,7 @@ Create a process in another realm.
 ```clojure
 (let [worker-realm (realm-create %{:name 'workers
                                     :policy %{:cpu %{:max 0.5}
-                                              :memory %{:max (* 1 +GB+)}}})]
+                                              :memory %{:max (* 1024 1024 1024)}}})]  ; 1 GB
   ;; Spawn multiple workers in the child realm
   (dotimes [i 10]
     (spawn-in worker-realm (fn [] (worker-loop i)))))
@@ -793,7 +793,7 @@ Create a shared memory region.
 
 **Example:**
 ```clojure
-(def dataset (make-shared-region (* 1 +GB+) 'corpus))
+(def dataset (make-shared-region (* 1024 1024 1024) 'corpus))  ; 1 GB
 ```
 
 ---
@@ -858,12 +858,12 @@ Get the size of a region in bytes.
 
 ```clojure
 ;; Parent realm creates shared data
-(def corpus (make-shared-region (* 1 +GB+) 'corpus))
+(def corpus (make-shared-region (* 1024 1024 1024) 'corpus))  ; 1 GB
 (load-data-into-region! corpus "/data/corpus.bin")
 
 ;; Create worker realm and share data read-only
-(let [workers (realm-create {:name 'workers
-                              :policy {:cpu {:max 0.8}}})]
+(let [workers (realm-create %{:name 'workers
+                              :policy %{:cpu %{:max 0.8}}})]
   (share-region corpus workers :read-only)
 
   ;; Spawn workers that process chunks
@@ -1167,8 +1167,8 @@ Notifications provide lightweight signaling for event-driven patterns, particula
   (let [worker-realm (proc/realm-create
                        %{:name 'worker-pool
                          :policy %{:cpu %{:min 0.1 :max 0.5}
-                                   :memory %{:min (* 100 +MB+)
-                                             :max (* 500 +MB+)}}})]
+                                   :memory %{:min (* 100 1024 1024)   ; 100 MB
+                                             :max (* 500 1024 1024)}}})]  ; 500 MB
 
     ;; Spawn workers in the isolated realm
     (let [workers (vec (for [i (range num-workers)]

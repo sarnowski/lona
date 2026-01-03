@@ -20,6 +20,9 @@ DOCKER_IMAGE = lona-build
 SEL4_VERSION = 14.0.0
 RUST_SEL4_VERSION = 3.0.0
 
+# Version derived from git
+VERSION := $(shell git describe --tags --always --dirty)
+
 # QEMU x86_64 configuration
 QEMU_X86           = qemu-system-x86_64
 QEMU_X86_MACHINE   = q35
@@ -38,6 +41,10 @@ QEMU_AARCH64_SMP     = 4
 VOLUME_BUILD = lona-build-cache
 VOLUME_CARGO = lona-cargo-cache
 VOLUME_RUSTUP = lona-rustup-cache
+
+# Python virtual environment (for MCP server, runs on host)
+VENV = .venv
+PYTHON = $(VENV)/bin/python
 
 # Docker run commands
 #
@@ -109,6 +116,8 @@ help:
 	@echo "  make clippy           Run clippy lints"
 	@echo "  make test             Run unit tests"
 	@echo "  make verify           Run all checks"
+	@echo "  make venv             Create Python virtual environment"
+	@echo "  make mcp              Start MCP server for AI agents"
 	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean            Remove Rust target cache"
@@ -244,6 +253,7 @@ CARGO_SEL4_FLAGS = -Z build-std=core,alloc,compiler_builtins -Z build-std-featur
 x86_64-build: $(MARKER_X86_64_KERNEL)
 	@echo "=== Building Lona for x86_64 (release) ==="
 	$(DOCKER) env \
+		LONA_VERSION=$(VERSION) \
 		SEL4_PREFIX=/build/sel4-x86_64 \
 		SEL4_INCLUDE_DIRS=/build/sel4-x86_64/libsel4/include \
 		RUST_TARGET_PATH=/source/targets \
@@ -255,6 +265,7 @@ x86_64-build: $(MARKER_X86_64_KERNEL)
 aarch64-build: $(MARKER_AARCH64_KERNEL)
 	@echo "=== Building Lona for aarch64 (release) ==="
 	$(DOCKER) env \
+		LONA_VERSION=$(VERSION) \
 		SEL4_PREFIX=/build/sel4-aarch64 \
 		SEL4_INCLUDE_DIRS=/build/sel4-aarch64/libsel4/include \
 		RUST_TARGET_PATH=/source/targets \
@@ -266,6 +277,7 @@ aarch64-build: $(MARKER_AARCH64_KERNEL)
 x86_64-build-test: $(MARKER_X86_64_KERNEL)
 	@echo "=== Building Lona for x86_64 (test) ==="
 	$(DOCKER) env \
+		LONA_VERSION=$(VERSION) \
 		SEL4_PREFIX=/build/sel4-x86_64 \
 		SEL4_INCLUDE_DIRS=/build/sel4-x86_64/libsel4/include \
 		RUST_TARGET_PATH=/source/targets \
@@ -277,6 +289,7 @@ x86_64-build-test: $(MARKER_X86_64_KERNEL)
 aarch64-build-test: $(MARKER_AARCH64_KERNEL)
 	@echo "=== Building Lona for aarch64 (test) ==="
 	$(DOCKER) env \
+		LONA_VERSION=$(VERSION) \
 		SEL4_PREFIX=/build/sel4-aarch64 \
 		SEL4_INCLUDE_DIRS=/build/sel4-aarch64/libsel4/include \
 		RUST_TARGET_PATH=/source/targets \
@@ -297,6 +310,7 @@ x86_64-image: x86_64-build
 		cp /build/sel4-x86_64/bin/kernel.elf /build/images/x86_64/boot/kernel.elf && \
 		cp /build/target/x86_64/x86_64-sel4/release/lona-root-task.elf \
 			/build/images/x86_64/boot/rootserver.elf && \
+		truncate -s 1M /build/images/x86_64/boot/rootserver.elf && \
 		echo "set timeout=0" > /build/images/x86_64/boot/grub.cfg && \
 		echo "set default=0" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "serial --unit=0 --speed=115200" >> /build/images/x86_64/boot/grub.cfg && \
@@ -337,6 +351,7 @@ x86_64-image-test: x86_64-build-test
 		cp /build/sel4-x86_64/bin/kernel.elf /build/images/x86_64/boot/kernel.elf && \
 		cp /build/target/x86_64/x86_64-sel4/debug/lona-root-task.elf \
 			/build/images/x86_64/boot/rootserver.elf && \
+		truncate -s 1M /build/images/x86_64/boot/rootserver.elf && \
 		echo "set timeout=0" > /build/images/x86_64/boot/grub.cfg && \
 		echo "set default=0" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "serial --unit=0 --speed=115200" >> /build/images/x86_64/boot/grub.cfg && \
@@ -366,10 +381,10 @@ aarch64-image-test: aarch64-build-test $(MARKER_AARCH64_LOADER)
 			--app /build/target/aarch64/aarch64-sel4/debug/lona-root-task.elf \
 			-o /build/images/aarch64/lona-image.elf'
 
-# Convenience aliases
+# Convenience aliases (build + export to dist/)
 .PHONY: x86_64 aarch64
-x86_64: x86_64-image
-aarch64: aarch64-image
+x86_64: export-x86_64
+aarch64: export-aarch64
 
 # ============================================================
 # Export Images to Host
@@ -467,22 +482,38 @@ integration-test: aarch64-test x86_64-test
 
 .PHONY: format
 format: $(MARKER_ENV)
-	@echo "=== Checking code formatting ==="
-	$(DOCKER) cargo fmt --check
+	@echo "=== Formatting code ==="
+	$(DOCKER) cargo fmt
 
 .PHONY: clippy
 clippy: $(MARKER_ENV)
 	@echo "=== Running clippy ==="
-	$(DOCKER) cargo clippy --all-targets -- -D warnings
+	$(DOCKER) env LONA_VERSION=$(VERSION) cargo clippy --all-targets -- -D warnings
 
 .PHONY: test
 test: $(MARKER_ENV)
 	@echo "=== Running unit tests ==="
-	$(DOCKER) sh -c 'cargo test && cargo llvm-cov --fail-under-lines 60'
+	$(DOCKER) sh -c 'LONA_VERSION=$(VERSION) cargo test && LONA_VERSION=$(VERSION) cargo llvm-cov --fail-under-lines 60'
 
 .PHONY: verify
 verify: format clippy test integration-test
 	@echo "=== All checks passed ==="
+
+# ============================================================
+# Python Tooling (runs on host, not in Docker)
+# ============================================================
+
+.PHONY: venv
+venv: $(VENV)
+
+$(VENV): requirements.txt
+	python3 -m venv $(VENV)
+	$(VENV)/bin/pip install -r requirements.txt
+	@touch $(VENV)
+
+.PHONY: mcp
+mcp: $(VENV)
+	$(PYTHON) -m tools.lona_dev_repl
 
 # ============================================================
 # Cleanup
@@ -500,6 +531,7 @@ clean-all:
 	-docker volume rm $(VOLUME_BUILD) $(VOLUME_CARGO) $(VOLUME_RUSTUP)
 	rm -rf $(MARKER_DIR)
 	rm -rf dist
+	rm -rf $(VENV)
 	@echo "=== Clean complete ==="
 
 .PHONY: env-clean

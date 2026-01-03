@@ -108,7 +108,7 @@ The var table lives in shared memory. Parent writes, children see it on next der
 Large datasets can be shared between realms without copying:
 
 ```clojure
-(def corpus (make-shared-region (* 1 +GB+) 'dataset))
+(def corpus (make-shared-region (* 1024 1024 1024) 'dataset))  ; 1 GB
 (share-region corpus worker-realm :read-only)
 ;; Workers read same physical memory, different virtual mappings
 ```

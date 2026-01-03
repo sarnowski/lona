@@ -1,0 +1,2 @@
+# Lona development tools dependencies
+mcp>=1.0.0

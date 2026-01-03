@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 Tobias Sarnowski
+
 //! Platform abstraction traits.
 
 use crate::types::{Paddr, Vaddr};
@@ -162,13 +165,42 @@ const _: () = {
     assert!(PagePerms::RX.execute);
 };
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Real VSpace that interprets addresses directly as pointers.
+///
+/// This implementation is used on seL4 where virtual addresses are
+/// directly accessible via pointer operations.
+#[cfg(not(any(test, feature = "std")))]
+#[derive(Default)]
+pub struct Sel4VSpace;
 
-    #[test]
-    fn test_map_error_display() {
-        let err = MapError::AlreadyMapped;
-        assert_eq!(format!("{err}"), "virtual address already mapped");
+#[cfg(not(any(test, feature = "std")))]
+impl MemorySpace for Sel4VSpace {
+    fn read<T: Copy>(&self, vaddr: Vaddr) -> T {
+        // SAFETY: Caller ensures vaddr is valid and mapped
+        unsafe { vaddr.as_ptr::<T>().read() }
+    }
+
+    fn write<T>(&mut self, vaddr: Vaddr, value: T) {
+        // SAFETY: Caller ensures vaddr is valid and mapped
+        unsafe {
+            vaddr.as_mut_ptr::<T>().write(value);
+        }
+    }
+
+    fn slice(&self, vaddr: Vaddr, len: usize) -> &[u8] {
+        // SAFETY: Caller ensures range is valid and mapped
+        unsafe { core::slice::from_raw_parts(vaddr.as_ptr::<u8>(), len) }
+    }
+
+    fn slice_mut(&mut self, vaddr: Vaddr, len: usize) -> &mut [u8] {
+        // SAFETY: Caller ensures range is valid and mapped
+        unsafe { core::slice::from_raw_parts_mut(vaddr.as_mut_ptr::<u8>(), len) }
+    }
+
+    fn copy_within(&mut self, src: Vaddr, dst: Vaddr, len: usize) {
+        // SAFETY: Caller ensures ranges are valid and don't illegally overlap
+        unsafe {
+            core::ptr::copy(src.as_ptr::<u8>(), dst.as_mut_ptr::<u8>(), len);
+        }
     }
 }

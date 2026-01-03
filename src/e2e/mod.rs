@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 Tobias Sarnowski
+
 //! End-to-end test framework for Lona on seL4.
 //!
 //! This module provides a test runner and test infrastructure for running

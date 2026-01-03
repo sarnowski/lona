@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "lona-dev-repl": {
+      "command": "make",
+      "args": ["mcp"]
+    }
+  }
+}

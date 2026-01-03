@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 Tobias Sarnowski
+
 //! # Lona VM
 //!
 //! Bytecode virtual machine for the Lonala language, designed to run on seL4.
@@ -21,8 +24,16 @@
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
+#[cfg(test)]
+mod lib_test;
+
+pub mod heap;
 pub mod platform;
+pub mod reader;
+pub mod repl;
 pub mod types;
+pub mod uart;
+pub mod value;
 
 /// End-to-end test framework for seL4 environment.
 ///
@@ -33,11 +44,20 @@ pub mod e2e;
 // Import core prelude items needed in this file
 use core::result::Result::{self, Ok};
 
+pub use heap::Heap;
 pub use platform::{MemorySpace, Platform};
-pub use types::{Paddr, Pid, Vaddr};
+pub use types::{Paddr, Vaddr};
+pub use uart::{Uart, UartExt};
+pub use value::{HeapString, Pair, Value, print_value};
 
 /// Crate version for runtime queries.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+///
+/// Uses the git-derived version from `LONA_VERSION` environment variable when available,
+/// falling back to "unknown" otherwise.
+pub const VERSION: &str = match option_env!("LONA_VERSION") {
+    Some(v) => v,
+    None => "unknown",
+};
 
 /// Initialize the VM runtime.
 ///
@@ -71,21 +91,5 @@ impl core::fmt::Display for InitError {
             Self::SchedulerInit => write!(f, "failed to initialize scheduler"),
             Self::InsufficientMemory => write!(f, "insufficient memory for initial structures"),
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_init_succeeds() {
-        let result = init();
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_version_not_empty() {
-        assert!(!VERSION.is_empty());
     }
 }

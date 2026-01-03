@@ -1,27 +1,38 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright 2026 Tobias Sarnowski
+
 //! E2E test cases for Lona on seL4.
 //!
-//! Each test function returns `Ok(())` on success or `Err(message)` on failure.
+//! Each test function receives the same heap, memory space, and UART
+//! that the REPL uses, ensuring tests exercise the exact same code paths.
+//!
+//! Test functions return `Ok(())` on success or `Err(message)` on failure.
 
-#[allow(unused_imports)]
 use core::option::Option::{None, Some};
 use core::result::Result::{self, Err, Ok};
 
-use crate::types::{Paddr, Pid, Vaddr};
+use crate::heap::Heap;
+use crate::platform::MemorySpace;
+use crate::reader::read;
+use crate::types::{Paddr, Vaddr};
+use crate::uart::Uart;
+use crate::value::print_value;
 
 /// Test that VM initialization succeeds.
-pub fn test_vm_init() -> Result<(), &'static str> {
+pub fn test_vm_init<M: MemorySpace, U: Uart>(
+    _heap: &mut Heap,
+    _mem: &mut M,
+    _uart: &mut U,
+) -> Result<(), &'static str> {
     crate::init().map_err(|_| "VM init failed")
 }
 
-/// Test that boot info is available (placeholder - actual check needs bootinfo).
-pub fn test_bootinfo_available() -> Result<(), &'static str> {
-    // This is a placeholder - actual test would check bootinfo
-    // The real test happens in root-task.rs which has access to bootinfo
-    Ok(())
-}
-
 /// Test that serial output works.
-pub fn test_serial_output() -> Result<(), &'static str> {
+pub fn test_serial_output<M: MemorySpace, U: Uart>(
+    _heap: &mut Heap,
+    _mem: &mut M,
+    _uart: &mut U,
+) -> Result<(), &'static str> {
     // If we got here, serial output is already working
     // This test mostly exists to verify the test framework itself
     sel4::debug_println!("  [serial test message]");
@@ -29,7 +40,11 @@ pub fn test_serial_output() -> Result<(), &'static str> {
 }
 
 /// Test memory type newtype wrappers.
-pub fn test_memory_types() -> Result<(), &'static str> {
+pub fn test_memory_types<M: MemorySpace, U: Uart>(
+    _heap: &mut Heap,
+    _mem: &mut M,
+    _uart: &mut U,
+) -> Result<(), &'static str> {
     // Test Paddr
     let paddr = Paddr::new(0x1000);
     if paddr.as_u64() != 0x1000 {
@@ -53,41 +68,12 @@ pub fn test_memory_types() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Test PID creation and manipulation.
-pub fn test_pid_creation() -> Result<(), &'static str> {
-    // Create a PID
-    let pid = Pid::new(1, 42);
-
-    // Verify components
-    if pid.realm_id() != 1 {
-        return Err("Pid::realm_id mismatch");
-    }
-    if pid.local_id() != 42 {
-        return Err("Pid::local_id mismatch");
-    }
-
-    // Test null PID
-    let null_pid = Pid::null();
-    if !null_pid.is_null() {
-        return Err("Pid::null should be null");
-    }
-
-    // Test same_realm
-    let same_realm_pid = Pid::new(1, 100);
-    if !pid.same_realm(same_realm_pid) {
-        return Err("same_realm should be true for same realm_id");
-    }
-
-    let diff_realm_pid = Pid::new(2, 42);
-    if pid.same_realm(diff_realm_pid) {
-        return Err("same_realm should be false for different realm_id");
-    }
-
-    Ok(())
-}
-
 /// Test address type operations.
-pub fn test_address_types() -> Result<(), &'static str> {
+pub fn test_address_types<M: MemorySpace, U: Uart>(
+    _heap: &mut Heap,
+    _mem: &mut M,
+    _uart: &mut U,
+) -> Result<(), &'static str> {
     // Test address arithmetic
     let addr = Vaddr::new(0x1000);
     let added = addr.add(0x500);
@@ -115,6 +101,84 @@ pub fn test_address_types() -> Result<(), &'static str> {
     match Vaddr::new(0x1500).align_down(0x1000) {
         Some(down) if down.as_u64() == 0x1000 => {}
         _ => return Err("align_down to 0x1000 from 0x1500 should be 0x1000"),
+    }
+
+    Ok(())
+}
+
+/// Maximum size for output buffer when capturing printed values.
+const OUTPUT_BUFFER_SIZE: usize = 256;
+
+/// A simple buffer that implements Uart for capturing output.
+struct OutputBuffer {
+    data: [u8; OUTPUT_BUFFER_SIZE],
+    len: usize,
+}
+
+impl OutputBuffer {
+    const fn new() -> Self {
+        Self {
+            data: [0; OUTPUT_BUFFER_SIZE],
+            len: 0,
+        }
+    }
+
+    fn as_str(&self) -> Result<&str, &'static str> {
+        core::str::from_utf8(&self.data[..self.len]).map_err(|_| "output not valid UTF-8")
+    }
+}
+
+impl Uart for OutputBuffer {
+    fn write_byte(&mut self, byte: u8) {
+        if self.len < self.data.len() {
+            self.data[self.len] = byte;
+            self.len += 1;
+        }
+    }
+
+    fn read_byte(&mut self) -> u8 {
+        0 // Not used for output capture
+    }
+
+    fn can_read(&self) -> bool {
+        false
+    }
+
+    fn can_write(&self) -> bool {
+        self.len < self.data.len()
+    }
+}
+
+/// Test reading and printing a quoted list.
+///
+/// This test exercises the same code path as the REPL:
+/// 1. `read()` parses the input string into a Value
+/// 2. `print_value()` converts the Value back to a string
+///
+/// Input: `'(1 2 3)` (quoted list)
+/// Expected output: `(quote (1 2 3))`
+pub fn test_read_quoted_list<M: MemorySpace, U: Uart>(
+    heap: &mut Heap,
+    mem: &mut M,
+    _uart: &mut U,
+) -> Result<(), &'static str> {
+    // Read the input using the same function as the REPL
+    let value = match read("'(1 2 3)", heap, mem) {
+        Ok(Some(v)) => v,
+        Ok(None) => return Err("read returned None"),
+        Err(_) => return Err("read failed"),
+    };
+
+    // Print the value using the same function as the REPL
+    let mut output = OutputBuffer::new();
+    print_value(value, heap, mem, &mut output);
+
+    // Verify the output matches expected
+    let printed = output.as_str()?;
+    if printed != "(quote (1 2 3))" {
+        sel4::debug_println!("  Expected: (quote (1 2 3))");
+        sel4::debug_println!("  Got: {}", printed);
+        return Err("output mismatch");
     }
 
     Ok(())

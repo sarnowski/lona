@@ -2,6 +2,55 @@
 
 Lona is a capability-secure operating system built on the seL4 microkernel, combining BEAM-style lightweight processes with a Clojure-inspired LISP dialect (Lonala).
 
+## Skills: When to Use Them
+
+**Skills are mandatory workflows. Use them - don't skip them.**
+
+| Skill | When to Use | Invocation |
+|-------|-------------|------------|
+| **develop-rust** | **BEFORE** reading, writing, reviewing, or thinking about any Rust code. Load FIRST whenever Rust is involved. | `/develop-rust` |
+| **finishing-work** | **AFTER** completing ANY work (concepts, plans, features, bugfixes, docs). MANDATORY before claiming work is done. | `/finishing-work` |
+| **git-commit** | When creating git commits. | `/git-commit` |
+
+### Skill Workflow Summary
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  START: Any Rust-related task                                   │
+│         ↓                                                       │
+│  /develop-rust  ← Load principles, read rust.md                 │
+│         ↓                                                       │
+│  [Do the work: implement, test, verify]                         │
+│         ↓                                                       │
+│  Use REPL tools for debugging/manual verification               │
+│  (mcp__lona-dev-repl__eval, mcp__lona-dev-repl__restart)        │
+│         ↓                                                       │
+│  /finishing-work  ← Parallel agent review, fix ALL issues       │
+│         ↓                                                       │
+│  DONE: Only now is the work complete                            │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**The `finishing-work` skill is non-negotiable.** It triggers three AI agents to review your changes in parallel and ensures every issue is resolved. Work is NOT complete until this skill passes.
+
+## Development REPL
+
+Two MCP tools are available for interactive Lonala development in QEMU:
+
+| Tool | Purpose |
+|------|---------|
+| `mcp__lona-dev-repl__eval` | Evaluate Lonala expressions. QEMU starts automatically on first use. |
+| `mcp__lona-dev-repl__restart` | Restart QEMU to pick up code changes after rebuilding. |
+
+Both tools support `arch` parameter: `aarch64` (default) or `x86_64`. Each architecture runs an independent QEMU instance with a 60-second idle timeout.
+
+**Workflow:**
+1. Use `eval` to test Lonala expressions interactively
+2. After modifying Rust code, use `restart` to rebuild and test with updated code
+3. Run both architectures in parallel if needed
+
+---
+
 ## IMPORTANT: Lonala Is Its Own Language
 
 **Lonala is NOT Clojure. Lonala is NOT Erlang/Elixir. It is its own language.**
@@ -217,7 +266,7 @@ Three AI agents are available for reviews, second opinions, and parallel consult
 |-------|--------|
 | **Claude** | `Task(subagent_type="reviewer", run_in_background=true, prompt="<PROMPT>")` |
 | **Gemini** | `Bash(run_in_background=true, timeout=600000, command='gemini -m gemini-3-pro-preview "<PROMPT>"')` |
-| **Codex** | `Bash(run_in_background=true, timeout=600000, command='codex exec -m gpt-5.2-codex -c model_reasoning_effort=medium -c hide_agent_reasoning=true -s read-only "<PROMPT>"')` |
+| **Codex** | `Bash(run_in_background=true, timeout=600000, command='codex exec -m gpt-5.2 -c model_reasoning_effort=medium -c hide_agent_reasoning=true -s read-only "<PROMPT>"')` |
 
 The `reviewer` subagent is defined in `.claude/agents/reviewer.md`. Symlinks `AGENTS.md` and `GEMINI.md` point to this file so all agents use consistent instructions.
 
