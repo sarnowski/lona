@@ -81,12 +81,10 @@ Everything is Lonala — drivers, protocols, applications, the scheduler. No con
 (def handle-request (fn [req] (process-v2 req)))
 
 ;; Hot-patch a driver without rebooting
-(ns-transaction 'drivers.uart
-  (fn [tx]
-    (tx-def tx 'uart-init improved-uart-init)))
+(def uart-init improved-uart-init)
 ```
 
-Atomic namespace transactions ensure you never see half-updated code.
+Var updates are atomic — callers see the new version immediately.
 
 ### Live Code Updates
 
@@ -174,10 +172,7 @@ Collection literals: `[]` tuples, `{}` vectors, `%{}` maps, `#{}` sets, `#bits[.
 | Document | Description |
 |----------|-------------|
 | [concept.md](concept.md) | Full system design and rationale |
-| [lonala.md](lonala.md) | Language specification |
-| [lonala-process.md](lonala-process.md) | Process and realm APIs |
-| [lonala-kernel.md](lonala-kernel.md) | seL4 kernel primitives |
-| [lonala-io.md](lonala-io.md) | Device driver primitives |
+| [lonala/](lonala/index.md) | Lonala language specification |
 
 ## Status
 

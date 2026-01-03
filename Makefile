@@ -119,6 +119,10 @@ help:
 	@echo "  make venv             Create Python virtual environment"
 	@echo "  make mcp              Start MCP server for AI agents"
 	@echo ""
+	@echo "Documentation:"
+	@echo "  make docs             Build documentation site"
+	@echo "  make docs-browse      Serve documentation locally"
+	@echo ""
 	@echo "Cleanup:"
 	@echo "  make clean            Remove Rust target cache"
 	@echo "  make clean-all        Remove entire build cache volume"
@@ -514,6 +518,18 @@ $(VENV): requirements.txt
 .PHONY: mcp
 mcp: $(VENV)
 	$(PYTHON) -m tools.lona_dev_repl
+
+# ============================================================
+# Documentation (runs on host, not in Docker)
+# ============================================================
+
+.PHONY: docs
+docs: $(VENV)
+	$(VENV)/bin/mkdocs build --strict
+
+.PHONY: docs-browse
+docs-browse: $(VENV)
+	$(VENV)/bin/mkdocs serve
 
 # ============================================================
 # Cleanup

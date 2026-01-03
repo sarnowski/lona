@@ -62,7 +62,7 @@ While heavily inspired by Clojure (syntax, persistent data structures, vars) and
 1. **NEVER assume** any function, macro, or behavior exists unless documented in the specification
 2. **ALWAYS verify** in the Lonala specification before using any function or feature
 3. **What is not in the specification does not exist** - do not invent functions based on Clojure/Erlang knowledge
-4. **Check the docs** - if you need a function, look it up in [docs/lonala.md](docs/lonala.md) and related specs first
+4. **Check the docs** - if you need a function, look it up in [docs/lonala/](docs/lonala/index.md) first
 
 **Key differences from Clojure:**
 - No `recur` (automatic TCO instead)
@@ -193,10 +193,7 @@ Since all processes in a realm share the same VSpace (address space), any code r
 | Document | Purpose |
 |----------|---------|
 | [docs/concept.md](docs/concept.md) | System architecture, design rationale, seL4 foundation, realm hierarchy, scheduling, resource management |
-| [docs/lonala.md](docs/lonala.md) | Language specification: special forms, types, pattern matching, binary/bit syntax |
-| [docs/lonala-process.md](docs/lonala-process.md) | Process and realm primitives: spawn, send/receive, supervisors, shared memory |
-| [docs/lonala-kernel.md](docs/lonala-kernel.md) | Low-level seL4 operations: IPC, TCB, CNode, VSpace (for VM implementers) |
-| [docs/lonala-io.md](docs/lonala-io.md) | Device driver primitives: MMIO, DMA, IRQ, ring buffers |
+| [docs/lonala/](docs/lonala/index.md) | Lonala language specification |
 
 ## Key Design Decisions
 
@@ -277,3 +274,10 @@ For **Codex**: Use "-m gpt-5.2" model for conceptual reviews such as designs or 
 **CRITICAL:** Run all three agents IN PARALLEL using a single message with multiple tool calls. Do NOT run sequentially.
 
 Collect results with `TaskOutput` when complete.
+
+### Handling Agent Timeouts
+
+**NOTE:** Agents, especially Codex, can take longer than the `TaskOutput` timeout (30 seconds default). If `TaskOutput` times out before an agent completes:
+1. Call `TaskOutput` again with the same `task_id`
+2. Repeat until the agent completes
+3. Typically takes 2-3 `TaskOutput` calls for Codex to finish

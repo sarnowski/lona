@@ -5,6 +5,9 @@
 # Exported images from Docker volume
 /dist/
 
+# MkDocs generated site
+/site/
+
 # Build state markers
 /.build-markers/
 

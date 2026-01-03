@@ -2,7 +2,7 @@
 
 This document describes Rust conventions for the Lonala VM, focusing on testing patterns and project-specific abstractions.
 
-**Related:** [concept.md](concept.md) (architecture) | [lonala.md](lonala.md) (language spec) | [lonala-kernel.md](lonala-kernel.md) (seL4 primitives)
+**Related:** [concept.md](concept.md) (architecture) | [lonala/](lonala/index.md) (language spec) | [lona.kernel](lonala/lona.kernel.md) (seL4 primitives)
 
 ---
 

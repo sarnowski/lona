@@ -214,6 +214,8 @@ TaskOutput(task_id="<gemini_id>", block=true, timeout=300000)
 TaskOutput(task_id="<codex_id>", block=true, timeout=300000)
 ```
 
+**NOTE:** Agents, especially Codex, can take longer than the `TaskOutput` timeout. If `TaskOutput` times out before an agent completes, call it again with the same `task_id` and repeat until the agent finishes. This typically takes 2-3 `TaskOutput` calls for Codex.
+
 ### 3.1.1 Handling Agent Failures
 
 If an agent times out or returns an error:

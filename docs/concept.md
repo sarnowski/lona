@@ -206,10 +206,16 @@ SchedContext = {
 }
 
 TCB binds to SchedContext:
-  - Multiple TCBs can share one SchedContext
-  - When budget exhausted, all bound TCBs are descheduled
+  - Each TCB binds to exactly one SchedContext (1:1 binding)
+  - When budget exhausted, the bound TCB is descheduled
   - Budget replenishes at start of each period
   - Kernel enforces this - no userspace bypass possible
+
+Multi-core realms:
+  - One SchedContext per scheduler TCB (one per core)
+  - Each SchedContext gets a fraction of the realm's total CPU budget
+  - Root realm tracks aggregate budget across all SchedContexts
+  - Example: realm with 30% CPU on 4 cores → 4 SchedContexts at 7.5% each
 ```
 
 ### IPC: Inter-Process Communication
@@ -242,7 +248,7 @@ A realm combines seL4 objects into a protection domain:
 %{;; seL4 kernel objects
   :vspace         <seL4-VSpace>         ; Virtual address space
   :cspace         <seL4-CNode>          ; Capability space root
-  :sched-contexts {<seL4-SchedContext>} ; CPU budgets (TODO: multi-core scheduling model TBD)
+  :sched-contexts {<seL4-SchedContext>} ; CPU budgets (one per scheduler TCB)
   :endpoint       <seL4-Endpoint>       ; IPC endpoint for incoming messages
   :tcbs           {<seL4-TCB>}          ; Scheduler threads (one per active core)
   :untyped        {<seL4-Untyped>}      ; Memory budget
@@ -310,7 +316,7 @@ Root Realm (coordinator, 100% resources, trusted)
 ;; Shares webserver's resource budget, no separate policy
 (let [realm (realm-create
               %{:name            'worker-1
-                :parent          (current-realm)             ; Inherits budget
+                :parent          (self-realm)             ; Inherits budget
                 :internal-weight 1})]                        ; Fair share among siblings
   (spawn-in realm (fn [] (worker-main))))
 ```
@@ -324,7 +330,12 @@ Creation:
   3. Root grants Untyped for memory budget
   4. Root maps inherited code pages (read-only)
   5. Root copies endpoint capability for IPC
-  6. Realm's entry function starts in initial process
+  6. Realm is now created in dormant state (no processes running)
+
+Execution:
+  - Processes are spawned into the realm via `spawn-in`
+  - Realm remains dormant until first `spawn-in` call
+  - Realms and processes are independent: a realm can exist with zero processes
 
 Termination:
   1. Root revokes all capabilities granted to realm
@@ -337,7 +348,9 @@ Termination:
 
 ## 5. Processes: Lightweight Execution Units
 
-Processes in Lona are modeled after BEAM/Erlang processes: lightweight, isolated, and scheduled cooperatively with preemption.
+Processes in Lona are modeled after BEAM/Erlang processes: lightweight, isolated, with hybrid scheduling:
+- **Cooperative within realm:** Processes yield after reduction count
+- **Preemptive between realms:** seL4 MCS preempts realm scheduler TCBs
 
 ### Process Characteristics
 
@@ -346,7 +359,7 @@ Processes in Lona are modeled after BEAM/Erlang processes: lightweight, isolated
 | Minimum size | ~512 bytes |
 | Initial heap | 4 KB (configurable) |
 | Kernel objects | None (pure userspace) |
-| Creation time | ~1-10 µs |
+| Creation time | ~1-10 µs (typical) |
 | Max per realm | Millions |
 | GC | Per-process, non-blocking |
 | Communication | Message passing only |
@@ -389,30 +402,34 @@ Processes in Lona are modeled after BEAM/Erlang processes: lightweight, isolated
 ### Process Memory Layout
 
 ```
-┌─────────────────────────────────────────┐ ← heap-start (high address)
-│              HEAP                       │
-│         (grows downward ↓)              │
-│                                         │
-│   Lists, vectors, closures,             │
-│   local bindings, message data...       │
-│                                         │
-├─────────────────────────────────────────┤ ← heap-ptr (moves down)
-│                                         │
-│           (free space)                  │
-│                                         │
-│   When heap-ptr meets stack-ptr:        │
-│   → Trigger garbage collection          │
-│   → If still insufficient: grow region  │
-│                                         │
-├─────────────────────────────────────────┤ ← stack-ptr (moves up)
+┌─────────────────────────────────────────┐ ← stack-start (high address)
 │              STACK                      │
-│         (grows upward ↑)                │
+│         (grows downward ↓)              │
 │                                         │
 │   Call frames, arguments, locals,       │
 │   return addresses, saved registers...  │
 │                                         │
-└─────────────────────────────────────────┘ ← stack-start (low address)
+├─────────────────────────────────────────┤ ← stack-ptr (moves down)
+│                                         │
+│           (free space)                  │
+│                                         │
+│   When stack-ptr meets heap-ptr:        │
+│   → Trigger garbage collection          │
+│   → If still insufficient: grow region  │
+│                                         │
+├─────────────────────────────────────────┤ ← heap-ptr (moves up)
+│              HEAP                       │
+│         (grows upward ↑)                │
+│                                         │
+│   Lists, vectors, closures,             │
+│   local bindings, message data...       │
+│                                         │
+└─────────────────────────────────────────┘ ← heap-start (low address)
 ```
+
+This follows the standard x86_64/ARM64 ABI convention, ensuring compatibility with
+debuggers, profilers, and any FFI code. The BEAM-style "heap and stack grow toward
+each other" model works identically with conventional directions.
 
 ### Process Creation
 
@@ -542,7 +559,8 @@ Each realm can have multiple scheduler TCBs, typically one per core:
 **Key properties**:
 - All TCBs share the same VSpace (address space)
 - All TCBs share the same CSpace (capabilities)
-- All TCBs share the same SchedContext (CPU budget)
+- Each TCB has its own SchedContext (1:1 binding required by seL4 MCS)
+- All SchedContexts collectively represent the realm's CPU budget
 - Each TCB is bound to a specific core (affinity)
 - Each TCB has its own run queue (lock-free)
 
@@ -907,6 +925,24 @@ The var table is in shared memory, enabling automatic update propagation:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+**Hierarchical Trust Model:**
+
+The var sharing mechanism implies that **parent realms are trusted by their children**.
+A parent can update vars that children execute, which is by design: parents control
+the child's execution environment.
+
+- Parent realms CAN affect children via var updates
+- This is intentional: parents create, configure, and manage children
+- **Untrusted code should run in sibling realms, not child realms**
+- Only the root realm's vars are trusted by all realms
+
+**Memory Safety Guarantees:**
+
+- Var pointers always reference memory mapped RO in the child's VSpace
+- Parent cannot update a var to point outside shared code pages
+- Memory referenced by vars is never freed while children exist (refcounted)
+- Atomic updates ensure children never see torn pointers
+
 ### Hierarchical Var Lookup
 
 ```
@@ -949,56 +985,7 @@ A namespace is an immutable snapshot of var bindings:
   :parent  <ptr-or-nil>}
 ```
 
-**Problem**: Updating vars individually causes inconsistency:
-```clojure
-(def add (fn [a b] (new-add a b)))
-;; ← Child reads here: sees new add, old mul!
-(def mul (fn [a b] ...))
-```
-
-**Solution**: Atomic namespace update:
-```clojure
-(ns-transaction 'math
-  (fn [tx]
-    (tx-def tx 'add (fn [a b] (+ a b)))
-    (tx-def tx 'sub (fn [a b] (- a b)))
-    (tx-def tx 'mul (fn [a b] (* a b)))
-    (tx-def tx 'div (fn [a b] (/ a b)))))
-;; Single pointer swap - all vars update atomically
-```
-
-### Multi-Namespace Transactions
-
-For updates spanning multiple namespaces:
-
-```clojure
-(multi-ns-transaction ['math 'physics]
-  (fn [tx]
-    (tx-def tx 'math 'vec-add ...)
-    (tx-def tx 'physics 'force ...)))
-```
-
-Uses sequence lock for consistency:
-
-```clojure
-;; Writer
-(atomic-inc! seq-lock)        ; Odd = write in progress
-(memory-barrier!)
-(update-all-namespaces!)
-(memory-barrier!)
-(atomic-inc! seq-lock)        ; Even = write complete
-
-;; Reader
-(defn read-with-seqlock []
-  (let [seq1 (atomic-load seq-lock)]
-    (if (odd? seq1)
-      (do (cpu-relax) (read-with-seqlock))  ; TCO tail call - spin if write in progress
-      (let [result (read-vars)
-            seq2 (atomic-load seq-lock)]
-        (if (= seq1 seq2)
-          result                             ; Consistent
-          (read-with-seqlock))))))              ; Retry if changed
-```
+Each `def` is atomic — the var binding update is a single pointer swap. Child realms reading the var see either the old value or the new value, never a partial state.
 
 ---
 
@@ -1023,10 +1010,10 @@ Same VSpace, pure userspace, no kernel involvement:
 
 ### Inter-Realm Messages (Kernel Path)
 
-Different VSpaces, requires seL4 IPC:
+Different VSpaces, requires seL4 IPC. The `send` function handles this transparently based on the target PID's realm:
 
 ```clojure
-(realm-send target-realm target-pid %{:type :request :data ...})
+(send remote-pid %{:type :request :data ...})
 ```
 
 **Implementation**:
@@ -1071,7 +1058,7 @@ Different VSpaces, requires seL4 IPC:
 Messages > 256 bytes use reference-counted shared binaries:
 
 ```clojure
-(def big-data (make-bytes (* 1024 1024)))  ; 1 MB
+(def big-data (binary large-byte-sequence))  ; Reference-counted binary
 
 ;; Sending doesn't copy the bytes
 (send pid %{:type :data :payload big-data})
@@ -1112,32 +1099,31 @@ Lock-free MPSC (Multiple Producer, Single Consumer) queue:
 Processes can register names for discovery:
 
 ```clojure
-;; Local registration
 (register 'db-server (self))
 (whereis 'db-server)  ; → pid
-
-;; Global registration (root realm's registry)
-(register-global 'system/logger (self))
-(whereis 'system/logger)  ; → pid
 ```
 
 ### Hierarchical Lookup
+
+`whereis` searches up the realm hierarchy:
 
 ```
 1. Local realm's registry
       ↓ not found
 2. Parent realm's registry
       ↓ not found
-3. Root realm's global registry
+3. Continue up to root realm
       ↓ not found
 4. Return nil
 ```
 
+This allows parent realms to provide services discoverable by children.
+
 ### Cross-Realm Send by Name
 
 ```clojure
-(send-named 'system/logger %{:level :error :msg "Something broke"})
-;; Equivalent to: lookup + realm-send
+(send-named 'logger %{:level :error :msg "Something broke"})
+;; Equivalent to: whereis + send
 ```
 
 ### Registry Server
@@ -1456,7 +1442,10 @@ Realm isolation (between realms):
 
 ---
 
-## 16. API Reference
+## 16. API Overview (Illustrative)
+
+> **Note:** This section provides an illustrative overview. For normative API
+> specifications, see `docs/lonala/`.
 
 ### Process Operations
 
@@ -1495,9 +1484,6 @@ Realm isolation (between realms):
 (let [realm (realm-create %{:name 'child :parent (self-realm)})]
   (spawn-in realm (fn [] ...)))
 
-;; Inter-realm messaging
-(realm-send realm-id pid msg)       ; → :ok
-
 ;; Shared memory
 (make-shared-region size name)      ; → region
 (share-region region realm access)  ; → :ok, access is :read-only or :read-write
@@ -1507,53 +1493,38 @@ Realm isolation (between realms):
 ### Namespace Operations
 
 ```clojure
-;; Define var
+;; Define var (atomic)
 (def name value)
 
-;; Namespace transaction
-(ns-transaction 'ns-name
-  (fn [tx]
-    (tx-def tx 'name value)
-    ...))
-
-;; Multi-namespace transaction
-(multi-ns-transaction ['ns1 'ns2]
-  (fn [tx]
-    (tx-def tx 'ns1 'name1 value1)
-    (tx-def tx 'ns2 'name2 value2)))
-
-;; Lookup
-(resolve 'name)                     ; → var
-@var                                ; → current value
+;; Var lookup
+(var 'name)                         ; → var
+(var-get v)                         ; → current value
 ```
 
 ### Registry Operations
 
 ```clojure
-;; Local
 (register name pid)                 ; → :ok
 (unregister name)                   ; → :ok
-(whereis name)                      ; → pid or nil
-
-;; Global
-(register-global name pid)          ; → :ok
-(whereis-global name)               ; → %{:realm id :pid pid} or nil
-
-;; Named send
-(send-named name msg)               ; → :ok (lookup + send)
+(whereis name)                      ; → pid or nil (hierarchical lookup)
+(send-named name msg)               ; → :ok (whereis + send)
 ```
 
 ### Memory Operations
 
 ```clojure
-;; Large binaries
-(make-bytes size)                   ; → binary (reference counted if large)
-(bytes-ref binary offset)           ; → byte
-(bytes-set! binary offset val)      ; → :ok
+;; Binaries (immutable, reference-counted)
+(binary bytes)                      ; → binary from byte sequence
+(binary-size bin)                   ; → u64
+(binary-ref bin offset)             ; → byte
 
-;; Shared regions
-(make-shared-region size name)
-(region-ref region offset)
+;; Bytebufs (mutable, for I/O)
+(bytebuf-alloc size)                ; → bytebuf
+(bytebuf-read8 buf offset)          ; → u8
+(bytebuf-write8! buf offset val)    ; → bytebuf
+
+;; Shared regions (illustrative - see lona.process)
+(region-create size name)
 (region-size region)
 ```
 
