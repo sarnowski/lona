@@ -190,10 +190,43 @@ Since all processes in a realm share the same VSpace (address space), any code r
 
 ## Documentation
 
-| Document | Purpose |
-|----------|---------|
-| [docs/concept.md](docs/concept.md) | System architecture, design rationale, seL4 foundation, realm hierarchy, scheduling, resource management |
-| [docs/lonala/](docs/lonala/index.md) | Lonala language specification |
+**CRITICAL: Always read the relevant documentation BEFORE discussing or implementing any topic.**
+
+The authoritative documentation index is **[mkdocs.yaml](mkdocs.yaml)**. Consult it to discover all available documentation pages and their structure.
+
+### Documentation Overview
+
+| Document | Description |
+|----------|-------------|
+| [docs/index.md](docs/index.md) | Project homepage: vision, key features, architecture overview |
+| [docs/concept.md](docs/concept.md) | Complete system design: seL4 foundation, realms, processes, scheduling, memory, IPC, security model |
+
+### Lonala Language Specification
+
+| Document | Description |
+|----------|-------------|
+| [docs/lonala/index.md](docs/lonala/index.md) | Language overview: design philosophy, what Lonala is NOT, type system |
+| [docs/lonala/reader.md](docs/lonala/reader.md) | Lexical syntax: symbols, keywords, numeric literals, collections, reader macros |
+| [docs/lonala/special-forms.md](docs/lonala/special-forms.md) | The 5 special forms: `def`, `fn*`, `match`, `do`, `quote` |
+| [docs/lonala/data-types.md](docs/lonala/data-types.md) | All value types: nil, booleans, numbers, strings, collections, addresses, capabilities |
+| [docs/lonala/lona.core.md](docs/lonala/lona.core.md) | Core intrinsics: namespaces, vars, arithmetic, collections, predicates |
+| [docs/lonala/lona.process.md](docs/lonala/lona.process.md) | Process intrinsics: spawn, message passing, linking, monitoring, realms |
+| [docs/lonala/lona.kernel.md](docs/lonala/lona.kernel.md) | seL4 intrinsics: IPC, capabilities, memory mapping (for VM/system code) |
+| [docs/lonala/lona.io.md](docs/lonala/lona.io.md) | I/O intrinsics: MMIO, DMA, interrupt handling (for driver development) |
+| [docs/lonala/lona.time.md](docs/lonala/lona.time.md) | Time intrinsics: monotonic time, sleep, system time |
+
+### Development
+
+| Document | Description |
+|----------|-------------|
+| [docs/rust.md](docs/rust.md) | Rust implementation guide: project structure, coding guidelines, testing strategy |
+
+### Before You Work
+
+1. **Identify the relevant documentation** for your task using [mkdocs.yaml](mkdocs.yaml)
+2. **Read those documents** before starting implementation
+3. **Do not assume** - if something isn't documented, it doesn't exist
+4. **Verify your understanding** matches the specification
 
 ## Key Design Decisions
 

@@ -51,7 +51,7 @@ Lona is a capability-secure operating system built on the seL4 microkernel, comb
 13. [Device Drivers and I/O](#13-device-drivers-and-io)
 14. [Virtual Address Space Layout](#14-virtual-address-space-layout)
 15. [Security Model](#15-security-model)
-16. [API Reference](#16-api-reference)
+16. [API Overview](#16-api-overview-illustrative)
 
 ---
 

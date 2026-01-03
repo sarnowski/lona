@@ -39,17 +39,44 @@ make verify
 
 **This MUST pass with ZERO issues.** No warnings treated as acceptable, no "minor" failures ignored.
 
-### 1.3 If Verification Fails
+### 1.3 Run `make docs` (Always Required)
 
-If `make verify` fails:
+Documentation must build successfully. Execute:
+
+```bash
+make docs
+```
+
+**This MUST pass with NO validation errors.** The command runs with `--strict` mode, so any warnings are treated as errors.
+
+Normal output includes:
+- `INFO - Cleaning site directory` (OK)
+- `INFO - Building documentation to directory: ...` (OK)
+- `INFO - Documentation built in X.XX seconds` (OK)
+
+**Failure indicators** (must be fixed):
+- `INFO - Doc file '...' contains a link '...', but there is no such anchor` - broken internal link
+- `WARNING - ...` - any warning message
+- `ERROR - ...` - any error message
+
+Common issues to fix:
+- **Incorrect internal links** - fix anchor names or paths in markdown files
+- **Missing pages** - add referenced files or remove dead links
+- **Invalid syntax** - fix markdown formatting
+
+If `make docs` reports any validation problems, fix all issues before proceeding.
+
+### 1.4 If Verification Fails
+
+If `make verify` or `make docs` fails:
 1. Fix ALL reported issues
-2. Run `make verify` again
-3. Repeat until it passes with zero issues
+2. Run the failing command again
+3. Repeat until both pass with zero issues/output
 4. Only then proceed to manual REPL testing
 
-**Do NOT proceed to agent review with a failing build.**
+**Do NOT proceed to agent review with a failing build or documentation errors.**
 
-### 1.4 Manual REPL Testing (MANDATORY)
+### 1.5 Manual REPL Testing (MANDATORY for Code Changes)
 
 After `make verify` passes, you MUST perform manual testing using the development REPL:
 
@@ -81,13 +108,18 @@ After `make verify` passes, you MUST perform manual testing using the developmen
 
 This manual verification catches issues that automated tests may miss and validates the implementation works end-to-end in QEMU.
 
-### 1.5 Skip Condition
+### 1.6 Skip Conditions
 
 You MAY skip `make verify` if:
 - Your changes are documentation-only (`.md` files)
 - You literally just ran it in the immediately preceding step, it passed, and no code changes occurred since
 
-If ANY doubt exists about whether code was changed, run it. Running unnecessarily is acceptable; skipping incorrectly is not.
+You MAY skip `make docs` if:
+- You literally just ran it in the immediately preceding step, it passed, and no `.md` file changes occurred since
+
+**`make docs` is required for ALL changes** (code or documentation) because code changes may affect documentation links or require documentation updates.
+
+If ANY doubt exists, run the commands. Running unnecessarily is acceptable; skipping incorrectly is not.
 
 ---
 
@@ -304,11 +336,12 @@ For each confirmed issue:
 Work is complete ONLY when ALL of the following are true:
 
 - [ ] `make verify` passes with zero issues (if code was changed)
+- [ ] `make docs` passes with zero output (always required)
 - [ ] All three agents have reviewed the changes
 - [ ] All agent-reported issues have been verified
 - [ ] All confirmed issues have been resolved
 - [ ] No code changes remain unreviewed
-- [ ] Documentation is up-to-date
+- [ ] Documentation is up-to-date and all links are valid
 
 ### 5.2 Reporting Completion
 
