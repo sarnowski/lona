@@ -1,6 +1,6 @@
 # Rust Implementation Guide
 
-This document describes Rust conventions for the Lonala VM, focusing on testing patterns and project-specific abstractions.
+This document describes Rust conventions for the Lona VM, focusing on testing patterns and project-specific abstractions.
 
 **Related:** [architecture/](../architecture/index.md) (architecture) | [lonala/](../lonala/index.md) (language spec) | [lona.kernel](../lonala/lona.kernel.md) (seL4 primitives)
 

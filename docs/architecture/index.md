@@ -15,7 +15,7 @@ Before diving into the architecture, here are the core concepts:
 | **Realm** | The primary security isolation boundary. Each realm is a completely isolated execution environment that can safely run untrusted code without compromising the rest of the system. Realms form a tree hierarchy, and each realm can host millions of lightweight processes. Typical examples: a driver runs in its own realm, an application runs in its own realm, a plugin runs in its own realm. |
 | **Process** | A lightweight execution unit within a realm, similar to Erlang/BEAM processes. Processes have their own heap and mailbox. Millions can exist per realm. NOT a security boundary - processes share trust with their realm. |
 | **Lona Memory Manager** | The minimal privileged component that manages system resources (memory, CPU budgets, realm lifecycle). Contains no Lonala code - just resource management and fault handling. |
-| **Lonala VM** | The virtual machine that runs Lonala code, mapped into every realm. Interprets bytecode, schedules processes, handles garbage collection. |
+| **Lona VM** | The virtual machine that runs Lonala code, mapped into every realm. Interprets bytecode, schedules processes, handles garbage collection. |
 | **seL4** | The microkernel underlying Lona. Provides the low-level mechanisms (capabilities, address spaces, scheduling) that make realm isolation possible. |
 
 **Key insight**: Realms provide security isolation (hardware-enforced, cannot be bypassed). Processes provide concurrency and fault tolerance within a realm. Running untrusted code requires a dedicated realm, not just a separate process.
@@ -153,7 +153,7 @@ The system must remain stable and protect other realms even when one realm is ac
 | **Unauthorized memory access** | Separate address spaces per realm | seL4 kernel + MMU |
 | **Capability theft/forgery** | Capability system, per-realm endpoints | seL4 kernel |
 | **IPC flooding** | Fault rate limiting | Lona Memory Manager |
-| **Crash loops** | Supervisor policies, restart limits | Lonala VM |
+| **Crash loops** | Supervisor policies, restart limits | Lona VM |
 | **Code injection** | W^X memory mappings (no RWX) | seL4 kernel |
 | **DMA attacks** | IOMMU restricts device memory access | Hardware IOMMU** |
 
@@ -194,7 +194,7 @@ Lona Memory Manager (trusted, manages all realms)
 
 | Aspect | Process Isolation | Realm Isolation |
 |--------|-------------------|-----------------|
-| **Enforced by** | Lonala VM (userspace) | seL4 kernel (hardware) |
+| **Enforced by** | Lona VM (userspace) | seL4 kernel (hardware) |
 | **Address space** | Shared within realm | Separate per realm |
 | **Purpose** | Concurrency, fault tolerance | Security |
 | **Trust level** | Same trust as realm | Independent trust |
@@ -229,7 +229,7 @@ Processes within a realm share an address space. A bug or exploit in one process
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐      │
 │  │   Init Realm    │  │   App Realm     │  │  Driver Realm   │      │
 │  │                 │  │                 │  │                 │      │
-│  │  Lonala VM      │  │  Lonala VM      │  │  Lonala VM      │      │
+│  │  Lona VM        │  │  Lona VM        │  │  Lona VM        │      │
 │  │       │         │  │       │         │  │       │         │      │
 │  │       ▼         │  │       ▼         │  │       ▼         │      │
 │  │  ┌─┬─┬─┐        │  │  ┌─┬─┬─┐        │  │  ┌─┬─┬─┐        │      │
@@ -261,9 +261,9 @@ Detailed definitions for reference:
 | Term | Definition |
 |------|------------|
 | **Lona Memory Manager** | Minimal privileged component managing resources. No Lonala code. |
-| **Lonala VM** | Virtual machine running Lonala code, mapped into all realms |
+| **Lona VM** | Virtual machine running Lonala code, mapped into all realms |
 | **Realm** | Security boundary with its own address space, capability space, and CPU budget |
-| **Worker** | Kernel thread (TCB) running the Lonala VM within a realm |
+| **Worker** | Kernel thread (TCB) running the Lona VM within a realm |
 | **Process** | Lightweight Lonala execution unit, multiplexed by the VM |
 | **Inherited Region** | Parent realm's code/data mapped read-only into child at fixed address |
 | **Realm Endpoint** | Per-realm IPC endpoint for communication with Lona Memory Manager (unforgeable identity) |
@@ -286,7 +286,7 @@ This documentation captures architectural decisions and design discussions. Some
 
 **Precisely Defined:**
 
-- Separation between Lona Memory Manager and Lonala VM binaries
+- Separation between Lona Memory Manager and Lona VM binaries
 - Two-level memory management (realms via seL4, processes via VM)
 - Inherited code regions with fixed virtual addresses
 - Dynamic process memory segments (BEAM-style)

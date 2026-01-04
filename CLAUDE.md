@@ -248,7 +248,7 @@ Since all processes in a realm share the same VSpace (address space), any code r
 └───────────────────────────────────────┬─────────────────────────┘
                                         │
 ┌───────────────────────────────────────▼─────────────────────────┐
-│  LONALA VM RUNTIME                                              │
+│  LONA VM RUNTIME                                                │
 │  - Scheduler (userspace, per-realm)                             │
 │  - Garbage collector (per-process)                              │
 │  - Uses lona.kernel for seL4 syscalls                           │
@@ -314,6 +314,7 @@ The authoritative documentation index is **[mkdocs.yaml](mkdocs.yaml)**. Consult
 
 | Document | Description |
 |----------|-------------|
+| [docs/development/structure.md](docs/development/structure.md) | Project structure: crate organization, directory layout, build artifacts |
 | [docs/development/rust-coding-guidelines.md](docs/development/rust-coding-guidelines.md) | Rust implementation guide: project structure, coding guidelines, testing strategy |
 | [docs/development/lonala-coding-guidelines.md](docs/development/lonala-coding-guidelines.md) | Coding style conventions for Lonala source files |
 | [docs/development/library-loading.md](docs/development/library-loading.md) | Library loading: tar archive format, embedding, namespace resolution |

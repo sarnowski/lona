@@ -4,11 +4,11 @@ This document covers Lona's system architecture built on seL4: the Lona Memory M
 
 ## Architectural Separation
 
-A key design decision: **separate the resource authority from the Lonala VM**.
+A key design decision: **separate the resource authority from the Lona VM**.
 
 ### The Problem with Conflation
 
-If one component handles both resource management AND runs the Lonala VM:
+If one component handles both resource management AND runs the Lona VM:
 
 ```
 Conflated Design (NOT what we do):
@@ -18,13 +18,13 @@ Conflated Design (NOT what we do):
 │  Mixed responsibilities:                                           │
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │ 1. Memory Authority (Untyped, fault handling)               │   │
-│  │ 2. Lonala VM (bytecode interpreter, GC, scheduler)          │   │
+│  │ 2. Lona VM (bytecode interpreter, GC, scheduler)            │   │
 │  │ 3. Init/Supervisor Logic (spawning realms)                  │   │
 │  └─────────────────────────────────────────────────────────────┘   │
 │                                                                     │
 │  Problems:                                                         │
 │  - Large Trusted Computing Base (TCB)                              │
-│  - Bug in Lonala VM could compromise resource management          │
+│  - Bug in Lona VM could compromise resource management            │
 │  - Complex, hard to audit                                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -34,7 +34,7 @@ Conflated Design (NOT what we do):
 ```
 Separated Design:
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Crate: lona-ipc                                                    │
+│  Crate: lona-abi                                                    │
 │  - IPC message types                                               │
 │  - Protocol definitions                                            │
 │  - Shared constants                                                │
@@ -43,7 +43,7 @@ Separated Design:
               ┌─────────────┴─────────────┐
               ▼                           ▼
 ┌──────────────────────────┐   ┌──────────────────────────────────────┐
-│  Lona Memory Manager     │   │  Lonala VM                           │
+│  Lona Memory Manager     │   │  Lona VM                             │
 │                          │   │                                      │
 │  - Resource authority    │   │  - Bytecode interpreter              │
 │  - Untyped pool          │   │  - Process multiplexer               │
@@ -61,7 +61,7 @@ Separated Design:
 | Aspect | Benefit |
 |--------|---------|
 | **Smaller TCB** | Lona Memory Manager is minimal, auditable |
-| **Fault isolation** | Bug in Lonala VM can't corrupt the Memory Manager |
+| **Fault isolation** | Bug in Lona VM can't corrupt the Memory Manager |
 | **Restartability** | Memory Manager could restart crashed realms |
 | **Uniformity** | All realms run identical VM code |
 | **Clear separation** | No risk of accidentally sharing code |
@@ -173,13 +173,12 @@ BOOT IMAGE:
 ├─────────────────────────────────────────────────────────────────────┤
 │  Lona Memory Manager (ELF)  ← Loaded by kernel, becomes root task  │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Lonala VM (ELF)            ← Boot module, mapped into realms      │
-├─────────────────────────────────────────────────────────────────────┤
-│  init.lona.bc               ← Boot module, bytecode for init realm │
-├─────────────────────────────────────────────────────────────────────┤
-│  core.lona.bc               ← Boot module, core library bytecode   │
+│  Lona VM (ELF)              ← Boot module, mapped into realms      │
+│    └── lonalib.tar (embedded) ← Standard library source code       │
 └─────────────────────────────────────────────────────────────────────┘
 ```
+
+The Lona VM binary embeds the standard library as a USTAR tar archive (`lonalib.tar`) containing Lonala source files. Source code is compiled on demand at runtime. See [Library Loading](../development/library-loading.md) for details.
 
 ### Physical Memory After Boot
 
@@ -189,14 +188,9 @@ BOOT IMAGE:
              │ Entry: 0x0010_0000      │
              └─────────────────────────┘
 0x0020_0000  ┌─────────────────────────┐
-             │ Lonala VM code          │ ← Boot module
+             │ Lona VM code            │ ← Boot module
              │ Entry: 0x0020_0000      │
-             └─────────────────────────┘
-0x0030_0000  ┌─────────────────────────┐
-             │ init.lona.bc            │ ← Boot module
-             └─────────────────────────┘
-0x0031_0000  ┌─────────────────────────┐
-             │ core.lona.bc            │ ← Boot module
+             │ (includes lonalib.tar)  │
              └─────────────────────────┘
 0x0100_0000  ┌─────────────────────────┐
              │ Free RAM (Untyped)      │
@@ -246,7 +240,7 @@ Step 1: Create kernel objects from Untyped
 Memory Manager stores: ep_init → realm_id: 1 (for caller identification)
 
 
-Step 2: Map Lonala VM code into init realm's VSpace
+Step 2: Map Lona VM code into init realm's VSpace
 ────────────────────────────────────────────────────────────────────────
 
 SAME physical frames, mapped into TWO VSpaces:
@@ -261,7 +255,7 @@ Memory Manager VSpace      Init Realm VSpace
                      ▼
            ┌─────────────────┐
            │ Physical Frames │
-           │ (Lonala VM)     │
+           │ (Lona VM)       │
            └─────────────────┘
 
 Same physical memory, mapped at the SAME virtual addresses in all realms.
@@ -269,11 +263,12 @@ This ensures pointers within the code remain valid across all VSpaces.
 Mapped read-only + execute.
 
 
-Step 3: Map bytecode
+Step 3: Map standard library (embedded in VM)
 ────────────────────────────────────────────────────────────────────────
 
-Similarly map init.lona.bc and core.lona.bc into init realm's VSpace.
-Read-only mappings (same physical frames).
+The Lona VM binary includes the embedded lonalib.tar containing Lonala
+source files. No separate bytecode mapping is needed - source is compiled
+on demand at runtime. See [Library Loading](../development/library-loading.md).
 
 
 Step 4: Configure TCB
@@ -302,14 +297,14 @@ Step 5: Set initial registers
 ────────────────────────────────────────────────────────────────────────
 
 seL4_UserContext regs = {
-    .pc = VM_ENTRY,         // Lonala VM entry point
+    .pc = VM_ENTRY,         // Lona VM entry point
     .sp = stack_top,        // Stack pointer
 
     // Pass arguments in registers (ABI-dependent):
-    .r0 = bytecode_addr,    // Where to find init.lona
-    .r1 = bytecode_len,     // Size of bytecode
-    .r2 = heap_start,       // Where heap begins
-    .r3 = heap_size,        // Initial heap size
+    .r0 = heap_start,       // Where heap begins
+    .r1 = heap_size,        // Initial heap size
+    // Note: Library source is embedded in VM binary (lonalib.tar)
+    // and compiled on demand - no separate bytecode pointer needed
 };
 
 seL4_TCB_WriteRegisters(init_tcb_cap, false, 0, 4, &regs);
@@ -321,9 +316,9 @@ Step 6: Start the worker
 seL4_SchedContext_Bind(sched_context_cap, init_tcb_cap);
 seL4_TCB_Resume(init_tcb_cap);
 
-→ TCB starts executing Lonala VM
-→ VM reads bytecode
-→ VM starts interpreting init.lona
+→ TCB starts executing Lona VM
+→ VM loads source from embedded lonalib.tar
+→ VM compiles and runs init.lona
 → Init realm is now running!
 ```
 
@@ -336,7 +331,7 @@ seL4_TCB_Resume(init_tcb_cap);
 | Term | seL4 Object | What It Is |
 |------|-------------|------------|
 | **Realm** | VSpace + CSpace + SchedContext | Security boundary |
-| **Worker** | TCB | Kernel-scheduled thread, runs Lonala VM |
+| **Worker** | TCB | Kernel-scheduled thread, runs Lona VM |
 | **Process** | (none - pure userspace) | Lonala lightweight process |
 
 ### Execution Model
@@ -345,13 +340,13 @@ seL4_TCB_Resume(init_tcb_cap);
 REALM
 ┌─────────────────────────────────────────────────────────────────────┐
 │                                                                     │
-│  VSpace: contains Lonala VM code + bytecode + heap                  │
+│  VSpace: contains Lona VM code + bytecode + heap                    │
 │  CSpace: capabilities for IPC, resources                            │
 │  TCB(s): one or more workers                                        │
 │                                                                     │
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │  Worker TCB 1          Worker TCB 2          Worker TCB N   │    │
-│  │  (Lonala VM)           (Lonala VM)           (Lonala VM)    │    │
+│  │  (Lona VM)             (Lona VM)             (Lona VM)      │    │
 │  │       │                     │                     │         │    │
 │  │       ▼                     ▼                     ▼         │    │
 │  │  ┌─────────┐           ┌─────────┐           ┌─────────┐    │    │
@@ -622,7 +617,7 @@ struct Region {
 }
 
 enum RegionType {
-    SharedCode,                    // Lonala VM, core lib
+    SharedCode,                    // Lona VM, core lib
     Inherited { ancestor: u8 },    // Parent's code/binary region
     LocalCode,                     // This realm's code region
     LocalBinary,                   // This realm's binary heap
@@ -763,46 +758,42 @@ Children can SHADOW inherited vars:
 
 ---
 
-## Lonala VM Entry Point
+## Lona VM Entry Point
 
-The Lonala VM binary has its own entry point, separate from the Lona Memory Manager:
+The Lona VM binary has its own entry point, separate from the Lona Memory Manager:
 
 ```rust
-// Lonala VM entry point (conceptual)
+// Lona VM entry point (conceptual)
 
 #[no_mangle]
 pub extern "C" fn realm_entry(
-    bytecode_ptr: *const u8,
-    bytecode_len: usize,
     heap_start: *mut u8,
     heap_size: usize,
 ) -> ! {
     // Initialize VM state
     let mut vm = VM::new(heap_start, heap_size);
 
-    // Load bytecode
-    let bytecode = unsafe {
-        core::slice::from_raw_parts(bytecode_ptr, bytecode_len)
-    };
+    // Load standard library from embedded lonalib.tar
+    // Source is compiled on demand at runtime
+    let source = TarSource::embedded();
+    vm.load_namespace(&source, "lona.core");
+    vm.load_namespace(&source, "lona.init");
 
-    // Load core library
-    vm.load_core_library();
-
-    // Start interpreting
-    vm.run(bytecode);
+    // Start the init process
+    vm.run_init();
 
     // Should not return
     loop {}
 }
 ```
 
-The Lona Memory Manager knows this entry point address (from ELF header or fixed convention) and sets PC accordingly when starting realm threads.
+The Lona Memory Manager knows this entry point address (from ELF header or fixed convention) and sets PC accordingly when starting realm threads. The standard library source is embedded in the VM binary via `lonalib.tar`.
 
 ---
 
 ## VM Scheduler Loop
 
-Within a realm, the Lonala VM multiplexes Lonala processes:
+Within a realm, the Lona VM multiplexes Lonala processes:
 
 ```
 loop {

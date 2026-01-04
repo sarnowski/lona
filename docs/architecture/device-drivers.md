@@ -15,7 +15,7 @@ DRIVER ISOLATION
 │                                                                     │
 │  VSpace:                                                            │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  Lonala VM code (shared)                                    │    │
+│  │  Lona VM code (shared)                                      │    │
 │  │  Driver bytecode (inherited or local)                       │    │
 │  │  Process heaps                                              │    │
 │  │  MMIO region ← Device registers mapped here                 │    │

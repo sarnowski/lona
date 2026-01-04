@@ -168,7 +168,7 @@ THREE SCHEDULING LAYERS
 │   Mechanism: Reduction counting + run queue                         │
 │   Granularity: ~1ms time slices                                     │
 │   Fairness: Round-robin among runnable processes                    │
-│   Control: Lonala VM (userspace)                                    │
+│   Control: Lona VM (userspace)                                      │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Layer 2: INTRA-REALM WORKER SCHEDULING (if multiple workers)        │
@@ -176,7 +176,7 @@ THREE SCHEDULING LAYERS
 │   Mechanism: Work stealing between workers                          │
 │   Granularity: Per-process                                          │
 │   Fairness: Load balancing across CPUs                              │
-│   Control: Lonala VM (userspace)                                    │
+│   Control: Lona VM (userspace)                                      │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │ Layer 1: INTER-REALM SCHEDULING                                     │

@@ -86,6 +86,8 @@ nav:
       - lona.time: lonala/lona.time.md
   # Implementation guides for Lona development
   - Development:
+      # Directory layout, crate organization, build artifacts
+      - Project Structure: development/structure.md
       # Rust implementation guide: project structure, coding guidelines, testing strategy
       - Rust Guidelines: development/rust-coding-guidelines.md
       # Coding style conventions for Lonala source files

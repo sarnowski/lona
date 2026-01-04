@@ -43,7 +43,7 @@ Contains code and data shared across ALL realms (same physical frames):
 SHARED CODE REGION
 ────────────────────────────────────────────────────────────────────────
 
-Lonala VM code (RX):
+Lona VM code (RX):
 ┌─────────────────────────────────────────────────────────────────────┐
 │  .text (executable code)                                            │
 │  .rodata (constants, jump tables)                                   │
@@ -53,15 +53,17 @@ Lonala VM code (RX):
 │  Size: ~1-2 MB                                                      │
 └─────────────────────────────────────────────────────────────────────┘
 
-Core library bytecode (R):
+Core library (R):
 ┌─────────────────────────────────────────────────────────────────────┐
-│  lona.core bytecode + metadata                                      │
-│  lona.process bytecode + metadata                                   │
+│  Compiled lona.core + metadata                                      │
+│  Compiled lona.process + metadata                                   │
 │  Other core namespaces                                              │
 │                                                                     │
 │  Physical frames: SHARED across all realms                          │
 │  Permissions: Read only                                             │
 │  Size: ~1-5 MB                                                      │
+│                                                                     │
+│  Note: Source is embedded in VM binary and compiled at boot.        │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -344,7 +346,7 @@ Benefits:
 
 ### 5. Worker Stacks Region
 
-Native stacks for Lonala VM workers (TCBs):
+Native stacks for Lona VM workers (TCBs):
 
 ```
 WORKER STACKS REGION
@@ -355,7 +357,7 @@ Worker 0 (TCB 0):
 │  IPC buffer (4 KB, required by seL4)                                │
 │  Guard page                                                         │
 │  Native stack (~256 KB)                                             │
-│    - Used by Lonala VM Rust code                                    │
+│    - Used by Lona VM Rust code                                      │
 │    - Interpreter call frames                                        │
 │    - NOT Lonala process stacks (those are in process region)        │
 │  Guard page                                                         │
@@ -711,7 +713,7 @@ These are deliberately left undefined for future refinement.
 
 | Region | Contents | Sharing | Growth |
 |--------|----------|---------|--------|
-| **Shared code** | Lonala VM, core lib | All realms (same frames) | Static |
+| **Shared code** | Lona VM, core lib | All realms (same frames) | Static |
 | **Inherited** | Parent bytecode/vars/binaries | Parent→children (RO) | Append-only |
 | **Realm-local** | Local vars, scheduler, tables | This realm only | Append-only |
 | **Process** | Heaps, stacks, mailboxes | Per-process | Dynamic segments |
