@@ -171,7 +171,7 @@ Collection literals: `[]` tuples, `{}` vectors, `%{}` maps, `#{}` sets, `#bits[.
 
 | Document | Description |
 |----------|-------------|
-| [concept.md](concept.md) | Full system design and rationale |
+| [architecture/](architecture/index.md) | Full system design and rationale |
 | [lonala/](lonala/index.md) | Lonala language specification |
 
 ## Status

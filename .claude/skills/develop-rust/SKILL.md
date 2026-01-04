@@ -1,6 +1,6 @@
 ---
 name: develop-rust
-description: MUST be loaded before reading, writing, reviewing, or even thinking about Rust code in Lona. Load this skill FIRST whenever Rust is involved - before exploring files, before planning, before any Rust-related reasoning. Contains development principles (YAGNI, KISS, clean code), project-specific coding guidelines (rust.md), and the test-first workflow for implementation.
+description: MUST be loaded before reading, writing, reviewing, or even thinking about Rust code in Lona. Load this skill FIRST whenever Rust is involved - before exploring files, before planning, before any Rust-related reasoning. Contains development principles (YAGNI, KISS, clean code), project-specific coding guidelines (rust-coding-guidelines.md), and the test-first workflow for implementation.
 ---
 
 # Develop Rust
@@ -15,7 +15,7 @@ This part is required for ALL Rust-related work: reviews, conceptual discussions
 
 ### 1.1 Read the Rust Guide
 
-**Read [docs/rust.md](../../../docs/rust.md) NOW.**
+**Read [docs/development/rust-coding-guidelines.md](../../../docs/development/rust-coding-guidelines.md) NOW.**
 
 This file contains project-specific conventions you must know:
 - Project structure and build infrastructure
@@ -57,7 +57,7 @@ Skip this part if you're only reviewing or discussing concepts. Follow this part
 
 Before writing any business logic:
 - Write tests that define the expected behavior
-- Use the testability matrix from rust.md to determine what can be host-tested
+- Use the testability matrix from rust-coding-guidelines.md to determine what can be host-tested
 - Unit tests: `#[cfg(test)] mod tests` in the same file
 - Integration tests: `tests/` directory
 - Use `MockVSpace` for memory operations

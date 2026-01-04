@@ -28,6 +28,7 @@ extern crate std;
 mod lib_test;
 
 pub mod heap;
+pub mod loader;
 pub mod platform;
 pub mod reader;
 pub mod repl;
@@ -45,6 +46,7 @@ pub mod e2e;
 use core::result::Result::{self, Ok};
 
 pub use heap::Heap;
+pub use loader::{ChainedSource, NamespaceSource, TarSource};
 pub use platform::{MemorySpace, Platform};
 pub use types::{Paddr, Vaddr};
 pub use uart::{Uart, UartExt};

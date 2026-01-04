@@ -2,7 +2,7 @@
 
 This document describes Rust conventions for the Lonala VM, focusing on testing patterns and project-specific abstractions.
 
-**Related:** [concept.md](concept.md) (architecture) | [lonala/](lonala/index.md) (language spec) | [lona.kernel](lonala/lona.kernel.md) (seL4 primitives)
+**Related:** [architecture/](../architecture/index.md) (architecture) | [lonala/](../lonala/index.md) (language spec) | [lona.kernel](../lonala/lona.kernel.md) (seL4 primitives)
 
 ---
 
@@ -167,7 +167,7 @@ const _: () = assert!(core::mem::offset_of!(Process, heap_ptr) == 0x08);
 
 ### VSpace Layout Constants
 
-Virtual address space regions (see [concept.md](concept.md) Section 14):
+Virtual address space regions (see [realm-memory-layout.md](../architecture/realm-memory-layout.md)):
 
 | Region | Base Address | Purpose |
 |--------|--------------|---------|
@@ -202,10 +202,11 @@ This allows `cargo test` to run with standard library access while release build
 
 ### Test Module Lints
 
-Test code prioritizes clarity over defensive programming. Add these allows at the top of every test module, immediately after the module doc comment:
+Test code prioritizes clarity over defensive programming. Add these allows at the top of every `_test.rs` file, immediately after the module doc comment:
 
 ```rust
-//! Tests for the frobnicator.
+// src/heap/heap_test.rs
+//! Tests for the heap allocator.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -236,27 +237,43 @@ use super::*;
 
 ### Test Categories
 
-**Unit tests** — in the same file as the code, use mocks:
+**Unit tests** — in dedicated `_test.rs` files alongside the module:
+
+```
+src/heap/
+├── mod.rs           # Implementation
+└── heap_test.rs     # Tests for this module
+```
 
 ```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::platform::MockVSpace;
+// src/heap/heap_test.rs
+//! Tests for the heap allocator.
 
-    #[test]
-    fn heap_grows_downward() {
-        let mut mem = MockVSpace::new(4096, Vaddr(0x1000));
-        let mut heap = ProcessHeap { base: Vaddr(0x1000), ptr: Vaddr(0x2000) };
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-        let first = heap.alloc(&mut mem, 64);
-        let second = heap.alloc(&mut mem, 64);
+use super::*;
+use crate::platform::MockVSpace;
 
-        assert!(first.is_some());
-        assert!(second.is_some());
-        assert!(second < first, "heap should grow downward");
-    }
+#[test]
+fn heap_grows_downward() {
+    let mut mem = MockVSpace::new(4096, Vaddr(0x1000));
+    let mut heap = ProcessHeap { base: Vaddr(0x1000), ptr: Vaddr(0x2000) };
+
+    let first = heap.alloc(&mut mem, 64);
+    let second = heap.alloc(&mut mem, 64);
+
+    assert!(first.is_some());
+    assert!(second.is_some());
+    assert!(second < first, "heap should grow downward");
 }
+```
+
+The test file must be included in the parent module:
+
+```rust
+// src/heap/mod.rs
+#[cfg(test)]
+mod heap_test;
 ```
 
 **Integration tests** — in `tests/`, verify component interactions:

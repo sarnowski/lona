@@ -38,11 +38,13 @@ Lonala is a LISP dialect for the Lona operating system, running on the seL4 micr
 | [reader.md](reader.md) | Lexical syntax, literals, reader macros |
 | [special-forms.md](special-forms.md) | The 5 special forms |
 | [data-types.md](data-types.md) | All value types |
+| [metadata.md](metadata.md) | Var metadata system |
 | [lona.core.md](lona.core.md) | Core language intrinsics |
 | [lona.process.md](lona.process.md) | Process and realm intrinsics |
 | [lona.kernel.md](lona.kernel.md) | seL4 kernel intrinsics |
 | [lona.io.md](lona.io.md) | Device I/O intrinsics |
 | [lona.time.md](lona.time.md) | Time intrinsics |
+| [../development/lonala-coding-guidelines.md](../development/lonala-coding-guidelines.md) | Style conventions |
 
 ---
 

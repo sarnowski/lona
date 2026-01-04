@@ -1,0 +1,13 @@
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Copyright 2026 Tobias Sarnowski
+
+(ns lona.init
+  "System initialization process.
+
+  This is the first user process started by the kernel. It bootstraps
+  the system and spawns essential services.")
+
+(defn main
+  "Entry point for the init process."
+  []
+  (kprintln "Hello Lona!"))

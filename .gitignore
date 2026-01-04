@@ -23,6 +23,8 @@ coverage/
 *.swp
 *.swo
 *~
+.lsp
+.clj-kondo
 
 # OS
 .DS_Store

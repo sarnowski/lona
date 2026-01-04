@@ -20,6 +20,38 @@ Work includes but is not limited to:
 
 ---
 
+## Phase 0: Plan Verification
+
+### 0.1 Check for Existing Plan
+
+Before proceeding, check if `PLAN.md` exists in the repository root:
+
+```bash
+cat PLAN.md 2>/dev/null || echo "NO PLAN FILE"
+```
+
+### 0.2 If PLAN.md Exists
+
+**You MUST verify the plan was followed before proceeding:**
+
+1. Read `PLAN.md` completely
+2. For EACH item in the plan, self-assess:
+   - Did I implement this item?
+   - Is my implementation COMPLETE (not partial)?
+   - Does my implementation match what was planned?
+3. If ANY item is incomplete or missing:
+   - **STOP** - do not proceed to Phase 1
+   - Go back and complete the missing work
+   - Return to this skill when truly done
+
+**Do NOT proceed with verification or review if the plan is not fully implemented.**
+
+### 0.3 Plan Contents for Review
+
+If `PLAN.md` exists, you will include its contents in the review prompt for agents to validate. Save the contents for Phase 2.
+
+---
+
 ## Phase 1: Verification Build
 
 ### 1.1 Determine If Verification Is Needed
@@ -292,7 +324,7 @@ The user sees the report for transparency. For routine fixes, proceed automatica
 
 ---
 
-## Phase 4: Issue Resolution
+## Phase 4: Issue Resolution (MANDATORY LOOP)
 
 ### 4.1 ALL Issues MUST Be Resolved
 
@@ -310,22 +342,95 @@ Ignore these agent qualifiers - they do NOT excuse skipping:
 
 **If an agent raised it and verification confirmed it, FIX IT.**
 
-### 4.2 Implement All Fixes
+### 4.2 Completeness Issues Are BLOCKING
+
+**SPECIAL RULE FOR COMPLETENESS ISSUES:**
+
+Completeness issues (placeholders, TODOs, stubs, partial implementations, etc.) are **ALWAYS BLOCKING**. You CANNOT proceed to completion while any completeness issue remains.
+
+This includes:
+- Plan items not fully implemented
+- `TODO`, `FIXME`, `XXX`, `HACK` comments in changed code
+- `unimplemented!()`, `todo!()` macros
+- Stub functions with no real logic
+- Partial implementations (only some cases handled)
+- Hardcoded test data in production code
+- No-op functions
+- "Will add later" or "temporary" comments
+
+**You must fix ALL of these before the review can pass.**
+
+### 4.3 Implement All Fixes
 
 For each confirmed issue:
-1. Implement the fix
+1. Implement the fix **COMPLETELY** - no partial fixes
 2. Verify the fix is complete and correct
 3. Do NOT introduce new issues while fixing
+4. Do NOT leave any aspect of the fix for "later"
 
-### 4.3 Loop Back If Code Changed
+### 4.4 MANDATORY Review Loop
+
+**THIS LOOP IS NOT OPTIONAL. You MUST repeat until zero issues remain.**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    MANDATORY FIX-REVIEW LOOP                        │
+│                                                                     │
+│  ┌─────────────────┐                                                │
+│  │ Agent Review    │◄─────────────────────────────────────┐        │
+│  │ (Phase 2)       │                                      │        │
+│  └────────┬────────┘                                      │        │
+│           │                                               │        │
+│           ▼                                               │        │
+│  ┌─────────────────┐                                      │        │
+│  │ Issues Found?   │──── NO ────► EXIT LOOP (Phase 5)    │        │
+│  └────────┬────────┘                                      │        │
+│           │                                               │        │
+│           │ YES                                           │        │
+│           ▼                                               │        │
+│  ┌─────────────────┐                                      │        │
+│  │ Fix ALL Issues  │                                      │        │
+│  │ (Phase 4.3)     │                                      │        │
+│  └────────┬────────┘                                      │        │
+│           │                                               │        │
+│           ▼                                               │        │
+│  ┌─────────────────┐                                      │        │
+│  │ make verify     │                                      │        │
+│  │ (Phase 1)       │                                      │        │
+│  └────────┬────────┘                                      │        │
+│           │                                               │        │
+│           └───────────────────────────────────────────────┘        │
+│                                                                     │
+│  YOU CANNOT EXIT THIS LOOP UNTIL AGENTS REPORT ZERO ISSUES         │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
 **If ANY source code was changed during issue resolution:**
 
-1. Return to **Phase 1** - run `make verify` again
-2. Return to **Phase 2** - launch all three agents again for re-review
-3. Continue until a cycle completes with zero new issues
+1. Run `make verify` again - must pass
+2. Run `make docs` again - must pass
+3. Launch all three agents again for re-review
+4. Process their findings
+5. If new issues found, fix them and REPEAT
+6. Continue until a cycle completes with **ZERO** new issues
 
-**Documentation-only changes do NOT require a new review cycle** (during the loop in Phase 4.3). However, documentation-only work still requires the initial full workflow (Phases 1-5) - the exemption only applies to the re-review loop when fixing issues.
+**You CANNOT claim completion until agents return zero issues.**
+
+### 4.5 Loop Counter and Escalation
+
+Track how many review cycles you've done:
+- Cycle 1: Initial review
+- Cycle 2: First fix review
+- Cycle 3+: Subsequent fix reviews
+
+**If you reach cycle 5 or more:**
+- Stop and inform the user
+- Something is fundamentally wrong with the implementation approach
+- Discuss whether to continue fixing or reconsider the approach
+
+### 4.6 Documentation-Only Changes
+
+**Documentation-only changes do NOT require a new review cycle** (during the loop in Phase 4.4). However, documentation-only work still requires the initial full workflow (Phases 0-5) - the exemption only applies to the re-review loop when fixing issues.
 
 ---
 
@@ -335,17 +440,39 @@ For each confirmed issue:
 
 Work is complete ONLY when ALL of the following are true:
 
+- [ ] **Plan fulfilled** - If `PLAN.md` existed, every item was fully implemented
+- [ ] **Zero completeness issues** - No placeholders, TODOs, stubs, or partial implementations
 - [ ] `make verify` passes with zero issues (if code was changed)
-- [ ] `make docs` passes with zero output (always required)
+- [ ] `make docs` passes with zero validation errors (always required)
 - [ ] All three agents have reviewed the changes
 - [ ] All agent-reported issues have been verified
 - [ ] All confirmed issues have been resolved
 - [ ] No code changes remain unreviewed
 - [ ] Documentation is up-to-date and all links are valid
+- [ ] **Final agent review passed with ZERO issues**
 
-### 5.2 Reporting Completion
+### 5.2 Plan Cleanup
 
-**Only when the checklist is fully satisfied may you report to the user that the work is done.**
+If `PLAN.md` exists and the work is truly complete:
+
+1. Delete `PLAN.md`:
+   ```bash
+   rm PLAN.md
+   ```
+
+2. This signals the plan has been fully implemented and is no longer needed
+
+**Do NOT delete `PLAN.md` until all phases are complete and agents have confirmed zero issues.**
+
+### 5.3 Reporting Completion
+
+**Only when the checklist is fully satisfied AND the final agent review returned zero issues may you report to the user that the work is done.**
+
+Your completion report must include:
+- Summary of what was implemented
+- Number of review cycles completed
+- Confirmation that all plan items were fulfilled (if plan existed)
+- Confirmation that zero completeness issues remain
 
 ---
 
@@ -368,8 +495,14 @@ From CLAUDE.md:
 
 **Important:** When passing this prompt to shell commands (Gemini, Codex), you must escape inner double quotes or use single quotes within the prompt text. The template below uses escaped quotes where needed.
 
+**CRITICAL:** If `PLAN.md` exists, you MUST include its contents in the review prompt. This is mandatory.
+
 ```
 Review the following changes for the Lona project.
+
+==== THE PLAN (from PLAN.md) ====
+<INSERT FULL CONTENTS OF PLAN.md HERE, or "No plan file exists" if none>
+==== END PLAN ====
 
 CHANGED FILES:
 - path/to/file1.rs
@@ -377,28 +510,65 @@ CHANGED FILES:
 - ...
 
 INSTRUCTIONS:
-1. Read ALL changed files completely
-2. Read ALL relevant documentation: CLAUDE.md, docs/concept.md, docs/lonala.md, docs/rust.md
-3. Read any other code files necessary to understand the context
+1. Read PLAN.md contents above FIRST (if present)
+2. Read ALL changed files completely
+3. Read ALL relevant documentation: CLAUDE.md, docs/lonala/index.md, docs/development/rust-coding-guidelines.md
+4. Read any other code files necessary to understand the context
 
 REVIEW CRITERIA:
-Assess each changed file for:
 
-A. CORRECTNESS: Logic errors, edge cases, integration issues
-B. KISS: Unnecessary complexity, over-abstraction
-C. YAGNI: Unneeded features, speculative code, dead paths
-D. CLEAN CODE: Naming, function focus, self-documentation
-E. COMPLETENESS: Check EVERY LINE for:
-   - Hacks, workarounds, dummy code, no-ops
-   - Deferred functionality (TODO, FIXME, implement later)
-   - Partial implementations, stubbed functions
-   - Mock/hardcoded data where real data should be
-F. DOCUMENTATION: Is all documentation still accurate?
+A. PLAN FULFILLMENT (CRITICAL - if plan exists):
+   - Was EVERY item in the plan implemented?
+   - Is each implementation COMPLETE (not partial)?
+   - Does implementation match what was planned?
+   - Report: "[PASS/FAIL] Plan Item X: <status>"
 
-Our core principle: CORRECTNESS OVER SPEED. We never sacrifice completeness.
+B. COMPLETENESS (CRITICAL - check EVERY LINE):
+   - Placeholders: unimplemented!(), todo!(), // placeholder
+   - TODO/FIXME: Any TODO, FIXME, XXX, HACK, TEMP comments
+   - Stub functions: Empty bodies, functions returning defaults without logic
+   - Hardcoded values: Magic numbers, test data in production code
+   - Partial implementations: Missing cases, happy path only
+   - Deferred handling: unwrap() where errors should be handled
+   - Future work comments: "will add later", "temporary", "for now"
+   - Dummy/mock data: Fake responses in non-test code
+   - No-op functions: Functions that do nothing meaningful
+   - Workarounds: "workaround for", "hack to fix"
 
-Report ALL issues found, even if minor. Categorize by criteria above.
-Include file path and line numbers for each issue.
+   Report format for EACH issue:
+   COMPLETENESS ISSUE [CRITICAL]:
+   - File: <path>
+   - Line: <number>
+   - Pattern: <type>
+   - Code: <the code>
+
+C. CORRECTNESS: Logic errors, edge cases, integration issues
+D. KISS: Unnecessary complexity, over-abstraction
+E. YAGNI: Unneeded features, speculative code, dead paths
+F. CLEAN CODE: Naming, function focus, self-documentation
+G. DOCUMENTATION: Is all documentation still accurate?
+
+Our core principle: CORRECTNESS OVER SPEED. We NEVER sacrifice completeness.
+
+THE PRIMARY AGENT HAS A HISTORY OF LEAVING INCOMPLETE IMPLEMENTATIONS.
+Be EXTREMELY thorough. Be skeptical. Check EVERY line.
+Completeness issues are ALWAYS critical - never mark them as "minor".
+
+OUTPUT FORMAT:
+## Plan Validation
+- [PASS/FAIL] Item 1: <status>
+...
+
+## Completeness Issues (CRITICAL)
+<list or "None found">
+
+## Other Issues
+<categorized list>
+
+## Summary
+- Plan items: X/Y fulfilled
+- Completeness issues: N (MUST be 0)
+- Recommendation: PASS/FAIL
 ```
 
 ---
@@ -414,5 +584,38 @@ Include file path and line numbers for each issue.
 - Run agents sequentially instead of in parallel
 - Accept partial fixes
 - Leave TODOs for "later"
+- Exit the review loop while issues remain
+- Delete `PLAN.md` before work is complete
+- Omit the plan from review prompts
+- Downgrade completeness issues to "minor"
+
+### SPECIFICALLY PROHIBITED BEHAVIORS
+
+The following are **ABSOLUTE VIOLATIONS** that have occurred in the past and **MUST NEVER happen again**:
+
+| Violation | Why It's Unacceptable |
+|-----------|----------------------|
+| Leaving `TODO` comments | Admits work is incomplete |
+| Using `unimplemented!()` | Defers required functionality |
+| Writing stub functions | Pretends to implement without doing the work |
+| Partial implementations | Claims completion when cases are missing |
+| "Will add later" comments | Acknowledges plan not followed |
+| Skipping plan items | Violates explicit agreement with user |
+| Claiming done with issues remaining | Breaks trust, wastes user time |
+| Exiting review loop early | Allows defects to slip through |
+
+**If you find yourself doing ANY of these, STOP. Go back and do the work properly.**
+
+### The Prime Directive
+
+**CORRECTNESS OVER SPEED. COMPLETENESS IS NON-NEGOTIABLE.**
+
+Incomplete work that appears done is worse than no work at all. It:
+- Wastes the user's time (they discover problems later)
+- Creates hidden technical debt
+- Breaks trust with the user
+- Violates the project's core principles
+
+**If you cannot complete something fully, STOP and discuss with the user. Never fake completion.**
 
 **REMEMBER:** This skill exists because correctness matters more than speed. Follow it completely, every time.

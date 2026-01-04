@@ -1,0 +1,678 @@
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;; Copyright 2026 Tobias Sarnowski
+
+;; ═══════════════════════════════════════════════════════════════════════════
+;; lona.core — Core language intrinsics and derived macros
+;; ═══════════════════════════════════════════════════════════════════════════
+;;
+;; This file bootstraps the Lonala language. It cannot use most language
+;; features because they are defined here. The bootstrap sequence is:
+;;
+;;   1. VM seeds `def` as the only pre-existing var
+;;   2. Special forms are registered with ^:native ^:special-form
+;;   3. Core intrinsics are registered with ^:native
+;;   4. `defmacro` is defined using raw `def` + `fn*`
+;;   5. Core macros are defined in dependency order
+;;   6. Helper functions are defined using `defn`
+;;
+;; After loading, this namespace is automatically referred into all other
+;; namespaces, making these definitions available without qualification.
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Special Forms
+;; ───────────────────────────────────────────────────────────────────────────
+;;
+;; The 5 special forms have evaluation rules built into the compiler.
+;; They are registered as vars for documentation and discoverability.
+
+(def ^{:native true
+       :special-form true
+       :doc "Creates or updates a var binding in the current namespace.
+
+  With one argument, creates an unbound var. With two arguments,
+  binds the var to the given value. Metadata on the symbol becomes
+  metadata on the var."
+       :arglists '([name] [name value])}
+  def)
+
+(def ^{:native true
+       :special-form true
+       :doc "Creates a function with a single parameter list.
+
+  Parameters are a vector of symbols. Use `& rest` for variadic
+  functions. The body has an implicit `do`. For multi-arity
+  functions, use the `fn` macro instead."
+       :arglists '([params & body] [name params & body])}
+  fn*)
+
+(def ^{:native true
+       :special-form true
+       :doc "Pattern matching expression.
+
+  Evaluates `expr` and tries each pattern in order. The first
+  matching pattern executes its body. Use `when` for guards.
+  If no pattern matches, the process exits with `:badmatch`."
+       :arglists '([expr & clauses])}
+  match)
+
+(def ^{:native true
+       :special-form true
+       :doc "Evaluates expressions in sequence, returns the last value.
+
+  Used for side effects when multiple expressions are needed."
+       :arglists '([& exprs])}
+  do)
+
+(def ^{:native true
+       :special-form true
+       :doc "Returns the unevaluated form.
+
+  Prevents evaluation of the form. The reader macro `'x` expands
+  to `(quote x)`."
+       :arglists '([form])}
+  quote)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Metadata
+;; ───────────────────────────────────────────────────────────────────────────
+
+(def ^{:native true
+       :doc "Returns the metadata map of `obj`, or nil if none."
+       :arglists '([obj])}
+  meta)
+
+(def ^{:native true
+       :doc "Returns `obj` with `meta-map` as its metadata."
+       :arglists '([obj meta-map])}
+  with-meta)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Sequences
+;; ───────────────────────────────────────────────────────────────────────────
+
+(def ^{:native true
+       :doc "Returns the first element of `coll`, or nil if empty.
+
+  Works on any collection type."
+       :arglists '([coll])}
+  first)
+
+(def ^{:native true
+       :doc "Returns all elements after the first, as a list.
+
+  Always returns a list regardless of input collection type.
+  Returns an empty list if `coll` has 0 or 1 elements."
+       :arglists '([coll])}
+  rest)
+
+(def ^{:native true
+       :doc "Returns true if `coll` has no elements."
+       :arglists '([coll])}
+  empty?)
+
+(def ^{:native true
+       :doc "Returns the number of elements in `coll`."
+       :arglists '([coll])}
+  count)
+
+(def ^{:native true
+       :doc "Returns the element at index `idx` in `coll`.
+
+  With two arguments, throws if index is out of bounds.
+  With three arguments, returns `not-found` instead."
+       :arglists '([coll idx] [coll idx not-found])}
+  nth)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Symbols and Evaluation
+;; ───────────────────────────────────────────────────────────────────────────
+
+(def ^{:native true
+       :doc "Generates a unique symbol.
+
+  With no arguments, generates a symbol like `G__123`. With a
+  prefix, generates a symbol like `prefix__123`."
+       :arglists '([] [prefix])}
+  gensym)
+
+(def ^{:native true
+       :doc "Returns true if `a` equals `b`.
+
+  Value-based equality. Collections are equal if they have the
+  same elements. Metadata does not affect equality."
+       :arglists '([a] [a b] [a b & more])}
+  =)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Type Predicates
+;; ───────────────────────────────────────────────────────────────────────────
+
+(def ^{:native true
+       :doc "Returns true if `x` is a list."
+       :arglists '([x])}
+  list?)
+
+(def ^{:native true
+       :doc "Returns true if `x` is nil."
+       :arglists '([x])}
+  nil?)
+
+(def ^{:native true
+       :doc "Returns true if `x` is a symbol."
+       :arglists '([x])}
+  symbol?)
+
+(def ^{:native true
+       :doc "Returns true if `x` is a keyword."
+       :arglists '([x])}
+  keyword?)
+
+(def ^{:native true
+       :doc "Returns true if `x` is a map."
+       :arglists '([x])}
+  map?)
+
+(def ^{:native true
+       :doc "Returns true if `x` is a tuple."
+       :arglists '([x])}
+  tuple?)
+
+(def ^{:native true
+       :doc "Returns true if `x` is a vector."
+       :arglists '([x])}
+  vector?)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Collections
+;; ───────────────────────────────────────────────────────────────────────────
+
+(def ^{:native true
+       :doc "Adds `elem` to the front of `list`."
+       :arglists '([list elem])}
+  prepend)
+
+(def ^{:native true
+       :doc "Adds `elem` to the end of `coll` (vector or tuple)."
+       :arglists '([coll elem])}
+  append)
+
+(def ^{:native true
+       :doc "Associates `key` with `val` in `map`."
+       :arglists '([map key val])}
+  put)
+
+(def ^{:native true
+       :doc "Returns value for `key` in `coll`, or `not-found`/nil."
+       :arglists '([coll key] [coll key not-found])}
+  get)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Namespaces
+;; ───────────────────────────────────────────────────────────────────────────
+
+(def ^{:native true
+       :doc "Creates a new namespace with the given symbol name."
+       :arglists '([sym])}
+  create-ns)
+
+(def ^{:native true
+       :doc "Returns the namespace with the given symbol name, or nil."
+       :arglists '([sym])}
+  find-ns)
+
+(def ^{:native true
+       :doc "Adds all public vars from `ns` to the current namespace."
+       :arglists '([ns])}
+  refer)
+
+(def ^{:native true
+       :doc "Creates an alias `alias-sym` for namespace `ns-sym`."
+       :arglists '([alias-sym ns-sym])}
+  alias)
+
+(def ^{:native true
+       :doc "Interns a var in `ns` with name `sym`.
+
+  With two arguments, creates an unbound var.
+  With three arguments, binds to `val`."
+       :arglists '([ns sym] [ns sym val])}
+  intern)
+
+(def ^{:native true
+       :doc "Returns the namespace's symbol name."
+       :arglists '([ns])}
+  ns-name)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Strings
+;; ───────────────────────────────────────────────────────────────────────────
+
+(def ^{:native true
+       :doc "Concatenates arguments into a string."
+       :arglists '([& args])}
+  str)
+
+(def ^{:native true
+       :doc "Creates a symbol from name, optionally with namespace."
+       :arglists '([name] [ns name])}
+  symbol)
+
+(def ^{:native true
+       :doc "Creates a keyword from name, optionally with namespace."
+       :arglists '([name] [ns name])}
+  keyword)
+
+(def ^{:native true
+       :doc "Returns the name part of a symbol or keyword as a string."
+       :arglists '([sym-or-kw])}
+  name)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Functions
+;; ───────────────────────────────────────────────────────────────────────────
+
+(def ^{:native true
+       :doc "Applies `f` to the arguments.
+
+  The last argument must be a sequence, which is spread as
+  individual arguments to `f`."
+       :arglists '([f args] [f a & more])}
+  apply)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Core Intrinsics — Debugging (Temporary)
+;; ───────────────────────────────────────────────────────────────────────────
+;;
+;; These intrinsics are temporary until proper I/O drivers are implemented.
+
+(def ^{:native true
+       :doc "Prints `x` to the kernel UART. Returns nil.
+
+  Temporary debugging intrinsic. Will be replaced by proper
+  I/O facilities once UART drivers are implemented."
+       :arglists '([x])}
+  kprint)
+
+(def ^{:native true
+       :doc "Returns true if `x` is a string."
+       :arglists '([x])}
+  string?)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Macro Definition Bootstrap
+;; ───────────────────────────────────────────────────────────────────────────
+;;
+;; `defmacro` is defined using raw primitives because we can't use `defmacro`
+;; to define itself. This is the only macro defined this way.
+
+(def ^{:macro true
+       :doc "Defines a macro.
+
+  Like `defn`, but the resulting function is called at compile-time
+  with unevaluated forms and its return value replaces the original
+  form in the code."
+       :arglists '([name doc-string? [params*] & body])}
+  defmacro
+  (fn* [name & decl]
+    (match decl
+      ;; (defmacro name "doc" [params] body...)
+      ([doc params & body] :when (string? doc))
+        `(def ~(with-meta name {:macro true :doc doc :arglists (list 'quote (list params))})
+           (fn* ~params ~@body))
+      ;; (defmacro name [params] body...)
+      ([params & body])
+        `(def ~(with-meta name {:macro true :arglists (list 'quote (list params))})
+           (fn* ~params ~@body)))))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Control Flow — Conditionals
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro if
+  "Evaluates `test`. If truthy, evaluates and returns `then`.
+  Otherwise, evaluates and returns `else` (or nil if not provided)."
+  [test then & else-form]
+  (match else-form
+    () `(match ~test false nil nil nil ~'_ ~then)
+    (else & _) `(match ~test false ~else nil ~else ~'_ ~then)))
+
+(defmacro when
+  "Evaluates `test`. If truthy, evaluates `body` forms and returns
+  the last value. Otherwise returns nil."
+  [test & body]
+  `(if ~test (do ~@body) nil))
+
+(defmacro when-not
+  "Evaluates `test`. If falsy, evaluates `body` forms and returns
+  the last value. Otherwise returns nil."
+  [test & body]
+  `(if ~test nil (do ~@body)))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Control Flow — Local Bindings
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro let
+  "Binds symbols to values for the scope of `body`.
+
+  `bindings` is a tuple of symbol-value pairs. Supports pattern
+  matching in the binding position."
+  [bindings & body]
+  ((fn* expand [bs]
+     (if (empty? bs)
+       `(do ~@body)
+       `(match ~(first (rest bs))
+          ~(first bs)
+          ~(expand (rest (rest bs))))))
+   bindings))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Control Flow — Boolean Operators
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro and
+  "Short-circuit logical AND.
+
+  Evaluates expressions left to right. Returns the first falsy value,
+  or the last value if all are truthy. With no arguments returns true."
+  [& forms]
+  (match forms
+    () true
+    (x & ()) x
+    (x & more)
+      (let [v (gensym "and__")]
+        `(let [~v ~x]
+           (if ~v (and ~@more) ~v)))))
+
+(defmacro or
+  "Short-circuit logical OR.
+
+  Evaluates expressions left to right. Returns the first truthy value,
+  or the last value if all are falsy. With no arguments returns nil."
+  [& forms]
+  (match forms
+    () nil
+    (x & ()) x
+    (x & more)
+      (let [v (gensym "or__")]
+        `(let [~v ~x]
+           (if ~v ~v (or ~@more))))))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Control Flow — Multi-Branch
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro cond
+  "Multi-branch conditional.
+
+  Takes pairs of test expressions and result expressions. Evaluates
+  tests in order; returns the result of the first truthy test.
+  Use `:else` as the final test for a default branch."
+  [& clauses]
+  (if (empty? clauses)
+    nil
+    (let [test (first clauses)
+          result (first (rest clauses))
+          remaining (rest (rest clauses))]
+      (if (= test :else)
+        result
+        `(if ~test ~result (cond ~@remaining))))))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Function Definition
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro fn
+  "Creates a function, optionally with multiple arities.
+
+  Single arity: (fn [x] body)
+  Multi-arity:  (fn ([x] body1) ([x y] body2))
+  Named:        (fn name [x] body)"
+  [& decl]
+  (match decl
+    ;; (fn name [...] body) - named, single arity
+    ([name params & body] :when (symbol? name))
+      `(fn* ~name ~params ~@body)
+    ;; (fn [...] body) - anonymous, single arity
+    ([params & body] :when (tuple? params))
+      `(fn* ~params ~@body)
+    ;; (fn name ([...] body) ([...] body)) - named, multi-arity
+    ([name & arities] :when (symbol? name))
+      (let [args-sym (gensym "args__")]
+        `(fn* ~name [~'& ~args-sym]
+           ~((fn* build-match [ars]
+               (if (empty? ars)
+                 `(match nil) ; will fail with badmatch
+                 (let [arity (first ars)
+                       params (first arity)
+                       body (rest arity)
+                       arity-count (count params)]
+                   `(if (= (count ~args-sym) ~arity-count)
+                      (let ~((fn* build-bindings [i ps]
+                               (if (empty? ps)
+                                 []
+                                 (let [p (first ps)]
+                                   (if (= p '&)
+                                     [(first (rest ps)) `(drop ~i ~args-sym)]
+                                     (append (append (build-bindings (+ i 1) (rest ps))
+                                                     `(nth ~args-sym ~i))
+                                             p)))))
+                             0 params)
+                        (do ~@body))
+                      ~(build-match (rest ars))))))
+             arities)))
+    ;; (fn ([...] body) ([...] body)) - anonymous, multi-arity
+    (arities)
+      (let [args-sym (gensym "args__")]
+        `(fn* [~'& ~args-sym]
+           ~((fn* build-match [ars]
+               (if (empty? ars)
+                 `(match nil)
+                 (let [arity (first ars)
+                       params (first arity)
+                       body (rest arity)
+                       arity-count (count params)]
+                   `(if (= (count ~args-sym) ~arity-count)
+                      (let ~((fn* build-bindings [i ps]
+                               (if (empty? ps)
+                                 []
+                                 (let [p (first ps)]
+                                   (if (= p '&)
+                                     [(first (rest ps)) `(drop ~i ~args-sym)]
+                                     (append (append (build-bindings (+ i 1) (rest ps))
+                                                     `(nth ~args-sym ~i))
+                                             p)))))
+                             0 params)
+                        (do ~@body))
+                      ~(build-match (rest ars))))))
+             arities)))))
+
+(defmacro defn
+  "Defines a named function.
+
+  Supports docstrings, multiple arities, and metadata."
+  [name & decl]
+  (match decl
+    ;; (defn name "doc" [...] body)
+    ([doc params & body] :when (string? doc))
+      `(def ~(with-meta name {:doc doc :arglists (list 'quote (list params))})
+         (fn ~name ~params ~@body))
+    ;; (defn name [...] body)
+    ([params & body] :when (tuple? params))
+      `(def ~(with-meta name {:arglists (list 'quote (list params))})
+         (fn ~name ~params ~@body))
+    ;; (defn name "doc" ([...] body) ...)
+    ([doc & arities] :when (string? doc))
+      `(def ~(with-meta name {:doc doc :arglists (list 'quote ((fn* extract-params [ars]
+                                                                 (if (empty? ars)
+                                                                   '()
+                                                                   (prepend (extract-params (rest ars))
+                                                                            (first (first ars)))))
+                                                               arities))})
+         (fn ~name ~@arities))
+    ;; (defn name ([...] body) ...)
+    (arities)
+      `(def ~(with-meta name {:arglists (list 'quote ((fn* extract-params [ars]
+                                                        (if (empty? ars)
+                                                          '()
+                                                          (prepend (extract-params (rest ars))
+                                                                   (first (first ars)))))
+                                                      arities))})
+         (fn ~name ~@arities))))
+
+(defmacro defn-
+  "Like `defn`, but defines a private function."
+  [name & decl]
+  `(defn ~(with-meta name {:private true}) ~@decl))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Control Flow — Case
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro case
+  "Value-based dispatch.
+
+  Compares `expr` against each value using `=`. Returns the result
+  of the first match. The last form without a test value is the default."
+  [expr & clauses]
+  (let [v (gensym "case__")]
+    `(let [~v ~expr]
+       ~((fn* build-case [cs]
+           (match cs
+             () `(match ~v) ; no match, will fail
+             (default & ()) default
+             (test result & more)
+               `(if (= ~v ~test) ~result ~(build-case more))))
+         clauses))))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Threading Macros
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro ->
+  "Thread-first macro.
+
+  Threads `x` through forms. Inserts `x` as the second element of
+  each form, or wraps symbols into a list."
+  [x & forms]
+  (if (empty? forms)
+    x
+    (let [form (first forms)
+          rest-forms (rest forms)
+          threaded (if (list? form)
+                     `(~(first form) ~x ~@(rest form))
+                     `(~form ~x))]
+      `(-> ~threaded ~@rest-forms))))
+
+(defmacro ->>
+  "Thread-last macro.
+
+  Threads `x` through forms. Inserts `x` as the last element of
+  each form, or wraps symbols into a list."
+  [x & forms]
+  (if (empty? forms)
+    x
+    (let [form (first forms)
+          rest-forms (rest forms)
+          threaded (if (list? form)
+                     `(~(first form) ~@(rest form) ~x)
+                     `(~form ~x))]
+      `(->> ~threaded ~@rest-forms))))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Namespace Macros
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro in-ns
+  "Switches to the namespace named by `name`, creating it if needed."
+  [name]
+  `(def ~'*ns* (or (find-ns '~name) (create-ns '~name))))
+
+(defmacro ns
+  "Declares a namespace with optional docstring and clauses.
+
+  Automatically refers all public vars from `lona.core`.
+
+  Clauses:
+    (:require [lib.name :as alias])
+    (:refer [lib.name :only [sym1 sym2]])"
+  [name & decl]
+  (let [doc (if (string? (first decl)) (first decl) nil)
+        clauses (if doc (rest decl) decl)]
+    `(do
+       (in-ns ~name)
+       (refer (find-ns 'lona.core))
+       ~@((fn* process-clauses [cs]
+            (if (empty? cs)
+              '()
+              (let [clause (first cs)]
+                (prepend
+                  (process-clauses (rest cs))
+                  (match clause
+                    (:require & specs)
+                      `(do ~@((fn* process-requires [ss]
+                                (if (empty? ss)
+                                  '()
+                                  (let [spec (first ss)]
+                                    (prepend
+                                      (process-requires (rest ss))
+                                      (match spec
+                                        [lib :as a]
+                                          `(alias '~a '~lib)
+                                        [lib]
+                                          `(refer (find-ns '~lib))
+                                        lib
+                                          `(refer (find-ns '~lib)))))))
+                              specs))
+                    (:refer & specs)
+                      `(do ~@((fn* process-refers [ss]
+                                (if (empty? ss)
+                                  '()
+                                  (let [spec (first ss)]
+                                    (prepend
+                                      (process-refers (rest ss))
+                                      (match spec
+                                        [lib :only syms]
+                                          `(refer (find-ns '~lib)) ; TODO: filter syms
+                                        [lib]
+                                          `(refer (find-ns '~lib)))))))
+                              specs)))))))
+          clauses)
+       ~(when doc
+          `(def ~'*ns-doc* ~doc)))))
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Utility Macros
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro comment
+  "Ignores body forms. Useful for documentation and examples."
+  [& _]
+  nil)
+
+;; ───────────────────────────────────────────────────────────────────────────
+;; Debugging (Temporary)
+;; ───────────────────────────────────────────────────────────────────────────
+
+(defmacro kprintln
+  "Prints arguments to the kernel UART, separated by spaces, followed by newline.
+
+  Temporary debugging macro. Will be replaced by proper I/O
+  facilities once UART drivers are implemented."
+  [& args]
+  (if (empty? args)
+    `(kprint "\n")
+    `(do ~@((fn* build-prints [xs first?]
+              (if (empty? xs)
+                '((kprint "\n"))
+                (let [x (first xs)]
+                  (prepend
+                    (build-prints (rest xs) false)
+                    (if first?
+                      `(kprint ~x)
+                      `(do (kprint " ") (kprint ~x)))))))
+            args true))))
+
+;; ═══════════════════════════════════════════════════════════════════════════
+;; End of lona.core bootstrap
+;; ═══════════════════════════════════════════════════════════════════════════

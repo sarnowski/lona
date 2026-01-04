@@ -34,6 +34,9 @@ e2e-test = ["sel4"]
 sel4 = { git = "https://github.com/seL4/rust-sel4.git", tag = "v3.0.0", optional = true }
 sel4-root-task = { git = "https://github.com/seL4/rust-sel4.git", tag = "v3.0.0", optional = true }
 
+# USTAR tar parsing for embedded library loading (no_std, zero-allocation)
+tar-no-std = "0.3"
+
 [dev-dependencies]
 proptest = "1.4"
 

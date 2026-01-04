@@ -1,0 +1,232 @@
+/* Gruvbox Theme for MkDocs Material
+ * Based on https://github.com/morhetz/gruvbox
+ * Using hard contrast backgrounds for better readability
+ */
+
+/* ==========================================================================
+   Gruvbox Dark (Hard Contrast)
+   ========================================================================== */
+
+[data-md-color-scheme="gruvbox-dark"] {
+  /* Core backgrounds */
+  --md-default-bg-color: #1d2021;
+  --md-default-bg-color--light: #282828;
+  --md-default-bg-color--lighter: #3c3836;
+  --md-default-bg-color--lightest: #504945;
+
+  /* Core foregrounds */
+  --md-default-fg-color: #ebdbb2;
+  --md-default-fg-color--light: #d5c4a1;
+  --md-default-fg-color--lighter: #a89984;
+  --md-default-fg-color--lightest: #928374;
+
+  /* Primary: dark header with light text */
+  --md-primary-fg-color: #282828;
+  --md-primary-fg-color--light: #3c3836;
+  --md-primary-fg-color--dark: #1d2021;
+  --md-primary-bg-color: #ebdbb2;
+  --md-primary-bg-color--light: #d5c4a1;
+
+  /* Accent: Gruvbox orange */
+  --md-accent-fg-color: #fe8019;
+  --md-accent-fg-color--transparent: rgba(254, 128, 25, 0.1);
+  --md-accent-bg-color: #1d2021;
+  --md-accent-bg-color--light: #282828;
+
+  /* Code blocks */
+  --md-code-fg-color: #ebdbb2;
+  --md-code-bg-color: #282828;
+  --md-code-hl-color: rgba(254, 128, 25, 0.2);
+  --md-code-hl-number-color: #d3869b;
+  --md-code-hl-special-color: #fe8019;
+  --md-code-hl-function-color: #b8bb26;
+  --md-code-hl-constant-color: #d3869b;
+  --md-code-hl-keyword-color: #fb4934;
+  --md-code-hl-string-color: #b8bb26;
+  --md-code-hl-name-color: #83a598;
+  --md-code-hl-operator-color: #8ec07c;
+  --md-code-hl-punctuation-color: #ebdbb2;
+  --md-code-hl-comment-color: #928374;
+  --md-code-hl-generic-color: #fe8019;
+  --md-code-hl-variable-color: #83a598;
+
+  /* Typeset */
+  --md-typeset-color: #ebdbb2;
+  --md-typeset-a-color: #83a598;
+
+  /* Navigation */
+  --md-nav-color: #ebdbb2;
+
+  /* Footer */
+  --md-footer-bg-color: #282828;
+  --md-footer-bg-color--dark: #1d2021;
+  --md-footer-fg-color: #a89984;
+  --md-footer-fg-color--light: #928374;
+  --md-footer-fg-color--lighter: #665c54;
+
+  /* Shadow (subtle for dark mode) */
+  --md-shadow-z1: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.3);
+  --md-shadow-z2: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.4);
+  --md-shadow-z3: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.5);
+
+  /* Admonitions */
+  --md-admonition-fg-color: #ebdbb2;
+  --md-admonition-bg-color: #282828;
+
+  /* Tables */
+  --md-typeset-table-color: rgba(60, 56, 54, 0.5);
+
+  /* Search */
+  --md-search-result-icon-color: #928374;
+}
+
+/* Dark mode header bar - matches primary-fg */
+[data-md-color-scheme="gruvbox-dark"] .md-header {
+  background-color: #282828;
+  color: #ebdbb2;
+}
+
+/* Dark mode tabs */
+[data-md-color-scheme="gruvbox-dark"] .md-tabs {
+  background-color: #282828;
+  color: #ebdbb2;
+}
+
+/* Dark mode search bar */
+[data-md-color-scheme="gruvbox-dark"] .md-search__form {
+  background-color: #3c3836;
+}
+
+/* Dark mode inline code */
+[data-md-color-scheme="gruvbox-dark"] .md-typeset code {
+  background-color: #3c3836;
+  color: #fe8019;
+}
+
+/* Dark mode code blocks */
+[data-md-color-scheme="gruvbox-dark"] .md-typeset pre > code {
+  background-color: #282828;
+  color: #ebdbb2;
+}
+
+/* Dark mode copy button */
+[data-md-color-scheme="gruvbox-dark"] .md-clipboard {
+  color: #a89984;
+}
+[data-md-color-scheme="gruvbox-dark"] .md-clipboard:hover {
+  color: #ebdbb2;
+}
+
+/* ==========================================================================
+   Gruvbox Light (Hard Contrast)
+   ========================================================================== */
+
+[data-md-color-scheme="gruvbox-light"] {
+  /* Core backgrounds */
+  --md-default-bg-color: #f9f5d7;
+  --md-default-bg-color--light: #fbf1c7;
+  --md-default-bg-color--lighter: #ebdbb2;
+  --md-default-bg-color--lightest: #d5c4a1;
+
+  /* Core foregrounds */
+  --md-default-fg-color: #3c3836;
+  --md-default-fg-color--light: #504945;
+  --md-default-fg-color--lighter: #7c6f64;
+  --md-default-fg-color--lightest: #928374;
+
+  /* Primary: light header with dark text */
+  --md-primary-fg-color: #ebdbb2;
+  --md-primary-fg-color--light: #d5c4a1;
+  --md-primary-fg-color--dark: #f9f5d7;
+  --md-primary-bg-color: #3c3836;
+  --md-primary-bg-color--light: #504945;
+
+  /* Accent: Gruvbox faded orange */
+  --md-accent-fg-color: #af3a03;
+  --md-accent-fg-color--transparent: rgba(175, 58, 3, 0.1);
+  --md-accent-bg-color: #f9f5d7;
+  --md-accent-bg-color--light: #ebdbb2;
+
+  /* Code blocks */
+  --md-code-fg-color: #3c3836;
+  --md-code-bg-color: #ebdbb2;
+  --md-code-hl-color: rgba(175, 58, 3, 0.15);
+  --md-code-hl-number-color: #8f3f71;
+  --md-code-hl-special-color: #af3a03;
+  --md-code-hl-function-color: #79740e;
+  --md-code-hl-constant-color: #8f3f71;
+  --md-code-hl-keyword-color: #9d0006;
+  --md-code-hl-string-color: #79740e;
+  --md-code-hl-name-color: #076678;
+  --md-code-hl-operator-color: #427b58;
+  --md-code-hl-punctuation-color: #3c3836;
+  --md-code-hl-comment-color: #928374;
+  --md-code-hl-generic-color: #af3a03;
+  --md-code-hl-variable-color: #076678;
+
+  /* Typeset */
+  --md-typeset-color: #3c3836;
+  --md-typeset-a-color: #076678;
+
+  /* Navigation */
+  --md-nav-color: #3c3836;
+
+  /* Footer */
+  --md-footer-bg-color: #ebdbb2;
+  --md-footer-bg-color--dark: #d5c4a1;
+  --md-footer-fg-color: #504945;
+  --md-footer-fg-color--light: #7c6f64;
+  --md-footer-fg-color--lighter: #928374;
+
+  /* Shadow */
+  --md-shadow-z1: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.1);
+  --md-shadow-z2: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.15);
+  --md-shadow-z3: 0 0.2rem 0.5rem rgba(0, 0, 0, 0.2);
+
+  /* Admonitions */
+  --md-admonition-fg-color: #3c3836;
+  --md-admonition-bg-color: #ebdbb2;
+
+  /* Tables */
+  --md-typeset-table-color: rgba(213, 196, 161, 0.5);
+
+  /* Search */
+  --md-search-result-icon-color: #7c6f64;
+}
+
+/* Light mode header bar - matches primary-fg */
+[data-md-color-scheme="gruvbox-light"] .md-header {
+  background-color: #ebdbb2;
+  color: #3c3836;
+}
+
+/* Light mode tabs */
+[data-md-color-scheme="gruvbox-light"] .md-tabs {
+  background-color: #ebdbb2;
+  color: #3c3836;
+}
+
+/* Light mode search bar */
+[data-md-color-scheme="gruvbox-light"] .md-search__form {
+  background-color: #d5c4a1;
+}
+
+/* Light mode inline code */
+[data-md-color-scheme="gruvbox-light"] .md-typeset code {
+  background-color: #ebdbb2;
+  color: #af3a03;
+}
+
+/* Light mode code blocks */
+[data-md-color-scheme="gruvbox-light"] .md-typeset pre > code {
+  background-color: #ebdbb2;
+  color: #3c3836;
+}
+
+/* Light mode copy button */
+[data-md-color-scheme="gruvbox-light"] .md-clipboard {
+  color: #7c6f64;
+}
+[data-md-color-scheme="gruvbox-light"] .md-clipboard:hover {
+  color: #3c3836;
+}

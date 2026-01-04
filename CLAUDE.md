@@ -16,22 +16,97 @@ Lona is a capability-secure operating system built on the seL4 microkernel, comb
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  START: Any Rust-related task                                   │
+│  START: Any task requiring implementation                       │
 │         ↓                                                       │
-│  /develop-rust  ← Load principles, read rust.md                 │
+│  /develop-rust  ← Load principles (if Rust involved)            │
 │         ↓                                                       │
-│  [Do the work: implement, test, verify]                         │
+│  Create PLAN.md  ← Save the implementation plan                 │
+│         ↓                                                       │
+│  [Implement COMPLETELY - no TODOs, no stubs, no placeholders]   │
 │         ↓                                                       │
 │  Use REPL tools for debugging/manual verification               │
-│  (mcp__lona-dev-repl__eval, mcp__lona-dev-repl__restart)        │
 │         ↓                                                       │
-│  /finishing-work  ← Parallel agent review, fix ALL issues       │
+│  /finishing-work  ← Validates plan, runs agent reviews          │
+│         ↓                                                       │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │  MANDATORY REVIEW LOOP (cannot exit with issues)          │  │
+│  │  Review → Fix Issues → make verify → Re-review → Repeat   │  │
+│  │  Exit ONLY when agents report ZERO issues                 │  │
+│  └───────────────────────────────────────────────────────────┘  │
+│         ↓                                                       │
+│  Delete PLAN.md  ← Plan is fulfilled                            │
 │         ↓                                                       │
 │  DONE: Only now is the work complete                            │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**The `finishing-work` skill is non-negotiable.** It triggers three AI agents to review your changes in parallel and ensures every issue is resolved. Work is NOT complete until this skill passes.
+**The `finishing-work` skill is non-negotiable.** It validates the plan was followed, triggers three AI agents to review in parallel, and loops until ALL issues are resolved. Work is NOT complete until this skill passes with zero issues.
+
+---
+
+## CRITICAL: Complete Implementations Only
+
+**THIS IS AN ABSOLUTE RULE. VIOLATIONS ARE UNACCEPTABLE.**
+
+### What You MUST NEVER Do
+
+When implementing any functionality, you are **ABSOLUTELY FORBIDDEN** from:
+
+| Violation | Examples | Why It's Unacceptable |
+|-----------|----------|----------------------|
+| **Placeholders** | `// placeholder`, `pass`, `unimplemented!()`, `todo!()` | Defers work that should be done now |
+| **TODO/FIXME comments** | `// TODO: implement this`, `// FIXME: handle edge case` | Admits incompleteness |
+| **Stub functions** | `fn foo() {}`, `fn foo() { Ok(()) }` with no logic | Pretends to implement |
+| **Hardcoded values** | Magic numbers, test data in production code | Avoids real implementation |
+| **Partial implementations** | Handling 2 of 5 cases, happy path only | Leaves work unfinished |
+| **Deferred error handling** | `unwrap()` where errors should be handled | Ignores real requirements |
+| **"Will add later" comments** | Any comment suggesting future work | Admits plan not followed |
+| **Dummy data/mock data** | Fake responses, simulated behavior | Not real functionality |
+| **No-op implementations** | Functions that do nothing but return | Dishonest about capabilities |
+| **Workarounds** | Temporary hacks presented as solutions | Technical debt disguised |
+
+### The Implementation Standard
+
+Every piece of code you write MUST be:
+
+1. **Complete** - All planned functionality is implemented, all cases handled
+2. **Correct** - Logic is sound, edge cases considered, errors handled properly
+3. **Production-ready** - No temporary code, no test fixtures in production paths
+4. **Self-contained** - No external work required to make it functional
+
+### Plan Fulfillment Is Mandatory
+
+If you create a plan (via EnterPlanMode or TodoWrite), you MUST:
+
+1. **Implement EVERY item** in the plan completely
+2. **Save the plan** to `PLAN.md` before starting implementation
+3. **Check each item off** only when truly complete
+4. **Never skip items** without explicit user approval
+5. **Never partially implement** an item and call it done
+
+The finishing-work skill will verify your implementation against `PLAN.md`. Reviewers will flag any deviation.
+
+### Enforcement
+
+The review agents are explicitly instructed to:
+- Check every line for incomplete implementation patterns
+- Compare implementation against the saved plan
+- Flag ANY placeholder, TODO, stub, or partial implementation
+- Reject the review until all issues are resolved
+
+**You will loop through review cycles until zero completeness issues remain.**
+
+### Why This Matters
+
+Incomplete implementations:
+- Waste the user's time (they think work is done when it isn't)
+- Create hidden technical debt
+- Break trust with the user
+- Violate the project's "correctness over speed" principle
+
+**If you cannot implement something completely, STOP and discuss with the user. Never pretend completion.**
+
+---
 
 ## Development REPL
 
@@ -199,7 +274,19 @@ The authoritative documentation index is **[mkdocs.yaml](mkdocs.yaml)**. Consult
 | Document | Description |
 |----------|-------------|
 | [docs/index.md](docs/index.md) | Project homepage: vision, key features, architecture overview |
-| [docs/concept.md](docs/concept.md) | Complete system design: seL4 foundation, realms, processes, scheduling, memory, IPC, security model |
+| [docs/supported-hardware.md](docs/supported-hardware.md) | Supported hardware platforms, IOMMU requirements, security implications |
+
+### Architecture Specification
+
+| Document | Description |
+|----------|-------------|
+| [docs/architecture/index.md](docs/architecture/index.md) | Architecture overview: design philosophy, security model, terminology |
+| [docs/architecture/memory-fundamentals.md](docs/architecture/memory-fundamentals.md) | Physical memory, MMU, address translation, seL4's memory model |
+| [docs/architecture/system-architecture.md](docs/architecture/system-architecture.md) | Lona Memory Manager, realms, threads, bootstrapping, IPC, resource management |
+| [docs/architecture/realm-memory-layout.md](docs/architecture/realm-memory-layout.md) | VSpace layout, inherited regions, vars, code compilation |
+| [docs/architecture/process-model.md](docs/architecture/process-model.md) | Processes, scheduling, message passing, garbage collection |
+| [docs/architecture/device-drivers.md](docs/architecture/device-drivers.md) | Driver isolation, zero-copy I/O, DMA, interrupt handling |
+| [docs/architecture/services.md](docs/architecture/services.md) | Inter-realm communication: service registry, connections, access control |
 
 ### Lonala Language Specification
 
@@ -209,17 +296,27 @@ The authoritative documentation index is **[mkdocs.yaml](mkdocs.yaml)**. Consult
 | [docs/lonala/reader.md](docs/lonala/reader.md) | Lexical syntax: symbols, keywords, numeric literals, collections, reader macros |
 | [docs/lonala/special-forms.md](docs/lonala/special-forms.md) | The 5 special forms: `def`, `fn*`, `match`, `do`, `quote` |
 | [docs/lonala/data-types.md](docs/lonala/data-types.md) | All value types: nil, booleans, numbers, strings, collections, addresses, capabilities |
+| [docs/lonala/metadata.md](docs/lonala/metadata.md) | Var metadata: native intrinsics, macros, documentation, process-local bindings |
 | [docs/lonala/lona.core.md](docs/lonala/lona.core.md) | Core intrinsics: namespaces, vars, arithmetic, collections, predicates |
 | [docs/lonala/lona.process.md](docs/lonala/lona.process.md) | Process intrinsics: spawn, message passing, linking, monitoring, realms |
 | [docs/lonala/lona.kernel.md](docs/lonala/lona.kernel.md) | seL4 intrinsics: IPC, capabilities, memory mapping (for VM/system code) |
 | [docs/lonala/lona.io.md](docs/lonala/lona.io.md) | I/O intrinsics: MMIO, DMA, interrupt handling (for driver development) |
 | [docs/lonala/lona.time.md](docs/lonala/lona.time.md) | Time intrinsics: monotonic time, sleep, system time |
 
+### Standard Library
+
+| File | Description |
+|------|-------------|
+| [lib/lona/core.lona](lib/lona/core.lona) | Core intrinsics and derived macros (bootstrap file) |
+| [lib/lona/init.lona](lib/lona/init.lona) | System init process (first user process) |
+
 ### Development
 
 | Document | Description |
 |----------|-------------|
-| [docs/rust.md](docs/rust.md) | Rust implementation guide: project structure, coding guidelines, testing strategy |
+| [docs/development/rust-coding-guidelines.md](docs/development/rust-coding-guidelines.md) | Rust implementation guide: project structure, coding guidelines, testing strategy |
+| [docs/development/lonala-coding-guidelines.md](docs/development/lonala-coding-guidelines.md) | Coding style conventions for Lonala source files |
+| [docs/development/library-loading.md](docs/development/library-loading.md) | Library loading: tar archive format, embedding, namespace resolution |
 
 ### Before You Work
 

@@ -144,6 +144,43 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> ! {
     // Log initialization complete
     uart.write_str("Lona initialized.\n");
 
+    // List embedded library contents
+    uart.write_str("\nEmbedded libraries:\n");
+    match lona_vm::TarSource::embedded() {
+        Ok(source) => {
+            for entry in source.entries() {
+                // Get filename - need to bind TarFormatString to extend its lifetime
+                let filename_tar = entry.filename();
+                let Ok(filename) = filename_tar.as_str() else {
+                    continue;
+                };
+                // Skip directories
+                if filename.ends_with('/') {
+                    continue;
+                }
+                uart.write_str("  ");
+                uart.write_str(filename);
+                uart.write_str(" (");
+                print_size(&mut uart, entry.data().len());
+                uart.write_str(" bytes)\n");
+            }
+
+            // TODO: Load bootstrap namespace once reader/evaluator are ready
+            // use lona_vm::NamespaceSource;
+            // let core_bytes = source.resolve("lona.core")
+            //     .expect("lona.core not found in embedded archive");
+            // let core_str = core::str::from_utf8(core_bytes)
+            //     .expect("lona.core is not valid UTF-8");
+            // // Read and evaluate all forms from lona.core
+            // // let forms = lona_vm::reader::read_all(core_str);
+            // // for form in forms { evaluator.eval(form); }
+        }
+        Err(_) => {
+            uart.write_str("  ERROR: Failed to load embedded archive\n");
+        }
+    }
+    uart.write_str("\n");
+
     // Branch: E2E tests or normal REPL
     #[cfg(feature = "e2e-test")]
     {
@@ -186,4 +223,29 @@ fn run_e2e_tests<U: lona_vm::Uart>(heap: &mut Heap, mem: &mut Sel4VSpace, uart: 
 
     // Suspend - test harness will detect completion and kill QEMU
     sel4::init_thread::suspend_self()
+}
+
+/// Print a decimal number to UART.
+///
+/// Since we don't have `format!` in no_std, this manually converts
+/// the number to decimal digits.
+fn print_size<U: lona_vm::Uart>(uart: &mut U, mut n: usize) {
+    if n == 0 {
+        uart.write_str("0");
+        return;
+    }
+    // Maximum digits for usize on 64-bit
+    const MAX_DIGITS: usize = 20;
+    let mut digits = [0u8; MAX_DIGITS];
+    let mut i = 0;
+    while n > 0 {
+        digits[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        i += 1;
+    }
+    // Print digits in reverse order
+    while i > 0 {
+        i -= 1;
+        uart.write_byte(digits[i]);
+    }
 }
