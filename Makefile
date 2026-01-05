@@ -182,6 +182,7 @@ $(MARKER_X86_64_KERNEL): $(MARKER_SEL4_SRC)
 			-DKernelPlatform=pc99 \
 			-DKernelSel4Arch=x86_64 \
 			-DKernelMaxNumNodes=64 \
+			-DKernelIsMCS=ON \
 			-DKernelVerificationBuild=OFF \
 			-DKernelDebugBuild=ON \
 			-DKernelPrinting=ON \
@@ -210,6 +211,7 @@ $(MARKER_AARCH64_KERNEL): $(MARKER_SEL4_SRC)
 			-DKernelPlatform=qemu-arm-virt \
 			-DKernelSel4Arch=aarch64 \
 			-DKernelMaxNumNodes=4 \
+			-DKernelIsMCS=ON \
 			-DKernelArmHypervisorSupport=ON \
 			-DKernelVerificationBuild=OFF \
 			-DKernelDebugBuild=ON \
@@ -255,50 +257,98 @@ CARGO_SEL4_FLAGS = -Z build-std=core,alloc,compiler_builtins -Z build-std-featur
 
 .PHONY: x86_64-build
 x86_64-build: $(MARKER_X86_64_KERNEL)
-	@echo "=== Building Lona for x86_64 (release) ==="
+	@echo "=== Building Lona VM for x86_64 (release) ==="
 	$(DOCKER) env \
 		LONA_VERSION=$(VERSION) \
 		SEL4_PREFIX=/build/sel4-x86_64 \
 		SEL4_INCLUDE_DIRS=/build/sel4-x86_64/libsel4/include \
 		RUST_TARGET_PATH=/source/targets \
 		CARGO_TARGET_DIR=/build/target/x86_64 \
-		cargo build --release --target x86_64-sel4 --no-default-features --features sel4 \
+		cargo build --release --target x86_64-sel4 \
+			-p lona-vm --no-default-features --features sel4 \
+			$(CARGO_SEL4_FLAGS)
+	@echo "=== Building Lona Memory Manager for x86_64 (release, with embedded VM) ==="
+	$(DOCKER) env \
+		LONA_VERSION=$(VERSION) \
+		SEL4_PREFIX=/build/sel4-x86_64 \
+		SEL4_INCLUDE_DIRS=/build/sel4-x86_64/libsel4/include \
+		RUST_TARGET_PATH=/source/targets \
+		CARGO_TARGET_DIR=/build/target/x86_64 \
+		LONA_VM_ELF=/build/target/x86_64/x86_64-sel4/release/lona-vm.elf \
+		cargo build --release --target x86_64-sel4 \
+			-p lona-memory-manager --no-default-features --features sel4 \
 			$(CARGO_SEL4_FLAGS)
 
 .PHONY: aarch64-build
 aarch64-build: $(MARKER_AARCH64_KERNEL)
-	@echo "=== Building Lona for aarch64 (release) ==="
+	@echo "=== Building Lona VM for aarch64 (release) ==="
 	$(DOCKER) env \
 		LONA_VERSION=$(VERSION) \
 		SEL4_PREFIX=/build/sel4-aarch64 \
 		SEL4_INCLUDE_DIRS=/build/sel4-aarch64/libsel4/include \
 		RUST_TARGET_PATH=/source/targets \
 		CARGO_TARGET_DIR=/build/target/aarch64 \
-		cargo build --release --target aarch64-sel4 --no-default-features --features sel4 \
+		cargo build --release --target aarch64-sel4 \
+			-p lona-vm --no-default-features --features sel4 \
+			$(CARGO_SEL4_FLAGS)
+	@echo "=== Building Lona Memory Manager for aarch64 (release, with embedded VM) ==="
+	$(DOCKER) env \
+		LONA_VERSION=$(VERSION) \
+		SEL4_PREFIX=/build/sel4-aarch64 \
+		SEL4_INCLUDE_DIRS=/build/sel4-aarch64/libsel4/include \
+		RUST_TARGET_PATH=/source/targets \
+		CARGO_TARGET_DIR=/build/target/aarch64 \
+		LONA_VM_ELF=/build/target/aarch64/aarch64-sel4/release/lona-vm.elf \
+		cargo build --release --target aarch64-sel4 \
+			-p lona-memory-manager --no-default-features --features sel4 \
 			$(CARGO_SEL4_FLAGS)
 
 .PHONY: x86_64-build-test
 x86_64-build-test: $(MARKER_X86_64_KERNEL)
-	@echo "=== Building Lona for x86_64 (test) ==="
+	@echo "=== Building Lona VM for x86_64 (test) ==="
 	$(DOCKER) env \
 		LONA_VERSION=$(VERSION) \
 		SEL4_PREFIX=/build/sel4-x86_64 \
 		SEL4_INCLUDE_DIRS=/build/sel4-x86_64/libsel4/include \
 		RUST_TARGET_PATH=/source/targets \
 		CARGO_TARGET_DIR=/build/target/x86_64 \
-		cargo build --target x86_64-sel4 --no-default-features --features sel4,e2e-test \
+		cargo build --target x86_64-sel4 \
+			-p lona-vm --no-default-features --features e2e-test \
+			$(CARGO_SEL4_FLAGS)
+	@echo "=== Building Lona Memory Manager for x86_64 (test, with embedded VM) ==="
+	$(DOCKER) env \
+		LONA_VERSION=$(VERSION) \
+		SEL4_PREFIX=/build/sel4-x86_64 \
+		SEL4_INCLUDE_DIRS=/build/sel4-x86_64/libsel4/include \
+		RUST_TARGET_PATH=/source/targets \
+		CARGO_TARGET_DIR=/build/target/x86_64 \
+		LONA_VM_ELF=/build/target/x86_64/x86_64-sel4/debug/lona-vm.elf \
+		cargo build --target x86_64-sel4 \
+			-p lona-memory-manager --no-default-features --features sel4 \
 			$(CARGO_SEL4_FLAGS)
 
 .PHONY: aarch64-build-test
 aarch64-build-test: $(MARKER_AARCH64_KERNEL)
-	@echo "=== Building Lona for aarch64 (test) ==="
+	@echo "=== Building Lona VM for aarch64 (test) ==="
 	$(DOCKER) env \
 		LONA_VERSION=$(VERSION) \
 		SEL4_PREFIX=/build/sel4-aarch64 \
 		SEL4_INCLUDE_DIRS=/build/sel4-aarch64/libsel4/include \
 		RUST_TARGET_PATH=/source/targets \
 		CARGO_TARGET_DIR=/build/target/aarch64 \
-		cargo build --target aarch64-sel4 --no-default-features --features sel4,e2e-test \
+		cargo build --target aarch64-sel4 \
+			-p lona-vm --no-default-features --features e2e-test \
+			$(CARGO_SEL4_FLAGS)
+	@echo "=== Building Lona Memory Manager for aarch64 (test, with embedded VM) ==="
+	$(DOCKER) env \
+		LONA_VERSION=$(VERSION) \
+		SEL4_PREFIX=/build/sel4-aarch64 \
+		SEL4_INCLUDE_DIRS=/build/sel4-aarch64/libsel4/include \
+		RUST_TARGET_PATH=/source/targets \
+		CARGO_TARGET_DIR=/build/target/aarch64 \
+		LONA_VM_ELF=/build/target/aarch64/aarch64-sel4/debug/lona-vm.elf \
+		cargo build --target aarch64-sel4 \
+			-p lona-memory-manager --no-default-features --features sel4 \
 			$(CARGO_SEL4_FLAGS)
 
 # ============================================================
@@ -314,7 +364,9 @@ x86_64-image: x86_64-build
 		cp /build/sel4-x86_64/bin/kernel.elf /build/images/x86_64/boot/kernel.elf && \
 		cp /build/target/x86_64/x86_64-sel4/release/lona-root-task.elf \
 			/build/images/x86_64/boot/rootserver.elf && \
-		truncate -s 1M /build/images/x86_64/boot/rootserver.elf && \
+		cp /build/target/x86_64/x86_64-sel4/release/lona-vm.elf \
+			/build/images/x86_64/boot/lona-vm.elf && \
+		truncate -s ">1M" /build/images/x86_64/boot/rootserver.elf && \
 		echo "set timeout=0" > /build/images/x86_64/boot/grub.cfg && \
 		echo "set default=0" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "serial --unit=0 --speed=115200" >> /build/images/x86_64/boot/grub.cfg && \
@@ -324,6 +376,7 @@ x86_64-image: x86_64-build
 		echo "menuentry \"Lona\" {" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "    multiboot2 /boot/kernel.elf" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "    module2 /boot/rootserver.elf" >> /build/images/x86_64/boot/grub.cfg && \
+		echo "    module2 /boot/lona-vm.elf" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "    boot" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "}" >> /build/images/x86_64/boot/grub.cfg && \
 		grub-mkstandalone \
@@ -333,6 +386,11 @@ x86_64-image: x86_64-build
 			"/boot/grub/grub.cfg=/build/images/x86_64/boot/grub.cfg"'
 	@echo "Image created in Docker volume at /build/images/x86_64/"
 
+# NOTE: aarch64 currently only loads the root task. The sel4-kernel-loader-add-payload
+# tool does not support multiple applications. Future options:
+# 1. Modify the loader to support multiple payloads
+# 2. Embed VM binary within Memory Manager
+# 3. Use different boot method (device tree, separate loading)
 .PHONY: aarch64-image
 aarch64-image: aarch64-build $(MARKER_AARCH64_LOADER)
 	@echo "=== Creating aarch64 bootable image ==="
@@ -355,7 +413,9 @@ x86_64-image-test: x86_64-build-test
 		cp /build/sel4-x86_64/bin/kernel.elf /build/images/x86_64/boot/kernel.elf && \
 		cp /build/target/x86_64/x86_64-sel4/debug/lona-root-task.elf \
 			/build/images/x86_64/boot/rootserver.elf && \
-		truncate -s 1M /build/images/x86_64/boot/rootserver.elf && \
+		cp /build/target/x86_64/x86_64-sel4/debug/lona-vm.elf \
+			/build/images/x86_64/boot/lona-vm.elf && \
+		truncate -s ">1M" /build/images/x86_64/boot/rootserver.elf && \
 		echo "set timeout=0" > /build/images/x86_64/boot/grub.cfg && \
 		echo "set default=0" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "serial --unit=0 --speed=115200" >> /build/images/x86_64/boot/grub.cfg && \
@@ -365,6 +425,7 @@ x86_64-image-test: x86_64-build-test
 		echo "menuentry \"Lona\" {" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "    multiboot2 /boot/kernel.elf" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "    module2 /boot/rootserver.elf" >> /build/images/x86_64/boot/grub.cfg && \
+		echo "    module2 /boot/lona-vm.elf" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "    boot" >> /build/images/x86_64/boot/grub.cfg && \
 		echo "}" >> /build/images/x86_64/boot/grub.cfg && \
 		grub-mkstandalone \

@@ -1,0 +1,35 @@
+[package]
+name = "lona-memory-manager"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lona Memory Manager - seL4 root task for resource management"
+readme = "README.md"
+keywords = ["sel4", "microkernel", "memory-manager"]
+categories = ["no-std", "embedded"]
+
+[lib]
+name = "lona_memory_manager"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lona-root-task"
+path = "src/bin/root-task.rs"
+required-features = ["sel4"]
+
+[features]
+default = ["std"]
+std = []
+# seL4 target - enables seL4 bindings for root task binary
+sel4 = ["dep:sel4", "dep:sel4-root-task"]
+
+[dependencies]
+lona-abi = { path = "../lona-abi" }
+sel4 = { git = "https://github.com/seL4/rust-sel4.git", tag = "v3.0.0", optional = true }
+sel4-root-task = { git = "https://github.com/seL4/rust-sel4.git", tag = "v3.0.0", optional = true }
+
+[lints]
+workspace = true

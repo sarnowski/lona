@@ -122,7 +122,8 @@ crates/lona-abi/
 crates/lona-memory-manager/
 ├── Cargo.toml
 └── src/
-    ├── main.rs                   # Entry point (#[root_task])
+    ├── bin/
+    │   └── root-task.rs          # Entry point (#[root_task])
     ├── boot.rs                   # Parse bootinfo, locate modules
     ├── realm/
     │   ├── mod.rs
@@ -166,7 +167,7 @@ crates/lona-vm/
 └── src/
     ├── lib.rs                    # Library exports
     ├── bin/
-    │   └── realm-entry.rs        # Binary entry point
+    │   └── lona-vm.rs            # Binary entry point
     ├── types/
     │   ├── mod.rs
     │   └── address.rs            # Re-exports from lona-abi

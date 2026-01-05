@@ -365,15 +365,14 @@ TCBs are the kernel's scheduling unit. Lonala processes are the VM's scheduling 
 
 ### Worker Count
 
-This is a design decision left open:
+**Decision: 1 worker per CPU core**
 
-**Option A: One worker per realm**
-- Simple, no synchronization needed
-- But can't use multiple CPUs within a realm
+Each realm creates one worker (TCB) per available CPU core. This enables parallel execution within a realm while keeping the Lona VM scheduler simple.
 
-**Option B: Multiple workers per realm (BEAM-style)**
-- Parallel execution, uses multiple CPUs
-- More complex, needs synchronization for shared structures
+- Each worker runs on a dedicated CPU core
+- Workers within a realm share the VSpace (address space)
+- MCS scheduler enforces CPU budget across realms
+- Future: work stealing between workers for load balancing
 
 ---
 

@@ -1,0 +1,22 @@
+[package]
+name = "lona-abi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared ABI definitions between Lona Memory Manager and Lona VM"
+readme = "README.md"
+keywords = ["abi", "sel4", "microkernel"]
+categories = ["no-std", "embedded"]
+
+[lib]
+name = "lona_abi"
+path = "src/lib.rs"
+
+# lona-abi has NO dependencies - it's pure data types
+# This keeps it simple, auditable, and 100% host-testable
+
+[lints]
+workspace = true

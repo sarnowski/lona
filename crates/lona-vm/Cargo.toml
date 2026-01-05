@@ -1,0 +1,44 @@
+[package]
+name = "lona-vm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Lona VM - Lonala bytecode virtual machine for seL4 realms"
+readme = "README.md"
+keywords = ["sel4", "vm", "lisp", "microkernel"]
+categories = ["no-std", "embedded"]
+
+[lib]
+name = "lona_vm"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lona-vm"
+path = "src/bin/lona-vm.rs"
+required-features = ["sel4"]
+
+[features]
+default = ["std"]
+std = []
+# seL4 target - enables seL4 bindings for VM binary
+sel4 = ["dep:sel4"]
+# E2E test mode - replaces normal boot with test runner
+e2e-test = ["sel4"]
+
+[dependencies]
+lona-abi = { path = "../lona-abi" }
+
+# seL4 bindings for x86_64 port I/O (UART)
+sel4 = { git = "https://github.com/seL4/rust-sel4.git", tag = "v3.0.0", optional = true }
+
+# USTAR tar parsing for embedded library loading (no_std, zero-allocation)
+tar-no-std = "0.3"
+
+[dev-dependencies]
+proptest = "1.4"
+
+[lints]
+workspace = true

@@ -451,20 +451,7 @@ Work is complete ONLY when ALL of the following are true:
 - [ ] Documentation is up-to-date and all links are valid
 - [ ] **Final agent review passed with ZERO issues**
 
-### 5.2 Plan Cleanup
-
-If `PLAN.md` exists and the work is truly complete:
-
-1. Delete `PLAN.md`:
-   ```bash
-   rm PLAN.md
-   ```
-
-2. This signals the plan has been fully implemented and is no longer needed
-
-**Do NOT delete `PLAN.md` until all phases are complete and agents have confirmed zero issues.**
-
-### 5.3 Reporting Completion
+### 5.2 Reporting Completion
 
 **Only when the checklist is fully satisfied AND the final agent review returned zero issues may you report to the user that the work is done.**
 
