@@ -92,34 +92,108 @@ fn init_uart_aarch64(boot_flags: BootFlags) -> Pl011Uart {
     Pl011Uart::new()
 }
 
-/// Static TLS region for x86_64.
-/// On x86_64, TLS uses variant 2 where the thread pointer points to the end
-/// of the TLS block (where the TCB/self-pointer lives).
+/// Maximum TLS block size in bytes (generous for debug builds).
+/// The sel4 crate needs ~16 bytes for IPC buffer pointer, but debug builds
+/// may have additional TLS variables from debug assertions and other code.
+#[cfg(all(target_arch = "x86_64", feature = "sel4"))]
+const TLS_BLOCK_SIZE: usize = 4096;
+
+/// Static TLS block for x86_64.
+///
+/// On x86_64, TLS uses variant 2 where the thread pointer (FS) points to
+/// the TCB at the END of the TLS block. TLS variables are accessed via
+/// negative offsets from FS.
+///
+/// Layout:
+/// ```text
+/// +----------------------------------+
+/// | .tdata (copied from ELF)         | <- TLS variables (initialized)
+/// +----------------------------------+
+/// | .tbss (zero-initialized)         | <- TLS variables (uninitialized)
+/// +----------------------------------+
+/// | self_ptr (points to itself)      | <- FS points here
+/// +----------------------------------+
+/// ```
 #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
 #[repr(C, align(16))]
-struct TlsRegion {
-    /// Space for TLS variables (sel4 crate needs ~16 bytes for IPC buffer pointer)
-    tls_data: [u8; 64],
+struct TlsBlock {
+    /// Space for TLS data (.tdata + .tbss)
+    data: [u8; TLS_BLOCK_SIZE],
     /// Self-pointer required by x86_64 TLS variant 2
     self_ptr: usize,
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
-static mut TLS_REGION: TlsRegion = TlsRegion {
-    tls_data: [0u8; 64],
+static mut TLS_BLOCK: TlsBlock = TlsBlock {
+    data: [0u8; TLS_BLOCK_SIZE],
     self_ptr: 0,
 };
 
+// Linker-provided symbols for TLS template sections.
+// These are defined in lona-vm.ld and mark the start/end of .tdata and .tbss.
+#[cfg(all(target_arch = "x86_64", feature = "sel4"))]
+unsafe extern "C" {
+    static __tdata_start: u8;
+    static __tdata_end: u8;
+    static __tbss_start: u8;
+    static __tbss_end: u8;
+}
+
 /// Initialize TLS on x86_64 using wrfsbase instruction.
+///
+/// This function properly initializes TLS by:
+/// 1. Calculating the TLS size from linker-provided symbols
+/// 2. Copying the .tdata template to the TLS block
+/// 3. Zero-initializing the .tbss portion (already zero in static)
+/// 4. Setting FS to point to the thread pointer (end of TLS block)
 #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
 unsafe fn init_tls_x86_64() {
     unsafe {
-        // Get address of self_ptr field (thread pointer for variant 2)
-        let tls_region = &raw mut TLS_REGION;
-        let thread_pointer = core::ptr::addr_of_mut!((*tls_region).self_ptr) as usize;
+        // Calculate TLS section sizes from linker symbols.
+        // Use tbss_end - tdata_start to include any alignment padding between sections.
+        let tdata_start = &__tdata_start as *const u8;
+        let tdata_end = &__tdata_end as *const u8;
+        let tbss_end = &__tbss_end as *const u8;
 
-        // The self-pointer must point to itself for x86_64 TLS variant 2
-        (*tls_region).self_ptr = thread_pointer;
+        let tdata_size = tdata_end.offset_from(tdata_start) as usize;
+        let total_tls_size = tbss_end.offset_from(tdata_start) as usize;
+
+        // Verify TLS fits in our static block
+        // Note: In production, this should never fail as TLS_BLOCK_SIZE is generous
+        if total_tls_size > TLS_BLOCK_SIZE {
+            // TLS too large - halt permanently. Single HLT can return after interrupt.
+            loop {
+                asm!("hlt", options(nomem, nostack));
+            }
+        }
+
+        // Calculate where TLS data should start in our block.
+        // For variant 2, TLS data is placed BEFORE the thread pointer.
+        // The thread pointer (FS) will point to the self_ptr field.
+        //
+        // Our block layout:
+        //   TLS_BLOCK.data[TLS_BLOCK_SIZE - total_tls_size .. TLS_BLOCK_SIZE] = TLS data
+        //   TLS_BLOCK.self_ptr = thread pointer (FS points here)
+        //
+        // TLS variables have negative offsets from FS, so:
+        //   fs:[offset] where offset is negative
+        //
+        // The linker computes offsets as if TLS data ends right before the TCB.
+        let tls_block_ptr = core::ptr::addr_of_mut!(TLS_BLOCK);
+        let tls_data_ptr = core::ptr::addr_of_mut!((*tls_block_ptr).data) as *mut u8;
+        let tls_data_start = tls_data_ptr.add(TLS_BLOCK_SIZE - total_tls_size);
+
+        // Copy .tdata template from ELF to our TLS block
+        if tdata_size > 0 {
+            core::ptr::copy_nonoverlapping(tdata_start, tls_data_start, tdata_size);
+        }
+
+        // .tbss is already zero-initialized in the static TLS_BLOCK
+
+        // Set up the thread pointer (self-pointer for variant 2)
+        let self_ptr_ptr = core::ptr::addr_of_mut!((*tls_block_ptr).self_ptr);
+        let thread_pointer = self_ptr_ptr as usize;
+        self_ptr_ptr.write(thread_pointer);
 
         // Set FS base register to the thread pointer
         asm!("wrfsbase {}", in(reg) thread_pointer, options(nostack, preserves_flags));

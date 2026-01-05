@@ -30,17 +30,24 @@ SECTIONS {
     } :rodata
 
     /* Thread-local storage template - used by sel4 crate for IPC buffer */
+    /* TLS sections are in both data (for loading) and tls (for template metadata) */
     .tdata : ALIGN(4K) {
         __tdata_start = .;
         *(.tdata .tdata.*)
         __tdata_end = .;
     } :data :tls
 
-    .tbss : ALIGN(8) {
+    .tbss : {
         __tbss_start = .;
         *(.tbss .tbss.*)
         __tbss_end = .;
     } :data :tls
+
+    /* Global Offset Table - placed explicitly after TLS to avoid TLS pollution */
+    .got : ALIGN(8) {
+        *(.got)
+        *(.got.plt)
+    } :data
 
     /* Read-write data - RW */
     .data : ALIGN(4K) {
