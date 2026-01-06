@@ -22,7 +22,10 @@
 //! - [`boot`]: Realm entry point argument format
 //! - [`fault`]: Fault information structures
 
-#![no_std]
+#![cfg_attr(not(test), no_std)]
+
+#[cfg(test)]
+extern crate std;
 
 pub mod boot;
 pub mod fault;
@@ -35,4 +38,4 @@ pub use boot::BootFlags;
 pub use fault::{FaultInfo, FaultType};
 pub use layout::{Permissions, RegionType};
 pub use tcb::{InitialRegisters, ipc_buffer_vaddr};
-pub use types::{CapSlot, ProcessId, RealmId, WorkerId};
+pub use types::{CapSlot, Paddr, ProcessId, RealmId, Vaddr, WorkerId};

@@ -9,10 +9,12 @@
 use core::cell::UnsafeCell;
 use core::ptr::{read_volatile, write_volatile};
 
+use lona_abi::Paddr;
+
 use super::UartWriter;
 
 /// PL011 UART physical base address on QEMU virt platform.
-pub const PL011_PADDR: u64 = 0x0900_0000;
+pub const PL011_PADDR: Paddr = Paddr::new(0x0900_0000);
 
 /// Data Register offset.
 const UARTDR: usize = 0x00;

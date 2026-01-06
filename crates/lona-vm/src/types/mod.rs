@@ -3,13 +3,8 @@
 
 //! Core type definitions for the Lona VM.
 //!
-//! This module provides type-safe wrappers for addresses and other fundamental
-//! types. Using newtypes prevents mixing incompatible values (e.g., passing a
-//! physical address where a virtual address is expected).
+//! This module re-exports address types from `lona-abi` for use within the VM.
+//! The canonical definitions live in `lona-abi` to ensure both the VM and memory
+//! manager use identical type definitions.
 
-#[cfg(test)]
-mod address_test;
-
-mod address;
-
-pub use address::{Paddr, Vaddr};
+pub use lona_abi::{Paddr, Vaddr};

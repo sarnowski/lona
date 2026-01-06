@@ -218,18 +218,28 @@ fn error_not_executable() {
 }
 
 #[test]
-fn segment_permissions_all_combinations() {
+fn segment_permissions_valid_combinations() {
+    // Valid combinations that don't violate W^X
     assert_eq!(SegmentPermissions::from_flags(0).as_str(), "--");
     assert_eq!(SegmentPermissions::from_flags(PF_R).as_str(), "RO");
     assert_eq!(SegmentPermissions::from_flags(PF_W).as_str(), "W");
     assert_eq!(SegmentPermissions::from_flags(PF_X).as_str(), "X");
     assert_eq!(SegmentPermissions::from_flags(PF_R | PF_W).as_str(), "RW");
     assert_eq!(SegmentPermissions::from_flags(PF_R | PF_X).as_str(), "RX");
-    assert_eq!(SegmentPermissions::from_flags(PF_W | PF_X).as_str(), "WX");
-    assert_eq!(
-        SegmentPermissions::from_flags(PF_R | PF_W | PF_X).as_str(),
-        "RWX"
-    );
+}
+
+#[test]
+#[should_panic(expected = "W^X violation")]
+fn segment_permissions_wx_panics() {
+    // W^X violation: writable and executable
+    SegmentPermissions::from_flags(PF_W | PF_X);
+}
+
+#[test]
+#[should_panic(expected = "W^X violation")]
+fn segment_permissions_rwx_panics() {
+    // W^X violation: read+write+execute
+    SegmentPermissions::from_flags(PF_R | PF_W | PF_X);
 }
 
 #[test]

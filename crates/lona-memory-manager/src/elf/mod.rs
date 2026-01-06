@@ -141,12 +141,37 @@ pub struct SegmentPermissions {
 
 impl SegmentPermissions {
     /// Creates permissions from ELF flags.
-    const fn from_flags(flags: u32) -> Self {
+    ///
+    /// # Panics
+    ///
+    /// Panics if the segment has both write and execute flags (W^X violation).
+    fn from_flags(flags: u32) -> Self {
+        let write = (flags & PF_W) != 0;
+        let execute = (flags & PF_X) != 0;
+
+        // Enforce W^X policy: segments cannot be both writable and executable
+        assert!(
+            !(write && execute),
+            "W^X violation: segment has both write and execute flags"
+        );
+
         Self {
             read: (flags & PF_R) != 0,
-            write: (flags & PF_W) != 0,
-            execute: (flags & PF_X) != 0,
+            write,
+            execute,
         }
+    }
+
+    /// Returns true if this segment should be mapped executable.
+    #[must_use]
+    pub const fn is_executable(&self) -> bool {
+        self.execute
+    }
+
+    /// Returns true if this segment should be mapped writable.
+    #[must_use]
+    pub const fn is_writable(&self) -> bool {
+        self.write
     }
 
     /// Returns a short string representation (e.g., "RX", "RW").
