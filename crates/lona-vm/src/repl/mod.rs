@@ -3,17 +3,20 @@
 
 //! REPL (Read-Eval-Print Loop) for Lonala.
 //!
-//! This module provides a minimal REPL that reads Lonala expressions,
-//! and prints them back (no evaluation yet).
+//! This module provides a REPL that reads Lonala expressions,
+//! compiles them to bytecode, executes them, and prints the results.
 
 #[cfg(test)]
 mod mod_test;
 
+use crate::compiler::{self, CompileError};
 use crate::heap::Heap;
+use crate::intrinsics::IntrinsicError;
 use crate::platform::MemorySpace;
 use crate::reader::{ReadError, read};
 use crate::uart::{Uart, UartExt};
 use crate::value::print_value;
+use crate::vm::{self, RuntimeError};
 
 /// Maximum line buffer size.
 const LINE_BUFFER_SIZE: usize = 256;
@@ -42,25 +45,47 @@ pub fn run<M: MemorySpace, U: Uart>(heap: &mut Heap, mem: &mut M, uart: &mut U) 
             continue;
         };
 
-        // Parse and print
-        match read(line, heap, mem) {
-            Ok(Some(value)) => {
-                print_value(value, heap, mem, uart);
-                uart.write_byte(b'\n');
-            }
-            Ok(None) => {
-                // Empty input after whitespace stripping
-            }
+        // Parse
+        let expr = match read(line, heap, mem) {
+            Ok(Some(v)) => v,
+            Ok(None) => continue, // Empty input
             Err(e) => {
                 uart.write_str("Error: ");
-                print_error(&e, uart);
+                print_read_error(&e, uart);
                 uart.write_byte(b'\n');
+                continue;
             }
-        }
+        };
+
+        // Compile
+        let chunk = match compiler::compile(expr, heap, mem) {
+            Ok(c) => c,
+            Err(e) => {
+                uart.write_str("Error: ");
+                print_compile_error(e, uart);
+                uart.write_byte(b'\n');
+                continue;
+            }
+        };
+
+        // Execute
+        let result = match vm::execute(&chunk, heap, mem) {
+            Ok(v) => v,
+            Err(e) => {
+                uart.write_str("Error: ");
+                print_runtime_error(&e, uart);
+                uart.write_byte(b'\n');
+                continue;
+            }
+        };
+
+        // Print result
+        print_value(result, heap, mem, uart);
+        uart.write_byte(b'\n');
     }
 }
 
-fn print_error<U: Uart>(e: &ReadError, uart: &mut U) {
+fn print_read_error<U: Uart>(e: &ReadError, uart: &mut U) {
     match e {
         ReadError::Lex(e) => {
             use crate::reader::LexError;
@@ -95,6 +120,106 @@ fn print_error<U: Uart>(e: &ReadError, uart: &mut U) {
     }
 }
 
+fn print_compile_error<U: Uart>(e: CompileError, uart: &mut U) {
+    match e {
+        CompileError::UnboundSymbol => uart.write_str("unbound symbol"),
+        CompileError::InvalidSyntax => uart.write_str("invalid syntax"),
+        CompileError::TooManyArguments => uart.write_str("too many arguments"),
+        CompileError::IntegerTooLarge => uart.write_str("integer too large"),
+        CompileError::ConstantPoolFull => uart.write_str("constant pool full"),
+        CompileError::ExpressionTooComplex => uart.write_str("expression too complex"),
+    }
+}
+
+fn print_runtime_error<U: Uart>(e: &RuntimeError, uart: &mut U) {
+    match e {
+        RuntimeError::InvalidOpcode(op) => {
+            uart.write_str("invalid opcode: ");
+            print_u8(*op, uart);
+        }
+        RuntimeError::IpOutOfBounds => uart.write_str("instruction pointer out of bounds"),
+        RuntimeError::ConstantOutOfBounds(idx) => {
+            uart.write_str("constant index out of bounds: ");
+            print_u32(*idx, uart);
+        }
+        RuntimeError::Intrinsic(e) => print_intrinsic_error(e, uart),
+    }
+}
+
+fn print_intrinsic_error<U: Uart>(e: &IntrinsicError, uart: &mut U) {
+    match e {
+        IntrinsicError::TypeError {
+            intrinsic,
+            arg,
+            expected,
+        } => {
+            uart.write_str("type error in intrinsic ");
+            if let Some(name) = crate::intrinsics::intrinsic_name(*intrinsic) {
+                uart.write_str(name);
+            } else {
+                print_u8(*intrinsic, uart);
+            }
+            uart.write_str(": argument ");
+            print_u8(*arg, uart);
+            uart.write_str(" expected ");
+            uart.write_str(expected);
+        }
+        IntrinsicError::DivisionByZero => uart.write_str("division by zero"),
+        IntrinsicError::Overflow => uart.write_str("integer overflow"),
+        IntrinsicError::UnknownIntrinsic(id) => {
+            uart.write_str("unknown intrinsic: ");
+            print_u8(*id, uart);
+        }
+        IntrinsicError::OutOfMemory => uart.write_str("out of memory"),
+    }
+}
+
+/// Print a u8 as decimal.
+fn print_u8<U: Uart>(n: u8, uart: &mut U) {
+    let mut buf = [0u8; 3];
+    let mut i = 0;
+    let mut val = n;
+
+    if val == 0 {
+        uart.write_byte(b'0');
+        return;
+    }
+
+    while val > 0 {
+        buf[i] = b'0' + (val % 10);
+        val /= 10;
+        i += 1;
+    }
+
+    while i > 0 {
+        i -= 1;
+        uart.write_byte(buf[i]);
+    }
+}
+
+/// Print a u32 as decimal.
+fn print_u32<U: Uart>(n: u32, uart: &mut U) {
+    let mut buf = [0u8; 10];
+    let mut i = 0;
+    let mut val = n;
+
+    if val == 0 {
+        uart.write_byte(b'0');
+        return;
+    }
+
+    while val > 0 {
+        buf[i] = b'0' + (val % 10) as u8;
+        val /= 10;
+        i += 1;
+    }
+
+    while i > 0 {
+        i -= 1;
+        uart.write_byte(buf[i]);
+    }
+}
+
 /// Run the REPL for a limited number of iterations (for testing).
 #[cfg(test)]
 pub fn run_limited<M: MemorySpace, U: Uart>(
@@ -119,17 +244,42 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
             continue;
         };
 
-        match read(line, heap, mem) {
-            Ok(Some(value)) => {
-                print_value(value, heap, mem, uart);
-                uart.write_byte(b'\n');
-            }
-            Ok(None) => {}
+        // Parse
+        let expr = match read(line, heap, mem) {
+            Ok(Some(v)) => v,
+            Ok(None) => continue,
             Err(e) => {
                 uart.write_str("Error: ");
-                print_error(&e, uart);
+                print_read_error(&e, uart);
                 uart.write_byte(b'\n');
+                continue;
             }
-        }
+        };
+
+        // Compile
+        let chunk = match compiler::compile(expr, heap, mem) {
+            Ok(c) => c,
+            Err(e) => {
+                uart.write_str("Error: ");
+                print_compile_error(e, uart);
+                uart.write_byte(b'\n');
+                continue;
+            }
+        };
+
+        // Execute
+        let result = match vm::execute(&chunk, heap, mem) {
+            Ok(v) => v,
+            Err(e) => {
+                uart.write_str("Error: ");
+                print_runtime_error(&e, uart);
+                uart.write_byte(b'\n');
+                continue;
+            }
+        };
+
+        // Print result
+        print_value(result, heap, mem, uart);
+        uart.write_byte(b'\n');
     }
 }

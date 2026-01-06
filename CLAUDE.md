@@ -287,6 +287,7 @@ The authoritative documentation index is **[mkdocs.yaml](mkdocs.yaml)**. Consult
 | [docs/architecture/process-model.md](docs/architecture/process-model.md) | Processes, scheduling, message passing, garbage collection |
 | [docs/architecture/device-drivers.md](docs/architecture/device-drivers.md) | Driver isolation, zero-copy I/O, DMA, interrupt handling |
 | [docs/architecture/services.md](docs/architecture/services.md) | Inter-realm communication: service registry, connections, access control |
+| [docs/architecture/virtual-machine.md](docs/architecture/virtual-machine.md) | Bytecode VM: register architecture, instruction format, execution model |
 
 ### Lonala Language Specification
 

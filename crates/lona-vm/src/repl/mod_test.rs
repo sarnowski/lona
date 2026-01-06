@@ -54,26 +54,39 @@ fn repl_integer() {
 }
 
 #[test]
-fn repl_list() {
+fn repl_intrinsic_call() {
     let (mut mem, mut heap) = setup();
+    // Test intrinsic call: (+ 1 2) → 3
+    let mut uart = MockUart::with_input(b"(+ 1 2)\r");
+
+    run_limited(&mut heap, &mut mem, &mut uart, 1);
+
+    let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
+    assert!(output.contains("3\n"));
+}
+
+#[test]
+fn repl_invalid_call() {
+    let (mut mem, mut heap) = setup();
+    // (1 2 3) is invalid - 1 is not callable
     let mut uart = MockUart::with_input(b"(1 2 3)\r");
 
     run_limited(&mut heap, &mut mem, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
-    assert!(output.contains("(1 2 3)\n"));
+    assert!(output.contains("Error: invalid syntax"));
 }
 
 #[test]
 fn repl_quote() {
     let (mut mem, mut heap) = setup();
+    // 'x => (quote x) returns x unevaluated
     let mut uart = MockUart::with_input(b"'(1 2)\r");
 
     run_limited(&mut heap, &mut mem, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
-    // 'x => (quote x)
-    assert!(output.contains("(quote (1 2))\n"));
+    assert!(output.contains("(1 2)\n"));
 }
 
 #[test]

@@ -62,6 +62,8 @@ nav:
       - Device Drivers: architecture/device-drivers.md
       # Inter-realm communication through named services
       - Services: architecture/services.md
+      # Bytecode VM: register architecture, instruction format, execution model
+      - Virtual Machine: architecture/virtual-machine.md
   # Lonala is a LISP dialect combining Clojure syntax with BEAM-style concurrency
   - Lonala Language:
       # Language overview: design philosophy, what Lonala is NOT, type system

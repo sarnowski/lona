@@ -21,7 +21,13 @@
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
+#[cfg(not(any(test, feature = "std")))]
+extern crate alloc;
+
+pub mod bytecode;
+pub mod compiler;
 pub mod heap;
+pub mod intrinsics;
 pub mod loader;
 pub mod platform;
 pub mod reader;
@@ -29,6 +35,7 @@ pub mod repl;
 pub mod types;
 pub mod uart;
 pub mod value;
+pub mod vm;
 
 #[cfg(feature = "e2e-test")]
 pub mod e2e;

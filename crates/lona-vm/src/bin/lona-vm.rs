@@ -12,6 +12,73 @@
 use core::arch::asm;
 use core::panic::PanicInfo;
 
+// Global allocator for heap allocations (Vec, etc.)
+// Uses a simple bump allocator with a fixed-size buffer.
+mod allocator {
+    use core::alloc::{GlobalAlloc, Layout};
+    use core::cell::UnsafeCell;
+    use core::ptr;
+    use core::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Size of the allocation buffer (64 KB should be plenty for bytecode chunks).
+    const ALLOC_SIZE: usize = 64 * 1024;
+
+    /// Simple bump allocator for no_std environments.
+    pub struct BumpAllocator {
+        buffer: UnsafeCell<[u8; ALLOC_SIZE]>,
+        next: AtomicUsize,
+    }
+
+    // SAFETY: Single-threaded environment, no concurrent access.
+    unsafe impl Sync for BumpAllocator {}
+
+    impl BumpAllocator {
+        pub const fn new() -> Self {
+            Self {
+                buffer: UnsafeCell::new([0u8; ALLOC_SIZE]),
+                next: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    unsafe impl GlobalAlloc for BumpAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let size = layout.size();
+            let align = layout.align();
+
+            loop {
+                let current = self.next.load(Ordering::Relaxed);
+                let buffer_start = self.buffer.get() as usize;
+                let alloc_start = buffer_start + current;
+
+                // Align up
+                let aligned = (alloc_start + align - 1) & !(align - 1);
+                let offset_from_buffer = aligned - buffer_start;
+                let new_next = offset_from_buffer + size;
+
+                if new_next > ALLOC_SIZE {
+                    return ptr::null_mut();
+                }
+
+                if self
+                    .next
+                    .compare_exchange_weak(current, new_next, Ordering::SeqCst, Ordering::Relaxed)
+                    .is_ok()
+                {
+                    return aligned as *mut u8;
+                }
+            }
+        }
+
+        unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+            // Bump allocator doesn't support deallocation
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: BumpAllocator = BumpAllocator::new();
+}
+
 use lona_abi::BootFlags;
 #[cfg(target_arch = "aarch64")]
 use lona_abi::layout::UART_VADDR;
