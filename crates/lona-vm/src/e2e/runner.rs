@@ -4,14 +4,14 @@
 //! E2E test runner for seL4 environment.
 //!
 //! Executes all registered tests and outputs results to serial console.
-//! Tests receive the same heap, memory space, and UART that the REPL uses,
+//! Tests receive the same process, memory space, and UART that the REPL uses,
 //! ensuring they exercise the exact same code paths.
 
 use core::option::Option;
 use core::result::Result::{self, Err, Ok};
 
-use crate::heap::Heap;
 use crate::platform::MemorySpace;
+use crate::process::Process;
 use crate::uart::Uart;
 
 use super::tests;
@@ -40,8 +40,8 @@ pub struct TestResult {
 
 /// A test function signature.
 ///
-/// Tests receive the same heap, memory space, and UART that the REPL uses.
-type TestFn<M, U> = fn(&mut Heap, &mut M, &mut U) -> Result<(), &'static str>;
+/// Tests receive the same process, memory space, and UART that the REPL uses.
+type TestFn<M, U> = fn(&mut Process, &mut M, &mut U) -> Result<(), &'static str>;
 
 /// A registered test with metadata.
 struct TestCase<M: MemorySpace, U: Uart> {
@@ -77,7 +77,7 @@ fn get_test_cases<M: MemorySpace, U: Uart>() -> [TestCase<M, U>; 5] {
 
 /// Run all registered E2E tests and output results.
 ///
-/// Tests receive the same heap, memory space, and UART that the REPL uses,
+/// Tests receive the same process, memory space, and UART that the REPL uses,
 /// ensuring they exercise the exact same code paths as production.
 ///
 /// Returns `true` if all tests passed, `false` otherwise.
@@ -86,7 +86,11 @@ fn get_test_cases<M: MemorySpace, U: Uart>() -> [TestCase<M, U>; 5] {
 ///
 /// Results are printed to serial console in a structured format that
 /// can be parsed by the host test runner.
-pub fn run_all_tests<M: MemorySpace, U: Uart>(heap: &mut Heap, mem: &mut M, uart: &mut U) -> bool {
+pub fn run_all_tests<M: MemorySpace, U: Uart>(
+    proc: &mut Process,
+    mem: &mut M,
+    uart: &mut U,
+) -> bool {
     sel4::debug_println!("=== LONA E2E TEST RUN ===");
 
     let test_cases = get_test_cases::<M, U>();
@@ -99,7 +103,7 @@ pub fn run_all_tests<M: MemorySpace, U: Uart>(heap: &mut Heap, mem: &mut M, uart
     for (i, test) in test_cases.iter().enumerate() {
         sel4::debug_print!("[TEST] {} ... ", test.name);
 
-        let result = match (test.func)(heap, mem, uart) {
+        let result = match (test.func)(proc, mem, uart) {
             Ok(()) => {
                 sel4::debug_println!("PASS");
                 passed += 1;

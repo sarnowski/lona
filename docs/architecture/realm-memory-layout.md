@@ -16,7 +16,7 @@ High addresses:
 ├─────────────────────────────────────────────────────────────────────┤
 │  MMIO / Device region (if driver realm)                             │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Process region (dynamic segments)                                  │
+│  Process region (process heaps)                                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Realm-local data (RW)                                              │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -191,7 +191,7 @@ Process Table:
 │  Process descriptors array:                                         │
 │    - PID → process metadata mapping                                 │
 │    - State (running, waiting, exited)                               │
-│    - Pointers to heap segments, stack, mailbox                      │
+│    - Pointers to heap block, mailbox                                │
 │    - Link/monitor relationships                                     │
 │    - Reduction counter                                              │
 └─────────────────────────────────────────────────────────────────────┘
@@ -228,95 +228,130 @@ Port/Reference Registry:
 
 ### 4. Process Region
 
-Memory for Lonala processes. Uses **dynamic segments** (BEAM-style), not fixed slots.
+Memory for Lonala processes, allocated from per-worker allocators.
 
-#### Why Dynamic Segments
+#### Per-Worker Allocator Instances
 
-Fixed slots waste address space for small processes and limit large ones:
-
-```
-FIXED SLOTS (NOT what we do):
-┌────────────────────────────────────────────────────────────────────┐
-│  Process 0: [16 MB slot] ← Tiny process wastes 15.99 MB            │
-│  Process 1: [16 MB slot] ← Large process can't exceed 16 MB        │
-│  ...                                                               │
-│  224k max processes with 1 GB slots = not enough                   │
-└────────────────────────────────────────────────────────────────────┘
-
-DYNAMIC SEGMENTS (what we do):
-┌────────────────────────────────────────────────────────────────────┐
-│  ┌────┬────┬──────────┬────┬────┬────────────────┬────┬─────────┐  │
-│  │ P1 │ P2 │    P3    │ P1 │ P4 │      P5        │free│  P999   │  │
-│  │heap│heap│   heap   │stk │heap│     heap       │    │  heap   │  │
-│  │4KB │4KB │  2 MB    │64K │16K │    500 MB      │    │   8KB   │  │
-│  └────┴────┴──────────┴────┴────┴────────────────┴────┴─────────┘  │
-│                                                                    │
-│  Millions of small processes? Fine.                                │
-│  One 10 GB process? Also fine (if realm has budget).               │
-└────────────────────────────────────────────────────────────────────┘
-```
-
-#### Process Memory Structure
-
-Each process has segments for different purposes:
+Following BEAM's proven model, each worker (scheduler thread) has its own allocator instance for lock-free allocation:
 
 ```
-PROCESS MEMORY (per process, allocated from pool)
+PER-WORKER ALLOCATION (Lock-Free)
 ────────────────────────────────────────────────────────────────────────
 
-Process Table Entry:
+                    PROCESS POOL REGION
+                           │
+       ┌───────────────────┼───────────────────┐
+       ▼                   ▼                   ▼
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  Worker 0   │     │  Worker 1   │     │  Worker 2   │
+│  Allocator  │     │  Allocator  │     │  Allocator  │
+│             │     │             │     │             │
+│ ┌─────────┐ │     │ ┌─────────┐ │     │ ┌─────────┐ │
+│ │Carrier 0│ │     │ │Carrier 0│ │     │ │Carrier 0│ │
+│ ├─────────┤ │     │ ├─────────┤ │     │ ├─────────┤ │
+│ │Carrier 1│ │     │ │Carrier 1│ │     │ │Carrier 1│ │
+│ └─────────┘ │     │ └─────────┘ │     │ └─────────┘ │
+│  LOCK-FREE  │     │  LOCK-FREE  │     │  LOCK-FREE  │
+└──────┬──────┘     └──────┬──────┘     └──────┬──────┘
+       │                   │                   │
+       ▼                   ▼                   ▼
+  Processes on        Processes on       Processes on
+   Worker 0            Worker 1           Worker 2
+
+Processes running on a worker allocate from that worker's instance.
+No coordination needed for the common case (allocation).
+```
+
+#### Two-Heap Architecture
+
+Each process owns **two memory blocks** following the BEAM model. For the complete memory model, see [Process Model](process-model.md).
+
+```
+PROCESS MEMORY LAYOUT (Two Heaps)
+────────────────────────────────────────────────────────────────────────
+
+Young Heap (stack + young objects):
+    ┌────────────────────────────────────────────────────────────────┐
+    │   STACK                      FREE                 YOUNG HEAP   │
+    │   (grows down)              SPACE                 (grows up)   │
+    │                                                                │
+    │   [frame1][frame0]◄─stop           htop─►[tuple][cons][string] │
+    │                                                                │
+    └────────────────────────────────────────────────────────────────┘
+    Out of memory when htop >= stop → triggers Minor GC
+
+Old Heap (promoted objects):
+    ┌────────────────────────────────────────────────────────────────┐
+    │   [promoted][promoted][promoted]           │       FREE        │
+    │   (survived Minor GC)                      │◄─ old_htop        │
+    └────────────────────────────────────────────────────────────────┘
+    Collected only during Major GC (fullsweep)
+```
+
+#### Generational GC
+
+```
+GENERATIONAL GARBAGE COLLECTION
+────────────────────────────────────────────────────────────────────────
+
+Initial young heap: ~2 KB (enables millions of tiny processes)
+
+Minor GC (when young heap full):
+  1. Scan roots (stack, registers)
+  2. Copy live young objects to OLD heap (promotion)
+  3. Reset young heap (all space now free)
+  4. Free heap fragments
+
+Major GC (fullsweep, less frequent):
+  1. Collect BOTH young and old heaps
+  2. Compact all live data into new young heap
+  3. Allocate fresh empty old heap
+
+Key properties:
+- Minor GC is fast (~10-100 µs) - only touches young heap
+- Major GC is slower but reclaims old generation garbage
+- Per-process GC (no global pauses)
+```
+
+#### Process Table Entry
+
+```
+PROCESS TABLE ENTRY
+────────────────────────────────────────────────────────────────────────
+
 ┌─────────────────────────────────────────────────────────────────────┐
 │  PID: 42                                                            │
 │  State: running                                                     │
 │                                                                     │
-│  Heap segments: [                                                   │
-│    { base: 0x..., size: 4 KB, used: 3 KB },                         │
-│    { base: 0x..., size: 16 KB, used: 12 KB },                       │
-│    { base: 0x..., size: 1 MB, used: 800 KB },                       │
-│  ]                                                                  │
+│  Young Heap:                                                        │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  heap:  0x0000_0010_0400_0000  (base address)               │    │
+│  │  hend:  0x0000_0010_0400_1000  (end address)                │    │
+│  │  htop:  0x0000_0010_0400_0800  (young heap top, grows up)   │    │
+│  │  stop:  0x0000_0010_0400_0F00  (stack ptr, grows down)      │    │
+│  └─────────────────────────────────────────────────────────────┘    │
 │                                                                     │
-│  Stack: { base: 0x..., size: 64 KB }                                │
-│  Mailbox: { base: 0x..., size: 16 KB }                              │
+│  Old Heap:                                                          │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  old_heap: 0x0000_0010_0401_0000 (base address)             │    │
+│  │  old_hend: 0x0000_0010_0401_2000 (end address)              │    │
+│  │  old_htop: 0x0000_0010_0401_0400 (old heap top)             │    │
+│  └─────────────────────────────────────────────────────────────┘    │
 │                                                                     │
-│  Total heap: ~1 MB                                                  │
+│  mbuf_list: (heap fragments from message passing)                   │
+│  Mailbox: MPSC queue (head/tail pointers)                           │
+│                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 
-Heap:
-┌─────────────────────────────────────────────────────────────────────┐
-│  Contains Lonala values:                                            │
-│  - Cons cells, tuples, vectors, maps                                │
-│  - Closures                                                         │
-│  - Small binaries (< 64 bytes, copied)                              │
-│  - References to large binaries (in binary heap)                    │
-│                                                                     │
-│  Starts tiny (e.g., 4 KB), grows on demand                          │
-│  GC'd independently per process                                     │
-└─────────────────────────────────────────────────────────────────────┘
-
-Stack:
-┌─────────────────────────────────────────────────────────────────────┐
-│  Call frames, local variables, temporary values                     │
-│  Grows on demand up to limit                                        │
-│  Guard page below for overflow detection                            │
-└─────────────────────────────────────────────────────────────────────┘
-
-Mailbox (MPSC queue):
-┌─────────────────────────────────────────────────────────────────────┐
-│  Lock-free MPSC (multiple-producer, single-consumer) linked list    │
-│  Many senders can enqueue concurrently; only owner dequeues         │
-│  Messages are heap-allocated nodes; mailbox holds head/tail ptrs    │
-│  Unbounded growth (no fixed capacity)                               │
-└─────────────────────────────────────────────────────────────────────┘
+Young heap contains: stack frames, recently allocated objects
+Old heap contains: promoted objects (survived Minor GC)
+Both contain: cons cells, tuples, vectors, maps, closures,
+              small binaries (<64 bytes), refs to large binaries
 ```
 
-#### BEAM-Style Process Memory
+#### Large Binary Handling
 
-Following BEAM's model:
-
-1. **Tiny initial heap**: Processes start with very small heaps (a few KB)
-2. **Dynamic growth**: Heap grows as needed via new segments
-3. **Independent GC**: Each process is garbage collected separately
-4. **Large binary separation**: Binaries ≥64 bytes stored in realm-wide binary heap with reference counting
+Binaries ≥64 bytes are stored in a realm-wide binary heap with reference counting:
 
 ```
 LARGE BINARY HANDLING
@@ -419,7 +454,7 @@ Address Range                    Region                    Permissions
 0xFFFF_8000_0000_0000+          Kernel                    (none)
 0x0000_0100_0000_0000+          (Reserved/Future)         (unmapped)
 0x0000_00F0_0000_0000           MMIO/Devices              RW uncached
-0x0000_0010_0000_0000           Process segments          RW
+0x0000_0010_0000_0000           Process heaps             RW
 0x0000_0009_0000_0000           Realm binary heap         RW
 0x0000_0008_0000_0000           Realm-local code/data     RW
 0x0000_0004_0000_0000           Inherited (ancestors)     RO
@@ -618,8 +653,8 @@ Process needs memory (e.g., (cons 1 2)):
    └── Need more? → Grow heap
 
 3. Runtime grows process heap
-   └── Allocate new segment from realm pool
-   └── Within process limit? → Add segment to process
+   └── Request larger heap from worker's allocator
+   └── Within process limit? → Allocate and copy live data
    └── At limit? → OOM for this process
 
 4. Realm pool needs more pages
@@ -716,7 +751,7 @@ These are deliberately left undefined for future refinement.
 | **Shared code** | Lona VM, core lib | All realms (same frames) | Static |
 | **Inherited** | Parent bytecode/vars/binaries | Parent→children (RO) | Append-only |
 | **Realm-local** | Local vars, scheduler, tables | This realm only | Append-only |
-| **Process** | Heaps, stacks, mailboxes | Per-process | Dynamic segments |
+| **Process** | Heaps, mailboxes | Per-process | Single block, grows via reallocation |
 | **Worker stacks** | Native TCB stacks | Per-worker | Fixed |
 | **MMIO** | Device registers, DMA | Driver realms only | Static |
 

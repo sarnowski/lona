@@ -13,8 +13,8 @@
 #[cfg(test)]
 mod intrinsics_test;
 
-use crate::heap::Heap;
 use crate::platform::MemorySpace;
+use crate::process::Process;
 use crate::value::Value;
 
 /// Intrinsic function IDs.
@@ -121,8 +121,7 @@ pub enum IntrinsicError {
 /// # Arguments
 /// * `intrinsic_id` - The intrinsic to call
 /// * `argc` - Number of arguments
-/// * `regs` - Register file (args in X1..X(argc), result written to X0)
-/// * `heap` - Heap for allocation
+/// * `proc` - Process containing registers and heap
 /// * `mem` - Memory space
 ///
 /// # Errors
@@ -130,40 +129,39 @@ pub enum IntrinsicError {
 pub fn call_intrinsic<M: MemorySpace>(
     intrinsic_id: u8,
     argc: u8,
-    regs: &mut [Value; 256],
-    heap: &mut Heap,
+    proc: &mut Process,
     mem: &mut M,
 ) -> Result<(), IntrinsicError> {
     let result = match intrinsic_id {
-        id::ADD => intrinsic_add(regs, intrinsic_id)?,
-        id::SUB => intrinsic_sub(regs, intrinsic_id)?,
-        id::MUL => intrinsic_mul(regs, intrinsic_id)?,
-        id::DIV => intrinsic_div(regs, intrinsic_id)?,
-        id::MOD => intrinsic_mod(regs, intrinsic_id)?,
-        id::EQ => intrinsic_eq(regs, heap, mem),
-        id::LT => intrinsic_lt(regs, intrinsic_id)?,
-        id::GT => intrinsic_gt(regs, intrinsic_id)?,
-        id::LE => intrinsic_le(regs, intrinsic_id)?,
-        id::GE => intrinsic_ge(regs, intrinsic_id)?,
-        id::NOT => intrinsic_not(regs),
-        id::IS_NIL => intrinsic_is_nil(regs),
-        id::IS_INT => intrinsic_is_int(regs),
-        id::IS_STR => intrinsic_is_str(regs),
-        id::STR => intrinsic_str(regs, argc, heap, mem)?,
+        id::ADD => intrinsic_add(proc, intrinsic_id)?,
+        id::SUB => intrinsic_sub(proc, intrinsic_id)?,
+        id::MUL => intrinsic_mul(proc, intrinsic_id)?,
+        id::DIV => intrinsic_div(proc, intrinsic_id)?,
+        id::MOD => intrinsic_mod(proc, intrinsic_id)?,
+        id::EQ => intrinsic_eq(proc, mem),
+        id::LT => intrinsic_lt(proc, intrinsic_id)?,
+        id::GT => intrinsic_gt(proc, intrinsic_id)?,
+        id::LE => intrinsic_le(proc, intrinsic_id)?,
+        id::GE => intrinsic_ge(proc, intrinsic_id)?,
+        id::NOT => intrinsic_not(proc),
+        id::IS_NIL => intrinsic_is_nil(proc),
+        id::IS_INT => intrinsic_is_int(proc),
+        id::IS_STR => intrinsic_is_str(proc),
+        id::STR => intrinsic_str(proc, argc, mem)?,
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };
-    regs[0] = result;
+    proc.x_regs[0] = result;
     Ok(())
 }
 
 /// Extract an integer from a register, returning a type error if not an int.
 const fn expect_int(
-    regs: &[Value; 256],
+    proc: &Process,
     reg: usize,
     intrinsic: u8,
     arg: u8,
 ) -> Result<i64, IntrinsicError> {
-    match regs[reg] {
+    match proc.x_regs[reg] {
         Value::Int(n) => Ok(n),
         _ => Err(IntrinsicError::TypeError {
             intrinsic,
@@ -175,36 +173,36 @@ const fn expect_int(
 
 // --- Arithmetic intrinsics ---
 
-fn intrinsic_add(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_add(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     Ok(Value::int(a.wrapping_add(b)))
 }
 
-fn intrinsic_sub(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_sub(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     Ok(Value::int(a.wrapping_sub(b)))
 }
 
-fn intrinsic_mul(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_mul(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     Ok(Value::int(a.wrapping_mul(b)))
 }
 
-fn intrinsic_div(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_div(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     if b == 0 {
         return Err(IntrinsicError::DivisionByZero);
     }
     Ok(Value::int(a.wrapping_div(b)))
 }
 
-fn intrinsic_mod(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_mod(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     if b == 0 {
         return Err(IntrinsicError::DivisionByZero);
     }
@@ -213,10 +211,10 @@ fn intrinsic_mod(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
 
 // --- Comparison intrinsics ---
 
-fn intrinsic_eq<M: MemorySpace>(regs: &[Value; 256], heap: &Heap, mem: &M) -> Value {
-    let a = regs[1];
-    let b = regs[2];
-    Value::bool(values_equal(a, b, heap, mem))
+fn intrinsic_eq<M: MemorySpace>(proc: &Process, mem: &M) -> Value {
+    let a = proc.x_regs[1];
+    let b = proc.x_regs[2];
+    Value::bool(values_equal(a, b, proc, mem))
 }
 
 /// Compare two values for equality.
@@ -225,17 +223,17 @@ fn intrinsic_eq<M: MemorySpace>(regs: &[Value; 256], heap: &Heap, mem: &M) -> Va
 /// - Strings compare by content
 /// - Symbols compare by identity (address)
 /// - Pairs compare by identity (address)
-fn values_equal<M: MemorySpace>(a: Value, b: Value, heap: &Heap, mem: &M) -> bool {
+fn values_equal<M: MemorySpace>(a: Value, b: Value, proc: &Process, mem: &M) -> bool {
     match (a, b) {
         (Value::Nil, Value::Nil) => true,
         (Value::Bool(x), Value::Bool(y)) => x == y,
         (Value::Int(x), Value::Int(y)) => x == y,
         (Value::String(_), Value::String(_)) => {
             // Compare string contents
-            let Some(sa) = heap.read_string(mem, a) else {
+            let Some(sa) = proc.read_string(mem, a) else {
                 return false;
             };
-            let Some(sb) = heap.read_string(mem, b) else {
+            let Some(sb) = proc.read_string(mem, b) else {
                 return false;
             };
             sa == sb
@@ -252,49 +250,49 @@ fn values_equal<M: MemorySpace>(a: Value, b: Value, heap: &Heap, mem: &M) -> boo
     }
 }
 
-fn intrinsic_lt(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_lt(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     Ok(Value::bool(a < b))
 }
 
-fn intrinsic_gt(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_gt(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     Ok(Value::bool(a > b))
 }
 
-fn intrinsic_le(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_le(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     Ok(Value::bool(a <= b))
 }
 
-fn intrinsic_ge(regs: &[Value; 256], id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(regs, 1, id, 0)?;
-    let b = expect_int(regs, 2, id, 1)?;
+fn intrinsic_ge(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(proc, 1, id, 0)?;
+    let b = expect_int(proc, 2, id, 1)?;
     Ok(Value::bool(a >= b))
 }
 
 // --- Boolean intrinsic ---
 
-const fn intrinsic_not(regs: &[Value; 256]) -> Value {
+const fn intrinsic_not(proc: &Process) -> Value {
     // (not x) returns true if x is falsy (nil or false), false otherwise
-    Value::bool(!regs[1].is_truthy())
+    Value::bool(!proc.x_regs[1].is_truthy())
 }
 
 // --- Type predicate intrinsics ---
 
-const fn intrinsic_is_nil(regs: &[Value; 256]) -> Value {
-    Value::bool(regs[1].is_nil())
+const fn intrinsic_is_nil(proc: &Process) -> Value {
+    Value::bool(proc.x_regs[1].is_nil())
 }
 
-const fn intrinsic_is_int(regs: &[Value; 256]) -> Value {
-    Value::bool(matches!(regs[1], Value::Int(_)))
+const fn intrinsic_is_int(proc: &Process) -> Value {
+    Value::bool(matches!(proc.x_regs[1], Value::Int(_)))
 }
 
-const fn intrinsic_is_str(regs: &[Value; 256]) -> Value {
-    Value::bool(matches!(regs[1], Value::String(_)))
+const fn intrinsic_is_str(proc: &Process) -> Value {
+    Value::bool(matches!(proc.x_regs[1], Value::String(_)))
 }
 
 // --- String intrinsic ---
@@ -303,9 +301,8 @@ const fn intrinsic_is_str(regs: &[Value; 256]) -> Value {
 const STR_BUFFER_SIZE: usize = 1024;
 
 fn intrinsic_str<M: MemorySpace>(
-    regs: &[Value; 256],
+    proc: &mut Process,
     argc: u8,
-    heap: &mut Heap,
     mem: &mut M,
 ) -> Result<Value, IntrinsicError> {
     // Build the concatenated string in a buffer
@@ -313,13 +310,13 @@ fn intrinsic_str<M: MemorySpace>(
     let mut pos = 0;
 
     for i in 0..argc as usize {
-        let val = regs[i + 1]; // Args start at X1
-        pos = write_value_to_buffer(&mut buffer, pos, val, heap, mem)?;
+        let val = proc.x_regs[i + 1]; // Args start at X1
+        pos = write_value_to_buffer(&mut buffer, pos, val, proc, mem)?;
     }
 
     // Allocate the result string
     let s = core::str::from_utf8(&buffer[..pos]).map_err(|_| IntrinsicError::OutOfMemory)?;
-    heap.alloc_string(mem, s).ok_or(IntrinsicError::OutOfMemory)
+    proc.alloc_string(mem, s).ok_or(IntrinsicError::OutOfMemory)
 }
 
 /// Write a value's string representation to a buffer.
@@ -327,7 +324,7 @@ fn write_value_to_buffer<M: MemorySpace>(
     buffer: &mut [u8; STR_BUFFER_SIZE],
     mut pos: usize,
     value: Value,
-    heap: &Heap,
+    proc: &Process,
     mem: &M,
 ) -> Result<usize, IntrinsicError> {
     match value {
@@ -359,7 +356,7 @@ fn write_value_to_buffer<M: MemorySpace>(
             pos = write_int_to_buffer(buffer, pos, n)?;
         }
         Value::String(_) | Value::Symbol(_) => {
-            let Some(s) = heap.read_string(mem, value) else {
+            let Some(s) = proc.read_string(mem, value) else {
                 return Err(IntrinsicError::OutOfMemory);
             };
             if pos + s.len() > STR_BUFFER_SIZE {

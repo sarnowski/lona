@@ -399,7 +399,7 @@ Three AI agents are available for reviews, second opinions, and parallel consult
 
 The `reviewer` subagent is defined in `.claude/agents/reviewer.md`. Symlinks `AGENTS.md` and `GEMINI.md` point to this file so all agents use consistent instructions.
 
-For **Codex**: Use "-m gpt-5.2" model for conceptual reviews such as designs or plans. Use "-m gpt-5.2-codex" model for code reviews.
+For **Codex**: MUST use "-m gpt-5.2" model for conceptual reviews such as designs or plans. MUST use "-m gpt-5.2-codex" model for code reviews. DO NOT use o3, o1, or other models - they are not supported with Codex.
 
 ### Running Agents in Parallel
 

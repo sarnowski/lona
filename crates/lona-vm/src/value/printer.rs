@@ -6,12 +6,12 @@
 //! Converts values back to their string representation.
 
 use super::Value;
-use crate::heap::Heap;
 use crate::platform::MemorySpace;
+use crate::process::Process;
 use crate::uart::Uart;
 
 /// Print a value to a UART output.
-pub fn print_value<M: MemorySpace, U: Uart>(value: Value, heap: &Heap, mem: &M, uart: &mut U) {
+pub fn print_value<M: MemorySpace, U: Uart>(value: Value, proc: &Process, mem: &M, uart: &mut U) {
     match value {
         Value::Nil => uart_write_str(uart, "nil"),
         Value::Bool(true) => uart_write_str(uart, "true"),
@@ -19,17 +19,17 @@ pub fn print_value<M: MemorySpace, U: Uart>(value: Value, heap: &Heap, mem: &M, 
         Value::Int(n) => print_int(n, uart),
         Value::String(addr) => {
             uart.write_byte(b'"');
-            if let Some(s) = heap.read_string(mem, Value::String(addr)) {
+            if let Some(s) = proc.read_string(mem, Value::String(addr)) {
                 print_string_escaped(s, uart);
             }
             uart.write_byte(b'"');
         }
         Value::Symbol(addr) => {
-            if let Some(s) = heap.read_string(mem, Value::Symbol(addr)) {
+            if let Some(s) = proc.read_string(mem, Value::Symbol(addr)) {
                 uart_write_str(uart, s);
             }
         }
-        Value::Pair(_) => print_list(value, heap, mem, uart),
+        Value::Pair(_) => print_list(value, proc, mem, uart),
     }
 }
 
@@ -95,7 +95,7 @@ const fn hex_digit(n: u8) -> u8 {
     }
 }
 
-fn print_list<M: MemorySpace, U: Uart>(list: Value, heap: &Heap, mem: &M, uart: &mut U) {
+fn print_list<M: MemorySpace, U: Uart>(list: Value, proc: &Process, mem: &M, uart: &mut U) {
     uart.write_byte(b'(');
 
     let mut current = list;
@@ -110,8 +110,8 @@ fn print_list<M: MemorySpace, U: Uart>(list: Value, heap: &Heap, mem: &M, uart: 
                 }
                 is_first = false;
 
-                if let Some(pair) = heap.read_pair(mem, current) {
-                    print_value(pair.first, heap, mem, uart);
+                if let Some(pair) = proc.read_pair(mem, current) {
+                    print_value(pair.first, proc, mem, uart);
                     current = pair.rest;
                 } else {
                     break;
@@ -120,7 +120,7 @@ fn print_list<M: MemorySpace, U: Uart>(list: Value, heap: &Heap, mem: &M, uart: 
             // Improper list (rest is not nil or pair)
             _ => {
                 uart_write_str(uart, " . ");
-                print_value(current, heap, mem, uart);
+                print_value(current, proc, mem, uart);
                 break;
             }
         }
@@ -133,10 +133,14 @@ fn print_list<M: MemorySpace, U: Uart>(list: Value, heap: &Heap, mem: &M, uart: 
 ///
 /// Returns the printed string representation.
 #[cfg(test)]
-pub fn print_to_string<M: MemorySpace>(value: Value, heap: &Heap, mem: &M) -> std::string::String {
+pub fn print_to_string<M: MemorySpace>(
+    value: Value,
+    proc: &Process,
+    mem: &M,
+) -> std::string::String {
     use crate::uart::MockUart;
 
     let mut uart = MockUart::new();
-    print_value(value, heap, mem, &mut uart);
+    print_value(value, proc, mem, &mut uart);
     std::string::String::from_utf8_lossy(uart.output()).into_owned()
 }

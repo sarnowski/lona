@@ -620,7 +620,7 @@ enum RegionType {
     Inherited { ancestor: u8 },    // Parent's code/binary region
     LocalCode,                     // This realm's code region
     LocalBinary,                   // This realm's binary heap
-    ProcessPool,                   // Dynamic process segments
+    ProcessPool,                   // Process heap memory (per-worker allocators)
     WorkerStacks,                  // TCB stacks + IPC buffers
     MMIO { device_id: u32 },       // Device mappings (driver realms)
     Guard,                         // NEVER map (violation = terminate)

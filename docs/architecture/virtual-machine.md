@@ -723,9 +723,11 @@ This enables efficient recursion without stack growth.
 
 ## Memory Model
 
-### Process Memory
+For the complete process memory model including garbage collection, heap fragments, and per-worker allocators, see [Process Model](process-model.md).
 
-Each process has independent memory regions:
+### Process Memory Overview
+
+Each process has two memory blocks following the BEAM model:
 
 ```
 PROCESS MEMORY MODEL
@@ -737,21 +739,22 @@ PROCESS MEMORY MODEL
 │  │ X0 │ X1 │ X2 │ X3 │ X4 │ ... X255       │                        │
 │  └────┴────┴────┴────┴────┴────────────────┘                        │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Call Stack (Y registers + control flow)                            │
+│  Young Heap (stack + young objects, single contiguous block)        │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  Frame 0: [ret_addr] [prev_fp] [Y0] [Y1] ...                │    │
-│  │  Frame 1: [ret_addr] [prev_fp] [Y0] [Y1] [Y2] ...           │    │
-│  │  Frame 2: [ret_addr] [prev_fp] [Y0] ...                     │    │
-│  │  ... grows downward ...                                     │    │
+│  │  STACK (grows down)    │  FREE  │  YOUNG HEAP (grows up)    │    │
+│  │  [Frame2][Frame1][F0]◄─┼────────┼─►[string][tuple][cons]    │    │
+│  │          stop          │        │        htop               │    │
 │  └─────────────────────────────────────────────────────────────┘    │
+│  Out of memory when htop >= stop → triggers Minor GC                │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Heap (dynamic allocation, grows upward)                            │
+│  Old Heap (promoted objects, separate contiguous block)             │
 │  ┌─────────────────────────────────────────────────────────────┐    │
-│  │  [String "hello"] [Tuple [1,2,3]] [Closure ...] ...         │    │
-│  │  ... grows upward ...                                       │    │
+│  │  [promoted][promoted][promoted]        │       FREE         │    │
+│  │  Objects that survived Minor GC        │◄─ old_htop         │    │
 │  └─────────────────────────────────────────────────────────────┘    │
+│  Collected only during Major GC (fullsweep)                         │
 ├─────────────────────────────────────────────────────────────────────┤
-│  Mailbox (message queue, separate allocation)                       │
+│  Mailbox (MPSC queue, messages on receiver's heap)                  │
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │  [Msg1] → [Msg2] → [Msg3] → nil                             │    │
 │  └─────────────────────────────────────────────────────────────┘    │
@@ -760,32 +763,27 @@ PROCESS MEMORY MODEL
 
 ### Heap Allocation
 
-The heap uses a bump allocator with generational garbage collection:
+The young heap uses a bump allocator. Allocation is O(1):
 
 ```
-HEAP ALLOCATION
+HEAP ALLOCATION (Young Heap)
 ════════════════════════════════════════════════════════════════════════
 
-Young Generation (nursery):
-- Bump allocation (fast, O(1))
-- Minor GC when full
-- Survivors promoted to old generation
+fn alloc(heap, size, align) -> Vaddr {
+    let new_htop = align_up(heap.htop + size, align);
+    if new_htop >= heap.stop {
+        trigger_minor_gc();
+        // Retry after GC - young heap is now empty
+        new_htop = align_up(heap.htop + size, align);
+    }
+    let ptr = heap.htop;
+    heap.htop = new_htop;
+    ptr
+}
 
-Old Generation:
-- Compacting GC
-- Major GC less frequent
-- Objects that survived multiple minor GCs
-
-Allocation:
-  fn alloc(heap, size, align) -> Vaddr {
-      let ptr = align_down(heap.ptr - size, align);
-      if ptr < heap.limit {
-          trigger_gc();
-          // Retry after GC
-      }
-      heap.ptr = ptr;
-      ptr
-  }
+Generational GC:
+- Minor GC: Promotes live young objects to old heap, resets young heap
+- Major GC: Collects both heaps, compacts all live data
 ```
 
 ---

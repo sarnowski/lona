@@ -22,9 +22,9 @@ use std::vec::Vec;
 use alloc::vec::Vec;
 
 use crate::bytecode::{BX_MASK, Chunk, MAX_SIGNED_BX, MIN_SIGNED_BX, encode_abc, encode_abx, op};
-use crate::heap::Heap;
 use crate::intrinsics::lookup_intrinsic;
 use crate::platform::MemorySpace;
+use crate::process::Process;
 use crate::value::Value;
 
 /// Maximum number of arguments for an intrinsic call.
@@ -55,8 +55,8 @@ pub enum CompileError {
 pub struct Compiler<'a, M: MemorySpace> {
     /// The bytecode chunk being built.
     chunk: Chunk,
-    /// Reference to the heap (for reading strings/symbols).
-    heap: &'a Heap,
+    /// Reference to the process (for reading strings/symbols).
+    proc: &'a Process,
     /// Reference to the memory space.
     mem: &'a M,
 }
@@ -64,10 +64,10 @@ pub struct Compiler<'a, M: MemorySpace> {
 impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// Create a new compiler.
     #[must_use]
-    pub const fn new(heap: &'a Heap, mem: &'a M) -> Self {
+    pub const fn new(proc: &'a Process, mem: &'a M) -> Self {
         Self {
             chunk: Chunk::new(),
-            heap,
+            proc,
             mem,
         }
     }
@@ -124,16 +124,13 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     }
 
     /// Compile an integer literal.
-    #[expect(
-        clippy::cast_sign_loss,
-        reason = "intentional two's complement encoding for signed immediate"
-    )]
     fn compile_int(&mut self, n: i64, target: u8) -> Result<(), CompileError> {
         // Check if it fits in 18-bit signed immediate
         if n >= i64::from(MIN_SIGNED_BX) && n <= i64::from(MAX_SIGNED_BX) {
-            // Encode as two's complement in 18 bits
-            // Cast through i32 first to get proper sign extension, then mask
-            let bx = (n as i32 as u32) & BX_MASK;
+            // Encode as two's complement in 18 bits using to_ne_bytes/from_ne_bytes
+            // for explicit bit-level reinterpretation without sign loss issues.
+            let bytes = (n as i32).to_ne_bytes();
+            let bx = u32::from_ne_bytes(bytes) & BX_MASK;
             self.chunk.emit(encode_abx(op::LOADINT, target, bx));
             Ok(())
         } else {
@@ -155,7 +152,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// Compile a list expression (special form or intrinsic call).
     fn compile_list(&mut self, list: Value, target: u8, temp_base: u8) -> Result<u8, CompileError> {
         let pair = self
-            .heap
+            .proc
             .read_pair(self.mem, list)
             .ok_or(CompileError::InvalidSyntax)?;
 
@@ -166,7 +163,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
 
         // Look up the symbol name
         let name = self
-            .heap
+            .proc
             .read_string(self.mem, pair.first)
             .ok_or(CompileError::InvalidSyntax)?;
 
@@ -193,7 +190,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     ) -> Result<u8, CompileError> {
         // Get the single argument
         let pair = self
-            .heap
+            .proc
             .read_pair(self.mem, arg_list)
             .ok_or(CompileError::InvalidSyntax)?;
 
@@ -229,7 +226,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
 
         while !current.is_nil() {
             let pair = self
-                .heap
+                .proc
                 .read_pair(self.mem, current)
                 .ok_or(CompileError::InvalidSyntax)?;
 
@@ -298,8 +295,12 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
 /// # Errors
 ///
 /// Returns an error if compilation fails.
-pub fn compile<M: MemorySpace>(expr: Value, heap: &Heap, mem: &M) -> Result<Chunk, CompileError> {
-    Compiler::new(heap, mem).compile(expr)
+pub fn compile<M: MemorySpace>(
+    expr: Value,
+    proc: &Process,
+    mem: &M,
+) -> Result<Chunk, CompileError> {
+    Compiler::new(proc, mem).compile(expr)
 }
 
 /// Debug helper: disassemble a chunk to a string.

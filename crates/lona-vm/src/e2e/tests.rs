@@ -3,7 +3,7 @@
 
 //! E2E test cases for Lona on seL4.
 //!
-//! Each test function receives the same heap, memory space, and UART
+//! Each test function receives the same process, memory space, and UART
 //! that the REPL uses, ensuring tests exercise the exact same code paths.
 //!
 //! Test functions return `Ok(())` on success or `Err(message)` on failure.
@@ -11,8 +11,8 @@
 use core::option::Option::{None, Some};
 use core::result::Result::{self, Err, Ok};
 
-use crate::heap::Heap;
 use crate::platform::MemorySpace;
+use crate::process::Process;
 use crate::reader::read;
 use crate::types::{Paddr, Vaddr};
 use crate::uart::Uart;
@@ -20,7 +20,7 @@ use crate::value::print_value;
 
 /// Test that VM initialization succeeds.
 pub fn test_vm_init<M: MemorySpace, U: Uart>(
-    _heap: &mut Heap,
+    _proc: &mut Process,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -30,7 +30,7 @@ pub fn test_vm_init<M: MemorySpace, U: Uart>(
 
 /// Test that serial output works.
 pub fn test_serial_output<M: MemorySpace, U: Uart>(
-    _heap: &mut Heap,
+    _proc: &mut Process,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -42,7 +42,7 @@ pub fn test_serial_output<M: MemorySpace, U: Uart>(
 
 /// Test memory type newtype wrappers.
 pub fn test_memory_types<M: MemorySpace, U: Uart>(
-    _heap: &mut Heap,
+    _proc: &mut Process,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -71,7 +71,7 @@ pub fn test_memory_types<M: MemorySpace, U: Uart>(
 
 /// Test address type operations.
 pub fn test_address_types<M: MemorySpace, U: Uart>(
-    _heap: &mut Heap,
+    _proc: &mut Process,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -159,12 +159,12 @@ impl Uart for OutputBuffer {
 /// Input: `'(1 2 3)` (quoted list)
 /// Expected output: `(quote (1 2 3))`
 pub fn test_read_quoted_list<M: MemorySpace, U: Uart>(
-    heap: &mut Heap,
+    proc: &mut Process,
     mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
     // Read the input using the same function as the REPL
-    let value = match read("'(1 2 3)", heap, mem) {
+    let value = match read("'(1 2 3)", proc, mem) {
         Ok(Some(v)) => v,
         Ok(None) => return Err("read returned None"),
         Err(_) => return Err("read failed"),
@@ -172,7 +172,7 @@ pub fn test_read_quoted_list<M: MemorySpace, U: Uart>(
 
     // Print the value using the same function as the REPL
     let mut output = OutputBuffer::new();
-    print_value(value, heap, mem, &mut output);
+    print_value(value, proc, mem, &mut output);
 
     // Verify the output matches expected
     let printed = output.as_str()?;

@@ -6,8 +6,8 @@
 //! Converts a token stream into Lonala values.
 
 use super::lexer::{LexError, Lexer, Token};
-use crate::heap::Heap;
 use crate::platform::MemorySpace;
+use crate::process::Process;
 use crate::value::Value;
 use core::option::Option::{self, None, Some};
 use core::result::Result::{self, Err, Ok};
@@ -103,7 +103,7 @@ impl<'a> Parser<'a> {
     /// memory allocation fails.
     pub fn read<M: MemorySpace>(
         &mut self,
-        heap: &mut Heap,
+        proc: &mut Process,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
         let token = match self.peek()? {
@@ -118,40 +118,40 @@ impl<'a> Parser<'a> {
             Token::False => Ok(Some(Value::bool(false))),
             Token::Int(n) => Ok(Some(Value::int(n))),
             Token::String(s) => {
-                let value = heap
+                let value = proc
                     .alloc_string(mem, s.as_str())
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(value))
             }
             Token::Symbol(s) => {
-                let value = heap
+                let value = proc
                     .alloc_symbol(mem, s.as_str())
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(value))
             }
             Token::Quote => {
                 // 'expr => (quote expr)
-                let expr = self.read(heap, mem)?.ok_or(ParseError::UnexpectedEof)?;
-                let quote_sym = heap
+                let expr = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                let quote_sym = proc
                     .alloc_symbol(mem, "quote")
                     .ok_or(ParseError::OutOfMemory)?;
                 // Build (quote expr) = Pair(quote, Pair(expr, nil))
-                let inner = heap
+                let inner = proc
                     .alloc_pair(mem, expr, Value::nil())
                     .ok_or(ParseError::OutOfMemory)?;
-                let outer = heap
+                let outer = proc
                     .alloc_pair(mem, quote_sym, inner)
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(outer))
             }
-            Token::LParen => self.read_list(heap, mem),
+            Token::LParen => self.read_list(proc, mem),
             Token::RParen => Err(ParseError::UnmatchedRParen.into()),
         }
     }
 
     fn read_list<M: MemorySpace>(
         &mut self,
-        heap: &mut Heap,
+        proc: &mut Process,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
         // Collect elements on stack before building cons list
@@ -169,7 +169,7 @@ impl<'a> Parser<'a> {
                     if count >= elements.len() {
                         return Err(ParseError::ListTooLong.into());
                     }
-                    let elem = self.read(heap, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                    let elem = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
                     elements[count] = elem;
                     count += 1;
                 }
@@ -179,7 +179,7 @@ impl<'a> Parser<'a> {
         // Build list from back to front: (a b c) = Pair(a, Pair(b, Pair(c, nil)))
         let mut result = Value::nil();
         for i in (0..count).rev() {
-            result = heap
+            result = proc
                 .alloc_pair(mem, elements[i], result)
                 .ok_or(ParseError::OutOfMemory)?;
         }
@@ -206,9 +206,9 @@ impl<'a> Parser<'a> {
 /// Returns an error if the input contains invalid syntax.
 pub fn read<M: MemorySpace>(
     input: &str,
-    heap: &mut Heap,
+    proc: &mut Process,
     mem: &mut M,
 ) -> Result<Option<Value>, ReadError> {
     let mut parser = Parser::new(input);
-    parser.read(heap, mem)
+    parser.read(proc, mem)
 }

@@ -85,10 +85,11 @@ use lona_abi::layout::UART_VADDR;
 use lona_vm::Vaddr;
 #[cfg(feature = "e2e-test")]
 use lona_vm::e2e;
-use lona_vm::heap::Heap;
 use lona_vm::loader::TarSource;
 #[cfg(not(any(test, feature = "std")))]
 use lona_vm::platform::Sel4VSpace;
+use lona_vm::process::pool::ProcessPool;
+use lona_vm::process::{INITIAL_OLD_HEAP_SIZE, INITIAL_YOUNG_HEAP_SIZE, Process};
 #[cfg(not(feature = "e2e-test"))]
 use lona_vm::repl;
 use lona_vm::uart::{Uart, UartExt};
@@ -126,15 +127,29 @@ pub extern "C" fn _start() -> ! {
         );
     }
 
-    // Initialize heap: boot args give us start (low) and size, heap needs base (high)
-    let heap_base = Vaddr::new(heap_start + heap_size);
-    let mut heap = Heap::new(heap_base, heap_size as usize);
+    // Create process pool from boot-allocated heap memory
+    let mut pool = ProcessPool::new(Vaddr::new(heap_start), heap_size as usize);
+
+    // Allocate memory for REPL process (young heap + old heap)
+    let (young_base, old_base) = pool
+        .allocate_process_memory(INITIAL_YOUNG_HEAP_SIZE, INITIAL_OLD_HEAP_SIZE)
+        .expect("failed to allocate REPL process memory");
+
+    // Create REPL process with BEAM-style memory layout
+    let mut process = Process::new(
+        1, // PID 1 for REPL
+        young_base,
+        INITIAL_YOUNG_HEAP_SIZE,
+        old_base,
+        INITIAL_OLD_HEAP_SIZE,
+    );
+
     let mut vspace = Sel4VSpace;
 
     // Run E2E tests when feature is enabled, otherwise start REPL
     #[cfg(feature = "e2e-test")]
     {
-        e2e::run_all_tests(&mut heap, &mut vspace, &mut uart);
+        e2e::run_all_tests(&mut process, &mut vspace, &mut uart);
         halt_loop()
     }
 
@@ -143,7 +158,7 @@ pub extern "C" fn _start() -> ! {
         if boot_flags.has_uart() {
             uart.write_line("\nStarting REPL...\n");
         }
-        repl::run(&mut heap, &mut vspace, &mut uart)
+        repl::run(&mut process, &mut vspace, &mut uart)
     }
 }
 

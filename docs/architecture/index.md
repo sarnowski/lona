@@ -289,7 +289,10 @@ This documentation captures architectural decisions and design discussions. Some
 - Separation between Lona Memory Manager and Lona VM binaries
 - Two-level memory management (realms via seL4, processes via VM)
 - Inherited code regions with fixed virtual addresses
-- Dynamic process memory segments (BEAM-style)
+- Process memory: single contiguous block per process (stack + heap growing toward each other, BEAM-style)
+- Per-worker allocator instances for lock-free allocation
+- Heap growth via reallocation (Fibonacci then 20% increments)
+- Per-process garbage collection (no global pauses)
 - Per-realm endpoints for IPC identity (not badges)
 - Fixed virtual addresses for shared code (same address in all realms)
 - IPC buffer location within worker stacks region

@@ -10,9 +10,9 @@
 mod mod_test;
 
 use crate::compiler::{self, CompileError};
-use crate::heap::Heap;
 use crate::intrinsics::IntrinsicError;
 use crate::platform::MemorySpace;
+use crate::process::Process;
 use crate::reader::{ReadError, read};
 use crate::uart::{Uart, UartExt};
 use crate::value::print_value;
@@ -24,7 +24,7 @@ const LINE_BUFFER_SIZE: usize = 256;
 /// Run the REPL loop.
 ///
 /// This function never returns under normal operation.
-pub fn run<M: MemorySpace, U: Uart>(heap: &mut Heap, mem: &mut M, uart: &mut U) -> ! {
+pub fn run<M: MemorySpace, U: Uart>(proc: &mut Process, mem: &mut M, uart: &mut U) -> ! {
     let mut line_buf = [0u8; LINE_BUFFER_SIZE];
 
     loop {
@@ -46,7 +46,7 @@ pub fn run<M: MemorySpace, U: Uart>(heap: &mut Heap, mem: &mut M, uart: &mut U) 
         };
 
         // Parse
-        let expr = match read(line, heap, mem) {
+        let expr = match read(line, proc, mem) {
             Ok(Some(v)) => v,
             Ok(None) => continue, // Empty input
             Err(e) => {
@@ -58,7 +58,7 @@ pub fn run<M: MemorySpace, U: Uart>(heap: &mut Heap, mem: &mut M, uart: &mut U) 
         };
 
         // Compile
-        let chunk = match compiler::compile(expr, heap, mem) {
+        let chunk = match compiler::compile(expr, proc, mem) {
             Ok(c) => c,
             Err(e) => {
                 uart.write_str("Error: ");
@@ -68,20 +68,25 @@ pub fn run<M: MemorySpace, U: Uart>(heap: &mut Heap, mem: &mut M, uart: &mut U) 
             }
         };
 
-        // Execute
-        let result = match vm::execute(&chunk, heap, mem) {
+        // Set chunk and execute
+        proc.set_chunk(chunk);
+        let result = match vm::execute(proc, mem) {
             Ok(v) => v,
             Err(e) => {
                 uart.write_str("Error: ");
                 print_runtime_error(&e, uart);
                 uart.write_byte(b'\n');
+                proc.reset();
                 continue;
             }
         };
 
         // Print result
-        print_value(result, heap, mem, uart);
+        print_value(result, proc, mem, uart);
         uart.write_byte(b'\n');
+
+        // Reset for next expression
+        proc.reset();
     }
 }
 
@@ -143,6 +148,7 @@ fn print_runtime_error<U: Uart>(e: &RuntimeError, uart: &mut U) {
             print_u32(*idx, uart);
         }
         RuntimeError::Intrinsic(e) => print_intrinsic_error(e, uart),
+        RuntimeError::NoCode => uart.write_str("no code to execute"),
     }
 }
 
@@ -223,7 +229,7 @@ fn print_u32<U: Uart>(n: u32, uart: &mut U) {
 /// Run the REPL for a limited number of iterations (for testing).
 #[cfg(test)]
 pub fn run_limited<M: MemorySpace, U: Uart>(
-    heap: &mut Heap,
+    proc: &mut Process,
     mem: &mut M,
     uart: &mut U,
     max_iterations: usize,
@@ -245,7 +251,7 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
         };
 
         // Parse
-        let expr = match read(line, heap, mem) {
+        let expr = match read(line, proc, mem) {
             Ok(Some(v)) => v,
             Ok(None) => continue,
             Err(e) => {
@@ -257,7 +263,7 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
         };
 
         // Compile
-        let chunk = match compiler::compile(expr, heap, mem) {
+        let chunk = match compiler::compile(expr, proc, mem) {
             Ok(c) => c,
             Err(e) => {
                 uart.write_str("Error: ");
@@ -267,19 +273,24 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
             }
         };
 
-        // Execute
-        let result = match vm::execute(&chunk, heap, mem) {
+        // Set chunk and execute
+        proc.set_chunk(chunk);
+        let result = match vm::execute(proc, mem) {
             Ok(v) => v,
             Err(e) => {
                 uart.write_str("Error: ");
                 print_runtime_error(&e, uart);
                 uart.write_byte(b'\n');
+                proc.reset();
                 continue;
             }
         };
 
         // Print result
-        print_value(result, heap, mem, uart);
+        print_value(result, proc, mem, uart);
         uart.write_byte(b'\n');
+
+        // Reset for next expression
+        proc.reset();
     }
 }

@@ -6,9 +6,10 @@
 //! Runtime for Lonala bytecode in seL4 realms.
 //!
 //! This crate provides:
-//! - Heap management for Lonala values
+//! - BEAM-style process memory model (per-process heaps)
 //! - UART drivers for aarch64 (PL011) and `x86_64` (COM1)
 //! - Reader (lexer/parser) for Lonala source code
+//! - Bytecode compiler and VM interpreter
 //! - Value representation and printing
 //! - Library loading from embedded tar archives
 //! - REPL for interactive development
@@ -26,10 +27,10 @@ extern crate alloc;
 
 pub mod bytecode;
 pub mod compiler;
-pub mod heap;
 pub mod intrinsics;
 pub mod loader;
 pub mod platform;
+pub mod process;
 pub mod reader;
 pub mod repl;
 pub mod types;
@@ -41,6 +42,8 @@ pub mod vm;
 pub mod e2e;
 
 // Re-export commonly used types at crate root
+pub use process::pool::ProcessPool;
+pub use process::{Process, ProcessStatus};
 pub use types::{Paddr, Vaddr};
 
 /// Crate version.
