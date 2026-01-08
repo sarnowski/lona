@@ -43,6 +43,10 @@ pub enum Value {
     Keyword(Vaddr) = 6,
     /// Heap-allocated tuple (pointer to `HeapTuple`).
     Tuple(Vaddr) = 7,
+    /// Heap-allocated map (pointer to `HeapMap`).
+    Map(Vaddr) = 8,
+    /// Heap-allocated namespace (pointer to `Namespace`).
+    Namespace(Vaddr) = 9,
 }
 
 impl Value {
@@ -102,6 +106,20 @@ impl Value {
         Self::Tuple(addr)
     }
 
+    /// Create a map value from a heap address.
+    #[inline]
+    #[must_use]
+    pub const fn map(addr: Vaddr) -> Self {
+        Self::Map(addr)
+    }
+
+    /// Create a namespace value from a heap address.
+    #[inline]
+    #[must_use]
+    pub const fn namespace(addr: Vaddr) -> Self {
+        Self::Namespace(addr)
+    }
+
     /// Check if this value is nil.
     #[inline]
     #[must_use]
@@ -145,11 +163,32 @@ impl Value {
         matches!(self, Self::Keyword(_))
     }
 
+    /// Check if this value is a symbol.
+    #[inline]
+    #[must_use]
+    pub const fn is_symbol(&self) -> bool {
+        matches!(self, Self::Symbol(_))
+    }
+
     /// Check if this value is a tuple.
     #[inline]
     #[must_use]
     pub const fn is_tuple(&self) -> bool {
         matches!(self, Self::Tuple(_))
+    }
+
+    /// Check if this value is a map.
+    #[inline]
+    #[must_use]
+    pub const fn is_map(&self) -> bool {
+        matches!(self, Self::Map(_))
+    }
+
+    /// Check if this value is a namespace.
+    #[inline]
+    #[must_use]
+    pub const fn is_namespace(&self) -> bool {
+        matches!(self, Self::Namespace(_))
     }
 }
 
@@ -164,6 +203,8 @@ impl fmt::Debug for Value {
             Self::Symbol(addr) => write!(f, "Symbol({addr:?})"),
             Self::Keyword(addr) => write!(f, "Keyword({addr:?})"),
             Self::Tuple(addr) => write!(f, "Tuple({addr:?})"),
+            Self::Map(addr) => write!(f, "Map({addr:?})"),
+            Self::Namespace(addr) => write!(f, "Namespace({addr:?})"),
         }
     }
 }
@@ -240,4 +281,56 @@ impl HeapTuple {
     pub const fn alloc_size(len: usize) -> usize {
         Self::HEADER_SIZE + len * core::mem::size_of::<Value>()
     }
+}
+
+/// Heap-allocated map header.
+///
+/// Maps are implemented as association lists: linked lists of `[key value]` tuples.
+/// The `entries` field points to a Pair chain where each `first` is a 2-element tuple.
+///
+/// Stored in memory as:
+/// - 16 bytes: entries (`Value::Pair` or `Value::Nil` for empty map)
+///
+/// Example structure for `%{:a 1 :b 2}`:
+/// ```text
+/// HeapMap { entries } → Pair([:a 1], Pair([:b 2], nil))
+/// ```
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct HeapMap {
+    /// Head of the association list (Pair chain or nil).
+    pub entries: Value,
+}
+
+impl HeapMap {
+    /// Size of the header in bytes.
+    pub const SIZE: usize = core::mem::size_of::<Self>();
+}
+
+/// Heap-allocated namespace header.
+///
+/// Namespaces are containers for var bindings. The `name` field is a symbol,
+/// and `mappings` is a `Value::Map` holding symbol→var mappings.
+///
+/// Stored in memory as:
+/// - 16 bytes: name (`Value::Symbol`)
+/// - 16 bytes: mappings (`Value::Map`)
+///
+/// Example: namespace `my.app` with var `x`:
+/// ```text
+/// Namespace { name: 'my.app, mappings: %{'x → var-addr} }
+/// ```
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct Namespace {
+    /// The namespace name (a symbol).
+    pub name: Value,
+    /// Symbol→Vaddr mappings (a map). In the future, this will map to `VarSlot`s.
+    /// For now, this is a map of symbol→value.
+    pub mappings: Value,
+}
+
+impl Namespace {
+    /// Size of the namespace header in bytes.
+    pub const SIZE: usize = core::mem::size_of::<Self>();
 }

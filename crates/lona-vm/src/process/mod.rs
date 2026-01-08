@@ -43,7 +43,7 @@ mod process_test;
 use crate::Vaddr;
 use crate::bytecode::Chunk;
 use crate::platform::MemorySpace;
-use crate::value::{HeapString, HeapTuple, Pair, Value};
+use crate::value::{HeapMap, HeapString, HeapTuple, Namespace, Pair, Value};
 
 /// Number of X registers (temporaries).
 pub const X_REG_COUNT: usize = 256;
@@ -57,6 +57,18 @@ pub const X_REG_COUNT: usize = 256;
 /// implemented (Phase 4+), most keywords will be interned at the realm level,
 /// and this table will only handle dynamically-constructed keywords.
 pub const MAX_INTERNED_KEYWORDS: usize = 1024;
+
+/// Maximum number of metadata entries per process.
+///
+/// Metadata is stored separately from objects to avoid inline overhead.
+/// Most objects don't have metadata, so a separate table is more efficient.
+pub const MAX_METADATA_ENTRIES: usize = 1024;
+
+/// Maximum number of namespaces per process.
+///
+/// Namespaces are stored in a per-process registry. In the future, this will
+/// move to the realm level for proper sharing across processes.
+pub const MAX_NAMESPACES: usize = 256;
 
 /// Initial young heap size (48 KB).
 pub const INITIAL_YOUNG_HEAP_SIZE: usize = 48 * 1024;
@@ -122,6 +134,22 @@ pub struct Process {
     keyword_intern: [Vaddr; MAX_INTERNED_KEYWORDS],
     /// Number of interned keywords.
     keyword_intern_len: usize,
+
+    // Metadata table
+    /// Metadata table: maps object addresses to metadata map addresses.
+    /// Stored as parallel arrays: `metadata_keys[i]` → `metadata_values[i]`.
+    metadata_keys: [Vaddr; MAX_METADATA_ENTRIES],
+    metadata_values: [Vaddr; MAX_METADATA_ENTRIES],
+    /// Number of metadata entries.
+    metadata_len: usize,
+
+    // Namespace registry
+    /// Namespace registry: maps namespace name symbols to namespace addresses.
+    /// Stored as parallel arrays: `namespace_names[i]` → `namespace_addrs[i]`.
+    namespace_names: [Vaddr; MAX_NAMESPACES],
+    namespace_addrs: [Vaddr; MAX_NAMESPACES],
+    /// Number of registered namespaces.
+    namespace_len: usize,
 }
 
 impl Process {
@@ -163,6 +191,14 @@ impl Process {
             // Interning tables
             keyword_intern: [Vaddr::new(0); MAX_INTERNED_KEYWORDS],
             keyword_intern_len: 0,
+            // Metadata table
+            metadata_keys: [Vaddr::new(0); MAX_METADATA_ENTRIES],
+            metadata_values: [Vaddr::new(0); MAX_METADATA_ENTRIES],
+            metadata_len: 0,
+            // Namespace registry
+            namespace_names: [Vaddr::new(0); MAX_NAMESPACES],
+            namespace_addrs: [Vaddr::new(0); MAX_NAMESPACES],
+            namespace_len: 0,
         }
     }
 
@@ -447,5 +483,167 @@ impl Process {
         let data_addr = addr.add(HeapTuple::HEADER_SIZE as u64);
         let elem_addr = data_addr.add((index * core::mem::size_of::<Value>()) as u64);
         Some(mem.read(elem_addr))
+    }
+
+    /// Allocate a map on the young heap.
+    ///
+    /// A map is an association list: a Pair chain where each `first` is a `[key value]` tuple.
+    ///
+    /// Returns a `Value::Map` pointing to the allocated map, or `None` if OOM.
+    pub fn alloc_map<M: MemorySpace>(&mut self, mem: &mut M, entries: Value) -> Option<Value> {
+        // Allocate space (align to 8 bytes for Value field)
+        let addr = self.alloc(HeapMap::SIZE, 8)?;
+
+        // Write the map
+        let map = HeapMap { entries };
+        mem.write(addr, map);
+
+        Some(Value::map(addr))
+    }
+
+    /// Read a map from the heap.
+    ///
+    /// Returns `None` if the value is not a map.
+    #[must_use]
+    pub fn read_map<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<HeapMap> {
+        let Value::Map(addr) = value else {
+            return None;
+        };
+
+        Some(mem.read(addr))
+    }
+
+    /// Set metadata for an object.
+    ///
+    /// Associates the given metadata map address with the object address.
+    /// If the object already has metadata, it is replaced.
+    /// If the metadata table is full, this is a silent no-op.
+    pub fn set_metadata(&mut self, obj_addr: Vaddr, meta_addr: Vaddr) {
+        // Check if already exists - update in place
+        for i in 0..self.metadata_len {
+            if self.metadata_keys[i] == obj_addr {
+                self.metadata_values[i] = meta_addr;
+                return;
+            }
+        }
+
+        // Add new entry if table not full
+        if self.metadata_len < MAX_METADATA_ENTRIES {
+            self.metadata_keys[self.metadata_len] = obj_addr;
+            self.metadata_values[self.metadata_len] = meta_addr;
+            self.metadata_len += 1;
+        }
+    }
+
+    /// Get metadata for an object.
+    ///
+    /// Returns the metadata map address if the object has metadata, `None` otherwise.
+    #[must_use]
+    pub fn get_metadata(&self, obj_addr: Vaddr) -> Option<Vaddr> {
+        for i in 0..self.metadata_len {
+            if self.metadata_keys[i] == obj_addr {
+                return Some(self.metadata_values[i]);
+            }
+        }
+        None
+    }
+
+    // --- Namespace methods ---
+
+    /// Allocate a namespace on the young heap.
+    ///
+    /// Creates a namespace with the given name symbol and an empty mappings map.
+    ///
+    /// Returns a `Value::Namespace` pointing to the allocated namespace, or `None` if OOM.
+    pub fn alloc_namespace<M: MemorySpace>(&mut self, mem: &mut M, name: Value) -> Option<Value> {
+        // Create empty mappings map
+        let empty_entries = Value::Nil;
+        let mappings = self.alloc_map(mem, empty_entries)?;
+
+        // Allocate space (align to 8 bytes for Value fields)
+        let addr = self.alloc(Namespace::SIZE, 8)?;
+
+        // Write the namespace
+        let ns = Namespace { name, mappings };
+        mem.write(addr, ns);
+
+        Some(Value::namespace(addr))
+    }
+
+    /// Read a namespace from the heap.
+    ///
+    /// Returns `None` if the value is not a namespace.
+    #[must_use]
+    pub fn read_namespace<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<Namespace> {
+        let Value::Namespace(addr) = value else {
+            return None;
+        };
+
+        Some(mem.read(addr))
+    }
+
+    /// Find a namespace by its name symbol.
+    ///
+    /// Compares namespace names by symbol address. Returns the namespace value
+    /// if found, `None` otherwise.
+    #[must_use]
+    pub fn find_namespace<M: MemorySpace>(&self, _mem: &M, name: Value) -> Option<Value> {
+        let Value::Symbol(name_addr) = name else {
+            return None;
+        };
+
+        for i in 0..self.namespace_len {
+            if self.namespace_names[i] == name_addr {
+                return Some(Value::namespace(self.namespace_addrs[i]));
+            }
+        }
+        None
+    }
+
+    /// Register a namespace in the registry.
+    ///
+    /// Associates the namespace with its name for later lookup via `find_namespace`.
+    /// If the namespace is already registered, updates the address.
+    /// If the registry is full, this is a silent no-op.
+    pub fn register_namespace(&mut self, name_addr: Vaddr, ns_addr: Vaddr) {
+        // Check if already exists - update in place
+        for i in 0..self.namespace_len {
+            if self.namespace_names[i] == name_addr {
+                self.namespace_addrs[i] = ns_addr;
+                return;
+            }
+        }
+
+        // Add new entry if table not full
+        if self.namespace_len < MAX_NAMESPACES {
+            self.namespace_names[self.namespace_len] = name_addr;
+            self.namespace_addrs[self.namespace_len] = ns_addr;
+            self.namespace_len += 1;
+        }
+    }
+
+    /// Create or find a namespace by name.
+    ///
+    /// If a namespace with the given name exists, returns it.
+    /// Otherwise, creates a new namespace, registers it, and returns it.
+    pub fn get_or_create_namespace<M: MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        name: Value,
+    ) -> Option<Value> {
+        // Check if namespace already exists
+        if let Some(ns) = self.find_namespace(mem, name) {
+            return Some(ns);
+        }
+
+        // Create new namespace
+        let ns = self.alloc_namespace(mem, name)?;
+
+        // Register it
+        if let (Value::Symbol(name_addr), Value::Namespace(ns_addr)) = (name, ns) {
+            self.register_namespace(name_addr, ns_addr);
+        }
+
+        Some(ns)
     }
 }

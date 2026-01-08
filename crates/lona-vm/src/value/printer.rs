@@ -37,6 +37,8 @@ pub fn print_value<M: MemorySpace, U: Uart>(value: Value, proc: &Process, mem: &
         }
         Value::Pair(_) => print_list(value, proc, mem, uart),
         Value::Tuple(_) => print_tuple(value, proc, mem, uart),
+        Value::Map(_) => print_map(value, proc, mem, uart),
+        Value::Namespace(_) => print_namespace(value, proc, mem, uart),
     }
 }
 
@@ -147,6 +149,48 @@ fn print_tuple<M: MemorySpace, U: Uart>(tuple: Value, proc: &Process, mem: &M, u
             if let Some(elem) = proc.read_tuple_element(mem, tuple, i) {
                 print_value(elem, proc, mem, uart);
             }
+        }
+    }
+
+    uart.write_byte(b']');
+}
+
+fn print_map<M: MemorySpace, U: Uart>(map: Value, proc: &Process, mem: &M, uart: &mut U) {
+    uart_write_str(uart, "%{");
+
+    if let Some(map_val) = proc.read_map(mem, map) {
+        let mut is_first = true;
+        let mut current = map_val.entries;
+
+        while let Some(pair) = proc.read_pair(mem, current) {
+            if !is_first {
+                uart.write_byte(b' ');
+            }
+            is_first = false;
+
+            // Each pair.first is a [key value] tuple
+            if let Some(key) = proc.read_tuple_element(mem, pair.first, 0) {
+                print_value(key, proc, mem, uart);
+                uart.write_byte(b' ');
+            }
+            if let Some(val) = proc.read_tuple_element(mem, pair.first, 1) {
+                print_value(val, proc, mem, uart);
+            }
+
+            current = pair.rest;
+        }
+    }
+
+    uart.write_byte(b'}');
+}
+
+fn print_namespace<M: MemorySpace, U: Uart>(ns: Value, proc: &Process, mem: &M, uart: &mut U) {
+    uart_write_str(uart, "#namespace[");
+
+    if let Some(ns_val) = proc.read_namespace(mem, ns) {
+        // Print the namespace name (symbol)
+        if let Some(name_str) = proc.read_string(mem, ns_val.name) {
+            uart_write_str(uart, name_str);
         }
     }
 

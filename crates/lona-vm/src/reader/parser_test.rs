@@ -323,3 +323,80 @@ fn read_unclosed_tuple() {
     let err = read("[1 2", &mut proc, &mut mem).unwrap_err();
     assert!(matches!(err, ReadError::Parse(ParseError::UnexpectedEof)));
 }
+
+// --- Map parser tests (Phase 2) ---
+
+#[test]
+fn read_map_empty() {
+    let (mut proc, mut mem) = setup();
+    let value = read("%{}", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_map());
+    let map = proc.read_map(&mem, value).unwrap();
+    assert!(map.entries.is_nil());
+}
+
+#[test]
+fn read_map_simple() {
+    let (mut proc, mut mem) = setup();
+    let value = read("%{:a 1 :b 2}", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_map());
+}
+
+#[test]
+fn read_map_odd_elements_error() {
+    let (mut proc, mut mem) = setup();
+    let err = read("%{:a 1 :b}", &mut proc, &mut mem).unwrap_err();
+    assert!(matches!(err, ReadError::Parse(ParseError::MapOddElements)));
+}
+
+#[test]
+fn read_map_unclosed_error() {
+    let (mut proc, mut mem) = setup();
+    let err = read("%{:a 1", &mut proc, &mut mem).unwrap_err();
+    assert!(matches!(err, ReadError::Parse(ParseError::UnexpectedEof)));
+}
+
+#[test]
+fn read_unmatched_rbrace() {
+    let (mut proc, mut mem) = setup();
+    let err = read("}", &mut proc, &mut mem).unwrap_err();
+    assert!(matches!(err, ReadError::Parse(ParseError::UnmatchedRBrace)));
+}
+
+// --- Metadata parser tests (Phase 2) ---
+
+#[test]
+fn read_metadata_keyword() {
+    let (mut proc, mut mem) = setup();
+    // ^:foo bar parses and attaches metadata
+    let value = read("^:private foo", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_symbol());
+    assert_eq!(proc.read_string(&mem, value).unwrap(), "foo");
+}
+
+#[test]
+fn read_metadata_map() {
+    let (mut proc, mut mem) = setup();
+    let value = read("^%{:doc \"hello\"} foo", &mut proc, &mut mem)
+        .unwrap()
+        .unwrap();
+    assert!(value.is_symbol());
+    assert_eq!(proc.read_string(&mem, value).unwrap(), "foo");
+}
+
+#[test]
+fn read_metadata_invalid() {
+    let (mut proc, mut mem) = setup();
+    let err = read("^123 foo", &mut proc, &mut mem).unwrap_err();
+    assert!(matches!(err, ReadError::Parse(ParseError::InvalidMetadata)));
+}
+
+#[test]
+fn read_metadata_missing_form() {
+    let (mut proc, mut mem) = setup();
+    let err = read("^:foo", &mut proc, &mut mem).unwrap_err();
+    assert!(matches!(
+        err,
+        ReadError::Parse(ParseError::MissingFormAfterMetadata)
+    ));
+}

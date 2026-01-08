@@ -22,6 +22,9 @@ const MAX_LIST_ELEMENTS: usize = 64;
 /// Maximum number of elements in a tuple literal.
 const MAX_TUPLE_ELEMENTS: usize = 64;
 
+/// Maximum number of key-value pairs in a map literal.
+const MAX_MAP_ENTRIES: usize = 64;
+
 /// Parse error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
@@ -33,12 +36,22 @@ pub enum ParseError {
     UnmatchedRParen,
     /// Unmatched right bracket.
     UnmatchedRBracket,
+    /// Unmatched right brace.
+    UnmatchedRBrace,
     /// Out of memory.
     OutOfMemory,
     /// List literal exceeds maximum element count.
     ListTooLong,
     /// Tuple literal exceeds maximum element count.
     TupleTooLong,
+    /// Map literal exceeds maximum entry count.
+    MapTooLong,
+    /// Map literal has odd number of elements (should be key-value pairs).
+    MapOddElements,
+    /// Invalid metadata (must be map or keyword).
+    InvalidMetadata,
+    /// Missing form after metadata.
+    MissingFormAfterMetadata,
 }
 
 impl core::fmt::Display for ParseError {
@@ -48,9 +61,14 @@ impl core::fmt::Display for ParseError {
             Self::UnexpectedToken(t) => write!(f, "unexpected token: {t:?}"),
             Self::UnmatchedRParen => write!(f, "unmatched )"),
             Self::UnmatchedRBracket => write!(f, "unmatched ]"),
+            Self::UnmatchedRBrace => write!(f, "unmatched }}"),
             Self::OutOfMemory => write!(f, "out of memory"),
             Self::ListTooLong => write!(f, "list exceeds {MAX_LIST_ELEMENTS} elements"),
             Self::TupleTooLong => write!(f, "tuple exceeds {MAX_TUPLE_ELEMENTS} elements"),
+            Self::MapTooLong => write!(f, "map exceeds {MAX_MAP_ENTRIES} entries"),
+            Self::MapOddElements => write!(f, "map literal requires even number of elements"),
+            Self::InvalidMetadata => write!(f, "metadata must be map or keyword"),
+            Self::MissingFormAfterMetadata => write!(f, "expected form after metadata"),
         }
     }
 }
@@ -163,6 +181,9 @@ impl<'a> Parser<'a> {
             Token::RParen => Err(ParseError::UnmatchedRParen.into()),
             Token::LBracket => self.read_tuple(proc, mem),
             Token::RBracket => Err(ParseError::UnmatchedRBracket.into()),
+            Token::MapStart => self.read_map(proc, mem),
+            Token::RBrace => Err(ParseError::UnmatchedRBrace.into()),
+            Token::Caret => self.read_with_metadata(proc, mem),
         }
     }
 
@@ -239,6 +260,155 @@ impl<'a> Parser<'a> {
         Ok(Some(tuple))
     }
 
+    fn read_map<M: MemorySpace>(
+        &mut self,
+        proc: &mut Process,
+        mem: &mut M,
+    ) -> Result<Option<Value>, ReadError> {
+        // Collect key-value pairs on stack before building map
+        // Each entry is 2 Values: key, value
+        let mut elements = [Value::nil(); MAX_MAP_ENTRIES * 2];
+        let mut count = 0;
+
+        loop {
+            match self.peek()? {
+                None => return Err(ParseError::UnexpectedEof.into()),
+                Some(Token::RBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(_) => {
+                    if count >= elements.len() {
+                        return Err(ParseError::MapTooLong.into());
+                    }
+                    let elem = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                    elements[count] = elem;
+                    count += 1;
+                }
+            }
+        }
+
+        // Must have even number of elements (key-value pairs)
+        if count % 2 != 0 {
+            return Err(ParseError::MapOddElements.into());
+        }
+
+        // Build the map as association list from back to front
+        // %{:a 1 :b 2} → Pair([:a 1], Pair([:b 2], nil))
+        let mut entries = Value::nil();
+        for i in (0..count).step_by(2).rev() {
+            // Build [key value] tuple
+            let pair_elements = [elements[i], elements[i + 1]];
+            let kv_tuple = proc
+                .alloc_tuple(mem, &pair_elements)
+                .ok_or(ParseError::OutOfMemory)?;
+
+            // Prepend to entries list
+            entries = proc
+                .alloc_pair(mem, kv_tuple, entries)
+                .ok_or(ParseError::OutOfMemory)?;
+        }
+
+        // Allocate the map with entries
+        let map = proc
+            .alloc_map(mem, entries)
+            .ok_or(ParseError::OutOfMemory)?;
+
+        Ok(Some(map))
+    }
+
+    /// Read a form with metadata attached.
+    ///
+    /// Handles both `^%{:k v} form` and `^:keyword form` syntax.
+    /// Multiple metadata prefixes are merged, with later values overriding earlier.
+    fn read_with_metadata<M: MemorySpace>(
+        &mut self,
+        proc: &mut Process,
+        mem: &mut M,
+    ) -> Result<Option<Value>, ReadError> {
+        // Collect all metadata maps/keywords before the form
+        // We need to merge multiple metadata: ^:a ^:b foo → {:a true :b true}
+        let mut meta_entries = [Value::nil(); MAX_MAP_ENTRIES * 2];
+        let mut meta_count = 0;
+
+        // Read the first metadata token (we already consumed the ^)
+        let first_meta = self.read_metadata_value(proc, mem)?;
+        add_metadata_entries(&first_meta, &mut meta_entries, &mut meta_count, proc, mem)?;
+
+        // Check for additional metadata prefixes
+        loop {
+            match self.peek()? {
+                Some(Token::Caret) => {
+                    self.advance(); // consume ^
+                    let next_meta = self.read_metadata_value(proc, mem)?;
+                    add_metadata_entries(
+                        &next_meta,
+                        &mut meta_entries,
+                        &mut meta_count,
+                        proc,
+                        mem,
+                    )?;
+                }
+                Some(_) => break,
+                None => return Err(ParseError::MissingFormAfterMetadata.into()),
+            }
+        }
+
+        // Read the actual form
+        let form = self
+            .read(proc, mem)?
+            .ok_or(ParseError::MissingFormAfterMetadata)?;
+
+        // Build the merged metadata map
+        let mut entries = Value::nil();
+        for i in (0..meta_count).step_by(2).rev() {
+            // Build [key value] tuple
+            let pair_elements = [meta_entries[i], meta_entries[i + 1]];
+            let kv_tuple = proc
+                .alloc_tuple(mem, &pair_elements)
+                .ok_or(ParseError::OutOfMemory)?;
+
+            entries = proc
+                .alloc_pair(mem, kv_tuple, entries)
+                .ok_or(ParseError::OutOfMemory)?;
+        }
+
+        let meta_map = proc
+            .alloc_map(mem, entries)
+            .ok_or(ParseError::OutOfMemory)?;
+
+        // Store the metadata for the form
+        // For now, we attach metadata in the process's metadata table
+        // The actual form is returned; the caller (or later phases) can retrieve meta
+        if let (Value::Map(map_addr), Some(addr)) = (meta_map, get_heap_addr(form)) {
+            proc.set_metadata(addr, map_addr);
+        }
+
+        Ok(Some(form))
+    }
+
+    /// Read the value after ^ - either a map or keyword shorthand
+    fn read_metadata_value<M: MemorySpace>(
+        &mut self,
+        proc: &mut Process,
+        mem: &mut M,
+    ) -> Result<Value, ReadError> {
+        match self.peek()? {
+            None => Err(ParseError::MissingFormAfterMetadata.into()),
+            Some(Token::MapStart) => {
+                self.advance();
+                let map = self.read_map(proc, mem)?;
+                map.ok_or_else(|| ParseError::MissingFormAfterMetadata.into())
+            }
+            Some(Token::Keyword(_)) => {
+                // ^:keyword is shorthand for ^%{:keyword true}
+                let kw = self.read(proc, mem)?;
+                kw.ok_or_else(|| ParseError::MissingFormAfterMetadata.into())
+            }
+            Some(_) => Err(ParseError::InvalidMetadata.into()),
+        }
+    }
+
     fn peek(&mut self) -> Result<Option<&Token>, LexError> {
         if self.lookahead.is_none() {
             self.lookahead = self.lexer.next_token()?;
@@ -263,4 +433,64 @@ pub fn read<M: MemorySpace>(
 ) -> Result<Option<Value>, ReadError> {
     let mut parser = Parser::new(input);
     parser.read(proc, mem)
+}
+
+/// Add entries from a metadata value (map or keyword) to the entries array.
+fn add_metadata_entries<M: MemorySpace>(
+    meta: &Value,
+    entries: &mut [Value],
+    count: &mut usize,
+    proc: &Process,
+    mem: &M,
+) -> Result<(), ReadError> {
+    match meta {
+        Value::Keyword(_) => {
+            // ^:keyword → {:keyword true}
+            if *count + 2 > entries.len() {
+                return Err(ParseError::MapTooLong.into());
+            }
+            entries[*count] = *meta;
+            entries[*count + 1] = Value::bool(true);
+            *count += 2;
+        }
+        Value::Map(_) => {
+            // Copy all entries from the map
+            let map = proc.read_map(mem, *meta);
+            if let Some(map_val) = map {
+                let mut current = map_val.entries;
+                while let Some(pair) = proc.read_pair(mem, current) {
+                    // Each pair.first is a [key value] tuple
+                    if let Some(kv_key) = proc.read_tuple_element(mem, pair.first, 0) {
+                        if let Some(kv_val) = proc.read_tuple_element(mem, pair.first, 1) {
+                            if *count + 2 > entries.len() {
+                                return Err(ParseError::MapTooLong.into());
+                            }
+                            entries[*count] = kv_key;
+                            entries[*count + 1] = kv_val;
+                            *count += 2;
+                        }
+                    }
+                    current = pair.rest;
+                }
+            }
+        }
+        _ => return Err(ParseError::InvalidMetadata.into()),
+    }
+    Ok(())
+}
+
+/// Get the heap address of a value if it has one.
+///
+/// Returns `Some(addr)` for heap-allocated values, `None` for immediates.
+const fn get_heap_addr(value: Value) -> Option<crate::Vaddr> {
+    match value {
+        Value::String(addr)
+        | Value::Pair(addr)
+        | Value::Symbol(addr)
+        | Value::Keyword(addr)
+        | Value::Tuple(addr)
+        | Value::Map(addr)
+        | Value::Namespace(addr) => Some(addr),
+        Value::Nil | Value::Bool(_) | Value::Int(_) => None,
+    }
 }

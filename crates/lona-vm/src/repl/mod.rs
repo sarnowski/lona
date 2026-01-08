@@ -119,9 +119,18 @@ fn print_read_error<U: Uart>(e: &ReadError, uart: &mut U) {
                 ParseError::UnexpectedToken(_) => uart.write_str("unexpected token"),
                 ParseError::UnmatchedRParen => uart.write_str("unmatched )"),
                 ParseError::UnmatchedRBracket => uart.write_str("unmatched ]"),
+                ParseError::UnmatchedRBrace => uart.write_str("unmatched }"),
                 ParseError::OutOfMemory => uart.write_str("out of memory"),
                 ParseError::ListTooLong => uart.write_str("list too long"),
                 ParseError::TupleTooLong => uart.write_str("tuple too long"),
+                ParseError::MapTooLong => uart.write_str("map too long"),
+                ParseError::MapOddElements => {
+                    uart.write_str("map requires even number of elements");
+                }
+                ParseError::InvalidMetadata => uart.write_str("invalid metadata"),
+                ParseError::MissingFormAfterMetadata => {
+                    uart.write_str("expected form after metadata");
+                }
             }
         }
     }

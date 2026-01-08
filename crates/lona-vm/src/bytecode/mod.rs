@@ -41,6 +41,8 @@ pub mod op {
     pub const HALT: u8 = 7;
     /// Build tuple: `X(A) := [X(B)..X(B+C-1)]` (C elements starting at X(B))
     pub const BUILD_TUPLE: u8 = 8;
+    /// Build map: `X(A) := %{X(B)..X(B+C*2-1)}` (C key-value pairs starting at X(B))
+    pub const BUILD_MAP: u8 = 9;
 }
 
 /// Bit widths for instruction fields.

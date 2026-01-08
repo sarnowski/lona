@@ -67,36 +67,72 @@ pub mod id {
     pub const COUNT: u8 = 21;
     /// Symbol predicate: `(symbol? x)` -> is x a symbol?
     pub const IS_SYMBOL: u8 = 22;
+    /// Map predicate: `(map? x)` -> is x a map?
+    pub const IS_MAP: u8 = 23;
+    /// Get value from map (2-arg): `(get m k)` -> value or nil
+    pub const GET: u8 = 24;
+    /// Put value into map (persistent): `(put m k v)` -> new map
+    pub const PUT: u8 = 25;
+    /// Get keys from map: `(keys m)` -> list of keys
+    pub const KEYS: u8 = 26;
+    /// Get values from map: `(vals m)` -> list of values
+    pub const VALS: u8 = 27;
+    /// Get metadata: `(meta obj)` -> metadata map or nil
+    pub const META: u8 = 28;
+    /// Attach metadata: `(with-meta obj m)` -> obj with metadata
+    pub const WITH_META: u8 = 29;
+    /// Namespace predicate: `(namespace? x)` -> is x a namespace?
+    pub const IS_NAMESPACE: u8 = 30;
+    /// Create namespace: `(create-ns sym)` -> namespace
+    pub const CREATE_NS: u8 = 31;
+    /// Find namespace: `(find-ns sym)` -> namespace or nil
+    pub const FIND_NS: u8 = 32;
+    /// Get namespace name: `(ns-name ns)` -> symbol
+    pub const NS_NAME: u8 = 33;
+    /// Get namespace mappings: `(ns-map ns)` -> map
+    pub const NS_MAP: u8 = 34;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 23;
+pub const INTRINSIC_COUNT: usize = 35;
 
 /// Intrinsic name lookup table.
 const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
-    "+",         // 0: ADD
-    "-",         // 1: SUB
-    "*",         // 2: MUL
-    "/",         // 3: DIV
-    "mod",       // 4: MOD
-    "=",         // 5: EQ
-    "<",         // 6: LT
-    ">",         // 7: GT
-    "<=",        // 8: LE
-    ">=",        // 9: GE
-    "not",       // 10: NOT
-    "nil?",      // 11: IS_NIL
-    "integer?",  // 12: IS_INT
-    "string?",   // 13: IS_STR
-    "str",       // 14: STR
-    "keyword?",  // 15: IS_KEYWORD
-    "keyword",   // 16: KEYWORD
-    "name",      // 17: NAME
-    "namespace", // 18: NAMESPACE
-    "tuple?",    // 19: IS_TUPLE
-    "nth",       // 20: NTH
-    "count",     // 21: COUNT
-    "symbol?",   // 22: IS_SYMBOL
+    "+",          // 0: ADD
+    "-",          // 1: SUB
+    "*",          // 2: MUL
+    "/",          // 3: DIV
+    "mod",        // 4: MOD
+    "=",          // 5: EQ
+    "<",          // 6: LT
+    ">",          // 7: GT
+    "<=",         // 8: LE
+    ">=",         // 9: GE
+    "not",        // 10: NOT
+    "nil?",       // 11: IS_NIL
+    "integer?",   // 12: IS_INT
+    "string?",    // 13: IS_STR
+    "str",        // 14: STR
+    "keyword?",   // 15: IS_KEYWORD
+    "keyword",    // 16: KEYWORD
+    "name",       // 17: NAME
+    "namespace",  // 18: NAMESPACE
+    "tuple?",     // 19: IS_TUPLE
+    "nth",        // 20: NTH
+    "count",      // 21: COUNT
+    "symbol?",    // 22: IS_SYMBOL
+    "map?",       // 23: IS_MAP
+    "get",        // 24: GET
+    "put",        // 25: PUT
+    "keys",       // 26: KEYS
+    "vals",       // 27: VALS
+    "meta",       // 28: META
+    "with-meta",  // 29: WITH_META
+    "namespace?", // 30: IS_NAMESPACE
+    "create-ns",  // 31: CREATE_NS
+    "find-ns",    // 32: FIND_NS
+    "ns-name",    // 33: NS_NAME
+    "ns-map",     // 34: NS_MAP
 ];
 
 /// Look up an intrinsic ID by name.
@@ -187,6 +223,18 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::NTH => intrinsic_nth(proc, mem, intrinsic_id)?,
         id::COUNT => intrinsic_count(proc, mem, intrinsic_id)?,
         id::IS_SYMBOL => intrinsic_is_symbol(proc),
+        id::IS_MAP => intrinsic_is_map(proc),
+        id::GET => intrinsic_get(proc, argc, mem, intrinsic_id)?,
+        id::PUT => intrinsic_put(proc, mem, intrinsic_id)?,
+        id::KEYS => intrinsic_keys(proc, mem, intrinsic_id)?,
+        id::VALS => intrinsic_vals(proc, mem, intrinsic_id)?,
+        id::META => intrinsic_meta(proc, mem),
+        id::WITH_META => intrinsic_with_meta(proc, mem, intrinsic_id)?,
+        id::IS_NAMESPACE => intrinsic_is_namespace(proc),
+        id::CREATE_NS => intrinsic_create_ns(proc, mem, intrinsic_id)?,
+        id::FIND_NS => intrinsic_find_ns(proc, mem, intrinsic_id)?,
+        id::NS_NAME => intrinsic_ns_name(proc, mem, intrinsic_id)?,
+        id::NS_MAP => intrinsic_ns_map(proc, mem, intrinsic_id)?,
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };
     proc.x_regs[0] = result;
@@ -301,6 +349,10 @@ fn values_equal<M: MemorySpace>(a: Value, b: Value, proc: &Process, mem: &M) -> 
         }
         (Value::Tuple(addr_a), Value::Tuple(addr_b)) => {
             // Tuples compare by identity
+            addr_a == addr_b
+        }
+        (Value::Map(addr_a), Value::Map(addr_b)) => {
+            // Maps compare by identity
             addr_a == addr_b
         }
         _ => false, // Different types are never equal
@@ -450,6 +502,24 @@ fn write_value_to_buffer<M: MemorySpace>(
         Value::Tuple(_) => {
             // Print tuples as "<tuple>"
             let s = b"<tuple>";
+            if pos + s.len() > STR_BUFFER_SIZE {
+                return Err(IntrinsicError::OutOfMemory);
+            }
+            buffer[pos..pos + s.len()].copy_from_slice(s);
+            pos += s.len();
+        }
+        Value::Map(_) => {
+            // Print maps as "<map>"
+            let s = b"<map>";
+            if pos + s.len() > STR_BUFFER_SIZE {
+                return Err(IntrinsicError::OutOfMemory);
+            }
+            buffer[pos..pos + s.len()].copy_from_slice(s);
+            pos += s.len();
+        }
+        Value::Namespace(_) => {
+            // Print namespaces as "<namespace>"
+            let s = b"<namespace>";
             if pos + s.len() > STR_BUFFER_SIZE {
                 return Err(IntrinsicError::OutOfMemory);
             }
@@ -708,6 +778,19 @@ fn intrinsic_count<M: MemorySpace>(
             let len_i64 = i64::try_from(s.len()).map_err(|_| IntrinsicError::Overflow)?;
             Ok(Value::int(len_i64))
         }
+        Value::Map(_) => {
+            // Count map entries
+            let map = proc
+                .read_map(mem, coll)
+                .ok_or(IntrinsicError::OutOfMemory)?;
+            let mut count: i64 = 0;
+            let mut current = map.entries;
+            while let Some(pair) = proc.read_pair(mem, current) {
+                count += 1;
+                current = pair.rest;
+            }
+            Ok(Value::int(count))
+        }
         _ => Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
@@ -720,4 +803,375 @@ fn intrinsic_count<M: MemorySpace>(
 
 const fn intrinsic_is_symbol(proc: &Process) -> Value {
     Value::bool(matches!(proc.x_regs[1], Value::Symbol(_)))
+}
+
+// --- Map intrinsics ---
+
+const fn intrinsic_is_map(proc: &Process) -> Value {
+    Value::bool(proc.x_regs[1].is_map())
+}
+
+/// Get value from map by key.
+///
+/// `(get m k)` - returns value or nil
+/// `(get m k default)` - returns value or default
+fn intrinsic_get<M: MemorySpace>(
+    proc: &Process,
+    argc: u8,
+    mem: &M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let map_val = proc.x_regs[1];
+    let key = proc.x_regs[2];
+    let default = if argc >= 3 {
+        proc.x_regs[3]
+    } else {
+        Value::Nil
+    };
+
+    let Value::Map(_) = map_val else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "map",
+        });
+    };
+
+    let map = proc
+        .read_map(mem, map_val)
+        .ok_or(IntrinsicError::OutOfMemory)?;
+
+    // Search the association list for the key
+    let mut current = map.entries;
+    while let Some(pair) = proc.read_pair(mem, current) {
+        // Each pair.first is a [key value] tuple
+        if let Some(entry_key) = proc.read_tuple_element(mem, pair.first, 0) {
+            if values_equal(entry_key, key, proc, mem) {
+                // Found the key, return the value
+                return proc
+                    .read_tuple_element(mem, pair.first, 1)
+                    .ok_or(IntrinsicError::OutOfMemory);
+            }
+        }
+        current = pair.rest;
+    }
+
+    // Key not found, return default
+    Ok(default)
+}
+
+/// Put key-value pair into map (persistent).
+///
+/// `(put m k v)` - returns new map with k->v added/updated
+fn intrinsic_put<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let map_val = proc.x_regs[1];
+    let key = proc.x_regs[2];
+    let value = proc.x_regs[3];
+
+    let Value::Map(_) = map_val else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "map",
+        });
+    };
+
+    let map = proc
+        .read_map(mem, map_val)
+        .ok_or(IntrinsicError::OutOfMemory)?;
+
+    // Create new [key value] tuple
+    let kv_elements = [key, value];
+    let kv_tuple = proc
+        .alloc_tuple(mem, &kv_elements)
+        .ok_or(IntrinsicError::OutOfMemory)?;
+
+    // Prepend to existing entries (structural sharing)
+    let new_entries = proc
+        .alloc_pair(mem, kv_tuple, map.entries)
+        .ok_or(IntrinsicError::OutOfMemory)?;
+
+    // Allocate new map with updated entries
+    proc.alloc_map(mem, new_entries)
+        .ok_or(IntrinsicError::OutOfMemory)
+}
+
+/// Get list of keys from map.
+///
+/// `(keys m)` - returns list of keys
+fn intrinsic_keys<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let map_val = proc.x_regs[1];
+
+    let Value::Map(_) = map_val else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "map",
+        });
+    };
+
+    let map = proc
+        .read_map(mem, map_val)
+        .ok_or(IntrinsicError::OutOfMemory)?;
+
+    // Build list of keys from the association list
+    // We need to reverse the order since we're prepending
+    let mut keys = Value::Nil;
+    let mut current = map.entries;
+    while let Some(pair) = proc.read_pair(mem, current) {
+        if let Some(key) = proc.read_tuple_element(mem, pair.first, 0) {
+            keys = proc
+                .alloc_pair(mem, key, keys)
+                .ok_or(IntrinsicError::OutOfMemory)?;
+        }
+        current = pair.rest;
+    }
+
+    // Reverse the list to match iteration order
+    reverse_list(proc, mem, keys)
+}
+
+/// Get list of values from map.
+///
+/// `(vals m)` - returns list of values
+fn intrinsic_vals<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let map_val = proc.x_regs[1];
+
+    let Value::Map(_) = map_val else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "map",
+        });
+    };
+
+    let map = proc
+        .read_map(mem, map_val)
+        .ok_or(IntrinsicError::OutOfMemory)?;
+
+    // Build list of values from the association list
+    let mut vals = Value::Nil;
+    let mut current = map.entries;
+    while let Some(pair) = proc.read_pair(mem, current) {
+        if let Some(val) = proc.read_tuple_element(mem, pair.first, 1) {
+            vals = proc
+                .alloc_pair(mem, val, vals)
+                .ok_or(IntrinsicError::OutOfMemory)?;
+        }
+        current = pair.rest;
+    }
+
+    // Reverse the list to match iteration order
+    reverse_list(proc, mem, vals)
+}
+
+/// Reverse a list (helper for keys/vals).
+fn reverse_list<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    list: Value,
+) -> Result<Value, IntrinsicError> {
+    let mut result = Value::Nil;
+    let mut current = list;
+    while let Some(pair) = proc.read_pair(mem, current) {
+        result = proc
+            .alloc_pair(mem, pair.first, result)
+            .ok_or(IntrinsicError::OutOfMemory)?;
+        current = pair.rest;
+    }
+    Ok(result)
+}
+
+// --- Metadata intrinsics ---
+
+/// Get metadata for an object.
+///
+/// `(meta obj)` - returns metadata map or nil
+fn intrinsic_meta<M: MemorySpace>(proc: &Process, mem: &M) -> Value {
+    let obj = proc.x_regs[1];
+
+    // Get the heap address of the object
+    let addr = match obj {
+        Value::String(addr)
+        | Value::Pair(addr)
+        | Value::Symbol(addr)
+        | Value::Keyword(addr)
+        | Value::Tuple(addr)
+        | Value::Map(addr)
+        | Value::Namespace(addr) => addr,
+        // Immediates don't have metadata
+        Value::Nil | Value::Bool(_) | Value::Int(_) => return Value::Nil,
+    };
+
+    // Look up in process metadata table
+    proc.get_metadata(addr).map_or(Value::Nil, |meta_addr| {
+        // Return the metadata map
+        let _: crate::value::HeapMap = mem.read(meta_addr);
+        Value::map(meta_addr)
+    })
+}
+
+/// Attach metadata to an object.
+///
+/// `(with-meta obj m)` - returns obj with metadata attached
+fn intrinsic_with_meta<M: MemorySpace>(
+    proc: &mut Process,
+    _mem: &M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let obj = proc.x_regs[1];
+    let meta = proc.x_regs[2];
+
+    // Metadata must be a map (or nil to clear)
+    let meta_addr = match meta {
+        Value::Nil => {
+            // Clear metadata by not setting any - just return the object
+            return Ok(obj);
+        }
+        Value::Map(addr) => addr,
+        _ => {
+            return Err(IntrinsicError::TypeError {
+                intrinsic: id,
+                arg: 1,
+                expected: "map",
+            });
+        }
+    };
+
+    // Get the heap address of the object
+    let obj_addr = match obj {
+        Value::String(addr)
+        | Value::Pair(addr)
+        | Value::Symbol(addr)
+        | Value::Keyword(addr)
+        | Value::Tuple(addr)
+        | Value::Map(addr)
+        | Value::Namespace(addr) => addr,
+        // Immediates can't have metadata
+        Value::Nil | Value::Bool(_) | Value::Int(_) => {
+            return Err(IntrinsicError::TypeError {
+                intrinsic: id,
+                arg: 0,
+                expected: "reference type",
+            });
+        }
+    };
+
+    // Store in process metadata table
+    proc.set_metadata(obj_addr, meta_addr);
+
+    // Return the same object (metadata doesn't change the value)
+    Ok(obj)
+}
+
+// --- Namespace intrinsics ---
+
+/// Check if value is a namespace.
+///
+/// `(namespace? x)` - returns true if x is a namespace
+const fn intrinsic_is_namespace(proc: &Process) -> Value {
+    Value::bool(proc.x_regs[1].is_namespace())
+}
+
+/// Create a namespace.
+///
+/// `(create-ns sym)` - creates or returns existing namespace with given name
+fn intrinsic_create_ns<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let name = proc.x_regs[1];
+
+    // Name must be a symbol
+    let Value::Symbol(_) = name else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "symbol",
+        });
+    };
+
+    // Create or find existing namespace
+    proc.get_or_create_namespace(mem, name)
+        .ok_or(IntrinsicError::OutOfMemory)
+}
+
+/// Find a namespace by name.
+///
+/// `(find-ns sym)` - returns namespace or nil if not found
+fn intrinsic_find_ns<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let name = proc.x_regs[1];
+
+    // Name must be a symbol
+    let Value::Symbol(_) = name else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "symbol",
+        });
+    };
+
+    // Find namespace, return nil if not found
+    Ok(proc.find_namespace(mem, name).unwrap_or(Value::Nil))
+}
+
+/// Get namespace name.
+///
+/// `(ns-name ns)` - returns the namespace's name symbol
+fn intrinsic_ns_name<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let ns_val = proc.x_regs[1];
+
+    // Must be a namespace
+    let ns = proc
+        .read_namespace(mem, ns_val)
+        .ok_or(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "namespace",
+        })?;
+
+    Ok(ns.name)
+}
+
+/// Get namespace mappings.
+///
+/// `(ns-map ns)` - returns the namespace's symbol->var mappings
+fn intrinsic_ns_map<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let ns_val = proc.x_regs[1];
+
+    // Must be a namespace
+    let ns = proc
+        .read_namespace(mem, ns_val)
+        .ok_or(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "namespace",
+        })?;
+
+    Ok(ns.mappings)
 }

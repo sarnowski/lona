@@ -20,6 +20,9 @@ use crate::value::Value;
 /// Maximum number of elements in a tuple literal.
 const MAX_TUPLE_ELEMENTS: usize = 64;
 
+/// Maximum number of key-value pairs in a map literal.
+const MAX_MAP_PAIRS: usize = 64;
+
 /// Runtime error during VM execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeError {
@@ -152,6 +155,41 @@ impl Vm {
                         .ok_or(RuntimeError::OutOfMemory)?;
 
                     proc.x_regs[a] = tuple;
+                }
+
+                op::BUILD_MAP => {
+                    let a = decode_a(instr) as usize;
+                    let b = decode_b(instr) as usize; // start register
+                    let c = decode_c(instr) as usize; // number of pairs
+
+                    // Build the map as association list from pairs in registers
+                    // Registers are: key1, val1, key2, val2, ...
+                    let pair_count = c.min(MAX_MAP_PAIRS);
+
+                    // Build entries list from back to front
+                    let mut entries = Value::Nil;
+                    for i in (0..pair_count).rev() {
+                        let key_reg = b + i * 2;
+                        let val_reg = b + i * 2 + 1;
+
+                        // Build [key value] tuple
+                        let kv_elements = [proc.x_regs[key_reg], proc.x_regs[val_reg]];
+                        let kv_tuple = proc
+                            .alloc_tuple(mem, &kv_elements)
+                            .ok_or(RuntimeError::OutOfMemory)?;
+
+                        // Prepend to entries list
+                        entries = proc
+                            .alloc_pair(mem, kv_tuple, entries)
+                            .ok_or(RuntimeError::OutOfMemory)?;
+                    }
+
+                    // Allocate map with entries
+                    let map = proc
+                        .alloc_map(mem, entries)
+                        .ok_or(RuntimeError::OutOfMemory)?;
+
+                    proc.x_regs[a] = map;
                 }
 
                 _ => {

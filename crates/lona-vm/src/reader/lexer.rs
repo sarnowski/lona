@@ -21,8 +21,14 @@ pub enum Token {
     LBracket,
     /// Right bracket `]`
     RBracket,
+    /// Right brace `}`
+    RBrace,
+    /// Map start `%{`
+    MapStart,
     /// Quote `'`
     Quote,
+    /// Metadata prefix `^`
+    Caret,
     /// The `nil` literal
     Nil,
     /// The `true` literal
@@ -186,9 +192,28 @@ impl<'a> Lexer<'a> {
                 self.chars.next();
                 Ok(Some(Token::RBracket))
             }
+            '}' => {
+                self.chars.next();
+                Ok(Some(Token::RBrace))
+            }
+            '%' => {
+                // Check for %{ (map start)
+                self.chars.next(); // consume '%'
+                if matches!(self.chars.peek(), Some('{')) {
+                    self.chars.next(); // consume '{'
+                    Ok(Some(Token::MapStart))
+                } else {
+                    // Just a % symbol
+                    self.lex_symbol_rest('%')
+                }
+            }
             '\'' => {
                 self.chars.next();
                 Ok(Some(Token::Quote))
+            }
+            '^' => {
+                self.chars.next();
+                Ok(Some(Token::Caret))
             }
             '"' => self.lex_string(),
             '0'..='9' => self.lex_number(),
@@ -376,22 +401,7 @@ fn is_symbol_start(c: char) -> bool {
     c.is_alphabetic()
         || matches!(
             c,
-            '!' | '$'
-                | '%'
-                | '&'
-                | '*'
-                | '+'
-                | '-'
-                | '.'
-                | '/'
-                | '<'
-                | '='
-                | '>'
-                | '?'
-                | '@'
-                | '^'
-                | '_'
-                | '~'
+            '!' | '$' | '&' | '*' | '+' | '-' | '.' | '/' | '<' | '=' | '>' | '?' | '@' | '_' | '~'
         )
 }
 
@@ -404,22 +414,7 @@ fn is_keyword_start(c: char) -> bool {
     c.is_alphabetic()
         || matches!(
             c,
-            '!' | '$'
-                | '%'
-                | '&'
-                | '*'
-                | '+'
-                | '-'
-                | '.'
-                | '/'
-                | '<'
-                | '='
-                | '>'
-                | '?'
-                | '@'
-                | '^'
-                | '_'
-                | '~'
+            '!' | '$' | '&' | '*' | '+' | '-' | '.' | '/' | '<' | '=' | '>' | '?' | '@' | '_' | '~'
         )
 }
 
@@ -429,7 +424,11 @@ fn is_keyword_continue(c: char) -> bool {
 }
 
 fn is_delimiter(c: char) -> bool {
-    c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '"' | '\'' | ';' | ',')
+    c.is_whitespace()
+        || matches!(
+            c,
+            '(' | ')' | '[' | ']' | '{' | '}' | '"' | '\'' | ';' | ',' | '^'
+        )
 }
 
 /// Tokenize an entire string into a vector of tokens.

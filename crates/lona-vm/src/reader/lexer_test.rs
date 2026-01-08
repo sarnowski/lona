@@ -333,3 +333,60 @@ fn lex_keyword_and_tuple() {
         ]
     );
 }
+
+// Phase 2: Map and metadata tokens
+
+#[test]
+fn lex_map_start() {
+    assert_eq!(
+        tokenize("%{:a 1}").unwrap(),
+        vec![
+            Token::MapStart,
+            Token::Keyword(TokenString::try_from_str("a").unwrap()),
+            Token::Int(1),
+            Token::RBrace
+        ]
+    );
+}
+
+#[test]
+fn lex_empty_map() {
+    assert_eq!(
+        tokenize("%{}").unwrap(),
+        vec![Token::MapStart, Token::RBrace]
+    );
+}
+
+#[test]
+fn lex_metadata_caret() {
+    assert_eq!(
+        tokenize("^:private").unwrap(),
+        vec![
+            Token::Caret,
+            Token::Keyword(TokenString::try_from_str("private").unwrap())
+        ]
+    );
+}
+
+#[test]
+fn lex_metadata_map() {
+    assert_eq!(
+        tokenize("^%{:doc \"hello\"}").unwrap(),
+        vec![
+            Token::Caret,
+            Token::MapStart,
+            Token::Keyword(TokenString::try_from_str("doc").unwrap()),
+            Token::String(TokenString::try_from_str("hello").unwrap()),
+            Token::RBrace
+        ]
+    );
+}
+
+#[test]
+fn lex_percent_symbol() {
+    // Just % followed by a letter should be a symbol starting with %
+    assert_eq!(
+        tokenize("%foo").unwrap(),
+        vec![Token::Symbol(TokenString::try_from_str("%foo").unwrap())]
+    );
+}

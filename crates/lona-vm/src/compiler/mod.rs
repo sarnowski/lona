@@ -126,6 +126,12 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
             }
             Value::Pair(_) => self.compile_list(expr, target, temp_base),
             Value::Tuple(_) => self.compile_tuple(expr, target, temp_base),
+            Value::Map(_) => self.compile_map(expr, target, temp_base),
+            Value::Namespace(_) => {
+                // Namespaces are self-evaluating constants
+                self.compile_constant(expr, target)?;
+                Ok(temp_base)
+            }
         }
     }
 
@@ -231,6 +237,73 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
             target,
             u16::from(temp_base),
             len as u16,
+        ));
+
+        Ok(current_next_temp)
+    }
+
+    /// Compile a map literal.
+    ///
+    /// `%{:a 1 :b 2}` evaluates each key and value, then builds a map.
+    fn compile_map(&mut self, map: Value, target: u8, temp_base: u8) -> Result<u8, CompileError> {
+        // Read the map's entries (association list)
+        let map_val = self
+            .proc
+            .read_map(self.mem, map)
+            .ok_or(CompileError::InvalidSyntax)?;
+
+        // Count entries and collect key-value pairs
+        let mut entries = Vec::new();
+        let mut current = map_val.entries;
+        while let Some(pair) = self.proc.read_pair(self.mem, current) {
+            // Each pair.first is a [key value] tuple
+            let kv = pair.first;
+            let key = self
+                .proc
+                .read_tuple_element(self.mem, kv, 0)
+                .ok_or(CompileError::InvalidSyntax)?;
+            let val = self
+                .proc
+                .read_tuple_element(self.mem, kv, 1)
+                .ok_or(CompileError::InvalidSyntax)?;
+            entries.push((key, val));
+            current = pair.rest;
+        }
+
+        if entries.is_empty() {
+            // Empty map - emit BUILD_MAP with 0 pairs
+            self.chunk.emit(encode_abc(op::BUILD_MAP, target, 0, 0));
+            return Ok(temp_base);
+        }
+
+        // Each pair needs 2 registers (key, value)
+        let pair_count = entries.len() as u8;
+        let elem_count = pair_count
+            .checked_mul(2)
+            .ok_or(CompileError::ExpressionTooComplex)?;
+        let next_temp = temp_base
+            .checked_add(elem_count)
+            .ok_or(CompileError::ExpressionTooComplex)?;
+
+        // Compile each key and value to temp registers
+        let mut current_next_temp = next_temp;
+        for (i, (key, val)) in entries.iter().enumerate() {
+            let key_reg = temp_base
+                .checked_add((i * 2) as u8)
+                .ok_or(CompileError::ExpressionTooComplex)?;
+            let val_reg = temp_base
+                .checked_add((i * 2 + 1) as u8)
+                .ok_or(CompileError::ExpressionTooComplex)?;
+            current_next_temp = self.compile_expr(*key, key_reg, current_next_temp)?;
+            current_next_temp = self.compile_expr(*val, val_reg, current_next_temp)?;
+        }
+
+        // Emit BUILD_MAP: target := %{temp_base..temp_base+pair_count*2-1}
+        self.chunk.emit(encode_abc(
+            op::BUILD_MAP,
+            target,
+            u16::from(temp_base),
+            u16::from(pair_count),
         ));
 
         Ok(current_next_temp)
@@ -410,6 +483,11 @@ pub fn disassemble(chunk: &Chunk) -> std::string::String {
                 let b = decode_b(instr);
                 let c = decode_c(instr);
                 let _ = writeln!(out, "BUILD_TUPLE X{a}, X{b}, {c}");
+            }
+            op::BUILD_MAP => {
+                let b = decode_b(instr);
+                let c = decode_c(instr);
+                let _ = writeln!(out, "BUILD_MAP X{a}, X{b}, {c} pairs");
             }
             _ => {
                 let _ = writeln!(out, "??? opcode={opcode}");
