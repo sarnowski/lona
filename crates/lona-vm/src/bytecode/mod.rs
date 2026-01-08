@@ -39,6 +39,8 @@ pub mod op {
     pub const RETURN: u8 = 6;
     /// Halt execution: stop VM
     pub const HALT: u8 = 7;
+    /// Build tuple: `X(A) := [X(B)..X(B+C-1)]` (C elements starting at X(B))
+    pub const BUILD_TUPLE: u8 = 8;
 }
 
 /// Bit widths for instruction fields.

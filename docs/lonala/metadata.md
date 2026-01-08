@@ -10,16 +10,16 @@ Metadata is attached using the `^` reader macro:
 
 ```clojure
 ;; Full map syntax
-(def ^{:doc "The ratio of circumference to diameter" :added "1.0"} pi 3.14159)
+(def ^%{:doc "The ratio of circumference to diameter" :added "1.0"} pi 3.14159)
 
 ;; Shorthand for boolean true
 (def ^:private helper-fn (fn* [x] ...))
 
 ;; Multiple shorthands
-(def ^:private ^:process-local *counter* 0)
+(def ^:private ^:process-bound *counter* 0)
 
 ;; Combined
-(def ^:private ^{:doc "Internal counter"} *counter* 0)
+(def ^:private ^%{:doc "Internal counter"} *counter* 0)
 ```
 
 ---
@@ -67,7 +67,7 @@ The following metadata keys have special meaning to the compiler and runtime.
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `:process-local` | boolean | Each process has its own value. Inherited from parent at spawn time. |
+| `:process-bound` | boolean | Each process has its own value. Inherited from parent at spawn time. |
 
 ### Compiler-Added
 
@@ -87,9 +87,9 @@ These keys are added automatically by the compiler:
 The `:native` metadata connects a var to a VM intrinsic function:
 
 ```clojure
-(def ^{:native true
-       :doc "Returns the sum of nums. (+) returns 0."
-       :arglists '([] [x] [x y] [x y & more])}
+(def ^%{:native true
+        :doc "Returns the sum of nums. (+) returns 0."
+        :arglists '([] [x] [x y] [x y & more])}
   +)
 ```
 
@@ -106,10 +106,10 @@ The `:native` metadata connects a var to a VM intrinsic function:
 Special forms are a subset of natives with `:special-form true`:
 
 ```clojure
-(def ^{:native true
-       :special-form true
-       :doc "Creates or updates a var binding."
-       :arglists '([name] [name value])}
+(def ^%{:native true
+        :special-form true
+        :doc "Creates or updates a var binding."
+        :arglists '([name] [name value])}
   def)
 ```
 
@@ -136,7 +136,7 @@ VM seeds: def
 (def ^:native first ...)
 ... all other intrinsics ...
     ↓
-(def ^{:macro true} defmacro ...)
+(def ^%{:macro true} defmacro ...)
     ↓
 Derived macros and functions
 ```
@@ -148,9 +148,9 @@ Derived macros and functions
 The `:macro` metadata marks a var as a macro:
 
 ```clojure
-(def ^{:macro true
-       :doc "Evaluates test. If truthy, evaluates body."
-       :arglists '([test & body])}
+(def ^%{:macro true
+        :doc "Evaluates test. If truthy, evaluates body."
+        :arglists '([test & body])}
   when
   (fn* [test & body]
     `(match ~test
@@ -168,22 +168,23 @@ The `:macro` metadata marks a var as a macro:
 
 ---
 
-## Process-Local Vars
+## Process-Bound Vars
 
-The `:process-local` metadata creates per-process bindings:
+The `:process-bound` metadata creates per-process bindings:
 
 ```clojure
-(def ^{:process-local true
-       :doc "Current namespace for this process."}
+(def ^%{:process-bound true
+        :doc "Current namespace for this process."}
   *ns*
   (find-ns 'lona.core))
 ```
 
 **Behavior:**
 
-- Each process has its own copy of the value
-- `def` on a process-local var modifies only the current process's copy
-- Spawned processes inherit parent's values at spawn time
+- A single Var exists in the realm with the `PROCESS_BOUND` flag
+- Each process can shadow the root value via a per-process binding table
+- `def` on a process-bound var updates only the current process's binding (not the realm root)
+- Spawned processes inherit parent's binding values at spawn time
 
 **Use cases:**
 
@@ -260,7 +261,7 @@ Two values differing only in metadata are equal. This allows metadata to annotat
 | `:doc` | User | Documentation string |
 | `:arglists` | User/Compiler | Argument signatures |
 | `:private` | User/`defn-` | Mark as internal |
-| `:process-local` | User | Per-process binding |
+| `:process-bound` | User | Per-process binding |
 | `:name` | Compiler | Var's simple name |
 | `:ns` | Compiler | Containing namespace |
 | `:file` | Compiler | Source file |

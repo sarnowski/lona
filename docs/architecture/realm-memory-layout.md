@@ -476,47 +476,67 @@ This section explains what vars, functions, and closures actually *are* - the da
 
 A **Var** is a named, mutable binding in a namespace. It provides indirection that enables live code updates.
 
+Vars use a two-level structure for atomic updates (MVCC-style):
+
 ```
 VAR STRUCTURE
 ════════════════════════════════════════════════════════════════════════
 
-struct Var {
-    name: Symbol,               // e.g., 'square
-    namespace: Symbol,          // e.g., 'my-app.core
-    root: *const Value,         // Pointer to current value
-    meta: *const Map,           // {:doc "..." :arglists ([x]) ...}
-    source_form: *const Value,  // Original (def ...) form
+struct VarSlot {
+    content: AtomicPtr<VarContent>,  // Acquire on load, Release on store
+    // NOTE: VarSlot's own Vaddr is used as VarId for process-bound lookup
+    // No separate id field needed - the address IS the unique identifier
 }
 
-SIZE: ~40 bytes
+struct VarContent {
+    name: Vaddr,           // Interned symbol
+    namespace: Vaddr,      // Containing namespace
+    root: Value,           // Inline 16-byte tagged value (NOT a pointer)
+    flags: u32,            // PROCESS_BOUND | NATIVE | MACRO | PRIVATE
+}
+
+// VarId is simply the VarSlot's address (stable in realm code region)
+type VarId = Vaddr;
+
+SIZE: VarSlot ~8 bytes, VarContent ~40 bytes
 LOCATION: Code region (owned by defining realm)
 ```
+
+**Design decisions**:
+- `root` is an inline `Value` (not a pointer) so vars can hold any Lonala value directly
+- Metadata is stored in a separate realm metadata table, not inline in VarContent
+- VarSlots have stable addresses for bytecode pointers; VarContent is replaced atomically on update
+- VarSlot address serves as VarId for process-bound lookups (no separate id field needed)
 
 **Key insight**: Vars are *indirect* references. Code calls functions through vars, not direct pointers. When a var is rebound, all callers see the new value automatically.
 
 ### CompiledFn Structure
 
-A **CompiledFn** is the result of compiling a `fn*` form:
+A **CompiledFn** is the result of compiling a `fn*` form. It represents a pure function without captures.
 
 ```
 COMPILEDFN STRUCTURE
 ════════════════════════════════════════════════════════════════════════
 
 struct CompiledFn {
-    bytecode: *const u8,            // Pointer to bytecode
-    bytecode_len: u32,              // Length in bytes
-    arity: u8,                      // Required parameters
-    variadic: bool,                 // Accepts &rest?
-    source_form: *const Value,      // Original (fn* ...) form
-    params: *const Vector,          // Parameter names [x y z]
-    closed_over_names: *const Vector,  // Captured var names, or nil
-    source_file: *const String,     // Source file path
-    source_line: u32,               // Line number
+    bytecode: Vaddr,            // Pointer to bytecode array
+    bytecode_len: u32,          // Length in bytes
+    constants: Vaddr,           // Pointer to constant pool (array of Values)
+    constants_len: u16,         // Number of constants
+    arity: u8,                  // Required parameters
+    variadic: bool,             // Accepts &rest?
+    num_locals: u8,             // Y registers needed
+    params: Vaddr,              // Parameter names tuple [x y z]
+    source_form: Vaddr,         // Original (fn* ...) form (for debugging/macros)
+    source_file: Vaddr,         // Source file path string (or nil)
+    source_line: u32,           // Line number in source file
 }
 
 SIZE: ~56 bytes
-LOCATION: Code region
+LOCATION: Initially on process heap; copied to code region by `def`
 ```
+
+**Value type**: `Value::CompiledFn(Vaddr)` - separate from Closure
 
 ### Closure Structure
 
@@ -527,17 +547,22 @@ CLOSURE STRUCTURE
 ════════════════════════════════════════════════════════════════════════
 
 struct Closure {
-    function: *const CompiledFn,
-    closed_over_values: *const Vector,  // Captured values
+    function: Vaddr,            // → CompiledFn
+    captures: Vaddr,            // → Tuple of captured values
 }
+
+SIZE: ~16 bytes
+LOCATION: Initially on process heap; copied to code region by `def`
 
 Example:
   (def add-5 ((fn* [x] (fn* [y] (+ x y))) 5))
 
   add-5 is a Closure:
     function → CompiledFn for (fn* [y] (+ x y))
-    closed_over_values → [5]
+    captures → [5]
 ```
+
+**Value type**: `Value::Closure(Vaddr)` - separate from CompiledFn
 
 ### The `def` Flow: Process Heap → Realm Storage
 
@@ -554,20 +579,36 @@ DEF FLOW
 
 2. EVALUATOR: Recognizes def special form
    └── Extracts name: 'square
-   └── Evaluates value expr → triggers compiler
+   └── Evaluates value expr: (fn* [x] (* x x))
 
-3. COMPILER: Produces CompiledFn in CODE REGION
-   └── Bytecode for (* x x)
-   └── Preserves source form
+3. fn* COMPILATION: Produces CompiledFn on PROCESS HEAP
+   └── Compiles body to bytecode
+   └── Allocates CompiledFn struct on process heap
+   └── Returns Value::Function(process_heap_addr)
 
-4. VAR CREATION: Creates Var in CODE REGION
-   └── name: 'square
-   └── root: → CompiledFn
+4. def DECIDES LOCATION:
+   If regular var (not process-bound):
+     └── Deep copy CompiledFn to REALM code region
+     └── Copy bytecode, constants, source form
+     └── Create/update VarContent with root = Value::Function(realm_addr)
+   If process-bound var:
+     └── Store Value::Function in process.bindings
+     └── CompiledFn stays on process heap
+
+5. VAR CREATION/UPDATE: In REALM code region
+   └── VarSlot atomically points to new VarContent
    └── Updates namespace binding table
 
-5. CLEANUP: Process heap AST becomes garbage
-   └── Var and CompiledFn persist in realm storage
+6. CLEANUP: Process heap AST becomes garbage
+   └── VarSlot and VarContent persist in realm storage
+   └── For regular vars, CompiledFn is now in realm (process copy is garbage)
 ```
+
+**Why compile to process heap first?**
+- Anonymous functions `(spawn (fn* [] ...))` stay in process, never bound to vars
+- Process-bound vars `(def ^:process-bound *handler* (fn* ...))` keep functions in process
+- Only `def` to regular vars triggers deep copy to realm
+- This uniform flow simplifies the compiler
 
 ### Late Binding Semantics
 

@@ -43,10 +43,20 @@ mod process_test;
 use crate::Vaddr;
 use crate::bytecode::Chunk;
 use crate::platform::MemorySpace;
-use crate::value::{HeapString, Pair, Value};
+use crate::value::{HeapString, HeapTuple, Pair, Value};
 
 /// Number of X registers (temporaries).
 pub const X_REG_COUNT: usize = 256;
+
+/// Maximum number of interned keywords per process.
+///
+/// Keywords are interned so that identical keyword literals share the same address.
+/// This enables O(1) equality comparison via address comparison.
+///
+/// Note: This is a temporary per-process table. Once realm-level interning is
+/// implemented (Phase 4+), most keywords will be interned at the realm level,
+/// and this table will only handle dynamically-constructed keywords.
+pub const MAX_INTERNED_KEYWORDS: usize = 1024;
 
 /// Initial young heap size (48 KB).
 pub const INITIAL_YOUNG_HEAP_SIZE: usize = 48 * 1024;
@@ -105,6 +115,13 @@ pub struct Process {
     pub x_regs: [Value; X_REG_COUNT],
     /// Current bytecode chunk being executed.
     pub chunk: Option<Chunk>,
+
+    // Interning tables
+    /// Interned keywords (addresses of keyword `HeapString`s on the heap).
+    /// Keywords are interned so that identical keyword literals share the same address.
+    keyword_intern: [Vaddr; MAX_INTERNED_KEYWORDS],
+    /// Number of interned keywords.
+    keyword_intern_len: usize,
 }
 
 impl Process {
@@ -143,6 +160,9 @@ impl Process {
             ip: 0,
             x_regs: [Value::Nil; X_REG_COUNT],
             chunk: None,
+            // Interning tables
+            keyword_intern: [Vaddr::new(0); MAX_INTERNED_KEYWORDS],
+            keyword_intern_len: 0,
         }
     }
 
@@ -289,12 +309,86 @@ impl Process {
         Some(Value::symbol(addr))
     }
 
+    /// Allocate a keyword on the young heap (same as string but tagged differently).
+    ///
+    /// Keywords are interned: the same keyword literal will return the same address.
+    /// This enables O(1) equality comparison via address comparison.
+    ///
+    /// Returns a `Value::Keyword` pointing to the allocated keyword, or `None` if OOM.
+    pub fn alloc_keyword<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Value> {
+        // Check intern table for existing keyword
+        for i in 0..self.keyword_intern_len {
+            let addr = self.keyword_intern[i];
+            let header: HeapString = mem.read(addr);
+            if header.len as usize == name.len() {
+                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
+                let bytes = mem.slice(data_addr, header.len as usize);
+                if bytes == name.as_bytes() {
+                    // Found existing interned keyword
+                    return Some(Value::keyword(addr));
+                }
+            }
+        }
+
+        // Not found, allocate new keyword
+        let len = name.len();
+        let total_size = HeapString::alloc_size(len);
+
+        // Allocate space (align to 4 bytes for the header)
+        let addr = self.alloc(total_size, 4)?;
+
+        // Write header
+        let header = HeapString { len: len as u32 };
+        mem.write(addr, header);
+
+        // Write string data
+        let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
+        let dest = mem.slice_mut(data_addr, len);
+        dest.copy_from_slice(name.as_bytes());
+
+        // Add to intern table if not full
+        if self.keyword_intern_len < MAX_INTERNED_KEYWORDS {
+            self.keyword_intern[self.keyword_intern_len] = addr;
+            self.keyword_intern_len += 1;
+        }
+
+        Some(Value::keyword(addr))
+    }
+
+    /// Allocate a tuple on the young heap.
+    ///
+    /// Returns a `Value::Tuple` pointing to the allocated tuple, or `None` if OOM.
+    pub fn alloc_tuple<M: MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        elements: &[Value],
+    ) -> Option<Value> {
+        let len = elements.len();
+        let total_size = HeapTuple::alloc_size(len);
+
+        // Allocate space (align to 8 bytes for Value fields)
+        let addr = self.alloc(total_size, 8)?;
+
+        // Write header
+        let header = HeapTuple { len: len as u32 };
+        mem.write(addr, header);
+
+        // Write elements
+        let data_addr = addr.add(HeapTuple::HEADER_SIZE as u64);
+        for (i, &elem) in elements.iter().enumerate() {
+            let elem_addr = data_addr.add((i * core::mem::size_of::<Value>()) as u64);
+            mem.write(elem_addr, elem);
+        }
+
+        Some(Value::tuple(addr))
+    }
+
     /// Read a heap-allocated string.
     ///
-    /// Returns `None` if the value is not a string or symbol.
+    /// Returns `None` if the value is not a string, symbol, or keyword.
     #[must_use]
     pub fn read_string<'a, M: MemorySpace>(&self, mem: &'a M, value: Value) -> Option<&'a str> {
-        let (Value::String(addr) | Value::Symbol(addr)) = value else {
+        let (Value::String(addr) | Value::Symbol(addr) | Value::Keyword(addr)) = value else {
             return None;
         };
 
@@ -316,5 +410,42 @@ impl Process {
         };
 
         Some(mem.read(addr))
+    }
+
+    /// Read a tuple's length from the heap.
+    ///
+    /// Returns `None` if the value is not a tuple.
+    #[must_use]
+    pub fn read_tuple_len<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<usize> {
+        let Value::Tuple(addr) = value else {
+            return None;
+        };
+
+        let header: HeapTuple = mem.read(addr);
+        Some(header.len as usize)
+    }
+
+    /// Read a tuple element at the given index.
+    ///
+    /// Returns `None` if the value is not a tuple or index is out of bounds.
+    #[must_use]
+    pub fn read_tuple_element<M: MemorySpace>(
+        &self,
+        mem: &M,
+        value: Value,
+        index: usize,
+    ) -> Option<Value> {
+        let Value::Tuple(addr) = value else {
+            return None;
+        };
+
+        let header: HeapTuple = mem.read(addr);
+        if index >= header.len as usize {
+            return None;
+        }
+
+        let data_addr = addr.add(HeapTuple::HEADER_SIZE as u64);
+        let elem_addr = data_addr.add((index * core::mem::size_of::<Value>()) as u64);
+        Some(mem.read(elem_addr))
     }
 }

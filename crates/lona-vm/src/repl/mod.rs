@@ -118,8 +118,10 @@ fn print_read_error<U: Uart>(e: &ReadError, uart: &mut U) {
                 ParseError::UnexpectedEof => uart.write_str("unexpected end of input"),
                 ParseError::UnexpectedToken(_) => uart.write_str("unexpected token"),
                 ParseError::UnmatchedRParen => uart.write_str("unmatched )"),
+                ParseError::UnmatchedRBracket => uart.write_str("unmatched ]"),
                 ParseError::OutOfMemory => uart.write_str("out of memory"),
                 ParseError::ListTooLong => uart.write_str("list too long"),
+                ParseError::TupleTooLong => uart.write_str("tuple too long"),
             }
         }
     }
@@ -149,6 +151,7 @@ fn print_runtime_error<U: Uart>(e: &RuntimeError, uart: &mut U) {
         }
         RuntimeError::Intrinsic(e) => print_intrinsic_error(e, uart),
         RuntimeError::NoCode => uart.write_str("no code to execute"),
+        RuntimeError::OutOfMemory => uart.write_str("out of memory"),
     }
 }
 
@@ -177,6 +180,12 @@ fn print_intrinsic_error<U: Uart>(e: &IntrinsicError, uart: &mut U) {
             print_u8(*id, uart);
         }
         IntrinsicError::OutOfMemory => uart.write_str("out of memory"),
+        IntrinsicError::IndexOutOfBounds { index, len } => {
+            uart.write_str("index out of bounds: ");
+            print_i64(*index, uart);
+            uart.write_str(" >= ");
+            print_usize(*len, uart);
+        }
     }
 }
 
@@ -224,6 +233,47 @@ fn print_u32<U: Uart>(n: u32, uart: &mut U) {
         i -= 1;
         uart.write_byte(buf[i]);
     }
+}
+
+/// Print an i64 as decimal.
+fn print_i64<U: Uart>(n: i64, uart: &mut U) {
+    if n < 0 {
+        uart.write_byte(b'-');
+        // Handle i64::MIN edge case
+        if n == i64::MIN {
+            uart.write_str("9223372036854775808");
+            return;
+        }
+    }
+    print_u64(n.unsigned_abs(), uart);
+}
+
+/// Print a u64 as decimal.
+fn print_u64<U: Uart>(n: u64, uart: &mut U) {
+    let mut buf = [0u8; 20];
+    let mut i = 0;
+    let mut val = n;
+
+    if val == 0 {
+        uart.write_byte(b'0');
+        return;
+    }
+
+    while val > 0 {
+        buf[i] = b'0' + (val % 10) as u8;
+        val /= 10;
+        i += 1;
+    }
+
+    while i > 0 {
+        i -= 1;
+        uart.write_byte(buf[i]);
+    }
+}
+
+/// Print a usize as decimal.
+fn print_usize<U: Uart>(n: usize, uart: &mut U) {
+    print_u64(n as u64, uart);
 }
 
 /// Run the REPL for a limited number of iterations (for testing).

@@ -19,6 +19,9 @@ use core::result::Result::{self, Err, Ok};
 /// incrementally to remove this limit.
 const MAX_LIST_ELEMENTS: usize = 64;
 
+/// Maximum number of elements in a tuple literal.
+const MAX_TUPLE_ELEMENTS: usize = 64;
+
 /// Parse error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
@@ -28,10 +31,14 @@ pub enum ParseError {
     UnexpectedToken(Token),
     /// Unmatched right parenthesis.
     UnmatchedRParen,
+    /// Unmatched right bracket.
+    UnmatchedRBracket,
     /// Out of memory.
     OutOfMemory,
     /// List literal exceeds maximum element count.
     ListTooLong,
+    /// Tuple literal exceeds maximum element count.
+    TupleTooLong,
 }
 
 impl core::fmt::Display for ParseError {
@@ -40,8 +47,10 @@ impl core::fmt::Display for ParseError {
             Self::UnexpectedEof => write!(f, "unexpected end of input"),
             Self::UnexpectedToken(t) => write!(f, "unexpected token: {t:?}"),
             Self::UnmatchedRParen => write!(f, "unmatched )"),
+            Self::UnmatchedRBracket => write!(f, "unmatched ]"),
             Self::OutOfMemory => write!(f, "out of memory"),
             Self::ListTooLong => write!(f, "list exceeds {MAX_LIST_ELEMENTS} elements"),
+            Self::TupleTooLong => write!(f, "tuple exceeds {MAX_TUPLE_ELEMENTS} elements"),
         }
     }
 }
@@ -129,6 +138,12 @@ impl<'a> Parser<'a> {
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(value))
             }
+            Token::Keyword(s) => {
+                let value = proc
+                    .alloc_keyword(mem, s.as_str())
+                    .ok_or(ParseError::OutOfMemory)?;
+                Ok(Some(value))
+            }
             Token::Quote => {
                 // 'expr => (quote expr)
                 let expr = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
@@ -146,6 +161,8 @@ impl<'a> Parser<'a> {
             }
             Token::LParen => self.read_list(proc, mem),
             Token::RParen => Err(ParseError::UnmatchedRParen.into()),
+            Token::LBracket => self.read_tuple(proc, mem),
+            Token::RBracket => Err(ParseError::UnmatchedRBracket.into()),
         }
     }
 
@@ -185,6 +202,41 @@ impl<'a> Parser<'a> {
         }
 
         Ok(Some(result))
+    }
+
+    fn read_tuple<M: MemorySpace>(
+        &mut self,
+        proc: &mut Process,
+        mem: &mut M,
+    ) -> Result<Option<Value>, ReadError> {
+        // Collect elements on stack before building tuple
+        let mut elements = [Value::nil(); MAX_TUPLE_ELEMENTS];
+        let mut count = 0;
+
+        loop {
+            match self.peek()? {
+                None => return Err(ParseError::UnexpectedEof.into()),
+                Some(Token::RBracket) => {
+                    self.advance();
+                    break;
+                }
+                Some(_) => {
+                    if count >= elements.len() {
+                        return Err(ParseError::TupleTooLong.into());
+                    }
+                    let elem = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                    elements[count] = elem;
+                    count += 1;
+                }
+            }
+        }
+
+        // Allocate and build the tuple
+        let tuple = proc
+            .alloc_tuple(mem, &elements[..count])
+            .ok_or(ParseError::OutOfMemory)?;
+
+        Ok(Some(tuple))
     }
 
     fn peek(&mut self) -> Result<Option<&Token>, LexError> {

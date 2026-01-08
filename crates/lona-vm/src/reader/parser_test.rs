@@ -172,3 +172,154 @@ fn read_unclosed_list() {
     let err = read("(1 2", &mut proc, &mut mem).unwrap_err();
     assert!(matches!(err, ReadError::Parse(ParseError::UnexpectedEof)));
 }
+
+// --- Keyword parser tests ---
+
+#[test]
+fn read_keyword_simple() {
+    let (mut proc, mut mem) = setup();
+    let value = read(":foo", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_keyword());
+    let s = proc.read_string(&mem, value).unwrap();
+    assert_eq!(s, "foo");
+}
+
+#[test]
+fn read_keyword_qualified() {
+    let (mut proc, mut mem) = setup();
+    let value = read(":ns/bar", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_keyword());
+    let s = proc.read_string(&mem, value).unwrap();
+    assert_eq!(s, "ns/bar");
+}
+
+#[test]
+fn read_keyword_interning() {
+    let (mut proc, mut mem) = setup();
+
+    // Parse the same keyword twice
+    let k1 = read(":foo", &mut proc, &mut mem).unwrap().unwrap();
+    let k2 = read(":foo", &mut proc, &mut mem).unwrap().unwrap();
+
+    // Both should be keywords
+    assert!(k1.is_keyword());
+    assert!(k2.is_keyword());
+
+    // Due to interning, they should have the same address
+    // Both are keywords (verified above), so direct comparison is valid
+    assert_eq!(k1, k2, "interned keywords should be equal");
+}
+
+#[test]
+fn read_keyword_different_not_interned() {
+    let (mut proc, mut mem) = setup();
+
+    // Parse different keywords
+    let k1 = read(":foo", &mut proc, &mut mem).unwrap().unwrap();
+    let k2 = read(":bar", &mut proc, &mut mem).unwrap().unwrap();
+
+    // Both are keywords
+    assert!(k1.is_keyword());
+    assert!(k2.is_keyword());
+
+    // Different keywords should not be equal
+    assert_ne!(k1, k2, "different keywords should not be equal");
+}
+
+// --- Tuple parser tests ---
+
+#[test]
+fn read_tuple_empty() {
+    let (mut proc, mut mem) = setup();
+    let value = read("[]", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_tuple());
+    let len = proc.read_tuple_len(&mem, value).unwrap();
+    assert_eq!(len, 0);
+}
+
+#[test]
+fn read_tuple_simple() {
+    let (mut proc, mut mem) = setup();
+    let value = read("[1 2 3]", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_tuple());
+
+    let len = proc.read_tuple_len(&mem, value).unwrap();
+    assert_eq!(len, 3);
+
+    assert_eq!(
+        proc.read_tuple_element(&mem, value, 0).unwrap(),
+        Value::int(1)
+    );
+    assert_eq!(
+        proc.read_tuple_element(&mem, value, 1).unwrap(),
+        Value::int(2)
+    );
+    assert_eq!(
+        proc.read_tuple_element(&mem, value, 2).unwrap(),
+        Value::int(3)
+    );
+}
+
+#[test]
+fn read_tuple_mixed() {
+    let (mut proc, mut mem) = setup();
+    let value = read("[1 \"hello\" nil]", &mut proc, &mut mem)
+        .unwrap()
+        .unwrap();
+    assert!(value.is_tuple());
+
+    let len = proc.read_tuple_len(&mem, value).unwrap();
+    assert_eq!(len, 3);
+
+    assert_eq!(
+        proc.read_tuple_element(&mem, value, 0).unwrap(),
+        Value::int(1)
+    );
+    let s = proc.read_tuple_element(&mem, value, 1).unwrap();
+    assert!(s.is_string());
+    assert_eq!(proc.read_string(&mem, s).unwrap(), "hello");
+    assert!(proc.read_tuple_element(&mem, value, 2).unwrap().is_nil());
+}
+
+#[test]
+fn read_tuple_nested() {
+    let (mut proc, mut mem) = setup();
+    let value = read("[[1 2] [3 4]]", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_tuple());
+
+    let len = proc.read_tuple_len(&mem, value).unwrap();
+    assert_eq!(len, 2);
+
+    let inner1 = proc.read_tuple_element(&mem, value, 0).unwrap();
+    assert!(inner1.is_tuple());
+    assert_eq!(proc.read_tuple_len(&mem, inner1).unwrap(), 2);
+
+    let inner2 = proc.read_tuple_element(&mem, value, 1).unwrap();
+    assert!(inner2.is_tuple());
+    assert_eq!(proc.read_tuple_len(&mem, inner2).unwrap(), 2);
+}
+
+#[test]
+fn read_tuple_with_keywords() {
+    let (mut proc, mut mem) = setup();
+    let value = read("[:a :b]", &mut proc, &mut mem).unwrap().unwrap();
+    assert!(value.is_tuple());
+
+    let len = proc.read_tuple_len(&mem, value).unwrap();
+    assert_eq!(len, 2);
+
+    let k1 = proc.read_tuple_element(&mem, value, 0).unwrap();
+    assert!(k1.is_keyword());
+    assert_eq!(proc.read_string(&mem, k1).unwrap(), "a");
+
+    let k2 = proc.read_tuple_element(&mem, value, 1).unwrap();
+    assert!(k2.is_keyword());
+    assert_eq!(proc.read_string(&mem, k2).unwrap(), "b");
+}
+
+#[test]
+fn read_unclosed_tuple() {
+    let (mut proc, mut mem) = setup();
+    let err = read("[1 2", &mut proc, &mut mem).unwrap_err();
+    assert!(matches!(err, ReadError::Parse(ParseError::UnexpectedEof)));
+}

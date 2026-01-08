@@ -451,3 +451,229 @@ fn unknown_intrinsic() {
     let result = call_intrinsic(200, 0, &mut proc, &mut mem);
     assert_eq!(result, Err(IntrinsicError::UnknownIntrinsic(200)));
 }
+
+// --- Keyword intrinsic tests ---
+
+#[test]
+fn is_keyword_true() {
+    let (mut proc, mut mem) = setup();
+
+    let kw = proc.alloc_keyword(&mut mem, "foo").unwrap();
+    proc.x_regs[1] = kw;
+    call_intrinsic(id::IS_KEYWORD, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::bool(true));
+}
+
+#[test]
+fn is_keyword_false() {
+    let (mut proc, mut mem) = setup();
+
+    proc.x_regs[1] = Value::int(42);
+    call_intrinsic(id::IS_KEYWORD, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::bool(false));
+
+    // Symbol is not a keyword
+    let sym = proc.alloc_symbol(&mut mem, "foo").unwrap();
+    proc.x_regs[1] = sym;
+    call_intrinsic(id::IS_KEYWORD, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::bool(false));
+}
+
+#[test]
+fn keyword_constructor() {
+    let (mut proc, mut mem) = setup();
+
+    let s = proc.alloc_string(&mut mem, "bar").unwrap();
+    proc.x_regs[1] = s;
+    call_intrinsic(id::KEYWORD, 1, &mut proc, &mut mem).unwrap();
+
+    let kw = proc.x_regs[0];
+    assert!(kw.is_keyword());
+    assert_eq!(proc.read_string(&mem, kw).unwrap(), "bar");
+}
+
+#[test]
+fn name_keyword() {
+    let (mut proc, mut mem) = setup();
+
+    let kw = proc.alloc_keyword(&mut mem, "hello").unwrap();
+    proc.x_regs[1] = kw;
+    call_intrinsic(id::NAME, 1, &mut proc, &mut mem).unwrap();
+
+    let name = proc.x_regs[0];
+    assert!(name.is_string());
+    assert_eq!(proc.read_string(&mem, name).unwrap(), "hello");
+}
+
+#[test]
+fn name_keyword_qualified() {
+    let (mut proc, mut mem) = setup();
+
+    let kw = proc.alloc_keyword(&mut mem, "ns/hello").unwrap();
+    proc.x_regs[1] = kw;
+    call_intrinsic(id::NAME, 1, &mut proc, &mut mem).unwrap();
+
+    let name = proc.x_regs[0];
+    assert!(name.is_string());
+    assert_eq!(proc.read_string(&mem, name).unwrap(), "hello");
+}
+
+#[test]
+fn name_symbol() {
+    let (mut proc, mut mem) = setup();
+
+    let sym = proc.alloc_symbol(&mut mem, "world").unwrap();
+    proc.x_regs[1] = sym;
+    call_intrinsic(id::NAME, 1, &mut proc, &mut mem).unwrap();
+
+    let name = proc.x_regs[0];
+    assert!(name.is_string());
+    assert_eq!(proc.read_string(&mem, name).unwrap(), "world");
+}
+
+#[test]
+fn namespace_keyword_qualified() {
+    let (mut proc, mut mem) = setup();
+
+    let kw = proc.alloc_keyword(&mut mem, "ns/hello").unwrap();
+    proc.x_regs[1] = kw;
+    call_intrinsic(id::NAMESPACE, 1, &mut proc, &mut mem).unwrap();
+
+    let ns = proc.x_regs[0];
+    assert!(ns.is_string());
+    assert_eq!(proc.read_string(&mem, ns).unwrap(), "ns");
+}
+
+#[test]
+fn namespace_keyword_unqualified() {
+    let (mut proc, mut mem) = setup();
+
+    let kw = proc.alloc_keyword(&mut mem, "hello").unwrap();
+    proc.x_regs[1] = kw;
+    call_intrinsic(id::NAMESPACE, 1, &mut proc, &mut mem).unwrap();
+
+    assert!(proc.x_regs[0].is_nil());
+}
+
+#[test]
+fn keyword_equality() {
+    let (mut proc, mut mem) = setup();
+
+    // Due to interning, same keyword literals should be equal
+    let k1 = proc.alloc_keyword(&mut mem, "foo").unwrap();
+    let k2 = proc.alloc_keyword(&mut mem, "foo").unwrap();
+
+    proc.x_regs[1] = k1;
+    proc.x_regs[2] = k2;
+    call_intrinsic(id::EQ, 2, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::bool(true));
+
+    // Different keywords should not be equal
+    let k3 = proc.alloc_keyword(&mut mem, "bar").unwrap();
+    proc.x_regs[1] = k1;
+    proc.x_regs[2] = k3;
+    call_intrinsic(id::EQ, 2, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::bool(false));
+}
+
+// --- Tuple intrinsic tests ---
+
+#[test]
+fn is_tuple_true() {
+    let (mut proc, mut mem) = setup();
+
+    let tuple = proc
+        .alloc_tuple(&mut mem, &[Value::int(1), Value::int(2)])
+        .unwrap();
+    proc.x_regs[1] = tuple;
+    call_intrinsic(id::IS_TUPLE, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::bool(true));
+}
+
+#[test]
+fn is_tuple_false() {
+    let (mut proc, mut mem) = setup();
+
+    proc.x_regs[1] = Value::int(42);
+    call_intrinsic(id::IS_TUPLE, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::bool(false));
+
+    // List is not a tuple
+    let pair = proc
+        .alloc_pair(&mut mem, Value::int(1), Value::nil())
+        .unwrap();
+    proc.x_regs[1] = pair;
+    call_intrinsic(id::IS_TUPLE, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::bool(false));
+}
+
+#[test]
+fn nth_basic() {
+    let (mut proc, mut mem) = setup();
+
+    let tuple = proc
+        .alloc_tuple(&mut mem, &[Value::int(10), Value::int(20), Value::int(30)])
+        .unwrap();
+    proc.x_regs[1] = tuple;
+    proc.x_regs[2] = Value::int(0);
+    call_intrinsic(id::NTH, 2, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::int(10));
+
+    proc.x_regs[2] = Value::int(1);
+    call_intrinsic(id::NTH, 2, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::int(20));
+
+    proc.x_regs[2] = Value::int(2);
+    call_intrinsic(id::NTH, 2, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::int(30));
+}
+
+#[test]
+fn nth_out_of_bounds() {
+    let (mut proc, mut mem) = setup();
+
+    let tuple = proc.alloc_tuple(&mut mem, &[Value::int(1)]).unwrap();
+    proc.x_regs[1] = tuple;
+    proc.x_regs[2] = Value::int(5); // Out of bounds
+
+    let result = call_intrinsic(id::NTH, 2, &mut proc, &mut mem);
+    assert!(result.is_err());
+}
+
+#[test]
+fn count_tuple() {
+    let (mut proc, mut mem) = setup();
+
+    let tuple = proc
+        .alloc_tuple(&mut mem, &[Value::int(1), Value::int(2), Value::int(3)])
+        .unwrap();
+    proc.x_regs[1] = tuple;
+    call_intrinsic(id::COUNT, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::int(3));
+}
+
+#[test]
+fn count_empty_tuple() {
+    let (mut proc, mut mem) = setup();
+
+    let tuple = proc.alloc_tuple(&mut mem, &[]).unwrap();
+    proc.x_regs[1] = tuple;
+    call_intrinsic(id::COUNT, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::int(0));
+}
+
+#[test]
+fn count_list() {
+    let (mut proc, mut mem) = setup();
+
+    // Create list (1 2 3)
+    let p3 = proc
+        .alloc_pair(&mut mem, Value::int(3), Value::nil())
+        .unwrap();
+    let p2 = proc.alloc_pair(&mut mem, Value::int(2), p3).unwrap();
+    let p1 = proc.alloc_pair(&mut mem, Value::int(1), p2).unwrap();
+
+    proc.x_regs[1] = p1;
+    call_intrinsic(id::COUNT, 1, &mut proc, &mut mem).unwrap();
+    assert_eq!(proc.x_regs[0], Value::int(3));
+}

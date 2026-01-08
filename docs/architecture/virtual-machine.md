@@ -91,7 +91,7 @@ All values in the VM are represented as tagged 64-bit words. This enables effici
 
 ### Value Tags
 
-The 4-bit tag space supports up to 16 primary types. The initial implementation includes:
+The 4-bit tag space supports up to 16 primary types:
 
 | Tag | Type | Description |
 |-----|------|-------------|
@@ -101,9 +101,24 @@ The 4-bit tag space supports up to 16 primary types. The initial implementation 
 | `0x3` | String | UTF-8 string (pointer to heap) |
 | `0x4` | Symbol | Interned symbol (pointer to heap) |
 | `0x5` | Pair | Cons cell for lists (pointer to heap) |
-| `0x6`-`0xF` | Reserved | Future types (see `docs/lonala/data-types.md`) |
+| `0x6` | Keyword | Interned keyword (pointer to heap) |
+| `0x7` | Tuple | Fixed-size tuple (pointer to heap) |
+| `0x8` | Map | Association list map (pointer to heap) |
+| `0x9` | CompiledFn | Pure function without captures (pointer to heap) |
+| `0xA` | Closure | Function with captured values (pointer to heap) |
+| `0xB` | NativeFn | Intrinsic ID (immediate, 16-bit payload) |
+| `0xC` | Var | VarSlot reference (pointer to code region) |
+| `0xD` | Namespace | Namespace reference (pointer to code region) |
+| `0xE` | Unbound | Sentinel for uninitialized vars (immediate) |
+| `0xF` | Reserved | Future types |
 
-**Note**: The complete type system includes additional types (keywords, floats, collections, capabilities, etc.) documented in `docs/lonala/data-types.md`. Types are added to the VM as needed. The implementation source code (`crates/lona-vm/src/value/`) is the authoritative reference for currently supported types.
+**Callable types**:
+- `CompiledFn` points to a pure function (no captures) - result of `(fn* [x] ...)`
+- `Closure` points to a function paired with captured values - result of `(fn* [x] (fn* [y] (+ x y)))`
+- `NativeFn` is an immediate value containing an intrinsic dispatch ID (0-65535)
+- All three return `true` for the `fn?` predicate
+
+**Note**: The complete type system includes additional types (floats, vectors, sets, capabilities, etc.) documented in `docs/lonala/data-types.md`. Types are added to the VM as needed. The implementation source code (`crates/lona-vm/src/value/`) is the authoritative reference for currently supported types.
 
 ### Small Integer Optimization
 

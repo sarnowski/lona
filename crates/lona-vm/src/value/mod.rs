@@ -39,6 +39,10 @@ pub enum Value {
     Pair(Vaddr) = 4,
     /// Heap-allocated symbol (pointer to `HeapString`).
     Symbol(Vaddr) = 5,
+    /// Heap-allocated keyword (pointer to `HeapString`).
+    Keyword(Vaddr) = 6,
+    /// Heap-allocated tuple (pointer to `HeapTuple`).
+    Tuple(Vaddr) = 7,
 }
 
 impl Value {
@@ -84,6 +88,20 @@ impl Value {
         Self::Symbol(addr)
     }
 
+    /// Create a keyword value from a heap address.
+    #[inline]
+    #[must_use]
+    pub const fn keyword(addr: Vaddr) -> Self {
+        Self::Keyword(addr)
+    }
+
+    /// Create a tuple value from a heap address.
+    #[inline]
+    #[must_use]
+    pub const fn tuple(addr: Vaddr) -> Self {
+        Self::Tuple(addr)
+    }
+
     /// Check if this value is nil.
     #[inline]
     #[must_use]
@@ -96,6 +114,13 @@ impl Value {
     #[must_use]
     pub const fn is_truthy(&self) -> bool {
         !matches!(self, Self::Nil | Self::Bool(false))
+    }
+
+    /// Check if this value is a string.
+    #[inline]
+    #[must_use]
+    pub const fn is_string(&self) -> bool {
+        matches!(self, Self::String(_))
     }
 
     /// Check if this value is a pair.
@@ -112,6 +137,20 @@ impl Value {
     pub const fn is_list_head(&self) -> bool {
         matches!(self, Self::Nil | Self::Pair(_))
     }
+
+    /// Check if this value is a keyword.
+    #[inline]
+    #[must_use]
+    pub const fn is_keyword(&self) -> bool {
+        matches!(self, Self::Keyword(_))
+    }
+
+    /// Check if this value is a tuple.
+    #[inline]
+    #[must_use]
+    pub const fn is_tuple(&self) -> bool {
+        matches!(self, Self::Tuple(_))
+    }
 }
 
 impl fmt::Debug for Value {
@@ -123,6 +162,8 @@ impl fmt::Debug for Value {
             Self::String(addr) => write!(f, "String({addr:?})"),
             Self::Pair(addr) => write!(f, "Pair({addr:?})"),
             Self::Symbol(addr) => write!(f, "Symbol({addr:?})"),
+            Self::Keyword(addr) => write!(f, "Keyword({addr:?})"),
+            Self::Tuple(addr) => write!(f, "Tuple({addr:?})"),
         }
     }
 }
@@ -173,5 +214,30 @@ impl Pair {
     #[must_use]
     pub const fn new(first: Value, rest: Value) -> Self {
         Self { first, rest }
+    }
+}
+
+/// Heap-allocated tuple header.
+///
+/// Stored in memory as:
+/// - 4 bytes: length (u32)
+/// - `len * size_of::<Value>()` bytes: elements (array of Values)
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct HeapTuple {
+    /// Number of elements in the tuple.
+    pub len: u32,
+    // Followed by `len` Values (not represented in struct)
+}
+
+impl HeapTuple {
+    /// Size of the header in bytes.
+    pub const HEADER_SIZE: usize = core::mem::size_of::<Self>();
+
+    /// Calculate total allocation size for a tuple of given length.
+    #[inline]
+    #[must_use]
+    pub const fn alloc_size(len: usize) -> usize {
+        Self::HEADER_SIZE + len * core::mem::size_of::<Value>()
     }
 }

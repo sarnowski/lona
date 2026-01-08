@@ -10,7 +10,7 @@ Creates or updates a root var binding.
 
 ```clojure
 (def name value)
-(def ^metadata name value)
+(def ^%{...} name value)
 ```
 
 Semantics:
@@ -20,7 +20,7 @@ Semantics:
 
 ```clojure
 (def pi 3.14159)
-(def ^{:macro true} my-macro (fn* [form] ...))
+(def ^%{:macro true} my-macro (fn* [form] ...))
 ```
 
 ---
@@ -141,10 +141,10 @@ Semantics:
 
 ## Macro Definition
 
-Macros are not a special form. A macro is a var with `{:macro true}` metadata:
+Macros are not a special form. A macro is a var with `%{:macro true}` metadata:
 
 ```clojure
-(def ^{:macro true} when
+(def ^%{:macro true} when
   (fn* [test & body]
     `(match ~test
        false nil

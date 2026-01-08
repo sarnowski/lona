@@ -175,7 +175,8 @@ fn lex_invalid_escape() {
 
 #[test]
 fn lex_unexpected_char() {
-    assert_eq!(tokenize("[").unwrap_err(), LexError::UnexpectedChar('['));
+    // Use a character that is not a valid token start
+    assert_eq!(tokenize("#").unwrap_err(), LexError::UnexpectedChar('#'));
 }
 
 #[test]
@@ -202,4 +203,133 @@ fn token_string_push() {
 fn token_string_too_long() {
     assert!(TokenString::try_from_str(&"x".repeat(64)).is_none());
     assert!(TokenString::try_from_str(&"x".repeat(63)).is_some());
+}
+
+// --- Keyword tests ---
+
+#[test]
+fn lex_keyword_simple() {
+    assert_eq!(
+        tokenize(":foo").unwrap(),
+        vec![Token::Keyword(TokenString::try_from_str("foo").unwrap())]
+    );
+    assert_eq!(
+        tokenize(":bar").unwrap(),
+        vec![Token::Keyword(TokenString::try_from_str("bar").unwrap())]
+    );
+}
+
+#[test]
+fn lex_keyword_qualified() {
+    assert_eq!(
+        tokenize(":ns/bar").unwrap(),
+        vec![Token::Keyword(TokenString::try_from_str("ns/bar").unwrap())]
+    );
+    assert_eq!(
+        tokenize(":my.namespace/foo").unwrap(),
+        vec![Token::Keyword(
+            TokenString::try_from_str("my.namespace/foo").unwrap()
+        )]
+    );
+}
+
+#[test]
+fn lex_keyword_special_chars() {
+    assert_eq!(
+        tokenize(":foo-bar").unwrap(),
+        vec![Token::Keyword(
+            TokenString::try_from_str("foo-bar").unwrap()
+        )]
+    );
+    assert_eq!(
+        tokenize(":foo?").unwrap(),
+        vec![Token::Keyword(TokenString::try_from_str("foo?").unwrap())]
+    );
+    assert_eq!(
+        tokenize(":foo!").unwrap(),
+        vec![Token::Keyword(TokenString::try_from_str("foo!").unwrap())]
+    );
+}
+
+#[test]
+fn lex_keyword_in_list() {
+    assert_eq!(
+        tokenize("(:a :b :c)").unwrap(),
+        vec![
+            Token::LParen,
+            Token::Keyword(TokenString::try_from_str("a").unwrap()),
+            Token::Keyword(TokenString::try_from_str("b").unwrap()),
+            Token::Keyword(TokenString::try_from_str("c").unwrap()),
+            Token::RParen
+        ]
+    );
+}
+
+// --- Tuple bracket tests ---
+
+#[test]
+fn lex_brackets() {
+    assert_eq!(
+        tokenize("[]").unwrap(),
+        vec![Token::LBracket, Token::RBracket]
+    );
+    assert_eq!(
+        tokenize("[1 2 3]").unwrap(),
+        vec![
+            Token::LBracket,
+            Token::Int(1),
+            Token::Int(2),
+            Token::Int(3),
+            Token::RBracket
+        ]
+    );
+}
+
+#[test]
+fn lex_nested_brackets() {
+    assert_eq!(
+        tokenize("[[1] [2]]").unwrap(),
+        vec![
+            Token::LBracket,
+            Token::LBracket,
+            Token::Int(1),
+            Token::RBracket,
+            Token::LBracket,
+            Token::Int(2),
+            Token::RBracket,
+            Token::RBracket
+        ]
+    );
+}
+
+#[test]
+fn lex_brackets_and_parens() {
+    assert_eq!(
+        tokenize("([1 2] (3 4))").unwrap(),
+        vec![
+            Token::LParen,
+            Token::LBracket,
+            Token::Int(1),
+            Token::Int(2),
+            Token::RBracket,
+            Token::LParen,
+            Token::Int(3),
+            Token::Int(4),
+            Token::RParen,
+            Token::RParen
+        ]
+    );
+}
+
+#[test]
+fn lex_keyword_and_tuple() {
+    assert_eq!(
+        tokenize("[:a :b]").unwrap(),
+        vec![
+            Token::LBracket,
+            Token::Keyword(TokenString::try_from_str("a").unwrap()),
+            Token::Keyword(TokenString::try_from_str("b").unwrap()),
+            Token::RBracket
+        ]
+    );
 }

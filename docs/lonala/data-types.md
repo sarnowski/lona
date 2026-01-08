@@ -489,15 +489,16 @@ Predicate: `var?`
 
 Accessor: `var-get`
 
-### Process-Local Vars
+### Process-Bound Vars
 
-Vars with `^:process-local` metadata have per-process values. Each process has its own
-copy; `def` on a process-local var modifies only the current process's copy.
+Vars with `^:process-bound` metadata have per-process bindings. A single Var exists
+in the realm, but each process can shadow its root value via a per-process binding table.
 
 ```clojure
-(def ^:process-local *ns* (find-ns 'lona.core))
+(def ^:process-bound *ns* (find-ns 'lona.core))
 ```
 
-Spawned processes inherit the parent's process-local values at spawn time.
+- `def` on a process-bound var updates only the current process's binding (not the realm root)
+- Spawned processes inherit the parent's binding values at spawn time
 
-The current namespace `*ns*` is the primary use case for process-local vars.
+The current namespace `*ns*` is the primary use case for process-bound vars.

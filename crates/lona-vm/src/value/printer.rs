@@ -29,7 +29,14 @@ pub fn print_value<M: MemorySpace, U: Uart>(value: Value, proc: &Process, mem: &
                 uart_write_str(uart, s);
             }
         }
+        Value::Keyword(addr) => {
+            uart.write_byte(b':');
+            if let Some(s) = proc.read_string(mem, Value::Keyword(addr)) {
+                uart_write_str(uart, s);
+            }
+        }
         Value::Pair(_) => print_list(value, proc, mem, uart),
+        Value::Tuple(_) => print_tuple(value, proc, mem, uart),
     }
 }
 
@@ -127,6 +134,23 @@ fn print_list<M: MemorySpace, U: Uart>(list: Value, proc: &Process, mem: &M, uar
     }
 
     uart.write_byte(b')');
+}
+
+fn print_tuple<M: MemorySpace, U: Uart>(tuple: Value, proc: &Process, mem: &M, uart: &mut U) {
+    uart.write_byte(b'[');
+
+    if let Some(len) = proc.read_tuple_len(mem, tuple) {
+        for i in 0..len {
+            if i > 0 {
+                uart.write_byte(b' ');
+            }
+            if let Some(elem) = proc.read_tuple_element(mem, tuple, i) {
+                print_value(elem, proc, mem, uart);
+            }
+        }
+    }
+
+    uart.write_byte(b']');
 }
 
 /// Print a value to a string buffer.

@@ -39,7 +39,6 @@ Qualified keywords:
 
 ```clojure
 :my.ns/bar
-::auto          ; resolves to current namespace
 ```
 
 ---
@@ -202,8 +201,8 @@ Segment format: `value:size/modifiers`
 | `` `x `` | Syntax-quote |
 | `~x` | Unquote (in syntax-quote) |
 | `~@x` | Unquote-splicing |
-| `^{:k v}` | Metadata |
-| `^:keyword` | `^{:keyword true}` |
+| `^%{:k v}` | Metadata |
+| `^:keyword` | `^%{:keyword true}` |
 | `#(...)` | Anonymous function |
 | `#_form` | Ignore next form |
 

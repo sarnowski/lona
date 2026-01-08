@@ -159,3 +159,74 @@ fn print_improper_list() {
         .unwrap();
     assert_eq!(print_to_string(p, &proc, &mem), "(1 . 2)");
 }
+
+// --- Keyword printer tests ---
+
+#[test]
+fn print_keyword_simple() {
+    let (mut proc, mut mem) = setup();
+    let kw = proc.alloc_keyword(&mut mem, "foo").unwrap();
+    assert_eq!(print_to_string(kw, &proc, &mem), ":foo");
+}
+
+#[test]
+fn print_keyword_qualified() {
+    let (mut proc, mut mem) = setup();
+    let kw = proc.alloc_keyword(&mut mem, "ns/bar").unwrap();
+    assert_eq!(print_to_string(kw, &proc, &mem), ":ns/bar");
+}
+
+#[test]
+fn print_keyword_in_list() {
+    let (mut proc, mut mem) = setup();
+    let k1 = proc.alloc_keyword(&mut mem, "a").unwrap();
+    let k2 = proc.alloc_keyword(&mut mem, "b").unwrap();
+    let p2 = proc.alloc_pair(&mut mem, k2, Value::nil()).unwrap();
+    let p1 = proc.alloc_pair(&mut mem, k1, p2).unwrap();
+    assert_eq!(print_to_string(p1, &proc, &mem), "(:a :b)");
+}
+
+// --- Tuple printer tests ---
+
+#[test]
+fn print_tuple_empty() {
+    let (mut proc, mut mem) = setup();
+    let tuple = proc.alloc_tuple(&mut mem, &[]).unwrap();
+    assert_eq!(print_to_string(tuple, &proc, &mem), "[]");
+}
+
+#[test]
+fn print_tuple_simple() {
+    let (mut proc, mut mem) = setup();
+    let tuple = proc
+        .alloc_tuple(&mut mem, &[Value::int(1), Value::int(2), Value::int(3)])
+        .unwrap();
+    assert_eq!(print_to_string(tuple, &proc, &mem), "[1 2 3]");
+}
+
+#[test]
+fn print_tuple_nested() {
+    let (mut proc, mut mem) = setup();
+    let inner = proc.alloc_tuple(&mut mem, &[Value::int(1)]).unwrap();
+    let outer = proc.alloc_tuple(&mut mem, &[inner, Value::int(2)]).unwrap();
+    assert_eq!(print_to_string(outer, &proc, &mem), "[[1] 2]");
+}
+
+#[test]
+fn print_tuple_with_keywords() {
+    let (mut proc, mut mem) = setup();
+    let k1 = proc.alloc_keyword(&mut mem, "a").unwrap();
+    let k2 = proc.alloc_keyword(&mut mem, "b").unwrap();
+    let tuple = proc.alloc_tuple(&mut mem, &[k1, k2]).unwrap();
+    assert_eq!(print_to_string(tuple, &proc, &mem), "[:a :b]");
+}
+
+#[test]
+fn print_tuple_mixed() {
+    let (mut proc, mut mem) = setup();
+    let s = proc.alloc_string(&mut mem, "hello").unwrap();
+    let tuple = proc
+        .alloc_tuple(&mut mem, &[Value::int(1), s, Value::bool(true)])
+        .unwrap();
+    assert_eq!(print_to_string(tuple, &proc, &mem), "[1 \"hello\" true]");
+}

@@ -119,7 +119,13 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
                 // Bare symbols are not supported yet (no variables)
                 Err(CompileError::UnboundSymbol)
             }
+            Value::Keyword(_) => {
+                // Keywords are self-evaluating constants
+                self.compile_constant(expr, target)?;
+                Ok(temp_base)
+            }
             Value::Pair(_) => self.compile_list(expr, target, temp_base),
+            Value::Tuple(_) => self.compile_tuple(expr, target, temp_base),
         }
     }
 
@@ -177,6 +183,57 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
 
         // Compile the intrinsic call
         self.compile_intrinsic_call(intrinsic_id, pair.rest, target, temp_base)
+    }
+
+    /// Compile a tuple literal.
+    ///
+    /// `[a b c]` evaluates each element and builds a tuple.
+    fn compile_tuple(
+        &mut self,
+        tuple: Value,
+        target: u8,
+        temp_base: u8,
+    ) -> Result<u8, CompileError> {
+        // Get tuple length and elements
+        let len = self
+            .proc
+            .read_tuple_len(self.mem, tuple)
+            .ok_or(CompileError::InvalidSyntax)?;
+
+        if len == 0 {
+            // Empty tuple - emit BUILD_TUPLE with 0 elements
+            self.chunk.emit(encode_abc(op::BUILD_TUPLE, target, 0, 0));
+            return Ok(temp_base);
+        }
+
+        // Allocate temp registers for elements
+        let elem_count = len as u8;
+        let next_temp = temp_base
+            .checked_add(elem_count)
+            .ok_or(CompileError::ExpressionTooComplex)?;
+
+        // Compile each element to a temp register
+        let mut current_next_temp = next_temp;
+        for i in 0..len {
+            let elem = self
+                .proc
+                .read_tuple_element(self.mem, tuple, i)
+                .ok_or(CompileError::InvalidSyntax)?;
+            let temp_reg = temp_base
+                .checked_add(i as u8)
+                .ok_or(CompileError::ExpressionTooComplex)?;
+            current_next_temp = self.compile_expr(elem, temp_reg, current_next_temp)?;
+        }
+
+        // Emit BUILD_TUPLE: target := [temp_base..temp_base+len-1]
+        self.chunk.emit(encode_abc(
+            op::BUILD_TUPLE,
+            target,
+            u16::from(temp_base),
+            len as u16,
+        ));
+
+        Ok(current_next_temp)
     }
 
     /// Compile the `quote` special form.
@@ -307,7 +364,7 @@ pub fn compile<M: MemorySpace>(
 #[cfg(any(test, feature = "std"))]
 #[must_use]
 pub fn disassemble(chunk: &Chunk) -> std::string::String {
-    use crate::bytecode::{decode_a, decode_b, decode_bx, decode_opcode, decode_sbx};
+    use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx};
     use std::fmt::Write;
 
     let mut out = std::string::String::new();
@@ -348,6 +405,11 @@ pub fn disassemble(chunk: &Chunk) -> std::string::String {
             }
             op::HALT => {
                 let _ = writeln!(out, "HALT");
+            }
+            op::BUILD_TUPLE => {
+                let b = decode_b(instr);
+                let c = decode_c(instr);
+                let _ = writeln!(out, "BUILD_TUPLE X{a}, X{b}, {c}");
             }
             _ => {
                 let _ = writeln!(out, "??? opcode={opcode}");

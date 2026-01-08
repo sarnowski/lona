@@ -11,11 +11,14 @@
 #[cfg(test)]
 mod vm_test;
 
-use crate::bytecode::{decode_a, decode_b, decode_bx, decode_opcode, decode_sbx, op};
+use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op};
 use crate::intrinsics::{self, IntrinsicError};
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::value::Value;
+
+/// Maximum number of elements in a tuple literal.
+const MAX_TUPLE_ELEMENTS: usize = 64;
 
 /// Runtime error during VM execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,6 +33,8 @@ pub enum RuntimeError {
     Intrinsic(IntrinsicError),
     /// No bytecode chunk to execute.
     NoCode,
+    /// Out of memory during allocation.
+    OutOfMemory,
 }
 
 impl From<IntrinsicError> for RuntimeError {
@@ -129,6 +134,24 @@ impl Vm {
 
                 op::RETURN | op::HALT => {
                     return Ok(proc.x_regs[0]);
+                }
+
+                op::BUILD_TUPLE => {
+                    let a = decode_a(instr) as usize;
+                    let b = decode_b(instr) as usize; // start register
+                    let c = decode_c(instr) as usize; // count
+
+                    // Collect elements from registers into temporary buffer
+                    let elem_count = c.min(MAX_TUPLE_ELEMENTS);
+                    let mut elements = [Value::Nil; MAX_TUPLE_ELEMENTS];
+                    elements[..elem_count].copy_from_slice(&proc.x_regs[b..b + elem_count]);
+
+                    // Allocate tuple
+                    let tuple = proc
+                        .alloc_tuple(mem, &elements[..elem_count])
+                        .ok_or(RuntimeError::OutOfMemory)?;
+
+                    proc.x_regs[a] = tuple;
                 }
 
                 _ => {

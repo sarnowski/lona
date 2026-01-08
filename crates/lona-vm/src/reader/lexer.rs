@@ -17,6 +17,10 @@ pub enum Token {
     LParen,
     /// Right parenthesis `)`
     RParen,
+    /// Left bracket `[`
+    LBracket,
+    /// Right bracket `]`
+    RBracket,
     /// Quote `'`
     Quote,
     /// The `nil` literal
@@ -31,6 +35,8 @@ pub enum Token {
     String(TokenString),
     /// Symbol (identifier)
     Symbol(TokenString),
+    /// Keyword (e.g., `:foo` or `:ns/bar`)
+    Keyword(TokenString),
 }
 
 /// A string stored inline for `no_std` compatibility.
@@ -172,6 +178,14 @@ impl<'a> Lexer<'a> {
                 self.chars.next();
                 Ok(Some(Token::RParen))
             }
+            '[' => {
+                self.chars.next();
+                Ok(Some(Token::LBracket))
+            }
+            ']' => {
+                self.chars.next();
+                Ok(Some(Token::RBracket))
+            }
             '\'' => {
                 self.chars.next();
                 Ok(Some(Token::Quote))
@@ -187,6 +201,11 @@ impl<'a> Lexer<'a> {
                     // Just a minus symbol
                     self.lex_symbol_rest('-')
                 }
+            }
+            ':' => {
+                // Keyword (e.g., :foo or :ns/bar)
+                self.chars.next(); // consume ':'
+                self.lex_keyword()
             }
             _ if is_symbol_start(c) => self.lex_symbol(),
             _ => Err(LexError::UnexpectedChar(c)),
@@ -307,7 +326,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Check for keywords
+        // Check for reserved words
         let token = match s.as_str() {
             "nil" => Token::Nil,
             "true" => Token::True,
@@ -316,6 +335,40 @@ impl<'a> Lexer<'a> {
         };
 
         Ok(Some(token))
+    }
+
+    /// Lex a keyword (already consumed the leading ':').
+    fn lex_keyword(&mut self) -> Result<Option<Token>, LexError> {
+        let mut s = TokenString::new();
+
+        // First character must be a keyword-start character (not digit)
+        let Some(&c) = self.chars.peek() else {
+            // Just ':' alone is an error
+            return Err(LexError::UnexpectedChar(':'));
+        };
+
+        if !is_keyword_start(c) {
+            return Err(LexError::UnexpectedChar(c));
+        }
+
+        self.chars.next();
+        if !s.push(c) {
+            return Err(LexError::TooLong);
+        }
+
+        // Continue reading keyword characters
+        while let Some(&c) = self.chars.peek() {
+            if is_keyword_continue(c) {
+                self.chars.next();
+                if !s.push(c) {
+                    return Err(LexError::TooLong);
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(Some(Token::Keyword(s)))
     }
 }
 
@@ -331,7 +384,6 @@ fn is_symbol_start(c: char) -> bool {
                 | '-'
                 | '.'
                 | '/'
-                | ':'
                 | '<'
                 | '='
                 | '>'
@@ -344,11 +396,40 @@ fn is_symbol_start(c: char) -> bool {
 }
 
 fn is_symbol_continue(c: char) -> bool {
-    is_symbol_start(c) || c.is_ascii_digit()
+    is_symbol_start(c) || c.is_ascii_digit() || c == ':'
+}
+
+/// Check if a character can start a keyword name (after the leading ':').
+fn is_keyword_start(c: char) -> bool {
+    c.is_alphabetic()
+        || matches!(
+            c,
+            '!' | '$'
+                | '%'
+                | '&'
+                | '*'
+                | '+'
+                | '-'
+                | '.'
+                | '/'
+                | '<'
+                | '='
+                | '>'
+                | '?'
+                | '@'
+                | '^'
+                | '_'
+                | '~'
+        )
+}
+
+/// Check if a character can continue a keyword name (allows digits and colons).
+fn is_keyword_continue(c: char) -> bool {
+    is_keyword_start(c) || c.is_ascii_digit() || c == ':'
 }
 
 fn is_delimiter(c: char) -> bool {
-    c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\'' | ';' | ',')
+    c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '"' | '\'' | ';' | ',')
 }
 
 /// Tokenize an entire string into a vector of tokens.
