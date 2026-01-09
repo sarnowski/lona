@@ -71,15 +71,15 @@ fn repl_intrinsic_call() {
 }
 
 #[test]
-fn repl_invalid_call() {
+fn repl_not_callable() {
     let (mut proc, mut mem) = setup();
-    // (1 2 3) is invalid - 1 is not callable
+    // (1 2 3) compiles but fails at runtime - 1 is not callable
     let mut uart = MockUart::with_input(b"(1 2 3)\r");
 
     run_limited(&mut proc, &mut mem, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
-    assert!(output.contains("Error: invalid syntax"));
+    assert!(output.contains("Error: value is not callable"));
 }
 
 #[test]

@@ -71,7 +71,72 @@ make verify
 
 **This MUST pass with ZERO issues.** No warnings treated as acceptable, no "minor" failures ignored.
 
-### 1.3 Run `make docs` (Always Required)
+### 1.3 File Length Check (MANDATORY)
+
+**After `make verify` passes, check the length of ALL changed source files.**
+
+Run the following to get line counts for all changed source files:
+```bash
+git diff --name-only origin/main...HEAD | xargs -I{} sh -c 'echo "$(wc -l < "{}" 2>/dev/null || echo 0) {}"' | sort -rn
+```
+
+For uncommitted changes, also check:
+```bash
+git diff --name-only HEAD | xargs -I{} sh -c 'echo "$(wc -l < "{}" 2>/dev/null || echo 0) {}"' | sort -rn
+```
+
+#### File Length Thresholds
+
+| Lines | Severity | Action Required |
+|-------|----------|-----------------|
+| **≤ 600** | OK | No action needed |
+| **601-800** | WARNING | Should be refactored and split into smaller files |
+| **> 800** | CRITICAL | **MUST** be split into smaller files |
+
+#### Exception for 601-800 Line Files
+
+Files between 601-800 lines MAY be acceptable **ONLY IF** the logic is so tightly coupled that splitting would significantly harm readability and understanding. You must:
+
+1. Evaluate whether the file has a single, cohesive responsibility
+2. Check if natural split points exist (separate concerns, distinct functionality)
+3. Consider if splitting would require excessive cross-file dependencies
+
+**If natural split points exist, the file MUST be split.** The exception is narrow: only for files where every function genuinely depends on understanding the whole.
+
+#### Reporting File Length Issues
+
+For each file exceeding thresholds, report to the user:
+
+```
+FILE LENGTH ISSUE [WARNING/CRITICAL]:
+- File: <path>
+- Lines: <count>
+- Threshold exceeded: <600 for warning, 800 for critical>
+- Natural split points: <identified concerns that could be separate files>
+- Recommendation: <specific suggestion for how to split>
+```
+
+For files in the 601-800 range that you deem acceptable:
+```
+FILE LENGTH EXCEPTION [ACCEPTED]:
+- File: <path>
+- Lines: <count>
+- Justification: <why splitting would harm readability>
+```
+
+#### If Critical File Length Issues Exist
+
+**Files over 800 lines are BLOCKING.** You MUST:
+
+1. **STOP** - do not proceed to Phase 2 (agent review)
+2. Refactor and split the oversized file(s)
+3. Run `make verify` again after splitting
+4. Re-check file lengths
+5. Only proceed when no files exceed 800 lines
+
+**Do NOT proceed to agent review with any file over 800 lines.**
+
+### 1.4 Run `make docs` (Always Required)
 
 Documentation must build successfully. Execute:
 
@@ -98,7 +163,7 @@ Common issues to fix:
 
 If `make docs` reports any validation problems, fix all issues before proceeding.
 
-### 1.4 If Verification Fails
+### 1.5 If Verification Fails
 
 If `make verify` or `make docs` fails:
 1. Fix ALL reported issues
@@ -108,7 +173,7 @@ If `make verify` or `make docs` fails:
 
 **Do NOT proceed to agent review with a failing build or documentation errors.**
 
-### 1.5 Manual REPL Testing (MANDATORY for Code Changes)
+### 1.6 Manual REPL Testing (MANDATORY for Code Changes)
 
 After `make verify` passes, you MUST perform manual testing using the development REPL:
 
@@ -136,11 +201,13 @@ After `make verify` passes, you MUST perform manual testing using the developmen
    ... (at least 10 tests)
    ```
 
+**Important:** the exactly same commands must be run on `aarch64` as well as on `x86_64` architecture (see `arch` parameter).
+
 **You MUST report the exact REPL commands and their outputs to the user before proceeding to Phase 2.**
 
 This manual verification catches issues that automated tests may miss and validates the implementation works end-to-end in QEMU.
 
-### 1.6 Skip Conditions
+### 1.7 Skip Conditions
 
 You MAY skip `make verify` if:
 - Your changes are documentation-only (`.md` files)

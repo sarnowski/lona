@@ -161,6 +161,21 @@ fn print_runtime_error<U: Uart>(e: &RuntimeError, uart: &mut U) {
         RuntimeError::Intrinsic(e) => print_intrinsic_error(e, uart),
         RuntimeError::NoCode => uart.write_str("no code to execute"),
         RuntimeError::OutOfMemory => uart.write_str("out of memory"),
+        RuntimeError::NotCallable => uart.write_str("value is not callable"),
+        RuntimeError::ArityMismatch {
+            expected,
+            got,
+            variadic,
+        } => {
+            uart.write_str("wrong number of arguments: expected ");
+            print_u8(*expected, uart);
+            if *variadic {
+                uart.write_str("+");
+            }
+            uart.write_str(", got ");
+            print_u8(*got, uart);
+        }
+        RuntimeError::StackOverflow => uart.write_str("call stack overflow"),
     }
 }
 

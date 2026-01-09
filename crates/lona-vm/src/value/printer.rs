@@ -38,7 +38,11 @@ pub fn print_value<M: MemorySpace, U: Uart>(value: Value, proc: &Process, mem: &
         Value::Pair(_) => print_list(value, proc, mem, uart),
         Value::Tuple(_) => print_tuple(value, proc, mem, uart),
         Value::Map(_) => print_map(value, proc, mem, uart),
+        Value::CompiledFn(_) => print_compiled_fn(value, proc, mem, uart),
+        Value::Closure(_) => print_closure(value, proc, mem, uart),
+        Value::NativeFn(id) => print_native_fn(id, uart),
         Value::Namespace(_) => print_namespace(value, proc, mem, uart),
+        Value::Unbound => uart_write_str(uart, "#<unbound>"),
     }
 }
 
@@ -195,6 +199,47 @@ fn print_namespace<M: MemorySpace, U: Uart>(ns: Value, proc: &Process, mem: &M, 
     }
 
     uart.write_byte(b']');
+}
+
+fn print_compiled_fn<M: MemorySpace, U: Uart>(func: Value, proc: &Process, mem: &M, uart: &mut U) {
+    uart_write_str(uart, "#<fn");
+
+    if let Some(fn_val) = proc.read_compiled_fn(mem, func) {
+        uart.write_byte(b'/');
+        print_int(i64::from(fn_val.arity), uart);
+        if fn_val.variadic {
+            uart.write_byte(b'+');
+        }
+    }
+
+    uart.write_byte(b'>');
+}
+
+fn print_closure<M: MemorySpace, U: Uart>(closure: Value, proc: &Process, mem: &M, uart: &mut U) {
+    uart_write_str(uart, "#<closure");
+
+    if let Some(closure_val) = proc.read_closure(mem, closure) {
+        // Read the underlying function to get arity
+        let fn_val: crate::value::HeapCompiledFn = mem.read(closure_val.function);
+        uart.write_byte(b'/');
+        print_int(i64::from(fn_val.arity), uart);
+        if fn_val.variadic {
+            uart.write_byte(b'+');
+        }
+    }
+
+    uart.write_byte(b'>');
+}
+
+fn print_native_fn<U: Uart>(id: u16, uart: &mut U) {
+    uart_write_str(uart, "#<native-fn ");
+    // Try to get the intrinsic name
+    if let Some(name) = crate::intrinsics::intrinsic_name(id as u8) {
+        uart_write_str(uart, name);
+    } else {
+        print_int(i64::from(id), uart);
+    }
+    uart.write_byte(b'>');
 }
 
 /// Print a value to a string buffer.

@@ -268,10 +268,17 @@ fn compile_unknown_intrinsic() {
 }
 
 #[test]
-fn compile_invalid_call_head() {
+fn compile_callable_expression_head() {
+    // With callable data structure support, non-symbol heads compile
+    // and are evaluated at runtime. The CALL instruction will dispatch
+    // based on the callee type.
     let (mut proc, mut mem) = setup();
-    let result = compile_expr("(42 1 2)", &mut proc, &mut mem);
-    assert_eq!(result, Err(CompileError::InvalidSyntax));
+    let chunk = compile_expr("(42 1 2)", &mut proc, &mut mem).unwrap();
+
+    // Should compile: loads 42 into a temp, loads args, emits CALL
+    // At runtime, this will fail with NotCallable
+    assert!(chunk.code.len() > 1);
+    assert_eq!(decode_opcode(*chunk.code.last().unwrap()), op::HALT);
 }
 
 // --- Disassembly tests ---

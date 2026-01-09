@@ -35,18 +35,23 @@
 //! For M2: Allocated but empty (no promotion without GC)
 //! ```
 
+mod function;
+mod namespace;
 pub mod pool;
+mod value_alloc;
 
 #[cfg(test)]
 mod process_test;
 
 use crate::Vaddr;
 use crate::bytecode::Chunk;
-use crate::platform::MemorySpace;
-use crate::value::{HeapMap, HeapString, HeapTuple, Namespace, Pair, Value};
+use crate::value::Value;
 
 /// Number of X registers (temporaries).
 pub const X_REG_COUNT: usize = 256;
+
+/// Maximum call stack depth.
+pub const MAX_CALL_DEPTH: usize = 256;
 
 /// Maximum number of interned keywords per process.
 ///
@@ -90,6 +95,18 @@ pub enum ProcessStatus {
     Error = 3,
 }
 
+/// A saved call frame on the call stack.
+///
+/// When calling a function, we save the current execution context here
+/// so it can be restored on return.
+#[derive(Clone, Copy, Debug)]
+pub struct CallFrame {
+    /// Return address (instruction pointer to resume at).
+    pub return_ip: usize,
+    /// Address of the function being called (for debugging/closures).
+    pub fn_addr: Vaddr,
+}
+
 /// A lightweight process with BEAM-style memory layout.
 ///
 /// Each process owns its heap and execution state. The VM operates on
@@ -128,28 +145,34 @@ pub struct Process {
     /// Current bytecode chunk being executed.
     pub chunk: Option<Chunk>,
 
+    // Call stack
+    /// Saved call frames for function returns.
+    call_stack: [CallFrame; MAX_CALL_DEPTH],
+    /// Number of frames on the call stack (stack top index).
+    call_stack_len: usize,
+
     // Interning tables
     /// Interned keywords (addresses of keyword `HeapString`s on the heap).
     /// Keywords are interned so that identical keyword literals share the same address.
-    keyword_intern: [Vaddr; MAX_INTERNED_KEYWORDS],
+    pub(crate) keyword_intern: [Vaddr; MAX_INTERNED_KEYWORDS],
     /// Number of interned keywords.
-    keyword_intern_len: usize,
+    pub(crate) keyword_intern_len: usize,
 
     // Metadata table
     /// Metadata table: maps object addresses to metadata map addresses.
     /// Stored as parallel arrays: `metadata_keys[i]` → `metadata_values[i]`.
-    metadata_keys: [Vaddr; MAX_METADATA_ENTRIES],
-    metadata_values: [Vaddr; MAX_METADATA_ENTRIES],
+    pub(crate) metadata_keys: [Vaddr; MAX_METADATA_ENTRIES],
+    pub(crate) metadata_values: [Vaddr; MAX_METADATA_ENTRIES],
     /// Number of metadata entries.
-    metadata_len: usize,
+    pub(crate) metadata_len: usize,
 
     // Namespace registry
     /// Namespace registry: maps namespace name symbols to namespace addresses.
     /// Stored as parallel arrays: `namespace_names[i]` → `namespace_addrs[i]`.
-    namespace_names: [Vaddr; MAX_NAMESPACES],
-    namespace_addrs: [Vaddr; MAX_NAMESPACES],
+    pub(crate) namespace_names: [Vaddr; MAX_NAMESPACES],
+    pub(crate) namespace_addrs: [Vaddr; MAX_NAMESPACES],
     /// Number of registered namespaces.
-    namespace_len: usize,
+    pub(crate) namespace_len: usize,
 }
 
 impl Process {
@@ -188,6 +211,12 @@ impl Process {
             ip: 0,
             x_regs: [Value::Nil; X_REG_COUNT],
             chunk: None,
+            // Call stack
+            call_stack: [CallFrame {
+                return_ip: 0,
+                fn_addr: Vaddr::new(0),
+            }; MAX_CALL_DEPTH],
+            call_stack_len: 0,
             // Interning tables
             keyword_intern: [Vaddr::new(0); MAX_INTERNED_KEYWORDS],
             keyword_intern_len: 0,
@@ -277,373 +306,38 @@ impl Process {
     pub const fn reset(&mut self) {
         self.ip = 0;
         self.x_regs = [Value::Nil; X_REG_COUNT];
+        self.call_stack_len = 0;
         self.status = ProcessStatus::Ready;
     }
 
-    // --- Value allocation helpers ---
+    // --- Call stack methods ---
 
-    /// Allocate a string on the young heap.
+    /// Push a call frame onto the stack.
     ///
-    /// Returns a `Value::String` pointing to the allocated string, or `None` if OOM.
-    pub fn alloc_string<M: MemorySpace>(&mut self, mem: &mut M, s: &str) -> Option<Value> {
-        let len = s.len();
-        let total_size = HeapString::alloc_size(len);
-
-        // Allocate space (align to 4 bytes for the header)
-        let addr = self.alloc(total_size, 4)?;
-
-        // Write header
-        let header = HeapString { len: len as u32 };
-        mem.write(addr, header);
-
-        // Write string data
-        let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-        let dest = mem.slice_mut(data_addr, len);
-        dest.copy_from_slice(s.as_bytes());
-
-        Some(Value::string(addr))
-    }
-
-    /// Allocate a pair on the young heap.
-    ///
-    /// Returns a `Value::Pair` pointing to the allocated pair, or `None` if OOM.
-    pub fn alloc_pair<M: MemorySpace>(
-        &mut self,
-        mem: &mut M,
-        first: Value,
-        rest: Value,
-    ) -> Option<Value> {
-        // Allocate space (align to 8 bytes for Value fields)
-        let addr = self.alloc(Pair::SIZE, 8)?;
-
-        // Write the pair
-        let pair = Pair::new(first, rest);
-        mem.write(addr, pair);
-
-        Some(Value::pair(addr))
-    }
-
-    /// Allocate a symbol on the young heap (same as string but tagged differently).
-    ///
-    /// Returns a `Value::Symbol` pointing to the allocated symbol, or `None` if OOM.
-    pub fn alloc_symbol<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Value> {
-        let len = name.len();
-        let total_size = HeapString::alloc_size(len);
-
-        // Allocate space (align to 4 bytes for the header)
-        let addr = self.alloc(total_size, 4)?;
-
-        // Write header
-        let header = HeapString { len: len as u32 };
-        mem.write(addr, header);
-
-        // Write string data
-        let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-        let dest = mem.slice_mut(data_addr, len);
-        dest.copy_from_slice(name.as_bytes());
-
-        Some(Value::symbol(addr))
-    }
-
-    /// Allocate a keyword on the young heap (same as string but tagged differently).
-    ///
-    /// Keywords are interned: the same keyword literal will return the same address.
-    /// This enables O(1) equality comparison via address comparison.
-    ///
-    /// Returns a `Value::Keyword` pointing to the allocated keyword, or `None` if OOM.
-    pub fn alloc_keyword<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Value> {
-        // Check intern table for existing keyword
-        for i in 0..self.keyword_intern_len {
-            let addr = self.keyword_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
-                    // Found existing interned keyword
-                    return Some(Value::keyword(addr));
-                }
-            }
+    /// Returns `false` if the call stack is full (stack overflow).
+    pub const fn push_call_frame(&mut self, return_ip: usize, fn_addr: Vaddr) -> bool {
+        if self.call_stack_len >= MAX_CALL_DEPTH {
+            return false;
         }
-
-        // Not found, allocate new keyword
-        let len = name.len();
-        let total_size = HeapString::alloc_size(len);
-
-        // Allocate space (align to 4 bytes for the header)
-        let addr = self.alloc(total_size, 4)?;
-
-        // Write header
-        let header = HeapString { len: len as u32 };
-        mem.write(addr, header);
-
-        // Write string data
-        let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-        let dest = mem.slice_mut(data_addr, len);
-        dest.copy_from_slice(name.as_bytes());
-
-        // Add to intern table if not full
-        if self.keyword_intern_len < MAX_INTERNED_KEYWORDS {
-            self.keyword_intern[self.keyword_intern_len] = addr;
-            self.keyword_intern_len += 1;
-        }
-
-        Some(Value::keyword(addr))
+        self.call_stack[self.call_stack_len] = CallFrame { return_ip, fn_addr };
+        self.call_stack_len += 1;
+        true
     }
 
-    /// Allocate a tuple on the young heap.
+    /// Pop a call frame from the stack.
     ///
-    /// Returns a `Value::Tuple` pointing to the allocated tuple, or `None` if OOM.
-    pub fn alloc_tuple<M: MemorySpace>(
-        &mut self,
-        mem: &mut M,
-        elements: &[Value],
-    ) -> Option<Value> {
-        let len = elements.len();
-        let total_size = HeapTuple::alloc_size(len);
-
-        // Allocate space (align to 8 bytes for Value fields)
-        let addr = self.alloc(total_size, 8)?;
-
-        // Write header
-        let header = HeapTuple { len: len as u32 };
-        mem.write(addr, header);
-
-        // Write elements
-        let data_addr = addr.add(HeapTuple::HEADER_SIZE as u64);
-        for (i, &elem) in elements.iter().enumerate() {
-            let elem_addr = data_addr.add((i * core::mem::size_of::<Value>()) as u64);
-            mem.write(elem_addr, elem);
-        }
-
-        Some(Value::tuple(addr))
-    }
-
-    /// Read a heap-allocated string.
-    ///
-    /// Returns `None` if the value is not a string, symbol, or keyword.
-    #[must_use]
-    pub fn read_string<'a, M: MemorySpace>(&self, mem: &'a M, value: Value) -> Option<&'a str> {
-        let (Value::String(addr) | Value::Symbol(addr) | Value::Keyword(addr)) = value else {
-            return None;
-        };
-
-        let header: HeapString = mem.read(addr);
-        let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-        let bytes = mem.slice(data_addr, header.len as usize);
-
-        // We wrote valid UTF-8 when creating the string, but return None on error
-        core::str::from_utf8(bytes).ok()
-    }
-
-    /// Read a pair from the heap.
-    ///
-    /// Returns `None` if the value is not a pair.
-    #[must_use]
-    pub fn read_pair<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<Pair> {
-        let Value::Pair(addr) = value else {
-            return None;
-        };
-
-        Some(mem.read(addr))
-    }
-
-    /// Read a tuple's length from the heap.
-    ///
-    /// Returns `None` if the value is not a tuple.
-    #[must_use]
-    pub fn read_tuple_len<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<usize> {
-        let Value::Tuple(addr) = value else {
-            return None;
-        };
-
-        let header: HeapTuple = mem.read(addr);
-        Some(header.len as usize)
-    }
-
-    /// Read a tuple element at the given index.
-    ///
-    /// Returns `None` if the value is not a tuple or index is out of bounds.
-    #[must_use]
-    pub fn read_tuple_element<M: MemorySpace>(
-        &self,
-        mem: &M,
-        value: Value,
-        index: usize,
-    ) -> Option<Value> {
-        let Value::Tuple(addr) = value else {
-            return None;
-        };
-
-        let header: HeapTuple = mem.read(addr);
-        if index >= header.len as usize {
+    /// Returns `None` if the call stack is empty.
+    pub const fn pop_call_frame(&mut self) -> Option<CallFrame> {
+        if self.call_stack_len == 0 {
             return None;
         }
-
-        let data_addr = addr.add(HeapTuple::HEADER_SIZE as u64);
-        let elem_addr = data_addr.add((index * core::mem::size_of::<Value>()) as u64);
-        Some(mem.read(elem_addr))
+        self.call_stack_len -= 1;
+        Some(self.call_stack[self.call_stack_len])
     }
 
-    /// Allocate a map on the young heap.
-    ///
-    /// A map is an association list: a Pair chain where each `first` is a `[key value]` tuple.
-    ///
-    /// Returns a `Value::Map` pointing to the allocated map, or `None` if OOM.
-    pub fn alloc_map<M: MemorySpace>(&mut self, mem: &mut M, entries: Value) -> Option<Value> {
-        // Allocate space (align to 8 bytes for Value field)
-        let addr = self.alloc(HeapMap::SIZE, 8)?;
-
-        // Write the map
-        let map = HeapMap { entries };
-        mem.write(addr, map);
-
-        Some(Value::map(addr))
-    }
-
-    /// Read a map from the heap.
-    ///
-    /// Returns `None` if the value is not a map.
+    /// Get the current call stack depth.
     #[must_use]
-    pub fn read_map<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<HeapMap> {
-        let Value::Map(addr) = value else {
-            return None;
-        };
-
-        Some(mem.read(addr))
-    }
-
-    /// Set metadata for an object.
-    ///
-    /// Associates the given metadata map address with the object address.
-    /// If the object already has metadata, it is replaced.
-    /// If the metadata table is full, this is a silent no-op.
-    pub fn set_metadata(&mut self, obj_addr: Vaddr, meta_addr: Vaddr) {
-        // Check if already exists - update in place
-        for i in 0..self.metadata_len {
-            if self.metadata_keys[i] == obj_addr {
-                self.metadata_values[i] = meta_addr;
-                return;
-            }
-        }
-
-        // Add new entry if table not full
-        if self.metadata_len < MAX_METADATA_ENTRIES {
-            self.metadata_keys[self.metadata_len] = obj_addr;
-            self.metadata_values[self.metadata_len] = meta_addr;
-            self.metadata_len += 1;
-        }
-    }
-
-    /// Get metadata for an object.
-    ///
-    /// Returns the metadata map address if the object has metadata, `None` otherwise.
-    #[must_use]
-    pub fn get_metadata(&self, obj_addr: Vaddr) -> Option<Vaddr> {
-        for i in 0..self.metadata_len {
-            if self.metadata_keys[i] == obj_addr {
-                return Some(self.metadata_values[i]);
-            }
-        }
-        None
-    }
-
-    // --- Namespace methods ---
-
-    /// Allocate a namespace on the young heap.
-    ///
-    /// Creates a namespace with the given name symbol and an empty mappings map.
-    ///
-    /// Returns a `Value::Namespace` pointing to the allocated namespace, or `None` if OOM.
-    pub fn alloc_namespace<M: MemorySpace>(&mut self, mem: &mut M, name: Value) -> Option<Value> {
-        // Create empty mappings map
-        let empty_entries = Value::Nil;
-        let mappings = self.alloc_map(mem, empty_entries)?;
-
-        // Allocate space (align to 8 bytes for Value fields)
-        let addr = self.alloc(Namespace::SIZE, 8)?;
-
-        // Write the namespace
-        let ns = Namespace { name, mappings };
-        mem.write(addr, ns);
-
-        Some(Value::namespace(addr))
-    }
-
-    /// Read a namespace from the heap.
-    ///
-    /// Returns `None` if the value is not a namespace.
-    #[must_use]
-    pub fn read_namespace<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<Namespace> {
-        let Value::Namespace(addr) = value else {
-            return None;
-        };
-
-        Some(mem.read(addr))
-    }
-
-    /// Find a namespace by its name symbol.
-    ///
-    /// Compares namespace names by symbol address. Returns the namespace value
-    /// if found, `None` otherwise.
-    #[must_use]
-    pub fn find_namespace<M: MemorySpace>(&self, _mem: &M, name: Value) -> Option<Value> {
-        let Value::Symbol(name_addr) = name else {
-            return None;
-        };
-
-        for i in 0..self.namespace_len {
-            if self.namespace_names[i] == name_addr {
-                return Some(Value::namespace(self.namespace_addrs[i]));
-            }
-        }
-        None
-    }
-
-    /// Register a namespace in the registry.
-    ///
-    /// Associates the namespace with its name for later lookup via `find_namespace`.
-    /// If the namespace is already registered, updates the address.
-    /// If the registry is full, this is a silent no-op.
-    pub fn register_namespace(&mut self, name_addr: Vaddr, ns_addr: Vaddr) {
-        // Check if already exists - update in place
-        for i in 0..self.namespace_len {
-            if self.namespace_names[i] == name_addr {
-                self.namespace_addrs[i] = ns_addr;
-                return;
-            }
-        }
-
-        // Add new entry if table not full
-        if self.namespace_len < MAX_NAMESPACES {
-            self.namespace_names[self.namespace_len] = name_addr;
-            self.namespace_addrs[self.namespace_len] = ns_addr;
-            self.namespace_len += 1;
-        }
-    }
-
-    /// Create or find a namespace by name.
-    ///
-    /// If a namespace with the given name exists, returns it.
-    /// Otherwise, creates a new namespace, registers it, and returns it.
-    pub fn get_or_create_namespace<M: MemorySpace>(
-        &mut self,
-        mem: &mut M,
-        name: Value,
-    ) -> Option<Value> {
-        // Check if namespace already exists
-        if let Some(ns) = self.find_namespace(mem, name) {
-            return Some(ns);
-        }
-
-        // Create new namespace
-        let ns = self.alloc_namespace(mem, name)?;
-
-        // Register it
-        if let (Value::Symbol(name_addr), Value::Namespace(ns_addr)) = (name, ns) {
-            self.register_namespace(name_addr, ns_addr);
-        }
-
-        Some(ns)
+    pub const fn call_depth(&self) -> usize {
+        self.call_stack_len
     }
 }

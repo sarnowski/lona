@@ -23,6 +23,12 @@ use core::fmt;
 ///
 /// The value representation uses 16 bytes (tag + payload).
 /// Immediate values are stored inline, heap values store a `Vaddr` pointer.
+///
+/// Tags follow the VM specification (see `docs/architecture/virtual-machine.md`):
+/// - 0x0-0x8: Basic types (nil, bool, int, string, pair, symbol, keyword, tuple, map)
+/// - 0x9-0xB: Callable types (function, closure, native function)
+/// - 0xC-0xD: Reference types (var, namespace)
+/// - 0xE: Unbound sentinel
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum Value {
@@ -45,8 +51,17 @@ pub enum Value {
     Tuple(Vaddr) = 7,
     /// Heap-allocated map (pointer to `HeapMap`).
     Map(Vaddr) = 8,
+    /// Compiled function without captures (pointer to `HeapCompiledFn`).
+    CompiledFn(Vaddr) = 9,
+    /// Function with captured values (pointer to `HeapClosure`).
+    Closure(Vaddr) = 10,
+    /// Native function (immediate value: intrinsic ID).
+    NativeFn(u16) = 11,
+    // Note: Var = 12 is reserved for Phase 4
     /// Heap-allocated namespace (pointer to `Namespace`).
-    Namespace(Vaddr) = 9,
+    Namespace(Vaddr) = 13,
+    /// Sentinel for uninitialized vars (immediate, no payload).
+    Unbound = 14,
 }
 
 impl Value {
@@ -120,6 +135,34 @@ impl Value {
         Self::Namespace(addr)
     }
 
+    /// Create a compiled function value from a heap address.
+    #[inline]
+    #[must_use]
+    pub const fn compiled_fn(addr: Vaddr) -> Self {
+        Self::CompiledFn(addr)
+    }
+
+    /// Create a closure value from a heap address.
+    #[inline]
+    #[must_use]
+    pub const fn closure(addr: Vaddr) -> Self {
+        Self::Closure(addr)
+    }
+
+    /// Create a native function value from an intrinsic ID.
+    #[inline]
+    #[must_use]
+    pub const fn native_fn(id: u16) -> Self {
+        Self::NativeFn(id)
+    }
+
+    /// Create an unbound sentinel value.
+    #[inline]
+    #[must_use]
+    pub const fn unbound() -> Self {
+        Self::Unbound
+    }
+
     /// Check if this value is nil.
     #[inline]
     #[must_use]
@@ -190,6 +233,44 @@ impl Value {
     pub const fn is_namespace(&self) -> bool {
         matches!(self, Self::Namespace(_))
     }
+
+    /// Check if this value is a compiled function.
+    #[inline]
+    #[must_use]
+    pub const fn is_compiled_fn(&self) -> bool {
+        matches!(self, Self::CompiledFn(_))
+    }
+
+    /// Check if this value is a closure.
+    #[inline]
+    #[must_use]
+    pub const fn is_closure(&self) -> bool {
+        matches!(self, Self::Closure(_))
+    }
+
+    /// Check if this value is a native function.
+    #[inline]
+    #[must_use]
+    pub const fn is_native_fn(&self) -> bool {
+        matches!(self, Self::NativeFn(_))
+    }
+
+    /// Check if this value is callable (function, closure, or native function).
+    #[inline]
+    #[must_use]
+    pub const fn is_fn(&self) -> bool {
+        matches!(
+            self,
+            Self::CompiledFn(_) | Self::Closure(_) | Self::NativeFn(_)
+        )
+    }
+
+    /// Check if this value is the unbound sentinel.
+    #[inline]
+    #[must_use]
+    pub const fn is_unbound(&self) -> bool {
+        matches!(self, Self::Unbound)
+    }
 }
 
 impl fmt::Debug for Value {
@@ -204,7 +285,11 @@ impl fmt::Debug for Value {
             Self::Keyword(addr) => write!(f, "Keyword({addr:?})"),
             Self::Tuple(addr) => write!(f, "Tuple({addr:?})"),
             Self::Map(addr) => write!(f, "Map({addr:?})"),
+            Self::CompiledFn(addr) => write!(f, "CompiledFn({addr:?})"),
+            Self::Closure(addr) => write!(f, "Closure({addr:?})"),
+            Self::NativeFn(id) => write!(f, "NativeFn({id})"),
             Self::Namespace(addr) => write!(f, "Namespace({addr:?})"),
+            Self::Unbound => write!(f, "Unbound"),
         }
     }
 }
@@ -333,4 +418,118 @@ pub struct Namespace {
 impl Namespace {
     /// Size of the namespace header in bytes.
     pub const SIZE: usize = core::mem::size_of::<Self>();
+}
+
+/// Heap-allocated compiled function header.
+///
+/// A compiled function is a pure function (no captures) produced by `(fn* [args] body)`.
+/// Contains bytecode and metadata for execution.
+///
+/// Stored in memory as:
+/// - Header: arity, variadic flag, locals count, code length
+/// - Followed by: bytecode instructions (array of u32)
+/// - Followed by: constants pool (array of Values)
+///
+/// Note: The constant pool is stored separately to allow variable-length bytecode.
+/// Constants follow immediately after bytecode.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct HeapCompiledFn {
+    /// Number of required parameters.
+    pub arity: u8,
+    /// If true, accepts variable arguments (last param collects rest).
+    pub variadic: bool,
+    /// Number of Y (local) registers needed.
+    pub num_locals: u8,
+    /// Padding byte for alignment (always 0).
+    pub padding: u8,
+    /// Length of bytecode in u32 instructions.
+    pub code_len: u32,
+    /// Number of constants in the constant pool.
+    pub constants_len: u32,
+    /// Source line number (0 if unknown).
+    pub source_line: u32,
+    /// Padding for 8-byte alignment.
+    pub padding2: u32,
+    /// Source file path (Vaddr to string, or `Vaddr::null()` if unknown).
+    pub source_file: crate::Vaddr,
+    // Followed by:
+    // - `code_len` u32 instructions
+    // - `constants_len` Values (constant pool)
+}
+
+impl HeapCompiledFn {
+    /// Size of the header in bytes.
+    pub const HEADER_SIZE: usize = core::mem::size_of::<Self>();
+
+    /// Calculate total allocation size for a compiled function.
+    ///
+    /// # Arguments
+    /// * `code_len` - Number of bytecode instructions (u32)
+    /// * `constants_len` - Number of constants in the pool
+    #[inline]
+    #[must_use]
+    pub const fn alloc_size(code_len: usize, constants_len: usize) -> usize {
+        Self::HEADER_SIZE
+            + code_len * core::mem::size_of::<u32>()
+            + constants_len * core::mem::size_of::<Value>()
+    }
+
+    /// Offset from header start to the bytecode array.
+    #[inline]
+    #[must_use]
+    pub const fn bytecode_offset() -> usize {
+        Self::HEADER_SIZE
+    }
+
+    /// Offset from header start to the constants pool.
+    #[inline]
+    #[must_use]
+    pub const fn constants_offset(code_len: usize) -> usize {
+        Self::HEADER_SIZE + code_len * core::mem::size_of::<u32>()
+    }
+}
+
+/// Heap-allocated closure header.
+///
+/// A closure is a function paired with captured values from its lexical environment.
+/// Produced when `fn*` references free variables from enclosing scope.
+///
+/// Stored in memory as:
+/// - Header: function pointer, captures count
+/// - Followed by: captured values (array of Values)
+///
+/// The `function` field points to a `HeapCompiledFn` that contains the bytecode.
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct HeapClosure {
+    /// Pointer to the underlying `HeapCompiledFn`.
+    pub function: Vaddr,
+    /// Number of captured values.
+    pub captures_len: u32,
+    /// Padding for alignment (always 0).
+    pub padding: u32,
+    // Followed by `captures_len` Values (captured environment)
+}
+
+impl HeapClosure {
+    /// Size of the header in bytes.
+    pub const HEADER_SIZE: usize = core::mem::size_of::<Self>();
+
+    /// Calculate total allocation size for a closure.
+    ///
+    /// # Arguments
+    /// * `captures_len` - Number of captured values
+    #[inline]
+    #[must_use]
+    pub const fn alloc_size(captures_len: usize) -> usize {
+        Self::HEADER_SIZE + captures_len * core::mem::size_of::<Value>()
+    }
+
+    /// Offset from header start to the captures array.
+    #[inline]
+    #[must_use]
+    pub const fn captures_offset() -> usize {
+        Self::HEADER_SIZE
+    }
 }

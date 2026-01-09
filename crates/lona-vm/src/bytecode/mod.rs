@@ -43,6 +43,14 @@ pub mod op {
     pub const BUILD_TUPLE: u8 = 8;
     /// Build map: `X(A) := %{X(B)..X(B+C*2-1)}` (C key-value pairs starting at X(B))
     pub const BUILD_MAP: u8 = 9;
+    /// Call function: `X0 := X(A)(X1..X(B))` where X(A) is a callable value.
+    ///
+    /// Format: `CALL fn_reg, argc` (result goes to X0).
+    pub const CALL: u8 = 10;
+    /// Build closure: `X(A) := Closure(X(B), X(C))` where X(B) is `CompiledFn`, X(C) is captures tuple.
+    ///
+    /// Format: `BUILD_CLOSURE target, fn_reg, captures_reg`
+    pub const BUILD_CLOSURE: u8 = 11;
 }
 
 /// Bit widths for instruction fields.

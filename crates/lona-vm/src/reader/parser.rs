@@ -490,7 +490,9 @@ const fn get_heap_addr(value: Value) -> Option<crate::Vaddr> {
         | Value::Keyword(addr)
         | Value::Tuple(addr)
         | Value::Map(addr)
-        | Value::Namespace(addr) => Some(addr),
-        Value::Nil | Value::Bool(_) | Value::Int(_) => None,
+        | Value::Namespace(addr)
+        | Value::CompiledFn(addr)
+        | Value::Closure(addr) => Some(addr),
+        Value::Nil | Value::Bool(_) | Value::Int(_) | Value::NativeFn(_) | Value::Unbound => None,
     }
 }

@@ -12,20 +12,23 @@
 //! - The result of an expression is always in X0
 //! - For intrinsics: `INTRINSIC id, argc` reads X1..X(argc), writes X0
 
+mod call;
+mod collection;
+mod fn_compile;
+
 #[cfg(test)]
 mod compiler_test;
 
 #[cfg(any(test, feature = "std"))]
-use std::vec::Vec;
-
-#[cfg(not(any(test, feature = "std")))]
-use alloc::vec::Vec;
+mod disassemble;
 
 use crate::bytecode::{BX_MASK, Chunk, MAX_SIGNED_BX, MIN_SIGNED_BX, encode_abc, encode_abx, op};
-use crate::intrinsics::lookup_intrinsic;
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::value::Value;
+
+#[cfg(any(test, feature = "std"))]
+pub use disassemble::disassemble;
 
 /// Maximum number of arguments for an intrinsic call.
 const MAX_ARGS: u8 = 254; // X1..X254, X0 reserved for result
@@ -33,6 +36,9 @@ const MAX_ARGS: u8 = 254; // X1..X254, X0 reserved for result
 /// First register available for temporary storage during compilation.
 /// Registers 128-255 are used as temps, giving 128 temp slots.
 const TEMP_REG_BASE: u8 = 128;
+
+/// Maximum number of parameter bindings in a function.
+const MAX_PARAMS: usize = 16;
 
 /// Compilation error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,25 +57,251 @@ pub enum CompileError {
     ExpressionTooComplex,
 }
 
+/// Maximum length of a symbol name for binding comparison.
+const MAX_SYMBOL_NAME_LEN: usize = 64;
+
+/// Maximum number of captured variables in a closure.
+const MAX_CAPTURES: usize = 16;
+
+/// A parameter binding: symbol name → register number.
+#[derive(Clone, Copy)]
+struct Binding {
+    /// Symbol name for comparison (stored inline).
+    name: [u8; MAX_SYMBOL_NAME_LEN],
+    /// Length of the name.
+    name_len: u8,
+    /// Register containing the parameter value (X1, X2, ...).
+    register: u8,
+}
+
+/// A captured variable: maps outer binding to inner register.
+#[derive(Clone, Copy)]
+struct Capture {
+    /// Symbol name of the captured variable.
+    name: [u8; MAX_SYMBOL_NAME_LEN],
+    /// Length of the name.
+    name_len: u8,
+    /// Register in outer scope that holds the value.
+    outer_register: u8,
+    /// Register in inner scope where capture will be loaded.
+    inner_register: u8,
+}
+
 /// Compiler state for a single expression.
 pub struct Compiler<'a, M: MemorySpace> {
     /// The bytecode chunk being built.
     chunk: Chunk,
-    /// Reference to the process (for reading strings/symbols).
-    proc: &'a Process,
+    /// Reference to the process (for reading/allocating values).
+    proc: &'a mut Process,
     /// Reference to the memory space.
-    mem: &'a M,
+    mem: &'a mut M,
+    /// Parameter bindings for the current function scope.
+    bindings: [Binding; MAX_PARAMS],
+    /// Number of active bindings.
+    bindings_len: usize,
+    /// Bindings from enclosing scope (for closure capture detection).
+    outer_bindings: [Binding; MAX_PARAMS],
+    /// Number of outer bindings.
+    outer_bindings_len: usize,
+    /// Captured variables for current closure being compiled.
+    captures: [Capture; MAX_CAPTURES],
+    /// Number of captures.
+    captures_len: usize,
+    /// Arity of the inner function (needed for capture register calculation).
+    inner_arity: u8,
 }
 
 impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// Create a new compiler.
     #[must_use]
-    pub const fn new(proc: &'a Process, mem: &'a M) -> Self {
+    pub const fn new(proc: &'a mut Process, mem: &'a mut M) -> Self {
         Self {
             chunk: Chunk::new(),
             proc,
             mem,
+            bindings: [Binding {
+                name: [0; MAX_SYMBOL_NAME_LEN],
+                name_len: 0,
+                register: 0,
+            }; MAX_PARAMS],
+            bindings_len: 0,
+            outer_bindings: [Binding {
+                name: [0; MAX_SYMBOL_NAME_LEN],
+                name_len: 0,
+                register: 0,
+            }; MAX_PARAMS],
+            outer_bindings_len: 0,
+            captures: [Capture {
+                name: [0; MAX_SYMBOL_NAME_LEN],
+                name_len: 0,
+                outer_register: 0,
+                inner_register: 0,
+            }; MAX_CAPTURES],
+            captures_len: 0,
+            inner_arity: 0,
         }
+    }
+
+    /// Look up a binding for a symbol by name.
+    ///
+    /// Returns `Some(register)` if the symbol name matches a bound parameter.
+    fn lookup_binding_by_name(&self, name: &str) -> Option<u8> {
+        let name_bytes = name.as_bytes();
+        for i in 0..self.bindings_len {
+            let binding = &self.bindings[i];
+            let binding_len = binding.name_len as usize;
+            if binding_len == name_bytes.len()
+                && binding.name[..binding_len] == name_bytes[..binding_len]
+            {
+                return Some(binding.register);
+            }
+        }
+        None
+    }
+
+    /// Look up a binding in the outer scope (for closure capture).
+    ///
+    /// Returns `Some(register)` if the symbol matches an outer binding.
+    fn lookup_outer_binding(&self, name: &str) -> Option<u8> {
+        let name_bytes = name.as_bytes();
+        for i in 0..self.outer_bindings_len {
+            let binding = &self.outer_bindings[i];
+            let binding_len = binding.name_len as usize;
+            if binding_len == name_bytes.len()
+                && binding.name[..binding_len] == name_bytes[..binding_len]
+            {
+                return Some(binding.register);
+            }
+        }
+        None
+    }
+
+    /// Look up an existing capture for a symbol.
+    ///
+    /// Returns `Some(inner_register)` if this symbol was already captured.
+    fn lookup_capture(&self, name: &str) -> Option<u8> {
+        let name_bytes = name.as_bytes();
+        for i in 0..self.captures_len {
+            let capture = &self.captures[i];
+            let capture_len = capture.name_len as usize;
+            if capture_len == name_bytes.len()
+                && capture.name[..capture_len] == name_bytes[..capture_len]
+            {
+                return Some(capture.inner_register);
+            }
+        }
+        None
+    }
+
+    /// Add a capture for a symbol from outer scope.
+    ///
+    /// Returns the inner register where the captured value will be available.
+    fn add_capture(&mut self, name: &str, outer_register: u8) -> Option<u8> {
+        if self.captures_len >= MAX_CAPTURES {
+            return None;
+        }
+
+        // Capture registers start after params: inner_arity + 1 + capture_index
+        let inner_register = self.inner_arity + 1 + self.captures_len as u8;
+
+        // Copy name
+        let name_bytes = name.as_bytes();
+        let name_len = name_bytes.len().min(MAX_SYMBOL_NAME_LEN);
+        let mut name_buf = [0u8; MAX_SYMBOL_NAME_LEN];
+        name_buf[..name_len].copy_from_slice(&name_bytes[..name_len]);
+
+        self.captures[self.captures_len] = Capture {
+            name: name_buf,
+            name_len: name_len as u8,
+            outer_register,
+            inner_register,
+        };
+        self.captures_len += 1;
+
+        Some(inner_register)
+    }
+
+    /// Clear all bindings and captures (for starting a new function).
+    const fn clear_bindings(&mut self) {
+        self.bindings_len = 0;
+        self.captures_len = 0;
+    }
+
+    /// Force capture of all grandparent variables into the current scope.
+    ///
+    /// This must be called BEFORE saving state when compiling a nested function.
+    /// It ensures that any variable from grandparent scopes is captured in the
+    /// current function, so nested functions can access them via the current
+    /// function's registers (not grandparent registers that won't exist at runtime).
+    fn capture_all_outer_bindings(&mut self) {
+        for i in 0..self.outer_bindings_len {
+            let binding = self.outer_bindings[i];
+            let name_slice = &binding.name[..binding.name_len as usize];
+
+            // Check if already in current bindings
+            let in_bindings = self.bindings[..self.bindings_len]
+                .iter()
+                .any(|b| b.name[..b.name_len as usize] == *name_slice);
+
+            // Check if already captured
+            let in_captures = self.captures[..self.captures_len]
+                .iter()
+                .any(|c| c.name[..c.name_len as usize] == *name_slice);
+
+            // If not already accessible, capture it
+            if !in_bindings && !in_captures && self.captures_len < MAX_CAPTURES {
+                let inner_reg = self.inner_arity + 1 + self.captures_len as u8;
+                self.captures[self.captures_len] = Capture {
+                    name: binding.name,
+                    name_len: binding.name_len,
+                    outer_register: binding.register,
+                    inner_register: inner_reg,
+                };
+                self.captures_len += 1;
+            }
+        }
+    }
+
+    /// Set up `outer_bindings` for a nested function.
+    ///
+    /// Builds the scope chain visible to the nested function from:
+    /// 1. Current bindings (params of this function)
+    /// 2. Current captures (variables captured from parent, including grandparent
+    ///    vars that were force-captured by `capture_all_outer_bindings`)
+    ///
+    /// Note: `capture_all_outer_bindings` must be called first to ensure
+    /// grandparent variables are in current captures.
+    fn setup_outer_bindings_for_nested_fn(&mut self) {
+        let mut new_outer_bindings = [Binding {
+            name: [0; MAX_SYMBOL_NAME_LEN],
+            name_len: 0,
+            register: 0,
+        }; MAX_PARAMS];
+        let mut new_outer_len = 0;
+
+        // First, copy current parameters (these are directly accessible)
+        for binding in self.bindings.iter().take(self.bindings_len) {
+            if new_outer_len < MAX_PARAMS {
+                new_outer_bindings[new_outer_len] = *binding;
+                new_outer_len += 1;
+            }
+        }
+
+        // Then, copy current captures (including grandparent vars)
+        // Use inner_register since that's where the value lives in current scope
+        for capture in self.captures.iter().take(self.captures_len) {
+            if new_outer_len < MAX_PARAMS {
+                new_outer_bindings[new_outer_len] = Binding {
+                    name: capture.name,
+                    name_len: capture.name_len,
+                    register: capture.inner_register,
+                };
+                new_outer_len += 1;
+            }
+        }
+
+        self.outer_bindings = new_outer_bindings;
+        self.outer_bindings_len = new_outer_len;
     }
 
     /// Compile an expression and emit HALT.
@@ -115,10 +347,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
                 self.compile_constant(expr, target)?;
                 Ok(temp_base)
             }
-            Value::Symbol(_) => {
-                // Bare symbols are not supported yet (no variables)
-                Err(CompileError::UnboundSymbol)
-            }
+            Value::Symbol(_) => self.compile_symbol(expr, target, temp_base),
             Value::Keyword(_) => {
                 // Keywords are self-evaluating constants
                 self.compile_constant(expr, target)?;
@@ -132,7 +361,69 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
                 self.compile_constant(expr, target)?;
                 Ok(temp_base)
             }
+            Value::CompiledFn(_) | Value::Closure(_) | Value::NativeFn(_) => {
+                // Functions are self-evaluating constants
+                self.compile_constant(expr, target)?;
+                Ok(temp_base)
+            }
+            Value::Unbound => {
+                // Unbound is a special sentinel - shouldn't appear in source
+                Err(CompileError::InvalidSyntax)
+            }
         }
+    }
+
+    /// Compile a symbol reference.
+    fn compile_symbol(
+        &mut self,
+        expr: Value,
+        target: u8,
+        temp_base: u8,
+    ) -> Result<u8, CompileError> {
+        // Read the symbol name into a local buffer to avoid borrow conflicts
+        let name_str = self
+            .proc
+            .read_string(self.mem, expr)
+            .ok_or(CompileError::InvalidSyntax)?;
+
+        // Copy to local buffer to release the borrow
+        let mut name_buf = [0u8; MAX_SYMBOL_NAME_LEN];
+        let name_bytes = name_str.as_bytes();
+        let name_len = name_bytes.len().min(MAX_SYMBOL_NAME_LEN);
+        name_buf[..name_len].copy_from_slice(&name_bytes[..name_len]);
+
+        // Work with the copied name
+        let name =
+            core::str::from_utf8(&name_buf[..name_len]).map_err(|_| CompileError::InvalidSyntax)?;
+
+        // Check if symbol is bound to a parameter in current scope
+        if let Some(reg) = self.lookup_binding_by_name(name) {
+            // Emit MOVE to copy parameter to target
+            self.chunk
+                .emit(encode_abc(op::MOVE, target, u16::from(reg), 0));
+            return Ok(temp_base);
+        }
+
+        // Check if we already captured this variable
+        if let Some(capture_reg) = self.lookup_capture(name) {
+            self.chunk
+                .emit(encode_abc(op::MOVE, target, u16::from(capture_reg), 0));
+            return Ok(temp_base);
+        }
+
+        // Check if symbol is in outer scope (capture candidate)
+        if let Some(outer_reg) = self.lookup_outer_binding(name) {
+            // Add capture and use the inner register
+            let inner_reg = self
+                .add_capture(name, outer_reg)
+                .ok_or(CompileError::ExpressionTooComplex)?;
+            self.chunk
+                .emit(encode_abc(op::MOVE, target, u16::from(inner_reg), 0));
+            return Ok(temp_base);
+        }
+
+        // Unbound symbol
+        Err(CompileError::UnboundSymbol)
     }
 
     /// Compile an integer literal.
@@ -152,7 +443,11 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     }
 
     /// Compile a constant (load from constant pool).
-    fn compile_constant(&mut self, value: Value, target: u8) -> Result<(), CompileError> {
+    pub(crate) fn compile_constant(
+        &mut self,
+        value: Value,
+        target: u8,
+    ) -> Result<(), CompileError> {
         let idx = self
             .chunk
             .add_constant(value)
@@ -161,262 +456,38 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
         Ok(())
     }
 
-    /// Compile a list expression (special form or intrinsic call).
-    fn compile_list(&mut self, list: Value, target: u8, temp_base: u8) -> Result<u8, CompileError> {
-        let pair = self
-            .proc
-            .read_pair(self.mem, list)
-            .ok_or(CompileError::InvalidSyntax)?;
-
-        // First element should be a symbol (the operator)
-        let Value::Symbol(_) = pair.first else {
-            return Err(CompileError::InvalidSyntax);
-        };
-
-        // Look up the symbol name
-        let name = self
-            .proc
-            .read_string(self.mem, pair.first)
-            .ok_or(CompileError::InvalidSyntax)?;
-
-        // Check for special forms first
-        if name == "quote" {
-            return self.compile_quote(pair.rest, target, temp_base);
-        }
-
-        // Check if it's a known intrinsic
-        let intrinsic_id = lookup_intrinsic(name).ok_or(CompileError::UnboundSymbol)?;
-
-        // Compile the intrinsic call
-        self.compile_intrinsic_call(intrinsic_id, pair.rest, target, temp_base)
-    }
-
-    /// Compile a tuple literal.
+    /// Compile the `do` special form.
     ///
-    /// `[a b c]` evaluates each element and builds a tuple.
-    fn compile_tuple(
+    /// `(do expr1 expr2 ... exprN)` evaluates each expression in sequence
+    /// and returns the value of the last one.
+    pub(crate) fn compile_do(
         &mut self,
-        tuple: Value,
+        body: Value,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
-        // Get tuple length and elements
-        let len = self
-            .proc
-            .read_tuple_len(self.mem, tuple)
-            .ok_or(CompileError::InvalidSyntax)?;
+        let mut current = body;
+        let mut result = temp_base;
 
-        if len == 0 {
-            // Empty tuple - emit BUILD_TUPLE with 0 elements
-            self.chunk.emit(encode_abc(op::BUILD_TUPLE, target, 0, 0));
+        // Empty do returns nil
+        if current.is_nil() {
+            self.chunk.emit(encode_abx(op::LOADNIL, target, 0));
             return Ok(temp_base);
         }
 
-        // Allocate temp registers for elements
-        let elem_count = len as u8;
-        let next_temp = temp_base
-            .checked_add(elem_count)
-            .ok_or(CompileError::ExpressionTooComplex)?;
-
-        // Compile each element to a temp register
-        let mut current_next_temp = next_temp;
-        for i in 0..len {
-            let elem = self
-                .proc
-                .read_tuple_element(self.mem, tuple, i)
-                .ok_or(CompileError::InvalidSyntax)?;
-            let temp_reg = temp_base
-                .checked_add(i as u8)
-                .ok_or(CompileError::ExpressionTooComplex)?;
-            current_next_temp = self.compile_expr(elem, temp_reg, current_next_temp)?;
-        }
-
-        // Emit BUILD_TUPLE: target := [temp_base..temp_base+len-1]
-        self.chunk.emit(encode_abc(
-            op::BUILD_TUPLE,
-            target,
-            u16::from(temp_base),
-            len as u16,
-        ));
-
-        Ok(current_next_temp)
-    }
-
-    /// Compile a map literal.
-    ///
-    /// `%{:a 1 :b 2}` evaluates each key and value, then builds a map.
-    fn compile_map(&mut self, map: Value, target: u8, temp_base: u8) -> Result<u8, CompileError> {
-        // Read the map's entries (association list)
-        let map_val = self
-            .proc
-            .read_map(self.mem, map)
-            .ok_or(CompileError::InvalidSyntax)?;
-
-        // Count entries and collect key-value pairs
-        let mut entries = Vec::new();
-        let mut current = map_val.entries;
-        while let Some(pair) = self.proc.read_pair(self.mem, current) {
-            // Each pair.first is a [key value] tuple
-            let kv = pair.first;
-            let key = self
-                .proc
-                .read_tuple_element(self.mem, kv, 0)
-                .ok_or(CompileError::InvalidSyntax)?;
-            let val = self
-                .proc
-                .read_tuple_element(self.mem, kv, 1)
-                .ok_or(CompileError::InvalidSyntax)?;
-            entries.push((key, val));
-            current = pair.rest;
-        }
-
-        if entries.is_empty() {
-            // Empty map - emit BUILD_MAP with 0 pairs
-            self.chunk.emit(encode_abc(op::BUILD_MAP, target, 0, 0));
-            return Ok(temp_base);
-        }
-
-        // Each pair needs 2 registers (key, value)
-        let pair_count = entries.len() as u8;
-        let elem_count = pair_count
-            .checked_mul(2)
-            .ok_or(CompileError::ExpressionTooComplex)?;
-        let next_temp = temp_base
-            .checked_add(elem_count)
-            .ok_or(CompileError::ExpressionTooComplex)?;
-
-        // Compile each key and value to temp registers
-        let mut current_next_temp = next_temp;
-        for (i, (key, val)) in entries.iter().enumerate() {
-            let key_reg = temp_base
-                .checked_add((i * 2) as u8)
-                .ok_or(CompileError::ExpressionTooComplex)?;
-            let val_reg = temp_base
-                .checked_add((i * 2 + 1) as u8)
-                .ok_or(CompileError::ExpressionTooComplex)?;
-            current_next_temp = self.compile_expr(*key, key_reg, current_next_temp)?;
-            current_next_temp = self.compile_expr(*val, val_reg, current_next_temp)?;
-        }
-
-        // Emit BUILD_MAP: target := %{temp_base..temp_base+pair_count*2-1}
-        self.chunk.emit(encode_abc(
-            op::BUILD_MAP,
-            target,
-            u16::from(temp_base),
-            u16::from(pair_count),
-        ));
-
-        Ok(current_next_temp)
-    }
-
-    /// Compile the `quote` special form.
-    ///
-    /// `(quote expr)` returns `expr` unevaluated.
-    fn compile_quote(
-        &mut self,
-        arg_list: Value,
-        target: u8,
-        temp_base: u8,
-    ) -> Result<u8, CompileError> {
-        // Get the single argument
-        let pair = self
-            .proc
-            .read_pair(self.mem, arg_list)
-            .ok_or(CompileError::InvalidSyntax)?;
-
-        // quote takes exactly one argument
-        if !pair.rest.is_nil() {
-            return Err(CompileError::InvalidSyntax);
-        }
-
-        // Load the quoted expression as a constant (unevaluated)
-        self.compile_constant(pair.first, target)?;
-        Ok(temp_base)
-    }
-
-    /// Compile an intrinsic call.
-    ///
-    /// Arguments are first compiled to temp registers, then moved to X1..Xn.
-    /// This prevents nested calls from clobbering already-computed arguments.
-    /// The INTRINSIC instruction puts the result in X0.
-    /// If target != 0, we emit a MOVE to copy X0 to target.
-    ///
-    /// Returns the next available temp register after compilation.
-    fn compile_intrinsic_call(
-        &mut self,
-        intrinsic_id: u8,
-        arg_list: Value,
-        target: u8,
-        temp_base: u8,
-    ) -> Result<u8, CompileError> {
-        // First, collect all arguments while counting
-        let mut args: Vec<Value> = Vec::new();
-        let mut arg_count: u8 = 0;
-        let mut current = arg_list;
-
+        // Evaluate each expression
         while !current.is_nil() {
             let pair = self
                 .proc
                 .read_pair(self.mem, current)
                 .ok_or(CompileError::InvalidSyntax)?;
 
-            arg_count = arg_count
-                .checked_add(1)
-                .ok_or(CompileError::TooManyArguments)?;
-            if arg_count > MAX_ARGS {
-                return Err(CompileError::TooManyArguments);
-            }
-
-            args.push(pair.first);
+            // Compile each expression to target (last one's value is kept)
+            result = self.compile_expr(pair.first, target, temp_base)?;
             current = pair.rest;
         }
 
-        // Handle zero-arg case
-        if arg_count == 0 {
-            self.chunk
-                .emit(encode_abc(op::INTRINSIC, intrinsic_id, 0, 0));
-            if target != 0 {
-                self.chunk.emit(encode_abc(op::MOVE, target, 0, 0));
-            }
-            return Ok(temp_base);
-        }
-
-        // Allocate temp registers for our args: temp_base..temp_base+argc-1
-        // Nested calls will use temps starting at temp_base+argc
-        let next_temp = temp_base
-            .checked_add(arg_count)
-            .ok_or(CompileError::ExpressionTooComplex)?;
-
-        // Compile each argument to its temp register
-        let mut current_next_temp = next_temp;
-        for (i, arg) in args.iter().enumerate() {
-            let temp_reg = temp_base
-                .checked_add(i as u8)
-                .ok_or(CompileError::ExpressionTooComplex)?;
-            current_next_temp = self.compile_expr(*arg, temp_reg, current_next_temp)?;
-        }
-
-        // Move temps to argument positions X1..Xn
-        for i in 0..arg_count {
-            self.chunk
-                .emit(encode_abc(op::MOVE, i + 1, u16::from(temp_base + i), 0));
-        }
-
-        // Emit INTRINSIC instruction
-        // Format: INTRINSIC id, arg_count (id in A field, arg_count in B field)
-        self.chunk.emit(encode_abc(
-            op::INTRINSIC,
-            intrinsic_id,
-            u16::from(arg_count),
-            0,
-        ));
-
-        // If target != 0, move X0 to target
-        if target != 0 {
-            self.chunk.emit(encode_abc(op::MOVE, target, 0, 0));
-        }
-
-        Ok(current_next_temp)
+        Ok(result)
     }
 }
 
@@ -427,80 +498,8 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
 /// Returns an error if compilation fails.
 pub fn compile<M: MemorySpace>(
     expr: Value,
-    proc: &Process,
-    mem: &M,
+    proc: &mut Process,
+    mem: &mut M,
 ) -> Result<Chunk, CompileError> {
     Compiler::new(proc, mem).compile(expr)
-}
-
-/// Debug helper: disassemble a chunk to a string.
-#[cfg(any(test, feature = "std"))]
-#[must_use]
-pub fn disassemble(chunk: &Chunk) -> std::string::String {
-    use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx};
-    use std::fmt::Write;
-
-    let mut out = std::string::String::new();
-
-    for (i, &instr) in chunk.code.iter().enumerate() {
-        let opcode = decode_opcode(instr);
-        let a = decode_a(instr);
-        let bx = decode_bx(instr);
-
-        let _ = write!(out, "{i:04}: ");
-
-        match opcode {
-            op::LOADNIL => {
-                let _ = writeln!(out, "LOADNIL   X{a}");
-            }
-            op::LOADBOOL => {
-                let b = if bx != 0 { "true" } else { "false" };
-                let _ = writeln!(out, "LOADBOOL  X{a}, {b}");
-            }
-            op::LOADINT => {
-                let sbx = decode_sbx(instr);
-                let _ = writeln!(out, "LOADINT   X{a}, {sbx}");
-            }
-            op::LOADK => {
-                let _ = writeln!(out, "LOADK     X{a}, K{bx}");
-            }
-            op::MOVE => {
-                let b = decode_b(instr);
-                let _ = writeln!(out, "MOVE      X{a}, X{b}");
-            }
-            op::INTRINSIC => {
-                let b = decode_b(instr);
-                let name = crate::intrinsics::intrinsic_name(a).unwrap_or("?");
-                let _ = writeln!(out, "INTRINSIC {name}({a}), {b} args");
-            }
-            op::RETURN => {
-                let _ = writeln!(out, "RETURN");
-            }
-            op::HALT => {
-                let _ = writeln!(out, "HALT");
-            }
-            op::BUILD_TUPLE => {
-                let b = decode_b(instr);
-                let c = decode_c(instr);
-                let _ = writeln!(out, "BUILD_TUPLE X{a}, X{b}, {c}");
-            }
-            op::BUILD_MAP => {
-                let b = decode_b(instr);
-                let c = decode_c(instr);
-                let _ = writeln!(out, "BUILD_MAP X{a}, X{b}, {c} pairs");
-            }
-            _ => {
-                let _ = writeln!(out, "??? opcode={opcode}");
-            }
-        }
-    }
-
-    if !chunk.constants.is_empty() {
-        let _ = writeln!(out, "\nConstants:");
-        for (i, c) in chunk.constants.iter().enumerate() {
-            let _ = writeln!(out, "  K{i}: {c:?}");
-        }
-    }
-
-    out
 }
