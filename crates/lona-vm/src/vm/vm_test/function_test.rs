@@ -85,14 +85,24 @@ fn eval_fn_predicate_false_keyword() {
 fn eval_fn_not_callable_int() {
     let (mut proc, mut mem) = setup();
     let result = eval("(42 1 2)", &mut proc, &mut mem);
-    assert!(matches!(result, Err(RuntimeError::NotCallable)));
+    assert!(matches!(
+        result,
+        Err(RuntimeError::NotCallable {
+            type_name: "integer"
+        })
+    ));
 }
 
 #[test]
 fn eval_fn_not_callable_string() {
     let (mut proc, mut mem) = setup();
     let result = eval("(\"hello\" 1)", &mut proc, &mut mem);
-    assert!(matches!(result, Err(RuntimeError::NotCallable)));
+    assert!(matches!(
+        result,
+        Err(RuntimeError::NotCallable {
+            type_name: "string"
+        })
+    ));
 }
 
 #[test]

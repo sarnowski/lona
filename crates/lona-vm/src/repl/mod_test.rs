@@ -79,7 +79,7 @@ fn repl_not_callable() {
     run_limited(&mut proc, &mut mem, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
-    assert!(output.contains("Error: value is not callable"));
+    assert!(output.contains("Error: integer is not callable"));
 }
 
 #[test]

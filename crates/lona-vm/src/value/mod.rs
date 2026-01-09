@@ -271,6 +271,28 @@ impl Value {
     pub const fn is_unbound(&self) -> bool {
         matches!(self, Self::Unbound)
     }
+
+    /// Get the type name of this value for error messages.
+    #[inline]
+    #[must_use]
+    pub const fn type_name(&self) -> &'static str {
+        match self {
+            Self::Nil => "nil",
+            Self::Bool(_) => "boolean",
+            Self::Int(_) => "integer",
+            Self::String(_) => "string",
+            Self::Pair(_) => "pair",
+            Self::Symbol(_) => "symbol",
+            Self::Keyword(_) => "keyword",
+            Self::Tuple(_) => "tuple",
+            Self::Map(_) => "map",
+            Self::CompiledFn(_) => "function",
+            Self::Closure(_) => "closure",
+            Self::NativeFn(_) => "native-function",
+            Self::Namespace(_) => "namespace",
+            Self::Unbound => "unbound",
+        }
+    }
 }
 
 impl fmt::Debug for Value {

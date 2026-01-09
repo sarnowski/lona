@@ -30,6 +30,9 @@ use collection::{
     intrinsic_count, intrinsic_get, intrinsic_is_map, intrinsic_is_symbol, intrinsic_is_tuple,
     intrinsic_keys, intrinsic_nth, intrinsic_put, intrinsic_vals,
 };
+
+// Re-export core functions for use by callable data structures in VM
+pub use collection::{CoreCollectionError, core_get, core_nth};
 use meta::{
     intrinsic_create_ns, intrinsic_find_ns, intrinsic_is_fn, intrinsic_is_namespace,
     intrinsic_meta, intrinsic_ns_map, intrinsic_ns_name, intrinsic_with_meta,
@@ -244,7 +247,7 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::NAME => intrinsic_name_fn(proc, mem, intrinsic_id)?,
         id::NAMESPACE => intrinsic_namespace(proc, mem, intrinsic_id)?,
         id::IS_TUPLE => intrinsic_is_tuple(proc),
-        id::NTH => intrinsic_nth(proc, mem, intrinsic_id)?,
+        id::NTH => intrinsic_nth(proc, argc, mem, intrinsic_id)?,
         id::COUNT => intrinsic_count(proc, mem, intrinsic_id)?,
         id::IS_SYMBOL => intrinsic_is_symbol(proc),
         id::IS_MAP => intrinsic_is_map(proc),

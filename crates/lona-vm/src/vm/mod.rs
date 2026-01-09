@@ -12,7 +12,7 @@
 mod vm_test;
 
 use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op};
-use crate::intrinsics::{self, IntrinsicError};
+use crate::intrinsics::{self, CoreCollectionError, IntrinsicError, core_get, core_nth};
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::value::Value;
@@ -138,7 +138,122 @@ fn call_user_fn<M: MemorySpace>(
 /// Maximum number of captured variables in a closure.
 const MAX_CLOSURE_CAPTURES: usize = 16;
 
+/// Arity description for callable data structures (keywords, maps, tuples).
+const CALLABLE_DATA_ARITY: &str = "1-2";
+
+/// Valid arity range for callable data structures.
+const CALLABLE_ARITY_RANGE: core::ops::RangeInclusive<u8> = 1..=2;
+
+/// Check arity for callable data structures (keywords, maps, tuples).
+fn check_callable_arity(argc: u8) -> Result<(), RuntimeError> {
+    if !CALLABLE_ARITY_RANGE.contains(&argc) {
+        return Err(RuntimeError::CallableArityError {
+            expected: CALLABLE_DATA_ARITY,
+            got: argc,
+        });
+    }
+    Ok(())
+}
+
+/// Call a keyword as a function: `(:key map [default])`.
+fn call_keyword<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    key: Value,
+    argc: u8,
+) -> Result<Value, RuntimeError> {
+    check_callable_arity(argc)?;
+
+    let map_val = proc.x_regs[1];
+    let default = if argc >= 2 {
+        proc.x_regs[2]
+    } else {
+        Value::Nil
+    };
+
+    core_get(proc, mem, map_val, key, default).map_err(|e| match e {
+        CoreCollectionError::NotAMap => RuntimeError::CallableTypeError {
+            callable: "keyword",
+            arg: 0,
+            expected: "map",
+        },
+        _ => RuntimeError::OutOfMemory,
+    })
+}
+
+/// Call a map as a function: `(map key [default])`.
+fn call_map<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    map_val: Value,
+    argc: u8,
+) -> Result<Value, RuntimeError> {
+    check_callable_arity(argc)?;
+
+    let key = proc.x_regs[1];
+    let default = if argc >= 2 {
+        proc.x_regs[2]
+    } else {
+        Value::Nil
+    };
+
+    // Note: NotAMap shouldn't happen here since we already know it's a map,
+    // but we handle it for completeness.
+    core_get(proc, mem, map_val, key, default).map_err(|e| match e {
+        CoreCollectionError::NotAMap => RuntimeError::CallableTypeError {
+            callable: "map",
+            arg: 0,
+            expected: "map",
+        },
+        _ => RuntimeError::OutOfMemory,
+    })
+}
+
+/// Call a tuple as a function: `(tuple idx [default])`.
+fn call_tuple<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    tuple_val: Value,
+    argc: u8,
+) -> Result<Value, RuntimeError> {
+    check_callable_arity(argc)?;
+
+    let idx = proc.x_regs[1];
+    let default = if argc >= 2 {
+        Some(proc.x_regs[2])
+    } else {
+        None
+    };
+
+    // Note: NotATuple shouldn't happen here since we already know it's a tuple,
+    // but we handle it for completeness.
+    core_nth(proc, mem, tuple_val, idx, default).map_err(|e| match e {
+        CoreCollectionError::NotATuple => RuntimeError::CallableTypeError {
+            callable: "tuple",
+            arg: 0,
+            expected: "tuple",
+        },
+        CoreCollectionError::InvalidIndex => RuntimeError::CallableTypeError {
+            callable: "tuple",
+            arg: 0,
+            expected: "integer index",
+        },
+        CoreCollectionError::IndexOutOfBounds { index, len } => {
+            RuntimeError::Intrinsic(IntrinsicError::IndexOutOfBounds { index, len })
+        }
+        _ => RuntimeError::OutOfMemory,
+    })
+}
+
 /// Execute a CALL instruction - dispatch based on callable type.
+///
+/// Handles:
+/// - `NativeFn(id)`: Native/intrinsic function call
+/// - `CompiledFn(addr)`: User-defined function call
+/// - `Closure(addr)`: Closure call (function + captures)
+/// - `Keyword(_)`: `(:key map [default])` → `(get map :key [default])`
+/// - `Map(_)`: `(map key [default])` → `(get map key [default])`
+/// - `Tuple(_)`: `(tuple idx [default])` → `(nth tuple idx [default])`
 fn execute_call<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
@@ -148,12 +263,9 @@ fn execute_call<M: MemorySpace>(
     let fn_val = proc.x_regs[fn_reg];
 
     match fn_val {
-        Value::NativeFn(id) => {
-            intrinsics::call_intrinsic(id as u8, argc, proc, mem)?;
-        }
+        Value::NativeFn(id) => intrinsics::call_intrinsic(id as u8, argc, proc, mem)?,
         Value::CompiledFn(fn_addr) => {
-            let result = call_user_fn(proc, mem, fn_addr, argc)?;
-            proc.x_regs[0] = result;
+            proc.x_regs[0] = call_user_fn(proc, mem, fn_addr, argc)?;
         }
         Value::Closure(closure_addr) => {
             let closure: crate::value::HeapClosure = mem.read(closure_addr);
@@ -165,15 +277,18 @@ fn execute_call<M: MemorySpace>(
 
             for i in 0..closure.captures_len as usize {
                 let capture_addr = captures_offset.add((i * core::mem::size_of::<Value>()) as u64);
-                let capture_val: Value = mem.read(capture_addr);
-                proc.x_regs[captures_base + i] = capture_val;
+                proc.x_regs[captures_base + i] = mem.read(capture_addr);
             }
 
-            let result = call_user_fn(proc, mem, closure.function, argc)?;
-            proc.x_regs[0] = result;
+            proc.x_regs[0] = call_user_fn(proc, mem, closure.function, argc)?;
         }
+        Value::Keyword(_) => proc.x_regs[0] = call_keyword(proc, mem, fn_val, argc)?,
+        Value::Map(_) => proc.x_regs[0] = call_map(proc, mem, fn_val, argc)?,
+        Value::Tuple(_) => proc.x_regs[0] = call_tuple(proc, mem, fn_val, argc)?,
         _ => {
-            return Err(RuntimeError::NotCallable);
+            return Err(RuntimeError::NotCallable {
+                type_name: fn_val.type_name(),
+            });
         }
     }
 
@@ -191,7 +306,9 @@ fn build_closure<M: MemorySpace>(
     // Get function address
     let fn_val = proc.x_regs[fn_reg];
     let Value::CompiledFn(fn_addr) = fn_val else {
-        return Err(RuntimeError::NotCallable);
+        return Err(RuntimeError::NotCallable {
+            type_name: fn_val.type_name(),
+        });
     };
 
     // Get captures tuple
@@ -276,7 +393,10 @@ pub enum RuntimeError {
     /// Out of memory during allocation.
     OutOfMemory,
     /// Value is not callable.
-    NotCallable,
+    NotCallable {
+        /// Name of the type that was used in function position.
+        type_name: &'static str,
+    },
     /// Wrong number of arguments in function call.
     ArityMismatch {
         /// Number of parameters the function expects.
@@ -285,6 +405,26 @@ pub enum RuntimeError {
         got: u8,
         /// Whether the function accepts variadic arguments.
         variadic: bool,
+    },
+    /// Wrong number of arguments when calling a data structure.
+    ///
+    /// Used for callable keywords, maps, and tuples which accept 1-2 args.
+    CallableArityError {
+        /// Description of expected arity (e.g., "1-2").
+        expected: &'static str,
+        /// Number of arguments actually provided.
+        got: u8,
+    },
+    /// Type error when calling a data structure (keyword, map, or tuple).
+    ///
+    /// Used when arguments to callable data structures have wrong types.
+    CallableTypeError {
+        /// What was being called (e.g., "keyword", "map", "tuple").
+        callable: &'static str,
+        /// Which argument had the wrong type (0-indexed).
+        arg: u8,
+        /// What type was expected.
+        expected: &'static str,
     },
     /// Call stack overflow (too many nested calls).
     StackOverflow,
