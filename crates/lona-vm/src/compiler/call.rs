@@ -47,6 +47,9 @@ impl<M: MemorySpace> Compiler<'_, M> {
             if name == "do" {
                 return self.compile_do(pair.rest, target, temp_base);
             }
+            if name == "var" {
+                return self.compile_var(pair.rest, target, temp_base);
+            }
 
             // Check if it's a known intrinsic
             if let Some(intrinsic_id) = lookup_intrinsic(name) {
@@ -251,5 +254,84 @@ impl<M: MemorySpace> Compiler<'_, M> {
         // Load the quoted expression as a constant (unevaluated)
         self.compile_constant(pair.first, target)?;
         Ok(temp_base)
+    }
+
+    /// Compile the `var` special form.
+    ///
+    /// `(var sym)` returns the var object for the given symbol.
+    /// This is also the expansion of reader syntax `#'sym`.
+    ///
+    /// For qualified symbols like `user/x`, looks up the namespace and var.
+    /// For unqualified symbols, returns `UnboundSymbol` error (current namespace
+    /// tracking requires `*ns*` which is implemented in Phase 5).
+    pub(super) fn compile_var(
+        &mut self,
+        arg_list: Value,
+        target: u8,
+        temp_base: u8,
+    ) -> Result<u8, CompileError> {
+        // Get the single argument (must be a symbol)
+        let pair = self
+            .proc
+            .read_pair(self.mem, arg_list)
+            .ok_or(CompileError::InvalidSyntax)?;
+
+        // var takes exactly one argument
+        if !pair.rest.is_nil() {
+            return Err(CompileError::InvalidSyntax);
+        }
+
+        // Argument must be a symbol
+        if !pair.first.is_symbol() {
+            return Err(CompileError::InvalidSyntax);
+        }
+
+        // Get the symbol name
+        let name = self
+            .proc
+            .read_string(self.mem, pair.first)
+            .ok_or(CompileError::InvalidSyntax)?;
+
+        // Check if qualified (contains '/')
+        if let Some(slash_pos) = name.rfind('/') {
+            // Qualified symbol: split into namespace and name parts
+            let ns_name = &name[..slash_pos];
+            let var_name = &name[slash_pos + 1..];
+
+            // Look up the namespace
+            let ns_symbol = self
+                .proc
+                .find_interned_symbol(self.mem, ns_name)
+                .ok_or(CompileError::UnboundSymbol)?;
+
+            let ns = self
+                .proc
+                .find_namespace(self.mem, ns_symbol)
+                .ok_or(CompileError::UnboundSymbol)?;
+
+            // Look up the var in the namespace
+            let var_symbol = self
+                .proc
+                .find_interned_symbol(self.mem, var_name)
+                .ok_or(CompileError::UnboundSymbol)?;
+
+            let ns_struct = self
+                .proc
+                .read_namespace(self.mem, ns)
+                .ok_or(CompileError::UnboundSymbol)?;
+
+            let var = self
+                .proc
+                .ns_lookup_var(self.mem, ns_struct.mappings, var_symbol)
+                .ok_or(CompileError::UnboundSymbol)?;
+
+            // Load the var as a constant
+            self.compile_constant(var, target)?;
+            Ok(temp_base)
+        } else {
+            // Unqualified symbol: would need *ns* for current namespace
+            // This is implemented in Phase 5 with the def special form
+            Err(CompileError::UnboundSymbol)
+        }
     }
 }

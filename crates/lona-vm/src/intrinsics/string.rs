@@ -76,6 +76,7 @@ fn write_value_to_buffer<M: MemorySpace>(
         Value::Pair(_) => write_static_to_buffer(buffer, pos, b"<pair>"),
         Value::Tuple(_) => write_static_to_buffer(buffer, pos, b"<tuple>"),
         Value::Map(_) => write_static_to_buffer(buffer, pos, b"<map>"),
+        Value::Var(_) => write_static_to_buffer(buffer, pos, b"<var>"),
         Value::Namespace(_) => write_static_to_buffer(buffer, pos, b"<namespace>"),
         Value::CompiledFn(_) => write_static_to_buffer(buffer, pos, b"<fn>"),
         Value::Closure(_) => write_static_to_buffer(buffer, pos, b"<closure>"),

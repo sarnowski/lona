@@ -180,4 +180,55 @@ impl MemorySpace for MockVSpace {
         self.memory
             .copy_within(src_offset..src_offset + len, dst_offset);
     }
+
+    fn read_u64_acquire(&self, vaddr: Vaddr) -> u64 {
+        use core::sync::atomic::{AtomicU64, Ordering};
+
+        let offset = self.offset(vaddr);
+        assert!(
+            offset
+                .checked_add(8)
+                .is_some_and(|end| end <= self.memory.len()),
+            "atomic read of 8 bytes at {vaddr} would exceed VSpace bounds"
+        );
+        assert!(
+            offset % 8 == 0,
+            "atomic read at {vaddr} requires 8-byte alignment"
+        );
+
+        // SAFETY: We've verified bounds and alignment above.
+        // AtomicU64 has the same layout as u64.
+        #[expect(
+            clippy::cast_ptr_alignment,
+            reason = "alignment verified by assert above"
+        )]
+        let ptr = self.memory[offset..].as_ptr().cast::<AtomicU64>();
+        unsafe { (*ptr).load(Ordering::Acquire) }
+    }
+
+    fn write_u64_release(&self, vaddr: Vaddr, value: u64) {
+        use core::sync::atomic::{AtomicU64, Ordering};
+
+        let offset = self.offset(vaddr);
+        assert!(
+            offset
+                .checked_add(8)
+                .is_some_and(|end| end <= self.memory.len()),
+            "atomic write of 8 bytes at {vaddr} would exceed VSpace bounds"
+        );
+        assert!(
+            offset % 8 == 0,
+            "atomic write at {vaddr} requires 8-byte alignment"
+        );
+
+        // SAFETY: We've verified bounds and alignment above.
+        // AtomicU64 has the same layout as u64.
+        // Atomic stores are safe from shared references.
+        #[expect(
+            clippy::cast_ptr_alignment,
+            reason = "alignment verified by assert above"
+        )]
+        let ptr = self.memory[offset..].as_ptr().cast::<AtomicU64>();
+        unsafe { (*ptr).store(value, Ordering::Release) }
+    }
 }

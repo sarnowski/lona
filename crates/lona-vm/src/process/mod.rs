@@ -39,6 +39,7 @@ mod function;
 mod namespace;
 pub mod pool;
 mod value_alloc;
+mod var;
 
 #[cfg(test)]
 mod process_test;
@@ -62,6 +63,16 @@ pub const MAX_CALL_DEPTH: usize = 256;
 /// implemented (Phase 4+), most keywords will be interned at the realm level,
 /// and this table will only handle dynamically-constructed keywords.
 pub const MAX_INTERNED_KEYWORDS: usize = 1024;
+
+/// Maximum number of interned symbols per process.
+///
+/// Symbols are interned so that identical symbol literals share the same address.
+/// This enables O(1) equality comparison via address comparison and is required
+/// for namespace lookups (which compare symbol addresses).
+///
+/// Note: This is a temporary per-process table. Once realm-level interning is
+/// implemented, most symbols will be interned at the realm level.
+pub const MAX_INTERNED_SYMBOLS: usize = 1024;
 
 /// Maximum number of metadata entries per process.
 ///
@@ -157,6 +168,11 @@ pub struct Process {
     pub(crate) keyword_intern: [Vaddr; MAX_INTERNED_KEYWORDS],
     /// Number of interned keywords.
     pub(crate) keyword_intern_len: usize,
+    /// Interned symbols (addresses of symbol `HeapString`s on the heap).
+    /// Symbols are interned so that identical symbol literals share the same address.
+    pub(crate) symbol_intern: [Vaddr; MAX_INTERNED_SYMBOLS],
+    /// Number of interned symbols.
+    pub(crate) symbol_intern_len: usize,
 
     // Metadata table
     /// Metadata table: maps object addresses to metadata map addresses.
@@ -220,6 +236,8 @@ impl Process {
             // Interning tables
             keyword_intern: [Vaddr::new(0); MAX_INTERNED_KEYWORDS],
             keyword_intern_len: 0,
+            symbol_intern: [Vaddr::new(0); MAX_INTERNED_SYMBOLS],
+            symbol_intern_len: 0,
             // Metadata table
             metadata_keys: [Vaddr::new(0); MAX_METADATA_ENTRIES],
             metadata_values: [Vaddr::new(0); MAX_METADATA_ENTRIES],

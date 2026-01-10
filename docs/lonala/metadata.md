@@ -28,12 +28,10 @@ Metadata is attached using the `^` reader macro:
 
 ```clojure
 (meta #'pi)
-; → {:doc "The ratio of circumference to diameter"
-;    :added "1.0"
-;    :name pi
-;    :ns #namespace[lona.core]}
-
-(meta (var pi))  ; equivalent to above
+; → %{:doc "The ratio of circumference to diameter"
+;     :added "1.0"
+;     :name pi
+;     :ns #namespace[lona.core]}
 ```
 
 ---

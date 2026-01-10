@@ -41,6 +41,7 @@ pub fn print_value<M: MemorySpace, U: Uart>(value: Value, proc: &Process, mem: &
         Value::CompiledFn(_) => print_compiled_fn(value, proc, mem, uart),
         Value::Closure(_) => print_closure(value, proc, mem, uart),
         Value::NativeFn(id) => print_native_fn(id, uart),
+        Value::Var(_) => print_var(value, proc, mem, uart),
         Value::Namespace(_) => print_namespace(value, proc, mem, uart),
         Value::Unbound => uart_write_str(uart, "#<unbound>"),
     }
@@ -199,6 +200,30 @@ fn print_namespace<M: MemorySpace, U: Uart>(ns: Value, proc: &Process, mem: &M, 
     }
 
     uart.write_byte(b']');
+}
+
+fn print_var<M: MemorySpace, U: Uart>(var: Value, proc: &Process, mem: &M, uart: &mut U) {
+    uart_write_str(uart, "#'");
+
+    if let Some(content) = proc.read_var_content(mem, var) {
+        // Print namespace/name
+        let ns_addr = content.namespace;
+        if !ns_addr.is_null() {
+            let ns: super::Namespace = mem.read(ns_addr);
+            if let Some(ns_name) = proc.read_string(mem, ns.name) {
+                uart_write_str(uart, ns_name);
+                uart.write_byte(b'/');
+            }
+        }
+
+        // Print var name
+        if !content.name.is_null() {
+            let name = Value::Symbol(content.name);
+            if let Some(name_str) = proc.read_string(mem, name) {
+                uart_write_str(uart, name_str);
+            }
+        }
+    }
 }
 
 fn print_compiled_fn<M: MemorySpace, U: Uart>(func: Value, proc: &Process, mem: &M, uart: &mut U) {

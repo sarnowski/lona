@@ -283,6 +283,30 @@ fn alloc_symbol() {
     assert_eq!(name, "foo");
 }
 
+#[test]
+fn symbol_interning() {
+    let (mut proc, mut mem) = setup();
+
+    // Same symbol name should return the same address (interned)
+    let sym1 = proc.alloc_symbol(&mut mem, "test").unwrap();
+    let sym2 = proc.alloc_symbol(&mut mem, "test").unwrap();
+    let sym3 = proc.alloc_symbol(&mut mem, "other").unwrap();
+
+    // Same name → same address
+    let Value::Symbol(addr1) = sym1 else { panic!() };
+    let Value::Symbol(addr2) = sym2 else { panic!() };
+    let Value::Symbol(addr3) = sym3 else { panic!() };
+
+    assert_eq!(
+        addr1, addr2,
+        "Same symbol should be interned to same address"
+    );
+    assert_ne!(
+        addr1, addr3,
+        "Different symbols should have different addresses"
+    );
+}
+
 // --- ProcessPool tests ---
 
 mod pool_tests {

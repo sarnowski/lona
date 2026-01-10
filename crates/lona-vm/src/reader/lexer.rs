@@ -27,6 +27,8 @@ pub enum Token {
     MapStart,
     /// Quote `'`
     Quote,
+    /// Var quote `#'`
+    VarQuote,
     /// Metadata prefix `^`
     Caret,
     /// The `nil` literal
@@ -231,6 +233,17 @@ impl<'a> Lexer<'a> {
                 // Keyword (e.g., :foo or :ns/bar)
                 self.chars.next(); // consume ':'
                 self.lex_keyword()
+            }
+            '#' => {
+                // Reader macro: #' for var quote
+                self.chars.next(); // consume '#'
+                if matches!(self.chars.peek(), Some('\'')) {
+                    self.chars.next(); // consume '\''
+                    Ok(Some(Token::VarQuote))
+                } else {
+                    // Unknown reader macro
+                    Err(LexError::UnexpectedChar('#'))
+                }
             }
             _ if is_symbol_start(c) => self.lex_symbol(),
             _ => Err(LexError::UnexpectedChar(c)),

@@ -60,7 +60,7 @@ pub fn intrinsic_eq<M: MemorySpace>(proc: &Process, mem: &M) -> Value {
 /// - Immediate values (nil, bool, int) compare by value
 /// - Strings compare by content
 /// - Keywords compare by content
-/// - Symbols compare by identity (address)
+/// - Symbols compare by content (fast path: address comparison for interned symbols)
 /// - Pairs compare by identity (address)
 /// - Tuples compare by identity (address)
 pub fn values_equal<M: MemorySpace>(a: Value, b: Value, proc: &Process, mem: &M) -> bool {
@@ -78,8 +78,18 @@ pub fn values_equal<M: MemorySpace>(a: Value, b: Value, proc: &Process, mem: &M)
             sa == sb
         }
         (Value::Symbol(addr_a), Value::Symbol(addr_b)) => {
-            // Symbols compare by identity
-            addr_a == addr_b
+            // Fast path: same address (interned symbols)
+            if addr_a == addr_b {
+                return true;
+            }
+            // Fallback: compare by content in case interning table was full
+            let Some(sa) = proc.read_string(mem, a) else {
+                return false;
+            };
+            let Some(sb) = proc.read_string(mem, b) else {
+                return false;
+            };
+            sa == sb
         }
         (Value::Keyword(_), Value::Keyword(_)) => {
             // Keywords compare by content (like strings) to handle cases

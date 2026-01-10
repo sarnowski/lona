@@ -177,6 +177,22 @@ impl<'a> Parser<'a> {
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(outer))
             }
+            Token::VarQuote => {
+                // #'expr => (var expr)
+                // var is a special form that returns the var object itself
+                let expr = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                let var_sym = proc
+                    .alloc_symbol(mem, "var")
+                    .ok_or(ParseError::OutOfMemory)?;
+                // Build (var expr) = Pair(var, Pair(expr, nil))
+                let inner = proc
+                    .alloc_pair(mem, expr, Value::nil())
+                    .ok_or(ParseError::OutOfMemory)?;
+                let outer = proc
+                    .alloc_pair(mem, var_sym, inner)
+                    .ok_or(ParseError::OutOfMemory)?;
+                Ok(Some(outer))
+            }
             Token::LParen => self.read_list(proc, mem),
             Token::RParen => Err(ParseError::UnmatchedRParen.into()),
             Token::LBracket => self.read_tuple(proc, mem),
@@ -490,6 +506,7 @@ const fn get_heap_addr(value: Value) -> Option<crate::Vaddr> {
         | Value::Keyword(addr)
         | Value::Tuple(addr)
         | Value::Map(addr)
+        | Value::Var(addr)
         | Value::Namespace(addr)
         | Value::CompiledFn(addr)
         | Value::Closure(addr) => Some(addr),

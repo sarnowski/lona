@@ -17,6 +17,8 @@ mod string;
 
 #[cfg(test)]
 mod intrinsics_test;
+#[cfg(test)]
+mod meta_intrinsics_test;
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
@@ -34,8 +36,9 @@ use collection::{
 // Re-export core functions for use by callable data structures in VM
 pub use collection::{CoreCollectionError, core_get, core_nth};
 use meta::{
-    intrinsic_create_ns, intrinsic_find_ns, intrinsic_is_fn, intrinsic_is_namespace,
-    intrinsic_meta, intrinsic_ns_map, intrinsic_ns_name, intrinsic_with_meta,
+    intrinsic_create_ns, intrinsic_find_ns, intrinsic_intern, intrinsic_is_fn,
+    intrinsic_is_namespace, intrinsic_is_var, intrinsic_meta, intrinsic_ns_map, intrinsic_ns_name,
+    intrinsic_var_get, intrinsic_with_meta,
 };
 use string::{
     intrinsic_is_keyword, intrinsic_keyword, intrinsic_name_fn, intrinsic_namespace, intrinsic_str,
@@ -117,10 +120,16 @@ pub mod id {
     pub const NS_MAP: u8 = 34;
     /// Function predicate: `(fn? x)` -> is x callable?
     pub const IS_FN: u8 = 35;
+    /// Var predicate: `(var? x)` -> is x a var?
+    pub const IS_VAR: u8 = 36;
+    /// Intern symbol in namespace: `(intern ns sym val)` -> var
+    pub const INTERN: u8 = 37;
+    /// Get var value: `(var-get var)` -> value
+    pub const VAR_GET: u8 = 38;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 36;
+pub const INTRINSIC_COUNT: usize = 39;
 
 /// Intrinsic name lookup table.
 const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
@@ -160,6 +169,9 @@ const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
     "ns-name",    // 33: NS_NAME
     "ns-map",     // 34: NS_MAP
     "fn?",        // 35: IS_FN
+    "var?",       // 36: IS_VAR
+    "intern",     // 37: INTERN
+    "var-get",    // 38: VAR_GET
 ];
 
 /// Look up an intrinsic ID by name.
@@ -263,6 +275,9 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::NS_NAME => intrinsic_ns_name(proc, mem, intrinsic_id)?,
         id::NS_MAP => intrinsic_ns_map(proc, mem, intrinsic_id)?,
         id::IS_FN => intrinsic_is_fn(proc),
+        id::IS_VAR => intrinsic_is_var(proc),
+        id::INTERN => intrinsic_intern(proc, mem, intrinsic_id)?,
+        id::VAR_GET => intrinsic_var_get(proc, mem, intrinsic_id)?,
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };
     proc.x_regs[0] = result;

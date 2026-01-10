@@ -77,12 +77,16 @@ Create namespace alias.
 
 ### `var`
 
-Get var object.
+Get var object by name. The `var` special form looks up a var by symbol name
+and returns the var object (not its value).
 
 ```clojure
-(var sym)   ; → var
-#'sym       ; reader syntax
+(var sym)   ; returns var object for sym
+#'sym       ; reader syntax, equivalent to (var sym)
+#'ns/sym    ; qualified var lookup
 ```
+
+Note: `var` is a special form - the symbol argument is not evaluated.
 
 ### `var-get`
 

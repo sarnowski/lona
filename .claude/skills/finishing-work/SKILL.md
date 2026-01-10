@@ -435,7 +435,52 @@ For each confirmed issue:
 3. Do NOT introduce new issues while fixing
 4. Do NOT leave any aspect of the fix for "later"
 
-### 4.4 MANDATORY Review Loop
+### 4.4 Issue Resolution Accounting (MANDATORY)
+
+**Before proceeding to re-review, you MUST explicitly account for EVERY confirmed issue.**
+
+#### Severity Is Irrelevant
+
+Once an issue is confirmed as real, its severity does not matter:
+- "Minor" issues **MUST** be fixed
+- "Small" issues **MUST** be fixed
+- "Trivial" issues **MUST** be fixed
+- "Style" issues **MUST** be fixed
+
+**There is no category of real issue that can be skipped.**
+
+#### Required Accounting Format
+
+For EVERY confirmed issue from Phase 3, you must provide one of:
+
+**Option A - Fixed:**
+```
+ISSUE #N: <description>
+STATUS: FIXED
+FIX: <what you changed, with file:line reference>
+```
+
+**Option B - User Approved Skip:**
+```
+ISSUE #N: <description>
+STATUS: SKIPPED WITH USER APPROVAL
+USER SAID: <quote the user's explicit approval to skip this specific issue>
+```
+
+**There is no Option C.** You cannot skip an issue without explicit user approval.
+
+#### Checklist Before Re-Review
+
+Before proceeding to Phase 4.5 (review loop), verify:
+
+- [ ] Every confirmed issue has an accounting entry above
+- [ ] Every entry is either FIXED (with proof) or SKIPPED WITH USER APPROVAL (with quote)
+- [ ] Zero issues were silently ignored
+- [ ] Zero issues were skipped because they seemed "minor"
+
+**If you cannot check all boxes, STOP and fix the remaining issues.**
+
+### 4.5 MANDATORY Review Loop
 
 **THIS LOOP IS NOT OPTIONAL. You MUST repeat until zero issues remain.**
 
@@ -483,7 +528,7 @@ For each confirmed issue:
 
 **You CANNOT claim completion until agents return zero issues.**
 
-### 4.5 Loop Counter and Escalation
+### 4.6 Loop Counter and Escalation
 
 Track how many review cycles you've done:
 - Cycle 1: Initial review
@@ -495,9 +540,9 @@ Track how many review cycles you've done:
 - Something is fundamentally wrong with the implementation approach
 - Discuss whether to continue fixing or reconsider the approach
 
-### 4.6 Documentation-Only Changes
+### 4.7 Documentation-Only Changes
 
-**Documentation-only changes do NOT require a new review cycle** (during the loop in Phase 4.4). However, documentation-only work still requires the initial full workflow (Phases 0-5) - the exemption only applies to the re-review loop when fixing issues.
+**Documentation-only changes do NOT require a new review cycle** (during the loop in Phase 4.5). However, documentation-only work still requires the initial full workflow (Phases 0-5) - the exemption only applies to the re-review loop when fixing issues.
 
 ---
 
@@ -657,6 +702,7 @@ The following are **ABSOLUTE VIOLATIONS** that have occurred in the past and **M
 | Skipping plan items | Violates explicit agreement with user |
 | Claiming done with issues remaining | Breaks trust, wastes user time |
 | Exiting review loop early | Allows defects to slip through |
+| Skipping "minor" issues | Severity is irrelevant; all confirmed issues must be fixed |
 
 **If you find yourself doing ANY of these, STOP. Go back and do the work properly.**
 

@@ -31,6 +31,18 @@ pub trait MemorySpace {
 
     /// Copy bytes from one location to another within the same `VSpace`.
     fn copy_within(&mut self, src: Vaddr, dst: Vaddr, len: usize);
+
+    /// Atomically read a u64 with Acquire ordering.
+    ///
+    /// Used for reading var slot content pointers to ensure we see
+    /// all writes that happened before the corresponding Release store.
+    fn read_u64_acquire(&self, vaddr: Vaddr) -> u64;
+
+    /// Atomically write a u64 with Release ordering.
+    ///
+    /// Used for updating var slot content pointers to ensure all our
+    /// writes are visible to readers before the pointer is published.
+    fn write_u64_release(&self, vaddr: Vaddr, value: u64);
 }
 
 /// Page permissions for memory mapping.
@@ -201,6 +213,23 @@ impl MemorySpace for Sel4VSpace {
         // SAFETY: Caller ensures ranges are valid and don't illegally overlap
         unsafe {
             core::ptr::copy(src.as_ptr::<u8>(), dst.as_mut_ptr::<u8>(), len);
+        }
+    }
+
+    fn read_u64_acquire(&self, vaddr: Vaddr) -> u64 {
+        // SAFETY: Caller ensures vaddr is valid, mapped, and properly aligned for u64
+        unsafe {
+            let atomic = &*(vaddr.as_ptr::<u64>() as *const core::sync::atomic::AtomicU64);
+            atomic.load(core::sync::atomic::Ordering::Acquire)
+        }
+    }
+
+    fn write_u64_release(&self, vaddr: Vaddr, value: u64) {
+        // SAFETY: Caller ensures vaddr is valid, mapped, and properly aligned for u64
+        // Note: Takes &self because atomic operations don't require &mut
+        unsafe {
+            let atomic = &*(vaddr.as_ptr::<u64>() as *const core::sync::atomic::AtomicU64);
+            atomic.store(value, core::sync::atomic::Ordering::Release);
         }
     }
 }

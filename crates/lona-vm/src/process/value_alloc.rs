@@ -10,7 +10,7 @@ use crate::Vaddr;
 use crate::platform::MemorySpace;
 use crate::value::{HeapMap, HeapString, HeapTuple, Pair, Value};
 
-use super::{MAX_INTERNED_KEYWORDS, MAX_METADATA_ENTRIES, Process};
+use super::{MAX_INTERNED_KEYWORDS, MAX_INTERNED_SYMBOLS, MAX_METADATA_ENTRIES, Process};
 
 impl Process {
     /// Allocate a string on the young heap.
@@ -56,8 +56,27 @@ impl Process {
 
     /// Allocate a symbol on the young heap (same as string but tagged differently).
     ///
+    /// Symbols are interned: the same symbol literal will return the same address.
+    /// This enables O(1) equality comparison via address comparison and is required
+    /// for namespace lookups (which compare symbol addresses).
+    ///
     /// Returns a `Value::Symbol` pointing to the allocated symbol, or `None` if OOM.
     pub fn alloc_symbol<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Value> {
+        // Check intern table for existing symbol
+        for i in 0..self.symbol_intern_len {
+            let addr = self.symbol_intern[i];
+            let header: HeapString = mem.read(addr);
+            if header.len as usize == name.len() {
+                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
+                let bytes = mem.slice(data_addr, header.len as usize);
+                if bytes == name.as_bytes() {
+                    // Found existing interned symbol
+                    return Some(Value::symbol(addr));
+                }
+            }
+        }
+
+        // Not found, allocate new symbol
         let len = name.len();
         let total_size = HeapString::alloc_size(len);
 
@@ -73,7 +92,33 @@ impl Process {
         let dest = mem.slice_mut(data_addr, len);
         dest.copy_from_slice(name.as_bytes());
 
+        // Add to intern table if not full
+        if self.symbol_intern_len < MAX_INTERNED_SYMBOLS {
+            self.symbol_intern[self.symbol_intern_len] = addr;
+            self.symbol_intern_len += 1;
+        }
+
         Some(Value::symbol(addr))
+    }
+
+    /// Find an existing interned symbol by name (read-only lookup).
+    ///
+    /// Returns the symbol if found in the intern table, `None` otherwise.
+    /// Unlike `alloc_symbol`, this does not allocate or modify the intern table.
+    #[must_use]
+    pub fn find_interned_symbol<M: MemorySpace>(&self, mem: &M, name: &str) -> Option<Value> {
+        for i in 0..self.symbol_intern_len {
+            let addr = self.symbol_intern[i];
+            let header: HeapString = mem.read(addr);
+            if header.len as usize == name.len() {
+                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
+                let bytes = mem.slice(data_addr, header.len as usize);
+                if bytes == name.as_bytes() {
+                    return Some(Value::symbol(addr));
+                }
+            }
+        }
+        None
     }
 
     /// Allocate a keyword on the young heap (same as string but tagged differently).

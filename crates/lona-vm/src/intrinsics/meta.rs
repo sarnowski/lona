@@ -26,6 +26,7 @@ pub fn intrinsic_meta<M: MemorySpace>(proc: &Process, mem: &M) -> Value {
         | Value::Tuple(addr)
         | Value::Map(addr)
         | Value::Namespace(addr)
+        | Value::Var(addr)
         | Value::CompiledFn(addr)
         | Value::Closure(addr) => addr,
         // Immediates don't have metadata
@@ -78,6 +79,7 @@ pub fn intrinsic_with_meta<M: MemorySpace>(
         | Value::Tuple(addr)
         | Value::Map(addr)
         | Value::Namespace(addr)
+        | Value::Var(addr)
         | Value::CompiledFn(addr)
         | Value::Closure(addr) => addr,
         // Immediates can't have metadata
@@ -204,4 +206,82 @@ pub fn intrinsic_ns_map<M: MemorySpace>(
 /// `(fn? x)` - returns true if x is any callable type
 pub const fn intrinsic_is_fn(proc: &Process) -> Value {
     Value::bool(proc.x_regs[1].is_fn())
+}
+
+// --- Var intrinsics ---
+
+/// Check if value is a var.
+///
+/// `(var? x)` - returns true if x is a var
+pub const fn intrinsic_is_var(proc: &Process) -> Value {
+    Value::bool(proc.x_regs[1].is_var())
+}
+
+/// Intern a symbol in a namespace, creating or updating a var.
+///
+/// `(intern ns sym val)` - creates var in namespace with given value
+pub fn intrinsic_intern<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let ns = proc.x_regs[1];
+    let name = proc.x_regs[2];
+    let value = proc.x_regs[3];
+
+    // First arg must be a namespace
+    if !ns.is_namespace() {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "namespace",
+        });
+    }
+
+    // Second arg must be a symbol
+    if !matches!(name, Value::Symbol(_)) {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 1,
+            expected: "symbol",
+        });
+    }
+
+    // Intern the var
+    proc.intern_var(mem, ns, name, value)
+        .ok_or(IntrinsicError::OutOfMemory)
+}
+
+/// Get the value of a var.
+///
+/// `(var-get var)` - returns the var's current value
+pub fn intrinsic_var_get<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let var = proc.x_regs[1];
+
+    // Must be a var
+    if !var.is_var() {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "var",
+        });
+    }
+
+    // Get the var's value
+    let value = proc.var_get(mem, var).ok_or(IntrinsicError::OutOfMemory)?;
+
+    // Check for unbound var
+    if matches!(value, Value::Unbound) {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "bound var",
+        });
+    }
+
+    Ok(value)
 }

@@ -366,6 +366,11 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
                 self.compile_constant(expr, target)?;
                 Ok(temp_base)
             }
+            Value::Var(_) => {
+                // Vars are self-evaluating (return the var object itself)
+                self.compile_constant(expr, target)?;
+                Ok(temp_base)
+            }
             Value::Unbound => {
                 // Unbound is a special sentinel - shouldn't appear in source
                 Err(CompileError::InvalidSyntax)
