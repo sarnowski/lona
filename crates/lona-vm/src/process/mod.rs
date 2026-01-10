@@ -42,7 +42,19 @@ mod value_alloc;
 mod var;
 
 #[cfg(test)]
-mod process_test;
+mod allocation_test;
+#[cfg(test)]
+mod copy_test;
+#[cfg(test)]
+mod execution_test;
+#[cfg(test)]
+mod namespace_test;
+#[cfg(test)]
+mod pool_test;
+#[cfg(test)]
+mod stack_test;
+#[cfg(test)]
+mod value_alloc_test;
 
 use crate::Vaddr;
 use crate::bytecode::Chunk;

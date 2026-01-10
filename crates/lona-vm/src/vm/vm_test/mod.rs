@@ -6,10 +6,14 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 mod arithmetic_test;
-mod collection_test;
+mod callable_test;
 mod function_test;
 mod integration_test;
+mod keyword_test;
 mod literal_test;
+mod map_test;
+mod metadata_test;
+mod tuple_test;
 
 use super::*;
 use crate::Vaddr;

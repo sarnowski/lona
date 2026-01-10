@@ -16,9 +16,21 @@ mod meta;
 mod string;
 
 #[cfg(test)]
-mod intrinsics_test;
+mod arithmetic_test;
+#[cfg(test)]
+mod boolean_test;
+#[cfg(test)]
+mod keyword_intrinsic_test;
+#[cfg(test)]
+mod lookup_test;
 #[cfg(test)]
 mod meta_intrinsics_test;
+#[cfg(test)]
+mod predicate_test;
+#[cfg(test)]
+mod string_test;
+#[cfg(test)]
+mod tuple_intrinsic_test;
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
