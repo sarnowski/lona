@@ -3,8 +3,6 @@
 
 //! Tests for the bytecode VM.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-
 mod arithmetic_test;
 mod callable_test;
 mod function_test;
@@ -21,27 +19,47 @@ use crate::compiler::compile;
 use crate::platform::MockVSpace;
 use crate::process::Process;
 use crate::reader::read;
+use crate::realm::{Realm, bootstrap};
 
-/// Create a test environment.
-pub fn setup() -> (Process, MockVSpace) {
+/// Create a test environment with bootstrapped realm and process.
+///
+/// Returns `None` if bootstrap fails (should not happen in tests).
+pub fn setup() -> Option<(Process, Realm, MockVSpace)> {
     let base = Vaddr::new(0x1_0000);
-    let mem = MockVSpace::new(128 * 1024, base);
+    let mut mem = MockVSpace::new(256 * 1024, base);
     let young_base = base;
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let proc = Process::new(1, young_base, young_size, old_base, old_size);
-    (proc, mem)
+    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+
+    // Create realm at a higher address
+    let realm_base = base.add(128 * 1024);
+    let mut realm = Realm::new(realm_base, 64 * 1024);
+
+    // Bootstrap realm and process
+    let result = bootstrap(&mut realm, &mut mem)?;
+    proc.bootstrap(result.ns_var, result.core_ns);
+
+    Some((proc, realm, mem))
 }
 
 /// Parse, compile, and execute an expression.
-pub fn eval(src: &str, proc: &mut Process, mem: &mut MockVSpace) -> Result<Value, RuntimeError> {
+///
+/// Returns `Err(RuntimeError::NoCode)` if parsing or compilation fails.
+pub fn eval(
+    src: &str,
+    proc: &mut Process,
+    realm: &mut Realm,
+    mem: &mut MockVSpace,
+) -> Result<Value, RuntimeError> {
     let expr = read(src, proc, mem)
-        .expect("parse error")
-        .expect("empty input");
-    let chunk = compile(expr, proc, mem).expect("compile error");
+        .ok()
+        .flatten()
+        .ok_or(RuntimeError::NoCode)?;
+    let chunk = compile(expr, proc, mem, realm).map_err(|_| RuntimeError::NoCode)?;
     proc.set_chunk(chunk);
-    let result = execute(proc, mem);
+    let result = execute(proc, mem, realm);
     proc.reset();
     result
 }

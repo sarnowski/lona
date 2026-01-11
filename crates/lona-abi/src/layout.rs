@@ -143,9 +143,9 @@ pub const MMIO_SIZE: u64 = 16 * GB;
 /// Virtual address where UART is mapped (for init realm).
 pub const UART_VADDR: u64 = MMIO_BASE;
 
-/// Default initial heap size for init realm (64 KB).
-/// This is sufficient for the REPL; full process pool comes later.
-pub const INIT_HEAP_SIZE: u64 = 64 * KB;
+/// Default initial heap size for init realm (128 KB).
+/// This is sufficient for realm code region + REPL process heaps.
+pub const INIT_HEAP_SIZE: u64 = 128 * KB;
 
 // =============================================================================
 // Region Types and Permissions

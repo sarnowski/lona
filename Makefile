@@ -558,7 +558,7 @@ clippy: $(MARKER_ENV)
 .PHONY: test
 test: $(MARKER_ENV)
 	@echo "=== Running unit tests ==="
-	$(DOCKER) sh -c 'LONA_VERSION=$(VERSION) cargo test && LONA_VERSION=$(VERSION) cargo llvm-cov --fail-under-lines 60'
+	$(DOCKER) sh -c 'LONA_VERSION=$(VERSION) cargo test && LONA_VERSION=$(VERSION) cargo llvm-cov --fail-under-lines 85'
 
 .PHONY: verify
 verify: format clippy test integration-test

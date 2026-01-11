@@ -44,6 +44,8 @@ mod var;
 #[cfg(test)]
 mod allocation_test;
 #[cfg(test)]
+mod binding_test;
+#[cfg(test)]
 mod copy_test;
 #[cfg(test)]
 mod execution_test;
@@ -71,9 +73,9 @@ pub const MAX_CALL_DEPTH: usize = 256;
 /// Keywords are interned so that identical keyword literals share the same address.
 /// This enables O(1) equality comparison via address comparison.
 ///
-/// Note: This is a temporary per-process table. Once realm-level interning is
-/// implemented (Phase 4+), most keywords will be interned at the realm level,
-/// and this table will only handle dynamically-constructed keywords.
+/// Note: This per-process table is used during compilation and REPL evaluation.
+/// Realm-level interning (see `realm::Realm`) handles persistent keywords that
+/// are part of `def`'d code. This table handles dynamically-constructed keywords.
 pub const MAX_INTERNED_KEYWORDS: usize = 1024;
 
 /// Maximum number of interned symbols per process.
@@ -82,8 +84,9 @@ pub const MAX_INTERNED_KEYWORDS: usize = 1024;
 /// This enables O(1) equality comparison via address comparison and is required
 /// for namespace lookups (which compare symbol addresses).
 ///
-/// Note: This is a temporary per-process table. Once realm-level interning is
-/// implemented, most symbols will be interned at the realm level.
+/// Note: This per-process table is used during compilation and REPL evaluation.
+/// Realm-level interning (see `realm::Realm`) handles persistent symbols that
+/// are part of `def`'d code.
 pub const MAX_INTERNED_SYMBOLS: usize = 1024;
 
 /// Maximum number of metadata entries per process.
@@ -94,9 +97,17 @@ pub const MAX_METADATA_ENTRIES: usize = 1024;
 
 /// Maximum number of namespaces per process.
 ///
-/// Namespaces are stored in a per-process registry. In the future, this will
-/// move to the realm level for proper sharing across processes.
+/// Namespaces are stored in a per-process registry for REPL and compilation.
+/// Realm-level namespace registry (see `realm::Realm`) handles persistent
+/// namespaces shared across processes. This table is used during bootstrap
+/// and for temporary namespace operations.
 pub const MAX_NAMESPACES: usize = 256;
+
+/// Maximum number of process-bound variable bindings.
+///
+/// Process-bound vars (like `*ns*`) can have per-process values that shadow
+/// the root binding. This table maps var IDs (`VarSlot` addresses) to values.
+pub const MAX_BINDINGS: usize = 256;
 
 /// Initial young heap size (48 KB).
 pub const INITIAL_YOUNG_HEAP_SIZE: usize = 48 * 1024;
@@ -201,6 +212,14 @@ pub struct Process {
     pub(crate) namespace_addrs: [Vaddr; MAX_NAMESPACES],
     /// Number of registered namespaces.
     pub(crate) namespace_len: usize,
+
+    // Process-bound var bindings
+    /// Var IDs (`VarSlot` addresses) with process-local bindings.
+    pub(crate) binding_var_ids: [Vaddr; MAX_BINDINGS],
+    /// Process-local values for those vars.
+    pub(crate) binding_values: [Value; MAX_BINDINGS],
+    /// Number of bindings.
+    pub(crate) binding_len: usize,
 }
 
 impl Process {
@@ -258,6 +277,10 @@ impl Process {
             namespace_names: [Vaddr::new(0); MAX_NAMESPACES],
             namespace_addrs: [Vaddr::new(0); MAX_NAMESPACES],
             namespace_len: 0,
+            // Process-bound var bindings
+            binding_var_ids: [Vaddr::new(0); MAX_BINDINGS],
+            binding_values: [Value::Nil; MAX_BINDINGS],
+            binding_len: 0,
         }
     }
 
@@ -369,5 +392,73 @@ impl Process {
     #[must_use]
     pub const fn call_depth(&self) -> usize {
         self.call_stack_len
+    }
+
+    // --- Process-bound var bindings ---
+
+    /// Get process-local binding for a var, if any.
+    ///
+    /// Returns the bound value if the var has a process-local binding,
+    /// `None` otherwise.
+    #[must_use]
+    pub fn get_binding(&self, var_id: Vaddr) -> Option<Value> {
+        for i in 0..self.binding_len {
+            if self.binding_var_ids[i] == var_id {
+                return Some(self.binding_values[i]);
+            }
+        }
+        None
+    }
+
+    /// Set process-local binding for a var.
+    ///
+    /// If the var already has a binding, updates it.
+    /// Otherwise, adds a new binding.
+    ///
+    /// Returns `None` if the binding table is full.
+    pub fn set_binding(&mut self, var_id: Vaddr, value: Value) -> Option<()> {
+        // Check if already bound - update in place
+        for i in 0..self.binding_len {
+            if self.binding_var_ids[i] == var_id {
+                self.binding_values[i] = value;
+                return Some(());
+            }
+        }
+
+        // Add new binding
+        if self.binding_len >= MAX_BINDINGS {
+            return None; // Table full
+        }
+
+        self.binding_var_ids[self.binding_len] = var_id;
+        self.binding_values[self.binding_len] = value;
+        self.binding_len += 1;
+        Some(())
+    }
+
+    /// Check if a var has a process-local binding.
+    #[must_use]
+    pub fn has_binding(&self, var_id: Vaddr) -> bool {
+        for i in 0..self.binding_len {
+            if self.binding_var_ids[i] == var_id {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Bootstrap this process with initial bindings from a realm.
+    ///
+    /// Sets up the `*ns*` binding to point to `lona.core` namespace.
+    /// This should be called after `realm::bootstrap()` has initialized the realm.
+    ///
+    /// # Arguments
+    /// * `ns_var` - The `*ns*` var from the realm (returned by `realm::bootstrap`)
+    /// * `core_ns` - The `lona.core` namespace (returned by `realm::bootstrap`)
+    pub fn bootstrap(&mut self, ns_var: Value, core_ns: Value) {
+        if let Value::Var(var_id) = ns_var {
+            // Set *ns* to lona.core for this process
+            let _ = self.set_binding(var_id, core_ns);
+        }
     }
 }

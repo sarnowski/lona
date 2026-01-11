@@ -9,6 +9,9 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
+use alloc::boxed::Box;
 use core::arch::asm;
 use core::panic::PanicInfo;
 
@@ -20,8 +23,8 @@ mod allocator {
     use core::ptr;
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Size of the allocation buffer (64 KB should be plenty for bytecode chunks).
-    const ALLOC_SIZE: usize = 64 * 1024;
+    /// Size of the allocation buffer (128 KB for Realm struct + bytecode chunks).
+    const ALLOC_SIZE: usize = 128 * 1024;
 
     /// Simple bump allocator for no_std environments.
     pub struct BumpAllocator {
@@ -90,6 +93,7 @@ use lona_vm::loader::TarSource;
 use lona_vm::platform::Sel4VSpace;
 use lona_vm::process::pool::ProcessPool;
 use lona_vm::process::{INITIAL_OLD_HEAP_SIZE, INITIAL_YOUNG_HEAP_SIZE, Process};
+use lona_vm::realm::Realm;
 #[cfg(not(feature = "e2e-test"))]
 use lona_vm::repl;
 use lona_vm::uart::{Uart, UartExt};
@@ -130,6 +134,15 @@ pub extern "C" fn _start() -> ! {
     // Create process pool from boot-allocated heap memory
     let mut pool = ProcessPool::new(Vaddr::new(heap_start), heap_size as usize);
 
+    // Allocate realm code region (16KB for vars, functions, etc.)
+    const REALM_CODE_SIZE: usize = 16 * 1024;
+    let realm_base = pool
+        .allocate(REALM_CODE_SIZE, 8)
+        .expect("failed to allocate realm code region");
+
+    // Create realm with code region (Box to avoid stack overflow - Realm is ~60KB)
+    let mut realm = Box::new(Realm::new(realm_base, REALM_CODE_SIZE));
+
     // Allocate memory for REPL process (young heap + old heap)
     let (young_base, old_base) = pool
         .allocate_process_memory(INITIAL_YOUNG_HEAP_SIZE, INITIAL_OLD_HEAP_SIZE)
@@ -146,6 +159,13 @@ pub extern "C" fn _start() -> ! {
 
     let mut vspace = Sel4VSpace;
 
+    // Bootstrap realm with lona.core namespace and essential vars
+    let bootstrap_result =
+        lona_vm::realm::bootstrap(&mut realm, &mut vspace).expect("failed to bootstrap realm");
+
+    // Bootstrap process with *ns* binding
+    process.bootstrap(bootstrap_result.ns_var, bootstrap_result.core_ns);
+
     // Run E2E tests when feature is enabled, otherwise start REPL
     #[cfg(feature = "e2e-test")]
     {
@@ -158,7 +178,7 @@ pub extern "C" fn _start() -> ! {
         if boot_flags.has_uart() {
             uart.write_line("\nStarting REPL...\n");
         }
-        repl::run(&mut process, &mut vspace, &mut uart)
+        repl::run(&mut process, &mut vspace, &mut realm, &mut uart)
     }
 }
 

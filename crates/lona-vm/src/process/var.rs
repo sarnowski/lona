@@ -12,13 +12,13 @@ use crate::value::{HeapMap, HeapString, HeapTuple, Namespace, Value, VarContent,
 use super::Process;
 
 impl Process {
-    /// Allocate a var (`VarSlot` + `VarContent`) on the heap.
+    /// Allocate a var (`VarSlot` + `VarContent`) on the process heap.
     ///
     /// Creates a new var with the given name symbol, namespace, root value, and flags.
     /// Returns a `Value::Var` pointing to the allocated `VarSlot`, or `None` if OOM.
     ///
-    /// Note: This allocates both `VarSlot` and `VarContent` on the process heap.
-    /// For realm-level allocation (Phase 5), use a different method.
+    /// Note: This allocates on the process heap for temporary/REPL use.
+    /// For persistent vars (via `def`), use `Realm::alloc_var` instead.
     pub fn alloc_var<M: MemorySpace>(
         &mut self,
         mem: &mut M,
@@ -78,14 +78,26 @@ impl Process {
 
     /// Get the current value of a var (dereferencing it).
     ///
-    /// Returns the var's root value. Returns `Value::Unbound` if the var
-    /// has no value (declared but not initialized).
+    /// For process-bound vars, checks process bindings first. If a process
+    /// binding exists, returns that value. Otherwise, returns the root value.
     ///
-    /// Process-bound var support (checking process.bindings table) will be
-    /// implemented in Phase 5 along with the `def` special form.
+    /// Returns `Value::Unbound` if the var has no value (declared but not initialized)
+    /// and no process binding exists.
     #[must_use]
-    pub fn var_get<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<Value> {
-        let content = self.read_var_content(mem, value)?;
+    pub fn var_get<M: MemorySpace>(&self, mem: &M, var: Value) -> Option<Value> {
+        let Value::Var(slot_addr) = var else {
+            return None;
+        };
+
+        let content = self.read_var_content(mem, var)?;
+
+        // Check process bindings first for process-bound vars
+        if content.is_process_bound() {
+            if let Some(binding) = self.get_binding(slot_addr) {
+                return Some(binding);
+            }
+        }
+
         Some(content.root)
     }
 

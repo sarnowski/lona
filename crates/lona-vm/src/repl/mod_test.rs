@@ -9,26 +9,36 @@ use super::run_limited;
 use crate::Vaddr;
 use crate::platform::MockVSpace;
 use crate::process::Process;
+use crate::realm::{Realm, bootstrap};
 use crate::uart::MockUart;
 
-fn setup() -> (Process, MockVSpace) {
+fn setup() -> Option<(Process, Realm, MockVSpace)> {
     let base = Vaddr::new(0x1_0000);
-    let mem = MockVSpace::new(128 * 1024, base);
+    let mut mem = MockVSpace::new(256 * 1024, base);
     let young_base = base;
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let proc = Process::new(1, young_base, young_size, old_base, old_size);
-    (proc, mem)
+    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+
+    // Create realm at a higher address
+    let realm_base = base.add(128 * 1024);
+    let mut realm = Realm::new(realm_base, 64 * 1024);
+
+    // Bootstrap realm and process
+    let result = bootstrap(&mut realm, &mut mem)?;
+    proc.bootstrap(result.ns_var, result.core_ns);
+
+    Some((proc, realm, mem))
 }
 
 #[test]
 fn repl_empty_line() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     // Empty line: just CR
     let mut uart = MockUart::with_input(b"\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 1);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     // Should just show prompt and echo the newline
@@ -37,10 +47,10 @@ fn repl_empty_line() {
 
 #[test]
 fn repl_nil() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     let mut uart = MockUart::with_input(b"nil\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 1);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     assert!(output.contains("lona> "));
@@ -49,10 +59,10 @@ fn repl_nil() {
 
 #[test]
 fn repl_integer() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     let mut uart = MockUart::with_input(b"42\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 1);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     assert!(output.contains("42\n"));
@@ -60,11 +70,11 @@ fn repl_integer() {
 
 #[test]
 fn repl_intrinsic_call() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     // Test intrinsic call: (+ 1 2) → 3
     let mut uart = MockUart::with_input(b"(+ 1 2)\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 1);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     assert!(output.contains("3\n"));
@@ -72,11 +82,11 @@ fn repl_intrinsic_call() {
 
 #[test]
 fn repl_not_callable() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     // (1 2 3) compiles but fails at runtime - 1 is not callable
     let mut uart = MockUart::with_input(b"(1 2 3)\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 1);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     assert!(output.contains("Error: integer is not callable"));
@@ -84,11 +94,11 @@ fn repl_not_callable() {
 
 #[test]
 fn repl_quote() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     // 'x => (quote x) returns x unevaluated
     let mut uart = MockUart::with_input(b"'(1 2)\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 1);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     assert!(output.contains("(1 2)\n"));
@@ -96,10 +106,10 @@ fn repl_quote() {
 
 #[test]
 fn repl_error() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     let mut uart = MockUart::with_input(b")\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 1);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     assert!(output.contains("Error: unmatched )"));
@@ -107,10 +117,10 @@ fn repl_error() {
 
 #[test]
 fn repl_multiple_lines() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     let mut uart = MockUart::with_input(b"1\r2\r3\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 3);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 3);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     assert!(output.contains("1\n"));
@@ -120,10 +130,10 @@ fn repl_multiple_lines() {
 
 #[test]
 fn repl_string() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     let mut uart = MockUart::with_input(b"\"hello\"\r");
 
-    run_limited(&mut proc, &mut mem, &mut uart, 1);
+    run_limited(&mut proc, &mut mem, &mut realm, &mut uart, 1);
 
     let output = std::string::String::from_utf8(uart.output().to_vec()).unwrap();
     assert!(output.contains("\"hello\"\n"));

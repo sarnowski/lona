@@ -10,8 +10,8 @@ use crate::value::Value;
 
 #[test]
 fn eval_tuple_simple() {
-    let (mut proc, mut mem) = setup();
-    let result = eval("[1 2 3]", &mut proc, &mut mem).unwrap();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let result = eval("[1 2 3]", &mut proc, &mut realm, &mut mem).unwrap();
     assert!(result.is_tuple());
     assert_eq!(proc.read_tuple_len(&mem, result).unwrap(), 3);
     assert_eq!(
@@ -30,17 +30,17 @@ fn eval_tuple_simple() {
 
 #[test]
 fn eval_tuple_empty() {
-    let (mut proc, mut mem) = setup();
-    let result = eval("[]", &mut proc, &mut mem).unwrap();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let result = eval("[]", &mut proc, &mut realm, &mut mem).unwrap();
     assert!(result.is_tuple());
     assert_eq!(proc.read_tuple_len(&mem, result).unwrap(), 0);
 }
 
 #[test]
 fn eval_tuple_elements_evaluated() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
     // Elements should be evaluated
-    let result = eval("[(+ 1 2) 4]", &mut proc, &mut mem).unwrap();
+    let result = eval("[(+ 1 2) 4]", &mut proc, &mut realm, &mut mem).unwrap();
     assert!(result.is_tuple());
     assert_eq!(proc.read_tuple_len(&mem, result).unwrap(), 2);
     assert_eq!(
@@ -55,8 +55,8 @@ fn eval_tuple_elements_evaluated() {
 
 #[test]
 fn eval_tuple_nested() {
-    let (mut proc, mut mem) = setup();
-    let result = eval("[[1 2] [3 4]]", &mut proc, &mut mem).unwrap();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let result = eval("[[1 2] [3 4]]", &mut proc, &mut realm, &mut mem).unwrap();
     assert!(result.is_tuple());
     assert_eq!(proc.read_tuple_len(&mem, result).unwrap(), 2);
 
@@ -67,44 +67,44 @@ fn eval_tuple_nested() {
 
 #[test]
 fn eval_tuple_predicate() {
-    let (mut proc, mut mem) = setup();
-    let result = eval("(tuple? [1 2])", &mut proc, &mut mem).unwrap();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let result = eval("(tuple? [1 2])", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, Value::bool(true));
 
-    let result = eval("(tuple? '(1 2))", &mut proc, &mut mem).unwrap();
+    let result = eval("(tuple? '(1 2))", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, Value::bool(false));
 
-    let result = eval("(tuple? 42)", &mut proc, &mut mem).unwrap();
+    let result = eval("(tuple? 42)", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, Value::bool(false));
 }
 
 #[test]
 fn eval_tuple_nth() {
-    let (mut proc, mut mem) = setup();
-    let result = eval("(nth [10 20 30] 0)", &mut proc, &mut mem).unwrap();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let result = eval("(nth [10 20 30] 0)", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, Value::int(10));
 
-    let result = eval("(nth [10 20 30] 1)", &mut proc, &mut mem).unwrap();
+    let result = eval("(nth [10 20 30] 1)", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, Value::int(20));
 
-    let result = eval("(nth [10 20 30] 2)", &mut proc, &mut mem).unwrap();
+    let result = eval("(nth [10 20 30] 2)", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, Value::int(30));
 }
 
 #[test]
 fn eval_tuple_count() {
-    let (mut proc, mut mem) = setup();
-    let result = eval("(count [1 2 3])", &mut proc, &mut mem).unwrap();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let result = eval("(count [1 2 3])", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, Value::int(3));
 
-    let result = eval("(count [])", &mut proc, &mut mem).unwrap();
+    let result = eval("(count [])", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, Value::int(0));
 }
 
 #[test]
 fn eval_tuple_with_keywords() {
-    let (mut proc, mut mem) = setup();
-    let result = eval("[:a :b :c]", &mut proc, &mut mem).unwrap();
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let result = eval("[:a :b :c]", &mut proc, &mut realm, &mut mem).unwrap();
     assert!(result.is_tuple());
     assert_eq!(proc.read_tuple_len(&mem, result).unwrap(), 3);
 

@@ -11,12 +11,12 @@ use crate::value::Value;
 
 #[test]
 fn str_single_string() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut mem, mut realm) = setup();
 
     let s = proc.alloc_string(&mut mem, "hello").unwrap();
     proc.x_regs[1] = s;
 
-    call_intrinsic(id::STR, 1, &mut proc, &mut mem).unwrap();
+    call_intrinsic(id::STR, 1, &mut proc, &mut mem, &mut realm).unwrap();
 
     let result = proc.read_string(&mem, proc.x_regs[0]).unwrap();
     assert_eq!(result, "hello");
@@ -24,7 +24,7 @@ fn str_single_string() {
 
 #[test]
 fn str_concatenation() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut mem, mut realm) = setup();
 
     let s1 = proc.alloc_string(&mut mem, "hello").unwrap();
     let s2 = proc.alloc_string(&mut mem, " ").unwrap();
@@ -34,7 +34,7 @@ fn str_concatenation() {
     proc.x_regs[2] = s2;
     proc.x_regs[3] = s3;
 
-    call_intrinsic(id::STR, 3, &mut proc, &mut mem).unwrap();
+    call_intrinsic(id::STR, 3, &mut proc, &mut mem, &mut realm).unwrap();
 
     let result = proc.read_string(&mem, proc.x_regs[0]).unwrap();
     assert_eq!(result, "hello world");
@@ -42,13 +42,13 @@ fn str_concatenation() {
 
 #[test]
 fn str_mixed_types() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut mem, mut realm) = setup();
 
     let s = proc.alloc_string(&mut mem, "x=").unwrap();
     proc.x_regs[1] = s;
     proc.x_regs[2] = Value::int(42);
 
-    call_intrinsic(id::STR, 2, &mut proc, &mut mem).unwrap();
+    call_intrinsic(id::STR, 2, &mut proc, &mut mem, &mut realm).unwrap();
 
     let result = proc.read_string(&mem, proc.x_regs[0]).unwrap();
     assert_eq!(result, "x=42");
@@ -56,13 +56,13 @@ fn str_mixed_types() {
 
 #[test]
 fn str_nil_and_bool() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut mem, mut realm) = setup();
 
     proc.x_regs[1] = Value::nil();
     proc.x_regs[2] = Value::bool(true);
     proc.x_regs[3] = Value::bool(false);
 
-    call_intrinsic(id::STR, 3, &mut proc, &mut mem).unwrap();
+    call_intrinsic(id::STR, 3, &mut proc, &mut mem, &mut realm).unwrap();
 
     let result = proc.read_string(&mem, proc.x_regs[0]).unwrap();
     assert_eq!(result, "niltruefalse");
@@ -70,11 +70,11 @@ fn str_nil_and_bool() {
 
 #[test]
 fn str_negative_int() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut mem, mut realm) = setup();
 
     proc.x_regs[1] = Value::int(-12345);
 
-    call_intrinsic(id::STR, 1, &mut proc, &mut mem).unwrap();
+    call_intrinsic(id::STR, 1, &mut proc, &mut mem, &mut realm).unwrap();
 
     let result = proc.read_string(&mem, proc.x_regs[0]).unwrap();
     assert_eq!(result, "-12345");
@@ -82,11 +82,11 @@ fn str_negative_int() {
 
 #[test]
 fn str_zero() {
-    let (mut proc, mut mem) = setup();
+    let (mut proc, mut mem, mut realm) = setup();
 
     proc.x_regs[1] = Value::int(0);
 
-    call_intrinsic(id::STR, 1, &mut proc, &mut mem).unwrap();
+    call_intrinsic(id::STR, 1, &mut proc, &mut mem, &mut realm).unwrap();
 
     let result = proc.read_string(&mem, proc.x_regs[0]).unwrap();
     assert_eq!(result, "0");

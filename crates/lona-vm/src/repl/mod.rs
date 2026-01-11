@@ -14,6 +14,7 @@ use crate::intrinsics::IntrinsicError;
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::reader::{ReadError, read};
+use crate::realm::Realm;
 use crate::uart::{Uart, UartExt};
 use crate::value::print_value;
 use crate::vm::{self, RuntimeError};
@@ -24,7 +25,18 @@ const LINE_BUFFER_SIZE: usize = 256;
 /// Run the REPL loop.
 ///
 /// This function never returns under normal operation.
-pub fn run<M: MemorySpace, U: Uart>(proc: &mut Process, mem: &mut M, uart: &mut U) -> ! {
+///
+/// # Arguments
+/// * `proc` - Process for execution (should be bootstrapped)
+/// * `mem` - Memory space
+/// * `realm` - Realm (should be bootstrapped, mutable for `def`)
+/// * `uart` - UART for I/O
+pub fn run<M: MemorySpace, U: Uart>(
+    proc: &mut Process,
+    mem: &mut M,
+    realm: &mut Realm,
+    uart: &mut U,
+) -> ! {
     let mut line_buf = [0u8; LINE_BUFFER_SIZE];
 
     loop {
@@ -58,7 +70,7 @@ pub fn run<M: MemorySpace, U: Uart>(proc: &mut Process, mem: &mut M, uart: &mut 
         };
 
         // Compile
-        let chunk = match compiler::compile(expr, proc, mem) {
+        let chunk = match compiler::compile(expr, proc, mem, realm) {
             Ok(c) => c,
             Err(e) => {
                 uart.write_str("Error: ");
@@ -70,7 +82,7 @@ pub fn run<M: MemorySpace, U: Uart>(proc: &mut Process, mem: &mut M, uart: &mut 
 
         // Set chunk and execute
         proc.set_chunk(chunk);
-        let result = match vm::execute(proc, mem) {
+        let result = match vm::execute(proc, mem, realm) {
             Ok(v) => v,
             Err(e) => {
                 uart.write_str("Error: ");
@@ -144,6 +156,7 @@ fn print_compile_error<U: Uart>(e: CompileError, uart: &mut U) {
         CompileError::IntegerTooLarge => uart.write_str("integer too large"),
         CompileError::ConstantPoolFull => uart.write_str("constant pool full"),
         CompileError::ExpressionTooComplex => uart.write_str("expression too complex"),
+        CompileError::InternalError => uart.write_str("internal compiler error"),
     }
 }
 
@@ -325,6 +338,7 @@ fn print_usize<U: Uart>(n: usize, uart: &mut U) {
 pub fn run_limited<M: MemorySpace, U: Uart>(
     proc: &mut Process,
     mem: &mut M,
+    realm: &mut Realm,
     uart: &mut U,
     max_iterations: usize,
 ) {
@@ -357,7 +371,7 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
         };
 
         // Compile
-        let chunk = match compiler::compile(expr, proc, mem) {
+        let chunk = match compiler::compile(expr, proc, mem, realm) {
             Ok(c) => c,
             Err(e) => {
                 uart.write_str("Error: ");
@@ -369,7 +383,7 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
 
         // Set chunk and execute
         proc.set_chunk(chunk);
-        let result = match vm::execute(proc, mem) {
+        let result = match vm::execute(proc, mem, realm) {
             Ok(v) => v,
             Err(e) => {
                 uart.write_str("Error: ");

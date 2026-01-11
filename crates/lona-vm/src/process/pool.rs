@@ -50,6 +50,25 @@ impl ProcessPool {
         self.limit.as_u64().saturating_sub(self.next.as_u64()) as usize
     }
 
+    /// Allocate a contiguous region from the pool.
+    ///
+    /// Returns the base address or `None` if insufficient space.
+    /// The allocation is aligned to `align` bytes.
+    pub fn allocate(&mut self, size: usize, align: usize) -> Option<Vaddr> {
+        // Align next up
+        let mask = (align as u64).wrapping_sub(1);
+        let aligned = (self.next.as_u64() + mask) & !mask;
+
+        let new_next = aligned.checked_add(size as u64)?;
+        if new_next > self.limit.as_u64() {
+            return None;
+        }
+
+        let result = Vaddr::new(aligned);
+        self.next = Vaddr::new(new_next);
+        Some(result)
+    }
+
     /// Allocate a contiguous region for a process's heaps.
     ///
     /// Returns `(young_base, old_base)` or `None` if insufficient space.

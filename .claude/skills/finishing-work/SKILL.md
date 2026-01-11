@@ -64,7 +64,7 @@ Save the plan contents for Phase 2 (agents will validate against it).
 Check which directories have changes:
 
 ```bash
-{ git diff --name-only origin/main...HEAD 2>/dev/null; git diff --name-only HEAD; } | sort -u | cut -d'/' -f1 | sort -u
+.claude/skills/finishing-work/changed-directories.sh
 ```
 
 | Changed Directory | Required Command | Must Result In |
@@ -99,7 +99,7 @@ If it fails: fix ALL issues (broken links, invalid syntax, missing pages), re-ru
 **Check the length of ALL changed source files.**
 
 ```bash
-{ git diff --name-only origin/main...HEAD 2>/dev/null; git diff --name-only HEAD; } | sort -u | xargs -I{} sh -c 'echo "$(wc -l < "{}" 2>/dev/null || echo 0) {}"' | sort -rn
+.claude/skills/finishing-work/file-line-counts.sh
 ```
 
 | Lines | Action |
@@ -149,7 +149,7 @@ After `make verify` passes:
 ### 2.1 Gather Changed Files
 
 ```bash
-{ git diff --name-only origin/main...HEAD 2>/dev/null; git diff --name-only HEAD; git status --porcelain | awk '{print $2}'; } | sort -u
+.claude/skills/finishing-work/changed-files.sh
 ```
 
 ### 2.2 Launch All Three Agents IN PARALLEL

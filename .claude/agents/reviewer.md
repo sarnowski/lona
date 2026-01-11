@@ -21,22 +21,64 @@ Your job is to review quality, correctness, and fit - not build status.
 
 ---
 
-## Documentation to Read
+## MANDATORY: Documentation-First Review
 
-**Read relevant documentation BEFORE performing a review.**
+**You MUST read relevant documentation BEFORE performing a review.**
 
-The authoritative documentation index is **[mkdocs.yaml](mkdocs.yaml)**.
+### The Rule
 
-| Document | Description |
-|----------|-------------|
-| [docs/index.md](docs/index.md) | Project homepage: vision, key features |
-| [docs/architecture/index.md](docs/architecture/index.md) | Architecture overview, security model |
-| [docs/lonala/index.md](docs/lonala/index.md) | Language overview, type system |
-| [docs/lonala/special-forms.md](docs/lonala/special-forms.md) | The 5 special forms |
-| [docs/lonala/data-types.md](docs/lonala/data-types.md) | All value types |
-| [docs/lonala/lona.core.md](docs/lonala/lona.core.md) | Core intrinsics |
-| [docs/lonala/lona.process.md](docs/lonala/lona.process.md) | Process intrinsics |
-| [docs/development/rust-coding-guidelines.md](docs/development/rust-coding-guidelines.md) | Rust implementation guide |
+1. **Identify** which documents cover the code being reviewed (see map below)
+2. **Read** those documents completely - not skim, READ
+3. **Validate** the implementation against what the specification says
+4. **Flag** any deviation from documented behavior
+
+### Complete Documentation Map
+
+**Use this table to identify which documents to read for any given review.**
+
+#### Architecture Specification
+
+| Document | What It Contains | Read When Reviewing |
+|----------|------------------|---------------------|
+| [architecture/index.md](docs/architecture/index.md) | Design philosophy, security model (realms vs processes), zero-trust principles, capability-based security overview, core terminology definitions | Any code; need to understand security boundaries; realm vs process decisions |
+| [architecture/memory-fundamentals.md](docs/architecture/memory-fundamentals.md) | Physical memory management, MMU and address translation, page tables, seL4's memory model (Untyped, frames, page tables), how capabilities control memory | Memory allocation code, page mapping, physical memory handling |
+| [architecture/system-architecture.md](docs/architecture/system-architecture.md) | Lona Memory Manager design, realm lifecycle (creation, resource budgets, termination), thread management, system bootstrapping sequence, IPC mechanisms, hierarchical resource management | Realm creation/management, system startup, resource quotas, parent-child relationships |
+| [architecture/realm-memory-layout.md](docs/architecture/realm-memory-layout.md) | Virtual address space layout within a realm, memory regions (code, heap, stack, vars), inherited read-only regions from parent realms, how vars are shared, code compilation and loading | Memory layout code, var sharing, child realm inheritance |
+| [architecture/process-model.md](docs/architecture/process-model.md) | Lightweight process design, process state machine, scheduling (reductions, preemption), message passing semantics, mailbox implementation, per-process garbage collection, process linking and monitoring | Process-related code, scheduling, message passing, GC, supervision |
+| [architecture/device-drivers.md](docs/architecture/device-drivers.md) | Driver isolation in separate realms, MMIO mapping, DMA buffer management, interrupt handling (notifications), zero-copy I/O patterns, driver capability requirements | Device driver code, hardware interaction, DMA, interrupts |
+| [architecture/services.md](docs/architecture/services.md) | Inter-realm communication via named services, service registry, connection establishment, access control for services, request-response patterns | Cross-realm communication, service discovery, IPC patterns |
+| [architecture/virtual-machine.md](docs/architecture/virtual-machine.md) | Bytecode VM design, register-based architecture, instruction format and encoding, opcode reference, execution model, stack frames, function calls at VM level | VM/compiler code, bytecode handling, instruction execution |
+
+#### Lonala Language Specification
+
+| Document | What It Contains | Read When Reviewing |
+|----------|------------------|---------------------|
+| [lonala/index.md](docs/lonala/index.md) | Language design philosophy, what Lonala is NOT (not Clojure, not Erlang), type system overview, evaluation model, key differences from inspirations | Any Lonala code; language design decisions |
+| [lonala/reader.md](docs/lonala/reader.md) | Lexical syntax, symbol and keyword rules, numeric literal formats, string escaping, collection syntax (`[]` tuple, `{}` vector, `%{}` map), reader macros (`'`, `` ` ``, `~`, `~@`, `^`, `@`) | Parser/reader code, syntax handling |
+| [lonala/special-forms.md](docs/lonala/special-forms.md) | The 5 special forms: `def` (var binding), `fn*` (function creation), `match` (pattern matching), `do` (sequencing), `quote` (preventing evaluation). Complete semantics for each | Special form implementation, evaluation rules, pattern matching |
+| [lonala/data-types.md](docs/lonala/data-types.md) | All value types: nil, booleans, integers (arbitrary precision), floats, strings, symbols, keywords, tuples, vectors, maps, addresses (PIDs, realm IDs), capabilities. Memory representation | Value handling, type checking, VM value representation |
+| [lonala/metadata.md](docs/lonala/metadata.md) | Var metadata system: `:native` (intrinsic functions), `:macro` (compile-time expansion), `:doc` (documentation), `:private`, `:dynamic` (process-local bindings). How metadata affects behavior | Var definitions, intrinsics, macros, dynamic bindings |
+| [lonala/lona.core.md](docs/lonala/lona.core.md) | Core namespace intrinsics: namespace management, var operations, arithmetic, comparison, string operations, collection functions (conj, get, assoc, etc.), type predicates, equality | Core function implementations, intrinsic behavior |
+| [lonala/lona.process.md](docs/lonala/lona.process.md) | Process namespace: `spawn`, `spawn-link`, `spawn-monitor`, `send`, `receive`, `self`, `exit`, `link`, `unlink`, `monitor`, `demonitor`, process flags, realm operations | Process intrinsics, message passing, supervision |
+| [lonala/lona.kernel.md](docs/lonala/lona.kernel.md) | Low-level seL4 intrinsics: IPC primitives (call, send, recv), capability operations, memory mapping, thread control. For VM and system code only | Kernel interface code, seL4 interaction, capability manipulation |
+| [lonala/lona.io.md](docs/lonala/lona.io.md) | I/O intrinsics: MMIO read/write, DMA buffer allocation and management, interrupt waiting and handling, port I/O. For driver development | I/O intrinsics, driver support code |
+| [lonala/lona.time.md](docs/lonala/lona.time.md) | Time intrinsics: monotonic time, wall clock time, sleep/delay, timeouts, timer creation | Time-related code, timeout handling |
+
+#### Standard Library
+
+| File | What It Contains | Read When Reviewing |
+|------|------------------|---------------------|
+| [lib/lona/core.lona](lib/lona/core.lona) | Bootstrap file defining core macros and derived functions built on intrinsics: `defn`, `defmacro`, `let`, `if`, `cond`, `and`, `or`, `->`, `->>`, etc. | Macro expansion, core library changes |
+| [lib/lona/init.lona](lib/lona/init.lona) | System init process - first userspace process that runs, initializes the system | System startup code |
+
+#### Development Guides
+
+| Document | What It Contains | Read When Reviewing |
+|----------|------------------|---------------------|
+| [development/structure.md](docs/development/structure.md) | Project directory layout, crate organization and dependencies, build artifacts, what each crate does | Project organization, crate structure |
+| [development/rust-coding-guidelines.md](docs/development/rust-coding-guidelines.md) | Rust coding standards for this project: error handling patterns, naming conventions, module organization, testing strategy, documentation requirements, no_std constraints | Any Rust code |
+| [development/lonala-coding-guidelines.md](docs/development/lonala-coding-guidelines.md) | Lonala coding style: naming conventions, formatting, documentation comments, idiomatic patterns | Any Lonala library code |
+| [development/library-loading.md](docs/development/library-loading.md) | How libraries are packaged (tar format), embedded in binary, loaded at runtime, namespace resolution order | Library loading, namespace resolution |
 
 ---
 

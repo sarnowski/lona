@@ -15,6 +15,7 @@ use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode, de
 use crate::intrinsics::{self, CoreCollectionError, IntrinsicError, core_get, core_nth};
 use crate::platform::MemorySpace;
 use crate::process::Process;
+use crate::realm::Realm;
 use crate::value::Value;
 
 /// Maximum number of elements in a tuple literal.
@@ -53,6 +54,7 @@ fn build_tuple<M: MemorySpace>(
 fn call_user_fn<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
+    realm: &mut Realm,
     fn_addr: crate::Vaddr,
     argc: u8,
 ) -> Result<Value, RuntimeError> {
@@ -126,7 +128,7 @@ fn call_user_fn<M: MemorySpace>(
     proc.ip = 0;
 
     // Execute the function
-    let result = Vm::run(proc, mem);
+    let result = Vm::run(proc, mem, realm);
 
     // Restore caller's state
     proc.chunk = saved_chunk;
@@ -257,15 +259,16 @@ fn call_tuple<M: MemorySpace>(
 fn execute_call<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
+    realm: &mut Realm,
     fn_reg: usize,
     argc: u8,
 ) -> Result<(), RuntimeError> {
     let fn_val = proc.x_regs[fn_reg];
 
     match fn_val {
-        Value::NativeFn(id) => intrinsics::call_intrinsic(id as u8, argc, proc, mem)?,
+        Value::NativeFn(id) => intrinsics::call_intrinsic(id as u8, argc, proc, mem, realm)?,
         Value::CompiledFn(fn_addr) => {
-            proc.x_regs[0] = call_user_fn(proc, mem, fn_addr, argc)?;
+            proc.x_regs[0] = call_user_fn(proc, mem, realm, fn_addr, argc)?;
         }
         Value::Closure(closure_addr) => {
             let closure: crate::value::HeapClosure = mem.read(closure_addr);
@@ -280,7 +283,7 @@ fn execute_call<M: MemorySpace>(
                 proc.x_regs[captures_base + i] = mem.read(capture_addr);
             }
 
-            proc.x_regs[0] = call_user_fn(proc, mem, closure.function, argc)?;
+            proc.x_regs[0] = call_user_fn(proc, mem, realm, closure.function, argc)?;
         }
         Value::Keyword(_) => proc.x_regs[0] = call_keyword(proc, mem, fn_val, argc)?,
         Value::Map(_) => proc.x_regs[0] = call_map(proc, mem, fn_val, argc)?,
@@ -452,7 +455,11 @@ impl Vm {
     /// # Errors
     ///
     /// Returns an error if execution fails.
-    pub fn run<M: MemorySpace>(proc: &mut Process, mem: &mut M) -> Result<Value, RuntimeError> {
+    pub fn run<M: MemorySpace>(
+        proc: &mut Process,
+        mem: &mut M,
+        realm: &mut Realm,
+    ) -> Result<Value, RuntimeError> {
         loop {
             // Access chunk fresh each iteration to avoid borrow conflicts with intrinsics
             let Some(chunk) = proc.chunk.as_ref() else {
@@ -522,7 +529,7 @@ impl Vm {
                 op::INTRINSIC => {
                     let intrinsic_id = decode_a(instr);
                     let argc = decode_b(instr) as u8;
-                    intrinsics::call_intrinsic(intrinsic_id, argc, proc, mem)?;
+                    intrinsics::call_intrinsic(intrinsic_id, argc, proc, mem, realm)?;
                 }
 
                 op::RETURN | op::HALT => {
@@ -546,7 +553,7 @@ impl Vm {
                 op::CALL => {
                     let fn_reg = decode_a(instr) as usize;
                     let argc = decode_b(instr) as u8;
-                    execute_call(proc, mem, fn_reg, argc)?;
+                    execute_call(proc, mem, realm, fn_reg, argc)?;
                 }
 
                 op::BUILD_CLOSURE => {
@@ -571,6 +578,10 @@ impl Vm {
 /// # Errors
 ///
 /// Returns an error if execution fails.
-pub fn execute<M: MemorySpace>(proc: &mut Process, mem: &mut M) -> Result<Value, RuntimeError> {
-    Vm::run(proc, mem)
+pub fn execute<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    realm: &mut Realm,
+) -> Result<Value, RuntimeError> {
+    Vm::run(proc, mem, realm)
 }

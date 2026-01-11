@@ -23,8 +23,10 @@ mod compiler_test;
 mod disassemble;
 
 use crate::bytecode::{BX_MASK, Chunk, MAX_SIGNED_BX, MIN_SIGNED_BX, encode_abc, encode_abx, op};
+use crate::intrinsics::id as intrinsic_id;
 use crate::platform::MemorySpace;
 use crate::process::Process;
+use crate::realm::{Realm, lookup_var_in_ns};
 use crate::value::Value;
 
 #[cfg(any(test, feature = "std"))]
@@ -55,6 +57,8 @@ pub enum CompileError {
     ConstantPoolFull,
     /// Expression too complex (register overflow).
     ExpressionTooComplex,
+    /// Internal compiler error (out of memory, etc.).
+    InternalError,
 }
 
 /// Maximum length of a symbol name for binding comparison.
@@ -95,6 +99,8 @@ pub struct Compiler<'a, M: MemorySpace> {
     proc: &'a mut Process,
     /// Reference to the memory space.
     mem: &'a mut M,
+    /// Reference to the realm (for namespace/var lookup and def).
+    realm: &'a mut Realm,
     /// Parameter bindings for the current function scope.
     bindings: [Binding; MAX_PARAMS],
     /// Number of active bindings.
@@ -114,11 +120,12 @@ pub struct Compiler<'a, M: MemorySpace> {
 impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// Create a new compiler.
     #[must_use]
-    pub const fn new(proc: &'a mut Process, mem: &'a mut M) -> Self {
+    pub const fn new(proc: &'a mut Process, mem: &'a mut M, realm: &'a mut Realm) -> Self {
         Self {
             chunk: Chunk::new(),
             proc,
             mem,
+            realm,
             bindings: [Binding {
                 name: [0; MAX_SYMBOL_NAME_LEN],
                 name_len: 0,
@@ -379,6 +386,11 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     }
 
     /// Compile a symbol reference.
+    ///
+    /// Symbol resolution order:
+    /// 1. Local bindings (function parameters, let bindings)
+    /// 2. Captured variables from enclosing scope
+    /// 3. Namespace lookup via `*ns*`
     fn compile_symbol(
         &mut self,
         expr: Value,
@@ -427,8 +439,87 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
             return Ok(temp_base);
         }
 
+        // Try to resolve via namespace lookup
+        if let Some(var) = self.resolve_symbol(name) {
+            // Emit code to dereference the var at runtime
+            return self.compile_var_deref(var, target, temp_base);
+        }
+
         // Unbound symbol
         Err(CompileError::UnboundSymbol)
+    }
+
+    /// Resolve a symbol to a var via namespace lookup.
+    ///
+    /// Handles both qualified (ns/name) and unqualified symbols.
+    /// The `/` symbol by itself is treated as unqualified (it's the division intrinsic).
+    fn resolve_symbol(&self, name: &str) -> Option<Value> {
+        // Special case: "/" alone is the division operator, not a qualified name
+        if name == "/" {
+            return self.resolve_unqualified(name);
+        }
+
+        name.rfind('/').map_or_else(
+            || self.resolve_unqualified(name),
+            |slash_pos| self.resolve_qualified(&name[..slash_pos], &name[slash_pos + 1..]),
+        )
+    }
+
+    /// Resolve a qualified symbol (ns/name).
+    fn resolve_qualified(&self, ns_name: &str, var_name: &str) -> Option<Value> {
+        // Find the namespace by name
+        let ns_sym = self.realm.find_symbol(self.mem, ns_name)?;
+        let ns = self.realm.find_namespace(ns_sym)?;
+
+        // Look up the var in that namespace
+        lookup_var_in_ns(self.realm, self.mem, ns, var_name)
+    }
+
+    /// Resolve an unqualified symbol via the current namespace (*ns*).
+    fn resolve_unqualified(&self, name: &str) -> Option<Value> {
+        // Get *ns* var
+        let ns_var = lookup_var_in_ns(self.realm, self.mem, self.get_core_ns()?, "*ns*")?;
+
+        // Get the current namespace from *ns* (via process binding or root)
+        let current_ns = self.proc.var_get(self.mem, ns_var)?;
+
+        // Look up the symbol in the current namespace
+        lookup_var_in_ns(self.realm, self.mem, current_ns, name)
+    }
+
+    /// Get the lona.core namespace.
+    fn get_core_ns(&self) -> Option<Value> {
+        let core_sym = self.realm.find_symbol(self.mem, "lona.core")?;
+        self.realm.find_namespace(core_sym)
+    }
+
+    /// Compile a var dereference (for symbol in eval position).
+    ///
+    /// Emits code to load the var and call `VAR_GET` to get its value.
+    fn compile_var_deref(
+        &mut self,
+        var: Value,
+        target: u8,
+        temp_base: u8,
+    ) -> Result<u8, CompileError> {
+        // Load the var as a constant
+        let var_temp = temp_base;
+        self.compile_constant(var, var_temp)?;
+
+        // Move to X1 for VAR_GET intrinsic
+        self.chunk
+            .emit(encode_abc(op::MOVE, 1, u16::from(var_temp), 0));
+
+        // Call VAR_GET intrinsic (result in X0)
+        self.chunk
+            .emit(encode_abc(op::INTRINSIC, intrinsic_id::VAR_GET, 1, 0));
+
+        // Move result to target if needed
+        if target != 0 {
+            self.chunk.emit(encode_abc(op::MOVE, target, 0, 0));
+        }
+
+        Ok(temp_base + 1)
     }
 
     /// Compile an integer literal.
@@ -505,6 +596,7 @@ pub fn compile<M: MemorySpace>(
     expr: Value,
     proc: &mut Process,
     mem: &mut M,
+    realm: &mut Realm,
 ) -> Result<Chunk, CompileError> {
-    Compiler::new(proc, mem).compile(expr)
+    Compiler::new(proc, mem, realm).compile(expr)
 }

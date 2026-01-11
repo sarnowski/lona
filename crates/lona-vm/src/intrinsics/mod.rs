@@ -34,6 +34,7 @@ mod tuple_intrinsic_test;
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
+use crate::realm::Realm;
 use crate::value::Value;
 
 use arithmetic::{
@@ -48,9 +49,9 @@ use collection::{
 // Re-export core functions for use by callable data structures in VM
 pub use collection::{CoreCollectionError, core_get, core_nth};
 use meta::{
-    intrinsic_create_ns, intrinsic_find_ns, intrinsic_intern, intrinsic_is_fn,
-    intrinsic_is_namespace, intrinsic_is_var, intrinsic_meta, intrinsic_ns_map, intrinsic_ns_name,
-    intrinsic_var_get, intrinsic_with_meta,
+    intrinsic_create_ns, intrinsic_def_binding, intrinsic_def_meta, intrinsic_def_root,
+    intrinsic_find_ns, intrinsic_intern, intrinsic_is_fn, intrinsic_is_namespace, intrinsic_is_var,
+    intrinsic_meta, intrinsic_ns_map, intrinsic_ns_name, intrinsic_var_get, intrinsic_with_meta,
 };
 use string::{
     intrinsic_is_keyword, intrinsic_keyword, intrinsic_name_fn, intrinsic_namespace, intrinsic_str,
@@ -138,52 +139,61 @@ pub mod id {
     pub const INTERN: u8 = 37;
     /// Get var value: `(var-get var)` -> value
     pub const VAR_GET: u8 = 38;
+    /// Define var root: `(def-root var value)` -> var (deep copies value to realm)
+    pub const DEF_ROOT: u8 = 39;
+    /// Define var binding: `(def-binding var value)` -> var (sets process binding)
+    pub const DEF_BINDING: u8 = 40;
+    /// Define var metadata: `(def-meta var meta)` -> var (stores metadata in realm)
+    pub const DEF_META: u8 = 41;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 39;
+pub const INTRINSIC_COUNT: usize = 42;
 
 /// Intrinsic name lookup table.
 const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
-    "+",          // 0: ADD
-    "-",          // 1: SUB
-    "*",          // 2: MUL
-    "/",          // 3: DIV
-    "mod",        // 4: MOD
-    "=",          // 5: EQ
-    "<",          // 6: LT
-    ">",          // 7: GT
-    "<=",         // 8: LE
-    ">=",         // 9: GE
-    "not",        // 10: NOT
-    "nil?",       // 11: IS_NIL
-    "integer?",   // 12: IS_INT
-    "string?",    // 13: IS_STR
-    "str",        // 14: STR
-    "keyword?",   // 15: IS_KEYWORD
-    "keyword",    // 16: KEYWORD
-    "name",       // 17: NAME
-    "namespace",  // 18: NAMESPACE
-    "tuple?",     // 19: IS_TUPLE
-    "nth",        // 20: NTH
-    "count",      // 21: COUNT
-    "symbol?",    // 22: IS_SYMBOL
-    "map?",       // 23: IS_MAP
-    "get",        // 24: GET
-    "put",        // 25: PUT
-    "keys",       // 26: KEYS
-    "vals",       // 27: VALS
-    "meta",       // 28: META
-    "with-meta",  // 29: WITH_META
-    "namespace?", // 30: IS_NAMESPACE
-    "create-ns",  // 31: CREATE_NS
-    "find-ns",    // 32: FIND_NS
-    "ns-name",    // 33: NS_NAME
-    "ns-map",     // 34: NS_MAP
-    "fn?",        // 35: IS_FN
-    "var?",       // 36: IS_VAR
-    "intern",     // 37: INTERN
-    "var-get",    // 38: VAR_GET
+    "+",           // 0: ADD
+    "-",           // 1: SUB
+    "*",           // 2: MUL
+    "/",           // 3: DIV
+    "mod",         // 4: MOD
+    "=",           // 5: EQ
+    "<",           // 6: LT
+    ">",           // 7: GT
+    "<=",          // 8: LE
+    ">=",          // 9: GE
+    "not",         // 10: NOT
+    "nil?",        // 11: IS_NIL
+    "integer?",    // 12: IS_INT
+    "string?",     // 13: IS_STR
+    "str",         // 14: STR
+    "keyword?",    // 15: IS_KEYWORD
+    "keyword",     // 16: KEYWORD
+    "name",        // 17: NAME
+    "namespace",   // 18: NAMESPACE
+    "tuple?",      // 19: IS_TUPLE
+    "nth",         // 20: NTH
+    "count",       // 21: COUNT
+    "symbol?",     // 22: IS_SYMBOL
+    "map?",        // 23: IS_MAP
+    "get",         // 24: GET
+    "put",         // 25: PUT
+    "keys",        // 26: KEYS
+    "vals",        // 27: VALS
+    "meta",        // 28: META
+    "with-meta",   // 29: WITH_META
+    "namespace?",  // 30: IS_NAMESPACE
+    "create-ns",   // 31: CREATE_NS
+    "find-ns",     // 32: FIND_NS
+    "ns-name",     // 33: NS_NAME
+    "ns-map",      // 34: NS_MAP
+    "fn?",         // 35: IS_FN
+    "var?",        // 36: IS_VAR
+    "intern",      // 37: INTERN
+    "var-get",     // 38: VAR_GET
+    "def-root",    // 39: DEF_ROOT
+    "def-binding", // 40: DEF_BINDING
+    "def-meta",    // 41: DEF_META
 ];
 
 /// Look up an intrinsic ID by name.
@@ -241,6 +251,7 @@ pub enum IntrinsicError {
 /// * `argc` - Number of arguments
 /// * `proc` - Process containing registers and heap
 /// * `mem` - Memory space
+/// * `realm` - Realm for intrinsics that need it (`DEF_ROOT`, `DEF_BINDING`)
 ///
 /// # Errors
 /// Returns an error if the intrinsic fails (type error, division by zero, etc.)
@@ -249,6 +260,7 @@ pub fn call_intrinsic<M: MemorySpace>(
     argc: u8,
     proc: &mut Process,
     mem: &mut M,
+    realm: &mut Realm,
 ) -> Result<(), IntrinsicError> {
     let result = match intrinsic_id {
         id::ADD => intrinsic_add(proc, intrinsic_id)?,
@@ -279,7 +291,7 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::PUT => intrinsic_put(proc, mem, intrinsic_id)?,
         id::KEYS => intrinsic_keys(proc, mem, intrinsic_id)?,
         id::VALS => intrinsic_vals(proc, mem, intrinsic_id)?,
-        id::META => intrinsic_meta(proc, mem),
+        id::META => intrinsic_meta(proc, realm, mem),
         id::WITH_META => intrinsic_with_meta(proc, mem, intrinsic_id)?,
         id::IS_NAMESPACE => intrinsic_is_namespace(proc),
         id::CREATE_NS => intrinsic_create_ns(proc, mem, intrinsic_id)?,
@@ -290,6 +302,9 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::IS_VAR => intrinsic_is_var(proc),
         id::INTERN => intrinsic_intern(proc, mem, intrinsic_id)?,
         id::VAR_GET => intrinsic_var_get(proc, mem, intrinsic_id)?,
+        id::DEF_ROOT => intrinsic_def_root(proc, realm, mem, intrinsic_id)?,
+        id::DEF_BINDING => intrinsic_def_binding(proc, mem, intrinsic_id)?,
+        id::DEF_META => intrinsic_def_meta(proc, realm, mem, intrinsic_id)?,
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };
     proc.x_regs[0] = result;

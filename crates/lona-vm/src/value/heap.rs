@@ -61,12 +61,16 @@ impl Pair {
 ///
 /// Stored in memory as:
 /// - 4 bytes: length (u32)
+/// - 4 bytes: padding (for 8-byte alignment of elements)
 /// - `len * size_of::<Value>()` bytes: elements (array of Values)
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct HeapTuple {
     /// Number of elements in the tuple.
     pub len: u32,
+    /// Padding to ensure Value elements are 8-byte aligned.
+    /// This field must always be set to 0.
+    pub padding: u32,
     // Followed by `len` Values (not represented in struct)
 }
 

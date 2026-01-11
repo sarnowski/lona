@@ -121,6 +121,26 @@ impl Process {
         None
     }
 
+    /// Find an existing interned keyword by name (read-only lookup).
+    ///
+    /// Returns the keyword if found in the intern table, `None` otherwise.
+    /// Unlike `alloc_keyword`, this does not allocate or modify the intern table.
+    #[must_use]
+    pub fn find_interned_keyword<M: MemorySpace>(&self, mem: &M, name: &str) -> Option<Value> {
+        for i in 0..self.keyword_intern_len {
+            let addr = self.keyword_intern[i];
+            let header: HeapString = mem.read(addr);
+            if header.len as usize == name.len() {
+                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
+                let bytes = mem.slice(data_addr, header.len as usize);
+                if bytes == name.as_bytes() {
+                    return Some(Value::keyword(addr));
+                }
+            }
+        }
+        None
+    }
+
     /// Allocate a keyword on the young heap (same as string but tagged differently).
     ///
     /// Keywords are interned: the same keyword literal will return the same address.
@@ -182,7 +202,10 @@ impl Process {
         let addr = self.alloc(total_size, 8)?;
 
         // Write header
-        let header = HeapTuple { len: len as u32 };
+        let header = HeapTuple {
+            len: len as u32,
+            padding: 0,
+        };
         mem.write(addr, header);
 
         // Write elements
@@ -311,7 +334,7 @@ impl Process {
         }
     }
 
-    /// Get metadata for an object.
+    /// Get metadata for an object by address.
     ///
     /// Returns the metadata map address if the object has metadata, `None` otherwise.
     #[must_use]
@@ -322,5 +345,41 @@ impl Process {
             }
         }
         None
+    }
+
+    /// Get metadata for a value.
+    ///
+    /// Returns the metadata Value (usually a map) if the value has metadata,
+    /// `Value::Nil` otherwise.
+    #[must_use]
+    pub fn get_metadata_value(&self, value: Value) -> Value {
+        // Extract address from heap-allocated values (immediate values cannot have metadata)
+        let (Value::Symbol(obj_addr)
+        | Value::Keyword(obj_addr)
+        | Value::String(obj_addr)
+        | Value::Tuple(obj_addr)
+        | Value::Map(obj_addr)
+        | Value::Pair(obj_addr)
+        | Value::CompiledFn(obj_addr)
+        | Value::Closure(obj_addr)
+        | Value::Var(obj_addr)
+        | Value::Namespace(obj_addr)) = value
+        else {
+            return Value::Nil;
+        };
+
+        self.get_metadata(obj_addr).map_or(Value::Nil, Value::map)
+    }
+
+    /// Look up a key in a map.
+    ///
+    /// Returns `Some(value)` if the key is found, `None` if not found or not a map.
+    #[must_use]
+    pub fn map_get<M: MemorySpace>(&self, mem: &M, map: Value, key: Value) -> Option<Value> {
+        use crate::intrinsics::core_get;
+
+        core_get(self, mem, map, key, Value::Nil)
+            .ok()
+            .filter(|v: &Value| !v.is_nil())
     }
 }
