@@ -44,6 +44,26 @@ fn build_tuple<M: MemorySpace>(
     Ok(())
 }
 
+/// Build a vector from registers and store in target register.
+fn build_vector<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    target: usize,
+    start_reg: usize,
+    count: usize,
+) -> Result<(), RuntimeError> {
+    let elem_count = count.min(MAX_TUPLE_ELEMENTS);
+    let mut elements = [Value::Nil; MAX_TUPLE_ELEMENTS];
+    elements[..elem_count].copy_from_slice(&proc.x_regs[start_reg..start_reg + elem_count]);
+
+    let vector = proc
+        .alloc_vector(mem, &elements[..elem_count])
+        .ok_or(RuntimeError::OutOfMemory)?;
+
+    proc.x_regs[target] = vector;
+    Ok(())
+}
+
 /// Execute a user-defined function.
 ///
 /// Reads the function's bytecode from the heap, builds a temporary chunk,
@@ -561,6 +581,13 @@ impl Vm {
                     let fn_reg = decode_b(instr) as usize;
                     let captures_reg = decode_c(instr) as usize;
                     build_closure(proc, mem, target, fn_reg, captures_reg)?;
+                }
+
+                op::BUILD_VECTOR => {
+                    let a = decode_a(instr) as usize;
+                    let b = decode_b(instr) as usize;
+                    let c = decode_c(instr) as usize;
+                    build_vector(proc, mem, a, b, c)?;
                 }
 
                 _ => {

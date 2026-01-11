@@ -21,6 +21,8 @@ pub enum Token {
     LBracket,
     /// Right bracket `]`
     RBracket,
+    /// Left brace `{`
+    LBrace,
     /// Right brace `}`
     RBrace,
     /// Map start `%{`
@@ -193,6 +195,10 @@ impl<'a> Lexer<'a> {
             ']' => {
                 self.chars.next();
                 Ok(Some(Token::RBracket))
+            }
+            '{' => {
+                self.chars.next();
+                Ok(Some(Token::LBrace))
             }
             '}' => {
                 self.chars.next();

@@ -218,6 +218,38 @@ impl Process {
         Some(Value::tuple(addr))
     }
 
+    /// Allocate a vector on the young heap.
+    ///
+    /// Vectors share the same memory layout as tuples (length + elements).
+    /// Returns a `Value::Vector` pointing to the allocated vector, or `None` if OOM.
+    pub fn alloc_vector<M: MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        elements: &[Value],
+    ) -> Option<Value> {
+        let len = elements.len();
+        let total_size = HeapTuple::alloc_size(len);
+
+        // Allocate space (align to 8 bytes for Value fields)
+        let addr = self.alloc(total_size, 8)?;
+
+        // Write header
+        let header = HeapTuple {
+            len: len as u32,
+            padding: 0,
+        };
+        mem.write(addr, header);
+
+        // Write elements
+        let data_addr = addr.add(HeapTuple::HEADER_SIZE as u64);
+        for (i, &elem) in elements.iter().enumerate() {
+            let elem_addr = data_addr.add((i * core::mem::size_of::<Value>()) as u64);
+            mem.write(elem_addr, elem);
+        }
+
+        Some(Value::vector(addr))
+    }
+
     /// Read a heap-allocated string.
     ///
     /// Returns `None` if the value is not a string, symbol, or keyword.
@@ -247,12 +279,12 @@ impl Process {
         Some(mem.read(addr))
     }
 
-    /// Read a tuple's length from the heap.
+    /// Read a tuple or vector's length from the heap.
     ///
-    /// Returns `None` if the value is not a tuple.
+    /// Returns `None` if the value is not a tuple or vector.
     #[must_use]
     pub fn read_tuple_len<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<usize> {
-        let Value::Tuple(addr) = value else {
+        let (Value::Tuple(addr) | Value::Vector(addr)) = value else {
             return None;
         };
 
@@ -260,9 +292,9 @@ impl Process {
         Some(header.len as usize)
     }
 
-    /// Read a tuple element at the given index.
+    /// Read a tuple or vector element at the given index.
     ///
-    /// Returns `None` if the value is not a tuple or index is out of bounds.
+    /// Returns `None` if the value is not a tuple/vector or index is out of bounds.
     #[must_use]
     pub fn read_tuple_element<M: MemorySpace>(
         &self,
@@ -270,7 +302,7 @@ impl Process {
         value: Value,
         index: usize,
     ) -> Option<Value> {
-        let Value::Tuple(addr) = value else {
+        let (Value::Tuple(addr) | Value::Vector(addr)) = value else {
             return None;
         };
 

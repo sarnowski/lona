@@ -170,6 +170,14 @@ pub fn deep_copy_to_realm<M: MemorySpace>(
             deep_copy_tuple(addr, realm, mem, visited)
         }
 
+        // Vectors: recursive copy (same layout as tuples)
+        Value::Vector(addr) => {
+            if let Some(dst) = visited.check(addr) {
+                return Some(Value::vector(dst));
+            }
+            deep_copy_vector(addr, realm, mem, visited)
+        }
+
         // Maps: recursive copy
         Value::Map(addr) => {
             if let Some(dst) = visited.check(addr) {
@@ -289,6 +297,39 @@ fn deep_copy_tuple<M: MemorySpace>(
     }
 
     Some(Value::tuple(dst_addr))
+}
+
+/// Deep copy a vector to the realm's code region (same layout as tuple).
+fn deep_copy_vector<M: MemorySpace>(
+    src_addr: Vaddr,
+    realm: &mut Realm,
+    mem: &mut M,
+    visited: &mut VisitedTracker,
+) -> Option<Value> {
+    // Read source header (vectors share layout with tuples)
+    let header: HeapTuple = mem.read(src_addr);
+    let len = header.len as usize;
+    let total_size = HeapTuple::alloc_size(len);
+
+    // Allocate in realm first
+    let dst_addr = realm.alloc(total_size, 8)?;
+    visited.record(src_addr, dst_addr);
+
+    // Write header
+    mem.write(dst_addr, header);
+
+    // Deep copy each element
+    let src_elements = src_addr.add(HeapTuple::HEADER_SIZE as u64);
+    let dst_elements = dst_addr.add(HeapTuple::HEADER_SIZE as u64);
+
+    for i in 0..len {
+        let offset = (i * core::mem::size_of::<Value>()) as u64;
+        let src_elem: Value = mem.read(src_elements.add(offset));
+        let dst_elem = deep_copy_to_realm(src_elem, realm, mem, visited)?;
+        mem.write(dst_elements.add(offset), dst_elem);
+    }
+
+    Some(Value::vector(dst_addr))
 }
 
 /// Deep copy a map to the realm's code region.

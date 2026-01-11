@@ -67,6 +67,57 @@ impl<M: MemorySpace> Compiler<'_, M> {
         Ok(current_next_temp)
     }
 
+    /// Compile a vector literal.
+    ///
+    /// `{a b c}` evaluates each element and builds a vector.
+    pub(super) fn compile_vector(
+        &mut self,
+        vector: Value,
+        target: u8,
+        temp_base: u8,
+    ) -> Result<u8, CompileError> {
+        // Vectors share the same memory layout as tuples
+        let len = self
+            .proc
+            .read_tuple_len(self.mem, vector)
+            .ok_or(CompileError::InvalidSyntax)?;
+
+        if len == 0 {
+            // Empty vector - emit BUILD_VECTOR with 0 elements
+            self.chunk.emit(encode_abc(op::BUILD_VECTOR, target, 0, 0));
+            return Ok(temp_base);
+        }
+
+        // Allocate temp registers for elements
+        let elem_count = len as u8;
+        let next_temp = temp_base
+            .checked_add(elem_count)
+            .ok_or(CompileError::ExpressionTooComplex)?;
+
+        // Compile each element to a temp register
+        let mut current_next_temp = next_temp;
+        for i in 0..len {
+            let elem = self
+                .proc
+                .read_tuple_element(self.mem, vector, i)
+                .ok_or(CompileError::InvalidSyntax)?;
+            let temp_reg = temp_base
+                .checked_add(i as u8)
+                .ok_or(CompileError::ExpressionTooComplex)?;
+            current_next_temp = self.compile_expr(elem, temp_reg, current_next_temp)?;
+        }
+
+        // Emit BUILD_VECTOR: target := {temp_base..temp_base+len-1}
+        self.chunk.emit(encode_abc(
+            op::BUILD_VECTOR,
+            target,
+            u16::from(temp_base),
+            len as u16,
+        ));
+
+        Ok(current_next_temp)
+    }
+
     /// Compile a map literal.
     ///
     /// `%{:a 1 :b 2}` evaluates each key and value, then builds a map.

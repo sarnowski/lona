@@ -59,6 +59,8 @@ pub enum Value {
     Tuple(Vaddr) = 7,
     /// Heap-allocated map (pointer to `HeapMap`).
     Map(Vaddr) = 8,
+    /// Heap-allocated vector (pointer to `HeapTuple`, same layout as tuple).
+    Vector(Vaddr) = 15,
     /// Compiled function without captures (pointer to `HeapCompiledFn`).
     CompiledFn(Vaddr) = 9,
     /// Function with captured values (pointer to `HeapClosure`).
@@ -135,6 +137,13 @@ impl Value {
     #[must_use]
     pub const fn map(addr: Vaddr) -> Self {
         Self::Map(addr)
+    }
+
+    /// Create a vector value from a heap address.
+    #[inline]
+    #[must_use]
+    pub const fn vector(addr: Vaddr) -> Self {
+        Self::Vector(addr)
     }
 
     /// Create a namespace value from a heap address.
@@ -243,6 +252,13 @@ impl Value {
         matches!(self, Self::Map(_))
     }
 
+    /// Check if this value is a vector.
+    #[inline]
+    #[must_use]
+    pub const fn is_vector(&self) -> bool {
+        matches!(self, Self::Vector(_))
+    }
+
     /// Check if this value is a namespace.
     #[inline]
     #[must_use]
@@ -309,6 +325,7 @@ impl Value {
             Self::Keyword(_) => "keyword",
             Self::Tuple(_) => "tuple",
             Self::Map(_) => "map",
+            Self::Vector(_) => "vector",
             Self::CompiledFn(_) => "function",
             Self::Closure(_) => "closure",
             Self::NativeFn(_) => "native-function",
@@ -331,6 +348,7 @@ impl fmt::Debug for Value {
             Self::Keyword(addr) => write!(f, "Keyword({addr:?})"),
             Self::Tuple(addr) => write!(f, "Tuple({addr:?})"),
             Self::Map(addr) => write!(f, "Map({addr:?})"),
+            Self::Vector(addr) => write!(f, "Vector({addr:?})"),
             Self::CompiledFn(addr) => write!(f, "CompiledFn({addr:?})"),
             Self::Closure(addr) => write!(f, "Closure({addr:?})"),
             Self::NativeFn(id) => write!(f, "NativeFn({id})"),

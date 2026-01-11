@@ -37,6 +37,7 @@ pub fn print_value<M: MemorySpace, U: Uart>(value: Value, proc: &Process, mem: &
         }
         Value::Pair(_) => print_list(value, proc, mem, uart),
         Value::Tuple(_) => print_tuple(value, proc, mem, uart),
+        Value::Vector(_) => print_vector(value, proc, mem, uart),
         Value::Map(_) => print_map(value, proc, mem, uart),
         Value::CompiledFn(_) => print_compiled_fn(value, proc, mem, uart),
         Value::Closure(_) => print_closure(value, proc, mem, uart),
@@ -158,6 +159,23 @@ fn print_tuple<M: MemorySpace, U: Uart>(tuple: Value, proc: &Process, mem: &M, u
     }
 
     uart.write_byte(b']');
+}
+
+fn print_vector<M: MemorySpace, U: Uart>(vector: Value, proc: &Process, mem: &M, uart: &mut U) {
+    uart.write_byte(b'{');
+
+    if let Some(len) = proc.read_tuple_len(mem, vector) {
+        for i in 0..len {
+            if i > 0 {
+                uart.write_byte(b' ');
+            }
+            if let Some(elem) = proc.read_tuple_element(mem, vector, i) {
+                print_value(elem, proc, mem, uart);
+            }
+        }
+    }
+
+    uart.write_byte(b'}');
 }
 
 fn print_map<M: MemorySpace, U: Uart>(map: Value, proc: &Process, mem: &M, uart: &mut U) {

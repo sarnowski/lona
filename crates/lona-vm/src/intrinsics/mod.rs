@@ -13,6 +13,7 @@
 mod arithmetic;
 mod collection;
 mod meta;
+mod sequence;
 mod string;
 
 #[cfg(test)]
@@ -28,6 +29,8 @@ mod meta_intrinsics_test;
 #[cfg(test)]
 mod predicate_test;
 #[cfg(test)]
+mod sequence_test;
+#[cfg(test)]
 mod string_test;
 #[cfg(test)]
 mod tuple_intrinsic_test;
@@ -38,12 +41,12 @@ use crate::realm::Realm;
 use crate::value::Value;
 
 use arithmetic::{
-    intrinsic_add, intrinsic_div, intrinsic_eq, intrinsic_ge, intrinsic_gt, intrinsic_le,
-    intrinsic_lt, intrinsic_mod, intrinsic_mul, intrinsic_not, intrinsic_sub,
+    intrinsic_add, intrinsic_div, intrinsic_eq, intrinsic_ge, intrinsic_gt, intrinsic_identical,
+    intrinsic_le, intrinsic_lt, intrinsic_mod, intrinsic_mul, intrinsic_not, intrinsic_sub,
 };
 use collection::{
     intrinsic_count, intrinsic_get, intrinsic_is_map, intrinsic_is_symbol, intrinsic_is_tuple,
-    intrinsic_keys, intrinsic_nth, intrinsic_put, intrinsic_vals,
+    intrinsic_is_vector, intrinsic_keys, intrinsic_nth, intrinsic_put, intrinsic_vals,
 };
 
 // Re-export core functions for use by callable data structures in VM
@@ -53,6 +56,7 @@ use meta::{
     intrinsic_find_ns, intrinsic_intern, intrinsic_is_fn, intrinsic_is_namespace, intrinsic_is_var,
     intrinsic_meta, intrinsic_ns_map, intrinsic_ns_name, intrinsic_var_get, intrinsic_with_meta,
 };
+use sequence::{intrinsic_first, intrinsic_is_empty, intrinsic_rest};
 use string::{
     intrinsic_is_keyword, intrinsic_keyword, intrinsic_name_fn, intrinsic_namespace, intrinsic_str,
 };
@@ -145,10 +149,20 @@ pub mod id {
     pub const DEF_BINDING: u8 = 40;
     /// Define var metadata: `(def-meta var meta)` -> var (stores metadata in realm)
     pub const DEF_META: u8 = 41;
+    /// Vector predicate: `(vector? x)` -> is x a vector?
+    pub const IS_VECTOR: u8 = 42;
+    /// Get first element: `(first coll)` -> first element or nil
+    pub const FIRST: u8 = 43;
+    /// Get rest of sequence: `(rest coll)` -> list of remaining elements
+    pub const REST: u8 = 44;
+    /// Empty predicate: `(empty? coll)` -> is collection empty?
+    pub const IS_EMPTY: u8 = 45;
+    /// Reference identity: `(identical? a b)` -> same object?
+    pub const IDENTICAL: u8 = 46;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 42;
+pub const INTRINSIC_COUNT: usize = 47;
 
 /// Intrinsic name lookup table.
 const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
@@ -194,6 +208,11 @@ const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
     "def-root",    // 39: DEF_ROOT
     "def-binding", // 40: DEF_BINDING
     "def-meta",    // 41: DEF_META
+    "vector?",     // 42: IS_VECTOR
+    "first",       // 43: FIRST
+    "rest",        // 44: REST
+    "empty?",      // 45: IS_EMPTY
+    "identical?",  // 46: IDENTICAL
 ];
 
 /// Look up an intrinsic ID by name.
@@ -305,6 +324,11 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::DEF_ROOT => intrinsic_def_root(proc, realm, mem, intrinsic_id)?,
         id::DEF_BINDING => intrinsic_def_binding(proc, mem, intrinsic_id)?,
         id::DEF_META => intrinsic_def_meta(proc, realm, mem, intrinsic_id)?,
+        id::IS_VECTOR => intrinsic_is_vector(proc),
+        id::FIRST => intrinsic_first(proc, mem, intrinsic_id)?,
+        id::REST => intrinsic_rest(proc, mem, intrinsic_id)?,
+        id::IS_EMPTY => intrinsic_is_empty(proc, mem, intrinsic_id)?,
+        id::IDENTICAL => intrinsic_identical(proc),
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };
     proc.x_regs[0] = result;

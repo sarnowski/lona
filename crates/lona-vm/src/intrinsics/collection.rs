@@ -145,6 +145,10 @@ pub const fn intrinsic_is_tuple(proc: &Process) -> Value {
     Value::bool(proc.x_regs[1].is_tuple())
 }
 
+pub const fn intrinsic_is_vector(proc: &Process) -> Value {
+    Value::bool(proc.x_regs[1].is_vector())
+}
+
 /// Get element at index from a tuple.
 ///
 /// `(nth tuple index)` - returns element or errors on OOB
@@ -192,7 +196,7 @@ pub fn intrinsic_count<M: MemorySpace>(
 
     match coll {
         Value::Nil => Ok(Value::int(0)),
-        Value::Tuple(_) => {
+        Value::Tuple(_) | Value::Vector(_) => {
             let len = proc
                 .read_tuple_len(mem, coll)
                 .ok_or(IntrinsicError::OutOfMemory)?;

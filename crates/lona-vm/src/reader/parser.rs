@@ -22,6 +22,9 @@ const MAX_LIST_ELEMENTS: usize = 64;
 /// Maximum number of elements in a tuple literal.
 const MAX_TUPLE_ELEMENTS: usize = 64;
 
+/// Maximum number of elements in a vector literal.
+const MAX_VECTOR_ELEMENTS: usize = 64;
+
 /// Maximum number of key-value pairs in a map literal.
 const MAX_MAP_ENTRIES: usize = 64;
 
@@ -44,6 +47,8 @@ pub enum ParseError {
     ListTooLong,
     /// Tuple literal exceeds maximum element count.
     TupleTooLong,
+    /// Vector literal exceeds maximum element count.
+    VectorTooLong,
     /// Map literal exceeds maximum entry count.
     MapTooLong,
     /// Map literal has odd number of elements (should be key-value pairs).
@@ -65,6 +70,7 @@ impl core::fmt::Display for ParseError {
             Self::OutOfMemory => write!(f, "out of memory"),
             Self::ListTooLong => write!(f, "list exceeds {MAX_LIST_ELEMENTS} elements"),
             Self::TupleTooLong => write!(f, "tuple exceeds {MAX_TUPLE_ELEMENTS} elements"),
+            Self::VectorTooLong => write!(f, "vector exceeds {MAX_VECTOR_ELEMENTS} elements"),
             Self::MapTooLong => write!(f, "map exceeds {MAX_MAP_ENTRIES} entries"),
             Self::MapOddElements => write!(f, "map literal requires even number of elements"),
             Self::InvalidMetadata => write!(f, "metadata must be map or keyword"),
@@ -197,6 +203,7 @@ impl<'a> Parser<'a> {
             Token::RParen => Err(ParseError::UnmatchedRParen.into()),
             Token::LBracket => self.read_tuple(proc, mem),
             Token::RBracket => Err(ParseError::UnmatchedRBracket.into()),
+            Token::LBrace => self.read_vector(proc, mem),
             Token::MapStart => self.read_map(proc, mem),
             Token::RBrace => Err(ParseError::UnmatchedRBrace.into()),
             Token::Caret => self.read_with_metadata(proc, mem),
@@ -274,6 +281,41 @@ impl<'a> Parser<'a> {
             .ok_or(ParseError::OutOfMemory)?;
 
         Ok(Some(tuple))
+    }
+
+    fn read_vector<M: MemorySpace>(
+        &mut self,
+        proc: &mut Process,
+        mem: &mut M,
+    ) -> Result<Option<Value>, ReadError> {
+        // Collect elements on stack before building vector
+        let mut elements = [Value::nil(); MAX_VECTOR_ELEMENTS];
+        let mut count = 0;
+
+        loop {
+            match self.peek()? {
+                None => return Err(ParseError::UnexpectedEof.into()),
+                Some(Token::RBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(_) => {
+                    if count >= elements.len() {
+                        return Err(ParseError::VectorTooLong.into());
+                    }
+                    let elem = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                    elements[count] = elem;
+                    count += 1;
+                }
+            }
+        }
+
+        // Allocate and build the vector
+        let vector = proc
+            .alloc_vector(mem, &elements[..count])
+            .ok_or(ParseError::OutOfMemory)?;
+
+        Ok(Some(vector))
     }
 
     fn read_map<M: MemorySpace>(
@@ -505,6 +547,7 @@ const fn get_heap_addr(value: Value) -> Option<crate::Vaddr> {
         | Value::Symbol(addr)
         | Value::Keyword(addr)
         | Value::Tuple(addr)
+        | Value::Vector(addr)
         | Value::Map(addr)
         | Value::Var(addr)
         | Value::Namespace(addr)

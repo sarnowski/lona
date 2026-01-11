@@ -362,6 +362,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
             }
             Value::Pair(_) => self.compile_list(expr, target, temp_base),
             Value::Tuple(_) => self.compile_tuple(expr, target, temp_base),
+            Value::Vector(_) => self.compile_vector(expr, target, temp_base),
             Value::Map(_) => self.compile_map(expr, target, temp_base),
             Value::Namespace(_) => {
                 // Namespaces are self-evaluating constants

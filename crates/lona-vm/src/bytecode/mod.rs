@@ -51,6 +51,8 @@ pub mod op {
     ///
     /// Format: `BUILD_CLOSURE target, fn_reg, captures_reg`
     pub const BUILD_CLOSURE: u8 = 11;
+    /// Build vector: `X(A) := {X(B)..X(B+C-1)}` (C elements starting at X(B))
+    pub const BUILD_VECTOR: u8 = 12;
 }
 
 /// Bit widths for instruction fields.
