@@ -677,9 +677,88 @@ Where different types of values are stored:
 
 ---
 
-## Memory Allocation Flow
+## Memory Allocation Strategy
 
-How memory allocation works at runtime:
+Lona uses **explicit IPC allocation** for most memory regions, with **lazy fault-based mapping** only for inherited regions.
+
+### Why This Design?
+
+seL4 MCS (Mixed Criticality System) scheduling creates timing interactions between page faults and CPU budgets. When a thread's budget expires during a page fault, seL4 delivers a Timeout fault (label=6) instead of VMFault (label=5), which breaks transparent demand paging for general regions.
+
+Additionally, explicit allocation provides:
+- **Predictable latency**: Allocation happens at known points, not random faults
+- **Error handling**: OOM returns an error tuple instead of blocking the thread
+- **Debuggability**: Faults indicate bugs, not normal operation
+
+### Per-Region Allocation
+
+| Region | Method | Rationale |
+|--------|--------|-----------|
+| **Shared Code** | Pre-mapped at boot | Same frames for all realms |
+| **Worker Stacks** | Pre-mapped at creation | Avoids MCS timing issues |
+| **Process Pool** | Explicit IPC | OOM returns error; VM can handle gracefully |
+| **Realm Binary** | Explicit IPC | Controlled allocation for large binaries |
+| **Realm Local** | Explicit IPC | Scheduler state, process table |
+| **Inherited** | Lazy fault-based | Parent can't push to unknown children |
+
+### Explicit IPC Allocation
+
+```
+EXPLICIT IPC ALLOCATION
+════════════════════════════════════════════════════════════════════════
+
+1. VM needs more heap space for ProcessPool
+2. VM calls lmm_request_pages(ProcessPool, count, hint)
+3. LMM receives AllocPages IPC message (label=0)
+4. LMM allocates frames and maps them into realm's VSpace
+5. LMM returns response with mapped address (or OOM error)
+6. VM can handle OOM gracefully (return error tuple to Lonala code)
+
+This path is used for:
+- Process pool growth (ProcessPool region)
+- Realm binary/local data allocation
+- Any allocation where OOM should be handled explicitly
+```
+
+### Inherited Region Lazy Mapping
+
+Inherited regions are the ONLY region using fault-based allocation. This is required because:
+
+1. **Parent doesn't know children**: Realms are created dynamically; parent can't track descendants
+2. **Live code updates**: When parent defines new code, children must see it
+3. **Efficiency**: Only map pages actually accessed by child
+
+When a child realm accesses inherited code for the first time:
+1. seL4 delivers VMFault (or Timeout if budget expired)
+2. LMM checks if address is in inherited region via `is_inherited_region()`
+3. If yes: map the page from parent's frames, reply to resume
+4. If no: don't reply, thread stays blocked (error)
+
+### MCS Timeout Handling
+
+When seL4 MCS delivers a Timeout fault (budget expired during page fault):
+1. LMM replenishes budget via `SchedControl_ConfigureFlags`
+2. LMM checks if MR1 contains an inherited region address
+3. If yes: map the page (may have been interrupted VMFault)
+4. Reply to resume thread with fresh budget
+
+### Non-Inherited Region Faults Are Errors
+
+Faults in non-inherited regions indicate bugs in the VM or invalid memory access:
+
+| Region | On Fault | Meaning |
+|--------|----------|---------|
+| ProcessPool | ERROR | VM should use `lmm_request_pages()` |
+| RealmBinary | ERROR | Should use explicit IPC |
+| RealmLocal | ERROR | Should use explicit IPC |
+| WorkerStack | ERROR | Stack overflow (stacks are pre-mapped) |
+| Invalid | ERROR | Null dereference, kernel space, etc. |
+
+The LMM logs the error and does NOT reply - the thread stays blocked (effectively terminated).
+
+### Process-Level Allocation
+
+Within the realm's allocated pages, the VM manages per-process allocation:
 
 ```
 Process needs memory (e.g., (cons 1 2)):
@@ -698,10 +777,10 @@ Process needs memory (e.g., (cons 1 2)):
    └── Within process limit? → Allocate and copy live data
    └── At limit? → OOM for this process
 
-4. Realm pool needs more pages
-   └── Page fault → Lona Memory Manager handles
-   └── Within realm budget? → Lona Memory Manager maps pages
-   └── At budget? → Realm OOM (runtime decides policy)
+4. Worker needs more pages in ProcessPool
+   └── Explicit IPC to LMM → Controlled allocation with OOM handling
+   └── Within realm budget? → LMM maps pages, returns success
+   └── At budget? → LMM returns OOM, VM handles gracefully
 ```
 
 ---

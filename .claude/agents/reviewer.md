@@ -230,12 +230,83 @@ Check these when reviewing changes:
 
 ---
 
+## CRITICAL: Test Coverage Check
+
+**Code without appropriate tests is incomplete. Tests are part of the implementation, not optional extras.**
+
+### What to Verify
+
+For each changed source file (excluding `_test.rs` files):
+
+| Change Type | Required | How to Verify |
+|-------------|----------|---------------|
+| New function | Unit tests | Corresponding `_test.rs` has tests for the function |
+| New feature | Unit + integration | Both `_test.rs` and `tests/` have relevant tests |
+| Bug fix | Regression test | Test named `regression_*` exists that covers the bug |
+| Modified behavior | Updated tests | Tests reflect the new behavior |
+
+### Red Flags
+
+- **No test file**: New `.rs` file with no corresponding `_test.rs`
+- **No test changes**: Implementation changed but no test modifications
+- **Missing regression test**: Bug fix without `regression_` prefixed test
+- **Coverage theater**: Tests exist but don't actually test the new code paths
+- **Happy path only**: Tests only cover success cases, not error handling
+
+### Bug Fix Verification (STRICT)
+
+If the changes include a bug fix:
+
+1. **A regression test MUST exist**
+2. **The test must actually reproduce the bug scenario**
+3. **The test name should identify the bug** (e.g., `regression_null_pointer_in_parse`)
+
+If no regression test exists:
+
+```
+TEST COVERAGE ISSUE [CRITICAL]:
+- Type: Bug fix without regression test
+- Changed file: <path>
+- Bug description: <what was fixed>
+- Required: Regression test that would fail before fix, pass after
+```
+
+### Test Quality Checks
+
+Tests must be meaningful:
+
+| Check | What to Look For |
+|-------|------------------|
+| Actually tests new code | Not just existing code paths |
+| Tests behavior, not implementation | Doesn't break on valid refactoring |
+| Covers edge cases | Empty input, boundaries, error conditions |
+| Readable assertions | Clear what's being tested and why |
+
+### Output Format for Test Coverage
+
+Add this section to your review output:
+
+```
+## Test Coverage
+- Changed source files: N
+- Files with corresponding tests: M
+- New functions without tests: <list or "None">
+- Bug fixes without regression tests: <list or "None">
+- Test quality issues: <list or "None">
+- Verdict: [ADEQUATE/INADEQUATE]
+```
+
+**Test coverage INADEQUATE is a review FAILURE.**
+
+---
+
 ## Review Criteria
 
 ### A. Plan Fulfillment (if PLAN.md exists)
 - Every planned item implemented?
 - Each implementation complete?
 - Implementation matches plan?
+- **Planned tests implemented?**
 
 ### B. Big Picture Fit
 - Does change fit project architecture?
@@ -246,27 +317,33 @@ Check these when reviewing changes:
 - Zero placeholders, TODOs, stubs, partial implementations
 - Check every line for incomplete patterns
 
-### D. Documentation Correctness
+### D. Test Coverage (CRITICAL)
+- New code has corresponding tests?
+- Bug fixes have regression tests?
+- Tests are meaningful (not coverage theater)?
+- Edge cases and error paths tested?
+
+### E. Documentation Correctness
 - Is documentation accurate after changes?
 - Any conflicts between docs and code?
 - Are all doc references valid?
 
-### E. Correctness
+### F. Correctness
 - Logic errors, off-by-one errors
 - Edge cases not handled
 - Integration issues with existing code
 
-### F. KISS (Keep It Simple)
+### G. KISS (Keep It Simple)
 - Unnecessary complexity
 - Over-abstraction
 - Simpler alternatives exist
 
-### G. YAGNI (You Aren't Gonna Need It)
+### H. YAGNI (You Aren't Gonna Need It)
 - Speculative features
 - Unused code paths
 - Dead code
 
-### H. Clean Code
+### I. Clean Code
 - Names reveal intent
 - Functions are focused
 - Code is self-documenting
@@ -288,6 +365,14 @@ Check these when reviewing changes:
 ## Completeness Issues (CRITICAL)
 <list all issues or "None found">
 
+## Test Coverage
+- Changed source files: N
+- Files with corresponding tests: M
+- New functions without tests: <list or "None">
+- Bug fixes without regression tests: <list or "None">
+- Test quality issues: <list or "None">
+- Verdict: [ADEQUATE/INADEQUATE]
+
 ## Documentation Issues
 <issues, conflicts, or "None found">
 
@@ -308,6 +393,7 @@ Check these when reviewing changes:
 - Plan items fulfilled: X/Y (or N/A)
 - Big picture issues: N
 - Completeness issues: N (MUST be 0 to pass)
+- Test coverage: [ADEQUATE/INADEQUATE] (MUST be ADEQUATE to pass)
 - Documentation issues: N
 - Other issues: N
 - Recommendation: [PASS/FAIL]
@@ -317,6 +403,8 @@ Check these when reviewing changes:
 - Any plan items not completely implemented
 - Any big picture issues exist
 - Any completeness issues found
+- **Test coverage is INADEQUATE**
+- **Bug fix has no regression test**
 - Any documentation conflicts exist
 - Any critical correctness issues exist
 
@@ -331,7 +419,12 @@ Check these when reviewing changes:
 - Deferring functionality
 - Claiming work is complete when it isn't
 - Not updating documentation after changes
+- **Skipping tests or writing superficial tests**
+- **Fixing bugs without regression tests**
+- **Writing tests after implementation instead of before**
 
 **Be extremely thorough. Be skeptical. Assume incompleteness until proven otherwise.**
 
 Every line must earn its place. If something looks incomplete, it probably is. Flag it.
+
+**For tests specifically:** Check that tests actually test the new code. Coverage theater (tests that exist but don't meaningfully verify the implementation) is as bad as missing tests.

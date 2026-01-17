@@ -6,13 +6,25 @@
 //! The `ProcessPool` is a simple bump allocator that allocates memory regions
 //! for process heaps. It tracks a contiguous region of memory and hands out
 //! chunks for process young and old heaps.
+//!
+//! When the pool runs out of space, it can request additional pages from the
+//! Lona Memory Manager via IPC.
 
 use crate::Vaddr;
+use crate::platform::lmm::lmm_request_pages;
+use lona_abi::ipc::IpcRegionType;
+use lona_abi::layout::PAGE_SIZE;
+
+/// Minimum number of pages to request when growing the pool.
+const MIN_GROWTH_PAGES: u64 = 16;
 
 /// Bump allocator for process memory regions.
 ///
 /// The pool tracks a contiguous region of memory and allocates
 /// chunks for process heaps using a simple bump pointer.
+///
+/// When allocations fail due to insufficient space, the pool can
+/// request additional pages from the Lona Memory Manager.
 pub struct ProcessPool {
     /// Next available address for allocation.
     next: Vaddr,
@@ -95,5 +107,80 @@ impl ProcessPool {
         self.next = Vaddr::new(new_next);
 
         Some((young_base, old_base))
+    }
+
+    /// Allocate process memory, requesting more pages from LMM if needed.
+    ///
+    /// This is the recommended method for process allocation in production.
+    /// It automatically grows the pool via IPC when necessary.
+    ///
+    /// Returns `(young_base, old_base)` or `None` if allocation fails
+    /// (either LMM is out of memory or the request is invalid).
+    pub fn allocate_process_memory_with_growth(
+        &mut self,
+        young_size: usize,
+        old_size: usize,
+    ) -> Option<(Vaddr, Vaddr)> {
+        // First try without growing
+        if let result @ Some(_) = self.allocate_process_memory(young_size, old_size) {
+            return result;
+        }
+
+        // Need more memory - try to grow the pool
+        let total = young_size.checked_add(old_size)?;
+        if !self.try_grow(total) {
+            return None;
+        }
+
+        // Try allocation again
+        self.allocate_process_memory(young_size, old_size)
+    }
+
+    /// Try to grow the pool by requesting pages from the LMM.
+    ///
+    /// Returns `true` if growth succeeded, `false` otherwise.
+    ///
+    /// # Arguments
+    ///
+    /// * `min_bytes` - Minimum number of bytes needed
+    pub fn try_grow(&mut self, min_bytes: usize) -> bool {
+        // Calculate pages needed
+        let min_pages = (min_bytes as u64).div_ceil(PAGE_SIZE);
+        let pages_to_request = min_pages.max(MIN_GROWTH_PAGES);
+
+        // Request pages at the current limit (contiguous growth)
+        match lmm_request_pages(
+            IpcRegionType::ProcessPool,
+            pages_to_request as usize,
+            Some(self.limit),
+        ) {
+            Ok(vaddr) => {
+                // Verify we got pages at the expected address
+                if vaddr != self.limit {
+                    // LMM gave us pages at a different address - this is unexpected
+                    // but we can still use them if they're contiguous
+                    // For now, just fail
+                    return false;
+                }
+
+                // Extend the pool
+                let new_limit = self
+                    .limit
+                    .as_u64()
+                    .saturating_add(pages_to_request * PAGE_SIZE);
+                self.limit = Vaddr::new(new_limit);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Extend the pool's limit.
+    ///
+    /// This is used when pages have been pre-mapped (e.g., at boot time).
+    /// It does NOT allocate or map new pages.
+    pub const fn extend(&mut self, additional_bytes: usize) {
+        let new_limit = self.limit.as_u64().saturating_add(additional_bytes as u64);
+        self.limit = Vaddr::new(new_limit);
     }
 }

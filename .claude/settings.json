@@ -4,6 +4,11 @@
       "Skill(develop-rust)",
       "Skill(finishing-work)",
 
+      "Bash(.claude/skills/finishing-work/changed-directories.sh)",
+      "Bash(.claude/skills/finishing-work/file-line-counts.sh)",
+      "Bash(.claude/skills/finishing-work/changed-files.sh)",
+      "Bash(.claude/skills/finishing-work/changed-rust-source-files.sh)",
+
       "mcp__lona-dev-repl__eval",
       "mcp__lona-dev-repl__restart",
 
@@ -21,6 +26,8 @@
       "Bash(tee:*)",
       "Bash(find:*)",
       "Bash(tree:*)",
+      "Bash(ls:*)",
+      "Bash(echo:*)",
 
       "Bash(gemini:*)",
       "Bash(codex:*)",

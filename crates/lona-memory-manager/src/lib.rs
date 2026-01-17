@@ -18,6 +18,7 @@ extern crate std;
 
 pub mod elf;
 pub mod embedded;
+pub mod event_loop;
 pub mod platform;
 pub mod realm;
 pub mod slots;

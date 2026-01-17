@@ -142,6 +142,70 @@ After `make verify` passes:
    ... (same tests)
    ```
 
+### 1.6 Test Coverage Verification (MANDATORY)
+
+**Verify appropriate tests exist for all changes.**
+
+#### Identify Changed Source Files
+
+```bash
+.claude/skills/finishing-work/changed-rust-source-files.sh
+```
+
+#### For Each Changed Source File
+
+1. **Check for corresponding test file:**
+   ```bash
+   # For src/foo/bar.rs, check for src/foo/bar_test.rs
+   ls src/foo/bar_test.rs 2>/dev/null || echo "NO TEST FILE"
+   ```
+
+2. **Check if tests were added/modified:**
+   ```bash
+   git diff --name-only HEAD | grep '_test\.rs$'
+   ```
+
+#### Test Coverage Requirements
+
+| Change Type | Required Tests | How to Verify |
+|-------------|----------------|---------------|
+| New function | Unit tests exist | `grep -l "fn test_" in corresponding `_test.rs` |
+| New feature | Unit + integration | Check both `_test.rs` and `tests/` |
+| Bug fix | Regression test | `grep -r "regression_" *_test.rs` |
+| Refactoring | Tests unchanged | `git diff *_test.rs` shows no changes needed |
+
+#### Bug Fix Verification (STRICT)
+
+If this change is a bug fix:
+
+1. **A regression test MUST exist**
+2. **The test name should identify the bug** (e.g., `regression_off_by_one_nth`)
+3. **Verify the test actually tests the fix:**
+   - Read the regression test
+   - Confirm it would have failed before the fix
+   - Confirm it passes after the fix
+
+```bash
+# Search for regression tests in changed test files
+git diff --name-only HEAD | xargs grep -l 'fn regression_' 2>/dev/null
+```
+
+If no regression test exists for a bug fix → **BLOCKING**. Do not proceed.
+
+#### Report Test Gaps
+
+For each gap found:
+
+```
+TEST COVERAGE ISSUE [BLOCKING]:
+- File: src/feature/impl.rs
+- Function: new_function()
+- Issue: No unit tests for this new function
+- Required: Add tests to src/feature/impl_test.rs
+```
+
+**All test coverage issues are BLOCKING.** Fix them before proceeding to Phase 2.
+
 ---
 
 ## Phase 2: Parallel Agent Review
@@ -341,6 +405,7 @@ Work is complete ONLY when ALL are true:
 - [ ] Zero completeness issues (no placeholders, TODOs, stubs)
 - [ ] `make verify` passed (if src/ or lib/ changed)
 - [ ] `make docs` passed (if docs/ changed)
+- [ ] **Test coverage verified** (all new code has tests, bug fixes have regression tests)
 - [ ] All three agents reviewed
 - [ ] All confirmed issues resolved
 - [ ] Documentation is accurate and current
@@ -376,6 +441,9 @@ Delete `PLAN.md` after completion (plan is fulfilled).
 | Exit loop with issues remaining | Zero issues is the only exit |
 | Assume docs are wrong | User decides doc vs implementation |
 | Assume implementation is wrong | User decides doc vs implementation |
+| Skip test verification | Code without tests is incomplete |
+| Ship bug fix without regression test | Bug will likely return |
+| Accept coverage theater | Tests must actually test new code |
 
 ### The Prime Directive
 

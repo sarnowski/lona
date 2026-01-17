@@ -7,6 +7,76 @@
 //! seL4 delivers it via IPC to the Lona Memory Manager. This module defines
 //! the structures used to represent fault information.
 
+use crate::types::Vaddr;
+
+// =============================================================================
+// seL4 Fault Label Constants
+// =============================================================================
+
+/// seL4 fault label for VM faults (page faults).
+///
+/// When a thread accesses unmapped memory, seL4 sends a `VMFault` IPC message
+/// to the thread's fault endpoint with this label.
+pub const SEL4_FAULT_VM_FAULT: u64 = 5;
+
+/// seL4 fault label for Timeout faults (MCS scheduler).
+///
+/// In seL4 MCS, when a thread's scheduling budget expires, a Timeout fault
+/// is delivered to its fault endpoint. This can also occur when budget
+/// expires during or near a page fault, causing Timeout to be delivered
+/// instead of `VMFault`.
+///
+/// Timeout fault message format:
+/// - MR0: Instruction pointer at timeout
+/// - MR1: Fault address (if interrupted a `VMFault`) or 0
+/// - MR2: Data (architecture-specific)
+pub const SEL4_FAULT_TIMEOUT: u64 = 6;
+
+// =============================================================================
+// VM Fault Info (seL4 Message Parsing)
+// =============================================================================
+
+/// VM fault info extracted from seL4 message registers.
+///
+/// seL4 `VMFault` message format:
+/// - MR0: Instruction pointer (where the fault occurred)
+/// - MR1: Fault address (the unmapped address accessed)
+/// - MR2: Prefetch fault flag (1 = instruction fetch, 0 = data access)
+/// - MR3: Fault status register (architecture-specific)
+#[derive(Debug, Clone, Copy)]
+pub struct VmFaultInfo {
+    /// Faulting instruction pointer.
+    pub ip: u64,
+    /// Faulting virtual address.
+    pub addr: Vaddr,
+    /// True if this was a prefetch (instruction) fault.
+    pub is_prefetch: bool,
+    /// Fault status register (architecture-specific).
+    pub fsr: u64,
+}
+
+impl VmFaultInfo {
+    /// Parse VM fault from seL4 message registers.
+    ///
+    /// # Arguments
+    ///
+    /// * `mrs` - The four message registers [MR0, MR1, MR2, MR3]
+    #[inline]
+    #[must_use]
+    pub const fn from_mrs(mrs: [u64; 4]) -> Self {
+        Self {
+            ip: mrs[0],
+            addr: Vaddr::new(mrs[1]),
+            is_prefetch: mrs[2] != 0,
+            fsr: mrs[3],
+        }
+    }
+}
+
+// =============================================================================
+// Generic Fault Info (Higher-Level Abstraction)
+// =============================================================================
+
 /// Information about a fault that occurred in a realm.
 ///
 /// The Lona Memory Manager receives this information from seL4's fault IPC
@@ -133,5 +203,73 @@ mod tests {
         let inf = FaultInfo::instruction_fault(0x3000, 0x3000);
         assert!(inf.is_instruction);
         assert!(!inf.is_write);
+    }
+
+    // =========================================================================
+    // VmFaultInfo Tests
+    // =========================================================================
+
+    #[test]
+    fn vm_fault_info_from_mrs_data_fault() {
+        // Simulate a data read fault at address 0x1_0000_0000
+        let mrs: [u64; 4] = [
+            0x0000_0001_0000_1234, // IP
+            0x0000_0001_0000_0000, // Fault address
+            0,                     // Not a prefetch fault (data access)
+            0x0000_0000_0000_0006, // FSR (example value)
+        ];
+
+        let fault = VmFaultInfo::from_mrs(mrs);
+
+        assert_eq!(fault.ip, 0x0000_0001_0000_1234);
+        assert_eq!(fault.addr.as_u64(), 0x0000_0001_0000_0000);
+        assert!(!fault.is_prefetch);
+        assert_eq!(fault.fsr, 0x0000_0000_0000_0006);
+    }
+
+    #[test]
+    fn vm_fault_info_from_mrs_prefetch_fault() {
+        // Simulate an instruction fetch fault
+        let mrs: [u64; 4] = [
+            0x0000_0002_0000_0000, // IP
+            0x0000_0002_0000_0000, // Fault address (same as IP for prefetch)
+            1,                     // Is a prefetch fault (instruction fetch)
+            0x0000_0000_0000_0005, // FSR (example value)
+        ];
+
+        let fault = VmFaultInfo::from_mrs(mrs);
+
+        assert_eq!(fault.ip, 0x0000_0002_0000_0000);
+        assert_eq!(fault.addr.as_u64(), 0x0000_0002_0000_0000);
+        assert!(fault.is_prefetch);
+        assert_eq!(fault.fsr, 0x0000_0000_0000_0005);
+    }
+
+    #[test]
+    fn vm_fault_info_addr_alignment() {
+        // Verify non-page-aligned addresses are preserved correctly
+        let mrs: [u64; 4] = [
+            0x1000,                // IP
+            0x0000_0020_0000_0123, // Non-page-aligned address
+            0,                     // Data fault
+            0,                     // FSR
+        ];
+
+        let fault = VmFaultInfo::from_mrs(mrs);
+
+        // The address should be preserved exactly (page alignment is done elsewhere)
+        assert_eq!(fault.addr.as_u64(), 0x0000_0020_0000_0123);
+    }
+
+    #[test]
+    fn sel4_fault_vm_fault_constant() {
+        // Verify the constant matches seL4's definition
+        assert_eq!(SEL4_FAULT_VM_FAULT, 5);
+    }
+
+    #[test]
+    fn sel4_fault_timeout_constant() {
+        // Verify the constant matches seL4 MCS's definition
+        assert_eq!(SEL4_FAULT_TIMEOUT, 6);
     }
 }

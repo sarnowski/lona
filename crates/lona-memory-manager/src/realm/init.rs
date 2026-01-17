@@ -23,6 +23,7 @@ use super::boot_module::VmBootModule;
 
 #[cfg(feature = "sel4")]
 mod sel4_impl {
+    use super::super::constants::{CNODE_SIZE_BITS, ROOT_CNODE_DEPTH};
     #[cfg(target_arch = "aarch64")]
     use super::super::device::map_uart;
     #[cfg(target_arch = "x86_64")]
@@ -42,26 +43,28 @@ mod sel4_impl {
         INIT_HEAP_SIZE, PAGE_SIZE, PROCESS_POOL_BASE, WORKER_STACK_SIZE, worker_ipc_buffer,
         worker_stack_base,
     };
-    use lona_abi::types::RealmId;
-    use sel4::Cap;
-    use sel4::cap_type::VSpace;
+    use lona_abi::types::{CapSlot, RealmId};
+    use sel4::cap_type::{CNode, VSpace};
+    use sel4::{Cap, CapRights};
 
     /// Create the init realm.
+    ///
+    /// The slot and untyped allocators are passed in and can be reused
+    /// after realm creation (e.g., for the event loop).
     pub fn create_init_realm(
         bootinfo: &sel4::BootInfoPtr,
         vm_module: &VmBootModule<'_>,
+        slots: &mut SlotAllocator,
+        untypeds: &mut UntypedAllocator,
     ) -> Result<Realm, RealmError> {
         sel4::debug_println!("Loading VM binary:");
         sel4::debug_println!("  Entry point: 0x{:x}", vm_module.entry_point);
         sel4::debug_println!("  Segments: {}", vm_module.segment_count);
         sel4::debug_println!("  Total size: {} bytes", vm_module.total_mem_size);
 
-        let mut slots = SlotAllocator::from_bootinfo(bootinfo);
-        let mut untypeds = UntypedAllocator::from_bootinfo(bootinfo);
-
         // Step 1: Create VSpace
         sel4::debug_println!("Creating VSpace...");
-        let vspace_slot = create_vspace(&mut slots, &mut untypeds)?;
+        let vspace_slot = create_vspace(slots, untypeds)?;
         let vspace_cap: Cap<VSpace> = Cap::from_bits(vspace_slot as u64);
         sel4::debug_println!("  VSpace at slot {}", vspace_slot);
 
@@ -81,8 +84,8 @@ mod sel4_impl {
                 segment.permissions.as_str()
             );
             map_segment(
-                &mut slots,
-                &mut untypeds,
+                slots,
+                untypeds,
                 vspace_cap,
                 segment.vaddr,
                 segment.mem_size,
@@ -91,20 +94,35 @@ mod sel4_impl {
             )?;
         }
 
-        // Step 4: Allocate and map worker stack
+        // Step 4: Map worker stack (full stack for now)
+        //
+        // We map the full stack at realm creation. While the demand paging
+        // infrastructure supports stack faults (FaultRegion::WorkerStack),
+        // partial stack mapping interacts poorly with seL4 MCS scheduling:
+        // when a thread faults on stack access, seL4 MCS may deliver a Timeout
+        // fault (label=6) instead of VMFault (label=5) depending on budget
+        // timing. Additionally, seL4 MCS requires replying to fault messages
+        // to clear the Reply object, but replying resumes the thread.
+        //
+        // For reliable operation, we map the full stack. Demand paging for
+        // the process pool region works correctly and provides the key
+        // benefit of lazy memory allocation for process heaps.
+        //
+        // Future work: investigate seL4 MCS-specific handling for stack faults,
+        // potentially by suspending the faulting TCB before replying.
         sel4::debug_println!("Mapping worker stack...");
         let stack_base = worker_stack_base(0);
         let stack_pages = (WORKER_STACK_SIZE / PAGE_SIZE) as usize;
         for i in 0..stack_pages {
             let vaddr = stack_base + (i as u64) * PAGE_SIZE;
-            map_rw_frame(&mut slots, &mut untypeds, vspace_cap, vaddr)?;
+            map_rw_frame(slots, untypeds, vspace_cap, vaddr)?;
         }
         sel4::debug_println!("  Stack at 0x{:x} ({} pages)", stack_base, stack_pages);
 
         // Step 5: Allocate and map IPC buffer
         sel4::debug_println!("Mapping IPC buffer...");
         let ipc_vaddr = worker_ipc_buffer(0);
-        let ipc_frame_slot = map_rw_frame(&mut slots, &mut untypeds, vspace_cap, ipc_vaddr)?;
+        let ipc_frame_slot = map_rw_frame(slots, untypeds, vspace_cap, ipc_vaddr)?;
         sel4::debug_println!("  IPC buffer at 0x{:x}", ipc_vaddr);
 
         // Step 5b: Allocate and map heap
@@ -112,7 +130,7 @@ mod sel4_impl {
         let heap_pages = (INIT_HEAP_SIZE / PAGE_SIZE) as usize;
         for i in 0..heap_pages {
             let vaddr = PROCESS_POOL_BASE + (i as u64) * PAGE_SIZE;
-            map_rw_frame(&mut slots, &mut untypeds, vspace_cap, vaddr)?;
+            map_rw_frame(slots, untypeds, vspace_cap, vaddr)?;
         }
         sel4::debug_println!(
             "  Heap at 0x{:x} ({} pages, {} bytes)",
@@ -123,23 +141,46 @@ mod sel4_impl {
 
         // Step 6: Create CSpace
         sel4::debug_println!("Creating CSpace...");
-        let cspace_slot = create_cnode(&mut slots, &mut untypeds)?;
+        let cspace_slot = create_cnode(slots, untypeds)?;
         sel4::debug_println!("  CSpace at slot {}", cspace_slot);
 
-        // Step 7: Create Endpoint
+        // Step 7: Create Endpoint (for both faults and IPC)
+        //
+        // We use a SINGLE endpoint for both thread faults and LMM IPC requests.
+        // The event loop distinguishes between them using the message label:
+        // - Fault messages have label != 0 (e.g., VMFault has label 5)
+        // - IPC requests have label == 0 with user-defined tags in the message
         sel4::debug_println!("Creating endpoint...");
-        let endpoint_slot = create_endpoint(&mut slots, &mut untypeds)?;
+        let endpoint_slot = create_endpoint(slots, untypeds)?;
         sel4::debug_println!("  Endpoint at slot {}", endpoint_slot);
+
+        // Step 7b: Copy endpoint capability into realm's CSpace for LMM IPC
+        // The realm needs this to call back to the LMM for memory allocation
+        sel4::debug_println!("Copying LMM endpoint to realm CSpace...");
+        let src = sel4::init_thread::slot::CNODE
+            .cap()
+            .absolute_cptr_from_bits_with_depth(endpoint_slot as u64, ROOT_CNODE_DEPTH);
+        let child_cnode: Cap<CNode> = Cap::from_bits(cspace_slot as u64);
+        let child_dst = child_cnode
+            .absolute_cptr_from_bits_with_depth(CapSlot::LMM_ENDPOINT.as_u64(), CNODE_SIZE_BITS);
+        child_dst.copy(&src, CapRights::all()).map_err(|e| {
+            sel4::debug_println!("Endpoint copy to child CSpace failed: {:?}", e);
+            RealmError::ObjectCreation
+        })?;
+        sel4::debug_println!(
+            "  LMM endpoint at CSpace slot {}",
+            CapSlot::LMM_ENDPOINT.as_u64()
+        );
 
         // Step 8: Create SchedContext
         sel4::debug_println!("Creating SchedContext...");
-        let sched_context_slot = create_sched_context(&mut slots, &mut untypeds)?;
+        let sched_context_slot = create_sched_context(slots, untypeds)?;
         configure_sched_context(bootinfo, sched_context_slot)?;
         sel4::debug_println!("  SchedContext at slot {}", sched_context_slot);
 
         // Step 9: Create TCB
         sel4::debug_println!("Creating TCB...");
-        let tcb_slot = create_tcb(&mut slots, &mut untypeds)?;
+        let tcb_slot = create_tcb(slots, untypeds)?;
         sel4::debug_println!("  TCB at slot {}", tcb_slot);
 
         // Step 10: Configure TCB
@@ -157,7 +198,7 @@ mod sel4_impl {
         #[cfg(target_arch = "aarch64")]
         {
             sel4::debug_println!("Mapping UART...");
-            map_uart(bootinfo, &mut slots, &mut untypeds, vspace_cap)?;
+            map_uart(bootinfo, slots, untypeds, vspace_cap)?;
             sel4::debug_println!("  UART at 0x{:x}", UART_VADDR);
         }
 
@@ -165,7 +206,7 @@ mod sel4_impl {
         #[cfg(target_arch = "x86_64")]
         {
             sel4::debug_println!("Setting up IOPort for UART...");
-            setup_ioport_uart(&mut slots, cspace_slot)?;
+            setup_ioport_uart(slots, cspace_slot)?;
             sel4::debug_println!(
                 "  IOPort at CSpace slot {}",
                 lona_abi::types::CapSlot::IOPORT_UART.as_u64()
@@ -174,12 +215,12 @@ mod sel4_impl {
 
         Ok(Realm {
             id: RealmId::INIT,
-            _vspace_slot: vspace_slot,
-            _cspace_slot: cspace_slot,
+            vspace_slot,
+            cspace_slot,
             tcb_slot,
             sched_context_slot,
             endpoint_slot,
-            _ipc_frame_slot: ipc_frame_slot,
+            ipc_frame_slot,
             entry_point: vm_module.entry_point,
         })
     }
@@ -206,7 +247,11 @@ mod non_sel4_impl {
     /// # Errors
     ///
     /// This stub always succeeds.
-    pub const fn create_init_realm(_vm_module: &VmBootModule<'_>) -> Result<Realm, RealmError> {
+    pub const fn create_init_realm(
+        _vm_module: &VmBootModule<'_>,
+        _slots: &mut (),
+        _untypeds: &mut (),
+    ) -> Result<Realm, RealmError> {
         Ok(Realm { id: RealmId::INIT })
     }
 

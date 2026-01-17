@@ -94,6 +94,65 @@ If you create a plan, save it to `PLAN.md` and implement EVERY item. The finishi
 
 ---
 
+## Test-First Development (MANDATORY)
+
+**Tests are not optional. They are part of the implementation.**
+
+### The Rule
+
+1. **Planning**: Every feature/task in `PLAN.md` MUST include a "Tests" subsection defining what tests will verify it
+2. **Implementation**: Write tests FIRST, watch them fail, then implement code to make them pass
+3. **Bug Fixes**: Write a failing regression test FIRST that demonstrates the bug, then fix it
+
+### Test Coverage Requirements
+
+| Change Type | Required Tests |
+|-------------|----------------|
+| New function/method | Unit tests for all code paths |
+| New feature | Unit tests + integration test demonstrating the feature |
+| Bug fix | Regression test that fails before fix, passes after |
+| Refactoring | Existing tests must pass; add tests if coverage gaps found |
+
+### Planning with Tests
+
+Every plan item must specify what tests will verify it:
+
+```markdown
+## Task: Implement vector `nth` function
+
+### Implementation
+- Add `nth` intrinsic to sequence module
+- Handle out-of-bounds with nil return
+
+### Tests
+- Unit: `nth` returns correct element at valid index
+- Unit: `nth` returns nil for negative index
+- Unit: `nth` returns nil for index >= length
+- Integration: REPL test `(nth {1 2 3} 1)` returns `2`
+```
+
+### Bug Fix Workflow (STRICT)
+
+Bug fixes MUST follow this exact sequence:
+
+```
+1. Write regression test that reproduces the bug
+2. Run test → MUST FAIL (proves test catches the bug)
+3. Implement the fix
+4. Run test → MUST PASS (proves fix works)
+5. Regression test stays in codebase permanently
+```
+
+The regression test name should identify the bug: `regression_issue_NNN_description` or `regression_description_of_bug`.
+
+### Enforcement
+
+- The `develop-rust` skill enforces test-first workflow during implementation
+- The `finishing-work` skill verifies tests were written for all changes
+- The reviewer agent validates test coverage is adequate
+
+---
+
 ## Lonala Language
 
 **Lonala is NOT Clojure. Lonala is NOT Erlang/Elixir.**

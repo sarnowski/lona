@@ -9,7 +9,7 @@ pub const CNODE_SIZE_BITS: usize = 8;
 
 /// Depth to use when addressing slots in the root task's `CSpace`.
 /// seL4 expects `seL4_WordBits` (64) for the root `CNode`.
-#[cfg(all(feature = "sel4", target_arch = "x86_64"))]
+#[cfg(feature = "sel4")]
 pub const ROOT_CNODE_DEPTH: usize = 64;
 
 /// Size of `SchedContext` in bits.
@@ -24,3 +24,24 @@ pub const TCB_PRIORITY: u64 = 254;
 /// This address is in the root task's `VSpace`, below the child realm regions.
 #[cfg(feature = "sel4")]
 pub const TEMP_MAP_VADDR: u64 = 0x0000_0000_4000_0000;
+
+/// Default scheduling budget in microseconds.
+///
+/// This is the amount of CPU time a realm gets per scheduling period.
+/// 500μs provides reasonable latency for most workloads while allowing
+/// fair scheduling across realms.
+///
+/// Future: This should become a per-realm configurable parameter passed
+/// during realm creation, allowing different budgets for driver realms
+/// (lower latency) vs application realms.
+#[cfg(feature = "sel4")]
+pub const SCHED_BUDGET_US: u64 = 500;
+
+/// Default scheduling period in microseconds.
+///
+/// The time window in which the budget is available. With budget = period,
+/// the realm gets 100% of its time slice.
+///
+/// Future: This should become a per-realm configurable parameter.
+#[cfg(feature = "sel4")]
+pub const SCHED_PERIOD_US: u64 = 500;

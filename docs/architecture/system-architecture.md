@@ -439,27 +439,63 @@ Per-realm endpoints avoid this:
 
 ### Fault Handling
 
-Each realm's TCBs have their realm-specific fault endpoint configured:
+Each realm uses a **single endpoint** for both faults AND IPC requests. The LMM distinguishes between them using the message label:
+
+| Fault Type | Label | Handling |
+|------------|-------|----------|
+| **IPC Request** | 0 | Handle `AllocPages`, reply with result |
+| **VMFault** | 5 | If inherited region: map page. Otherwise: error (don't reply) |
+| **Timeout** | 6 | Replenish budget, check for inherited region, reply |
+| **CapFault** | 1 | Log error, don't reply |
+| **UserException** | 3 | Log error, don't reply |
+
+**Important**: Faults in non-inherited regions indicate bugs. The VM should use explicit IPC (`lmm_request_pages`) for all memory allocation except inherited code access.
 
 ```
-FAULT HANDLING
+FAULT AND IPC HANDLING (MCS-AWARE)
 ════════════════════════════════════════════════════════════════════════
 
-LONA MEMORY MANAGER
+LONA MEMORY MANAGER (Event Loop)
 ┌─────────────────────────────────────────────────────────────────┐
 │                                                                 │
-│  Waits on all realm endpoints (multiplexed receive)             │
-│                                                                 │
 │  loop {                                                         │
-│      (endpoint, fault_info) = wait_any_endpoint();              │
-│      realm_id = endpoint_to_realm[endpoint];                    │
-│      handle_fault(realm_id, fault_info);                        │
-│      reply(endpoint);  // resume faulting thread                │
+│      (msg_info, badge) = endpoint.recv(reply_cap);              │
+│      label = msg_info.label();                                  │
+│                                                                 │
+│      match label {                                              │
+│          0 (IPC) => {                                           │
+│              response = handle_alloc_pages(request);            │
+│              reply(response);                                   │
+│          }                                                      │
+│                                                                 │
+│          5 (VMFault) => {                                       │
+│              // ONLY inherited regions use fault-based mapping  │
+│              if is_inherited_region(fault_addr):                │
+│                  map_frame(realm.vspace, fault_addr);           │
+│                  reply();  // Resume thread                     │
+│              else:                                              │
+│                  log_error(...);                                │
+│                  recv();  // Error - thread stays blocked       │
+│          }                                                      │
+│                                                                 │
+│          6 (Timeout) => {                                       │
+│              // MCS budget expired - must replenish             │
+│              sched_control.configure_flags(sched_context, ...); │
+│              if is_inherited_region(mr1):                       │
+│                  map_frame(realm.vspace, mr1);  // Interrupted  │
+│              reply();  // Resume with fresh budget              │
+│          }                                                      │
+│                                                                 │
+│          _ => {                                                 │
+│              log_fault(label, mrs);                             │
+│              recv();  // Don't reply - thread stays blocked     │
+│          }                                                      │
+│      }                                                          │
 │  }                                                              │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
                                   ▲
-                                  │ fault IPC (per-realm endpoints)
+                                  │ fault/IPC (per-realm endpoints)
     ┌─────────────────────────────┼──────────────────────────────┐
     │                             │                              │
     ▼                             ▼                              ▼
@@ -469,11 +505,17 @@ LONA MEMORY MANAGER
 │TCB config: │            │TCB config: │             │TCB config: │
 │fault_ep=   │            │fault_ep=   │             │fault_ep=   │
 │ep_init     │            │ep_app_a    │             │ep_driver   │
+│            │            │            │             │            │
+│CSpace has  │            │CSpace has  │             │CSpace has  │
+│ep_init cap │            │ep_app_a cap│             │ep_driver   │
+│for IPC     │            │for IPC     │             │cap for IPC │
 └────────────┘            └────────────┘             └────────────┘
 
-Page fault in any realm → seL4 sends fault IPC to realm's endpoint
-Memory Manager identifies realm by which endpoint received the fault
-Memory Manager handles it, replies, thread resumes
+VMFault in inherited region → LMM maps page, replies, thread resumes
+VMFault in other region → ERROR: LMM logs, doesn't reply, thread blocked
+Timeout → LMM replenishes budget + maps inherited page if needed, replies
+IPC request → LMM processes, replies with response
+Other faults → LMM logs, doesn't reply (thread blocked)
 ```
 
 ### Capability Distribution

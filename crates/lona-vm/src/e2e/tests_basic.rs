@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 Tobias Sarnowski
 
-//! E2E test cases for Lona on seL4.
+//! Basic E2E test cases for Lona on seL4.
+//!
+//! These tests verify fundamental VM functionality: initialization, serial output,
+//! memory types, address operations, and basic reader/printer roundtrips.
 //!
 //! Each test function receives the same process, memory space, and UART
 //! that the REPL uses, ensuring tests exercise the exact same code paths.
@@ -111,20 +114,20 @@ pub fn test_address_types<M: MemorySpace, U: Uart>(
 const OUTPUT_BUFFER_SIZE: usize = 256;
 
 /// A simple buffer that implements Uart for capturing output.
-struct OutputBuffer {
+pub struct OutputBuffer {
     data: [u8; OUTPUT_BUFFER_SIZE],
     len: usize,
 }
 
 impl OutputBuffer {
-    const fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             data: [0; OUTPUT_BUFFER_SIZE],
             len: 0,
         }
     }
 
-    fn as_str(&self) -> Result<&str, &'static str> {
+    pub fn as_str(&self) -> Result<&str, &'static str> {
         core::str::from_utf8(&self.data[..self.len]).map_err(|_| "output not valid UTF-8")
     }
 }

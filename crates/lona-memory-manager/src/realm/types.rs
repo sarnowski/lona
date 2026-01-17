@@ -29,20 +29,27 @@ pub enum RealmError {
 pub struct Realm {
     /// Realm identifier.
     pub id: RealmId,
-    /// VSpace (root page table) capability slot (stored for future realm teardown).
-    pub(crate) _vspace_slot: usize,
-    /// CSpace (CNode) capability slot (stored for future realm teardown).
-    pub(crate) _cspace_slot: usize,
+    /// VSpace (root page table) capability slot.
+    pub vspace_slot: usize,
+    /// CSpace (CNode) capability slot.
+    pub cspace_slot: usize,
     /// TCB capability slot.
-    pub(crate) tcb_slot: usize,
+    pub tcb_slot: usize,
     /// SchedContext capability slot.
-    pub(crate) sched_context_slot: usize,
-    /// Fault endpoint capability slot.
-    pub(crate) endpoint_slot: usize,
-    /// IPC buffer frame capability slot (stored for future realm teardown).
-    pub(crate) _ipc_frame_slot: usize,
+    pub sched_context_slot: usize,
+    /// Endpoint capability slot (for both faults and IPC).
+    ///
+    /// This single endpoint is used for:
+    /// - Thread faults (configured in TCB via `tcb_set_sched_params`)
+    /// - LMM IPC requests (cap copied to realm's CSpace)
+    ///
+    /// The event loop distinguishes between faults (label != 0) and
+    /// IPC requests (label == 0) based on the message label.
+    pub endpoint_slot: usize,
+    /// IPC buffer frame capability slot.
+    pub ipc_frame_slot: usize,
     /// Entry point address from ELF.
-    pub(crate) entry_point: u64,
+    pub entry_point: u64,
 }
 
 /// A created realm (stub for non-seL4 builds).

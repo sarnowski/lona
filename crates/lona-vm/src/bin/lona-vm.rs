@@ -117,9 +117,9 @@ pub extern "C" fn _start() -> ! {
 
     let boot_flags = BootFlags::new(flags);
 
-    // Initialize UART based on platform
+    // Initialize UART based on platform (also sets up IPC buffer)
     #[cfg(target_arch = "aarch64")]
-    let mut uart = init_uart_aarch64(boot_flags);
+    let mut uart = init_uart_aarch64(boot_flags, worker_id);
 
     #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
     let mut uart = init_uart_x86_64(boot_flags, worker_id);
@@ -144,8 +144,9 @@ pub extern "C" fn _start() -> ! {
     let mut realm = Box::new(Realm::new(realm_base, REALM_CODE_SIZE));
 
     // Allocate memory for REPL process (young heap + old heap)
+    // Uses growth-enabled allocation that requests more pages from LMM if needed
     let (young_base, old_base) = pool
-        .allocate_process_memory(INITIAL_YOUNG_HEAP_SIZE, INITIAL_OLD_HEAP_SIZE)
+        .allocate_process_memory_with_growth(INITIAL_YOUNG_HEAP_SIZE, INITIAL_OLD_HEAP_SIZE)
         .expect("failed to allocate REPL process memory");
 
     // Create REPL process with BEAM-style memory layout
@@ -182,15 +183,66 @@ pub extern "C" fn _start() -> ! {
     }
 }
 
+/// TLS block size for aarch64 (matches x86_64 for consistency).
+#[cfg(target_arch = "aarch64")]
+const TLS_BLOCK_SIZE_AARCH64: usize = 4096;
+
+/// Static TLS block for aarch64.
+///
+/// On aarch64, TLS uses variant 1 where the thread pointer (TPIDR_EL0) points
+/// to the TCB at the START of the TLS block. TLS variables are accessed via
+/// positive offsets from the thread pointer.
+#[cfg(target_arch = "aarch64")]
+#[repr(C, align(16))]
+struct TlsBlockAarch64 {
+    /// TCB / DTV pointer (required by TLS ABI, but we can leave as zero)
+    tcb: [usize; 2],
+    /// Space for TLS data
+    data: [u8; TLS_BLOCK_SIZE_AARCH64],
+}
+
+#[cfg(target_arch = "aarch64")]
+static mut TLS_BLOCK_AARCH64: TlsBlockAarch64 = TlsBlockAarch64 {
+    tcb: [0; 2],
+    data: [0u8; TLS_BLOCK_SIZE_AARCH64],
+};
+
+/// Initialize TLS on aarch64 by setting TPIDR_EL0.
+#[cfg(target_arch = "aarch64")]
+unsafe fn init_tls_aarch64() {
+    use core::arch::asm;
+    unsafe {
+        let tls_ptr = core::ptr::addr_of_mut!(TLS_BLOCK_AARCH64) as usize;
+        asm!("msr tpidr_el0, {}", in(reg) tls_ptr, options(nomem, nostack));
+    }
+}
+
 /// Initialize UART on aarch64 (PL011 MMIO).
 #[cfg(target_arch = "aarch64")]
-fn init_uart_aarch64(boot_flags: BootFlags) -> Pl011Uart {
+fn init_uart_aarch64(boot_flags: BootFlags, worker_id: u16) -> Pl011Uart {
+    // Initialize TLS first - required for seL4 TLS variables
+    // SAFETY: Single-threaded, called once at startup
+    unsafe {
+        init_tls_aarch64();
+    }
+
+    // Initialize UART (MMIO-based, no seL4 syscalls needed)
     if boot_flags.has_uart() {
         // SAFETY: Memory manager has mapped UART at UART_VADDR
         unsafe {
             lona_vm::uart::aarch64_init(UART_VADDR as *mut u8);
         }
     }
+
+    // Set up IPC buffer for seL4 syscalls (required before ANY seL4 syscall)
+    let ipc_buffer_addr = lona_abi::layout::worker_ipc_buffer(worker_id);
+    // SAFETY: Memory manager has mapped IPC buffer at this address and
+    // it will remain valid for the lifetime of this VM.
+    unsafe {
+        let ipc_buffer = &mut *(ipc_buffer_addr as *mut sel4::IpcBuffer);
+        sel4::set_ipc_buffer(ipc_buffer);
+    }
+
     Pl011Uart::new()
 }
 

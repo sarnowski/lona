@@ -143,9 +143,96 @@ pub const MMIO_SIZE: u64 = 16 * GB;
 /// Virtual address where UART is mapped (for init realm).
 pub const UART_VADDR: u64 = MMIO_BASE;
 
-/// Default initial heap size for init realm (128 KB).
-/// This is sufficient for realm code region + REPL process heaps.
-pub const INIT_HEAP_SIZE: u64 = 128 * KB;
+/// Initial heap size for init realm (32 KB).
+///
+/// This is intentionally smaller than what the VM needs, forcing it to
+/// request additional pages from the Lona Memory Manager via IPC.
+pub const INIT_HEAP_SIZE: u64 = 32 * KB;
+
+// =============================================================================
+// Fault Region Classification
+// =============================================================================
+
+/// Result of classifying a faulting address.
+///
+/// Used by the Lona Memory Manager to determine what kind of error occurred
+/// when a fault happens. Note: Most regions do NOT use fault-based allocation.
+/// Only inherited regions use lazy mapping; all other faults indicate errors.
+///
+/// | Region | On Fault |
+/// |--------|----------|
+/// | ProcessPool | ERROR - should use explicit IPC |
+/// | RealmBinary | ERROR - should use explicit IPC |
+/// | RealmLocal | ERROR - should use explicit IPC |
+/// | WorkerStack | ERROR - stacks are pre-mapped |
+/// | Invalid | ERROR - invalid memory access |
+/// | (Inherited) | Not in enum - see `is_inherited_region()` |
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaultRegion {
+    /// Address is in the process pool region.
+    ProcessPool,
+    /// Address is in the realm binary heap region.
+    RealmBinary,
+    /// Address is in the realm-local data region.
+    RealmLocal,
+    /// Address is in a worker stack region. Contains the worker index.
+    WorkerStack(u16),
+    /// Address is invalid (null guard, kernel space, etc).
+    Invalid,
+}
+
+impl FaultRegion {
+    /// Determine which region a faulting address belongs to.
+    ///
+    /// This is used by the fault handler to decide whether to map a page
+    /// or reject the fault.
+    #[must_use]
+    pub const fn from_addr(addr: u64) -> Self {
+        // Null guard page - never map
+        if addr < PAGE_SIZE {
+            return Self::Invalid;
+        }
+
+        // Worker stacks region
+        if addr >= WORKER_STACKS_BASE && addr < WORKER_STACKS_BASE + WORKER_STACKS_SIZE {
+            let offset = addr - WORKER_STACKS_BASE;
+            let worker = (offset / WORKER_SLOT_SIZE) as u16;
+            return Self::WorkerStack(worker);
+        }
+
+        // Process pool region
+        if addr >= PROCESS_POOL_BASE && addr < PROCESS_POOL_BASE + PROCESS_POOL_SIZE {
+            return Self::ProcessPool;
+        }
+
+        // Realm binary heap region
+        if addr >= REALM_BINARY_BASE && addr < REALM_BINARY_BASE + REALM_BINARY_SIZE {
+            return Self::RealmBinary;
+        }
+
+        // Realm-local data region
+        if addr >= REALM_LOCAL_BASE && addr < REALM_LOCAL_BASE + REALM_LOCAL_SIZE {
+            return Self::RealmLocal;
+        }
+
+        // Everything else is invalid (shared code should be pre-mapped,
+        // inherited regions are RO, MMIO is device-specific)
+        Self::Invalid
+    }
+
+    /// Check if this region classification indicates a potentially valid access.
+    ///
+    /// Returns `true` if the address is in a known region (for error reporting).
+    /// Returns `false` if the address is completely invalid (null, kernel, etc).
+    ///
+    /// NOTE: This does NOT mean the fault should be handled by mapping a page.
+    /// For allocation decisions, check `is_inherited_region()` first.
+    #[inline]
+    #[must_use]
+    pub const fn is_mappable(&self) -> bool {
+        !matches!(self, Self::Invalid)
+    }
+}
 
 // =============================================================================
 // Region Types and Permissions
@@ -279,6 +366,23 @@ pub const fn worker_ipc_buffer(worker_index: u16) -> u64 {
         + PAGE_SIZE
 }
 
+/// Check if an address is in the inherited regions area.
+///
+/// Inherited regions contain code and data from ancestor realms. They are
+/// the ONLY regions that use fault-based lazy mapping. All other regions
+/// use explicit IPC allocation or are pre-mapped at realm creation.
+///
+/// Lazy mapping for inherited regions is required because:
+/// 1. Parent realms don't know their descendants (can't push updates)
+/// 2. Live code updates must propagate to children automatically
+/// 3. Pre-mapping all ancestor pages would be expensive and incomplete
+///    (new parent pages allocated after child creation need lazy mapping)
+#[inline]
+#[must_use]
+pub const fn is_inherited_region(addr: u64) -> bool {
+    addr >= INHERITED_BASE && addr < INHERITED_BASE + INHERITED_SIZE
+}
+
 // Compile-time verification that regions do not overlap
 const _: () = {
     assert!(NULL_GUARD_BASE + NULL_GUARD_SIZE <= WORKER_STACKS_BASE);
@@ -337,5 +441,121 @@ mod tests {
 
         assert!(Permissions::ReadExecute.can_read());
         assert!(Permissions::ReadExecute.can_execute());
+    }
+
+    // =========================================================================
+    // FaultRegion Tests
+    // =========================================================================
+
+    #[test]
+    fn fault_region_null_guard() {
+        // Address 0 should be invalid (null guard)
+        assert_eq!(FaultRegion::from_addr(0), FaultRegion::Invalid);
+        assert!(!FaultRegion::from_addr(0).is_mappable());
+
+        // Anything in the first page is null guard
+        assert_eq!(FaultRegion::from_addr(0x100), FaultRegion::Invalid);
+        assert_eq!(FaultRegion::from_addr(PAGE_SIZE - 1), FaultRegion::Invalid);
+    }
+
+    #[test]
+    fn fault_region_process_pool() {
+        // Base of process pool
+        let base = FaultRegion::from_addr(PROCESS_POOL_BASE);
+        assert_eq!(base, FaultRegion::ProcessPool);
+        assert!(base.is_mappable());
+
+        // Middle of process pool
+        let mid = FaultRegion::from_addr(PROCESS_POOL_BASE + 0x1_0000_0000);
+        assert_eq!(mid, FaultRegion::ProcessPool);
+        assert!(mid.is_mappable());
+
+        // Just before end of process pool
+        let before_end = FaultRegion::from_addr(PROCESS_POOL_BASE + PROCESS_POOL_SIZE - 1);
+        assert_eq!(before_end, FaultRegion::ProcessPool);
+    }
+
+    #[test]
+    fn fault_region_worker_stack() {
+        // Worker 0 stack
+        let w0 = FaultRegion::from_addr(worker_stack_base(0) + 0x100);
+        assert_eq!(w0, FaultRegion::WorkerStack(0));
+        assert!(w0.is_mappable());
+
+        // Worker 1 stack
+        let w1 = FaultRegion::from_addr(worker_stack_base(1) + 0x100);
+        assert_eq!(w1, FaultRegion::WorkerStack(1));
+
+        // Worker 10 stack
+        let w10 = FaultRegion::from_addr(worker_stack_base(10) + 0x100);
+        assert_eq!(w10, FaultRegion::WorkerStack(10));
+    }
+
+    #[test]
+    fn fault_region_realm_binary() {
+        let base = FaultRegion::from_addr(REALM_BINARY_BASE);
+        assert_eq!(base, FaultRegion::RealmBinary);
+        assert!(base.is_mappable());
+
+        let mid = FaultRegion::from_addr(REALM_BINARY_BASE + 0x1000_0000);
+        assert_eq!(mid, FaultRegion::RealmBinary);
+    }
+
+    #[test]
+    fn fault_region_realm_local() {
+        let base = FaultRegion::from_addr(REALM_LOCAL_BASE);
+        assert_eq!(base, FaultRegion::RealmLocal);
+        assert!(base.is_mappable());
+
+        let mid = FaultRegion::from_addr(REALM_LOCAL_BASE + 0x1000);
+        assert_eq!(mid, FaultRegion::RealmLocal);
+    }
+
+    #[test]
+    fn fault_region_boundaries() {
+        // Just before process pool should be invalid (it's in realm binary region)
+        let before_pool = FaultRegion::from_addr(PROCESS_POOL_BASE - 1);
+        // This is still in REALM_BINARY (0x0000_0013... + 16GB ends before 0x0000_0020...)
+        // Actually check: REALM_BINARY_BASE + REALM_BINARY_SIZE = 0x0000_0013_0000_0000 + 16GB
+        // = 0x0000_0017_0000_0000, which is less than PROCESS_POOL_BASE (0x0000_0020_0000_0000)
+        // So the address just before PROCESS_POOL_BASE is in invalid territory
+        assert_eq!(before_pool, FaultRegion::Invalid);
+
+        // Just after process pool should be invalid
+        let after_pool = FaultRegion::from_addr(PROCESS_POOL_BASE + PROCESS_POOL_SIZE);
+        assert_eq!(after_pool, FaultRegion::Invalid);
+
+        // Shared code region should be invalid (pre-mapped, not demand-paged)
+        let shared = FaultRegion::from_addr(SHARED_CODE_BASE + 0x1000);
+        assert_eq!(shared, FaultRegion::Invalid);
+
+        // MMIO region should be invalid (device-specific)
+        let mmio = FaultRegion::from_addr(MMIO_BASE + 0x1000);
+        assert_eq!(mmio, FaultRegion::Invalid);
+    }
+
+    // =========================================================================
+    // is_inherited_region Tests
+    // =========================================================================
+
+    #[test]
+    fn is_inherited_region_tests() {
+        // Before inherited region
+        assert!(!is_inherited_region(INHERITED_BASE - 1));
+
+        // Start of inherited region
+        assert!(is_inherited_region(INHERITED_BASE));
+
+        // Middle of inherited region
+        assert!(is_inherited_region(INHERITED_BASE + INHERITED_SIZE / 2));
+
+        // Just before end of inherited region
+        assert!(is_inherited_region(INHERITED_BASE + INHERITED_SIZE - 1));
+
+        // End of inherited region (exclusive)
+        assert!(!is_inherited_region(INHERITED_BASE + INHERITED_SIZE));
+
+        // Well after inherited region
+        assert!(!is_inherited_region(PROCESS_POOL_BASE));
     }
 }

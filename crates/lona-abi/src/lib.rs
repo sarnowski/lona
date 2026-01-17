@@ -29,13 +29,15 @@ extern crate std;
 
 pub mod boot;
 pub mod fault;
+pub mod ipc;
 pub mod layout;
 pub mod tcb;
 pub mod types;
 
 // Re-export commonly used types at crate root
 pub use boot::BootFlags;
-pub use fault::{FaultInfo, FaultType};
-pub use layout::{Permissions, RegionType};
+pub use fault::{FaultInfo, FaultType, SEL4_FAULT_VM_FAULT, VmFaultInfo};
+pub use ipc::{AllocPagesRequest, AllocPagesResponse, IpcRegionType, LmmError, MessageTag};
+pub use layout::{FaultRegion, Permissions, RegionType};
 pub use tcb::{InitialRegisters, ipc_buffer_vaddr};
 pub use types::{CapSlot, Paddr, ProcessId, RealmId, Vaddr, WorkerId};

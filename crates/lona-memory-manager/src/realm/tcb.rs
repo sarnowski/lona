@@ -52,6 +52,8 @@ pub fn start_worker(realm: &Realm, worker_id: WorkerId) -> Result<(), RealmError
     )?;
 
     // Step 13: Bind SchedContext and fault endpoint to TCB via set_sched_params (MCS)
+    // NOTE: We use a single endpoint for both faults AND IPC requests.
+    // The event loop distinguishes them by message label (faults have label != 0).
     sel4::debug_println!("Binding SchedContext via set_sched_params...");
     let endpoint_cap: Cap<Endpoint> = Cap::from_bits(realm.endpoint_slot as u64);
     tcb_cap

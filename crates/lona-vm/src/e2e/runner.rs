@@ -14,7 +14,7 @@ use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::uart::Uart;
 
-use super::tests;
+use super::{tests_basic, tests_lmm, tests_lmm_demand};
 
 /// Status of a single test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,27 +50,87 @@ struct TestCase<M: MemorySpace, U: Uart> {
 }
 
 /// Get all registered test cases.
-fn get_test_cases<M: MemorySpace, U: Uart>() -> [TestCase<M, U>; 5] {
+fn get_test_cases<M: MemorySpace, U: Uart>() -> [TestCase<M, U>; 19] {
     [
+        // Basic VM tests
         TestCase {
             name: "test_vm_init",
-            func: tests::test_vm_init,
+            func: tests_basic::test_vm_init,
         },
         TestCase {
             name: "test_serial_output",
-            func: tests::test_serial_output,
+            func: tests_basic::test_serial_output,
         },
         TestCase {
             name: "test_memory_types",
-            func: tests::test_memory_types,
+            func: tests_basic::test_memory_types,
         },
         TestCase {
             name: "test_address_types",
-            func: tests::test_address_types,
+            func: tests_basic::test_address_types,
         },
         TestCase {
             name: "test_read_quoted_list",
-            func: tests::test_read_quoted_list,
+            func: tests_basic::test_read_quoted_list,
+        },
+        // Memory allocation IPC tests
+        TestCase {
+            name: "test_lmm_alloc_single_page",
+            func: tests_lmm::test_lmm_alloc_single_page,
+        },
+        TestCase {
+            name: "test_lmm_alloc_multiple_pages",
+            func: tests_lmm::test_lmm_alloc_multiple_pages,
+        },
+        TestCase {
+            name: "test_lmm_alloc_memory_usable",
+            func: tests_lmm::test_lmm_alloc_memory_usable,
+        },
+        TestCase {
+            name: "test_lmm_alloc_with_hint",
+            func: tests_lmm::test_lmm_alloc_with_hint,
+        },
+        TestCase {
+            name: "test_lmm_alloc_sequential",
+            func: tests_lmm::test_lmm_alloc_sequential,
+        },
+        TestCase {
+            name: "test_lmm_alloc_regions",
+            func: tests_lmm::test_lmm_alloc_regions,
+        },
+        TestCase {
+            name: "test_lmm_alloc_large",
+            func: tests_lmm::test_lmm_alloc_large,
+        },
+        TestCase {
+            name: "test_lmm_alloc_invalid_hint",
+            func: tests_lmm::test_lmm_alloc_invalid_hint,
+        },
+        // Pool growth tests
+        TestCase {
+            name: "test_lmm_pool_growth",
+            func: tests_lmm::test_lmm_pool_growth,
+        },
+        TestCase {
+            name: "test_lmm_process_allocation_pattern",
+            func: tests_lmm::test_lmm_process_allocation_pattern,
+        },
+        TestCase {
+            name: "test_lmm_stress_allocations",
+            func: tests_lmm::test_lmm_stress_allocations,
+        },
+        // Production allocation tests (explicit IPC + pre-mapped stacks)
+        TestCase {
+            name: "test_explicit_ipc_allocation",
+            func: tests_lmm_demand::test_explicit_ipc_allocation,
+        },
+        TestCase {
+            name: "test_premapped_stack",
+            func: tests_lmm_demand::test_premapped_stack,
+        },
+        TestCase {
+            name: "test_interleaved_explicit_allocation",
+            func: tests_lmm_demand::test_interleaved_explicit_allocation,
         },
     ]
 }

@@ -31,6 +31,8 @@
 //! ```
 
 mod runner;
-mod tests;
+mod tests_basic;
+mod tests_lmm;
+mod tests_lmm_demand;
 
 pub use runner::{TestResult, TestStatus, run_all_tests};

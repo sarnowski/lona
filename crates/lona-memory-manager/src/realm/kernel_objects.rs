@@ -163,13 +163,14 @@ pub fn configure_sched_context(
     let sched_cap: Cap<SchedContext> = Cap::from_bits(sched_slot as u64);
     let sched_control = bootinfo.sched_control().index(0).cap();
 
-    // Configure with generous budget: 10ms period, 10ms budget (100% of time slice)
-    const PERIOD_US: u64 = 10_000;
-    const BUDGET_US: u64 = 10_000;
+    use super::constants::{SCHED_BUDGET_US, SCHED_PERIOD_US};
 
     sched_control
         .sched_control_configure_flags(
-            sched_cap, BUDGET_US, PERIOD_US, 0, // extra_refills
+            sched_cap,
+            SCHED_BUDGET_US,
+            SCHED_PERIOD_US,
+            0, // extra_refills
             0, // badge
             0, // flags
         )
@@ -201,6 +202,35 @@ pub fn create_tcb(
         .untyped_retype(&blueprint, &cnode.absolute_cptr_for_self(), dest_slot, 1)
         .map_err(|e| {
             sel4::debug_println!("TCB retype failed: {:?}", e);
+            RealmError::ObjectCreation
+        })?;
+
+    Ok(dest_slot)
+}
+
+/// Create Reply capability for IPC.
+///
+/// In seL4 MCS, Reply objects are needed to receive and reply to IPC calls.
+#[cfg(feature = "sel4")]
+pub fn create_reply(
+    slots: &mut SlotAllocator,
+    untypeds: &mut UntypedAllocator,
+) -> Result<usize, RealmError> {
+    let dest_slot = slots.alloc().ok_or(RealmError::OutOfSlots)?;
+    let blueprint = ObjectBlueprint::Reply;
+
+    let size_bits = blueprint.physical_size_bits() as u8;
+    let (ut_slot, _, _) = untypeds
+        .allocate(size_bits, slots, false)
+        .ok_or(RealmError::OutOfMemory)?;
+
+    let untyped: Cap<sel4::cap_type::Untyped> = Cap::from_bits(ut_slot as u64);
+    let cnode = sel4::init_thread::slot::CNODE.cap();
+
+    untyped
+        .untyped_retype(&blueprint, &cnode.absolute_cptr_for_self(), dest_slot, 1)
+        .map_err(|e| {
+            sel4::debug_println!("Reply retype failed: {:?}", e);
             RealmError::ObjectCreation
         })?;
 
