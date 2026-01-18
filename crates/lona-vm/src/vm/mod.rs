@@ -312,18 +312,42 @@ fn handle_call<M: MemorySpace>(
 
         Value::CompiledFn(fn_addr) => {
             let callee_chunk = prepare_user_fn(proc, mem, fn_addr, argc)?;
-            proc.push_call_frame(fn_addr)
+
+            // Ensure caller's chunk is on heap (for REPL case)
+            if !proc.ensure_chunk_on_heap(mem) {
+                return Err(RuntimeError::OutOfMemory);
+            }
+
+            // Create stack frame for callee
+            let return_ip = proc.ip;
+            let caller_chunk_addr = proc.chunk_addr.unwrap_or(Vaddr::new(0));
+            proc.allocate_frame(mem, return_ip, caller_chunk_addr)
                 .map_err(|_| RuntimeError::StackOverflow)?;
+
+            // Set up callee's execution context
             proc.chunk = Some(callee_chunk);
+            proc.chunk_addr = Some(fn_addr);
             proc.ip = 0;
             Ok(1)
         }
 
         Value::Closure(closure_addr) => {
             let (fn_addr, callee_chunk) = prepare_closure(proc, mem, closure_addr, argc)?;
-            proc.push_call_frame(fn_addr)
+
+            // Ensure caller's chunk is on heap (for REPL case)
+            if !proc.ensure_chunk_on_heap(mem) {
+                return Err(RuntimeError::OutOfMemory);
+            }
+
+            // Create stack frame for callee
+            let return_ip = proc.ip;
+            let caller_chunk_addr = proc.chunk_addr.unwrap_or(Vaddr::new(0));
+            proc.allocate_frame(mem, return_ip, caller_chunk_addr)
                 .map_err(|_| RuntimeError::StackOverflow)?;
+
+            // Set up callee's execution context
             proc.chunk = Some(callee_chunk);
+            proc.chunk_addr = Some(fn_addr);
             proc.ip = 0;
             Ok(1)
         }
@@ -482,6 +506,27 @@ pub enum RuntimeError {
     },
     /// Call stack overflow (too many nested calls).
     StackOverflow,
+
+    /// Y register index out of bounds.
+    ///
+    /// The Y register index exceeds the number of Y registers allocated
+    /// in the current frame.
+    YRegisterOutOfBounds {
+        /// The index that was accessed.
+        index: usize,
+        /// Number of Y registers allocated.
+        allocated: usize,
+    },
+
+    /// Frame Y register count mismatch.
+    ///
+    /// DEALLOCATE was called with a different count than ALLOCATE.
+    FrameMismatch {
+        /// Number of Y registers that were allocated.
+        allocated: usize,
+        /// Number of Y registers DEALLOCATE tried to release.
+        deallocate_count: usize,
+    },
 }
 
 impl From<IntrinsicError> for RuntimeError {
@@ -519,6 +564,84 @@ impl RunResult {
     #[must_use]
     pub const fn is_yielded(&self) -> bool {
         matches!(self, Self::Yielded)
+    }
+}
+
+/// Handle RETURN instruction: deallocate frame and restore caller context.
+fn handle_return<M: MemorySpace>(proc: &mut Process, mem: &M) -> Result<u32, RunResult> {
+    match proc.deallocate_frame(mem) {
+        Some((return_ip, chunk_addr)) => {
+            if !proc.load_chunk_from(mem, chunk_addr) {
+                return Err(RunResult::Error(RuntimeError::NoCode));
+            }
+            proc.ip = return_ip;
+            Ok(1)
+        }
+        None => Err(RunResult::Completed(proc.x_regs[0])),
+    }
+}
+
+/// Execute a Y register instruction.
+///
+/// Returns `Ok(cost)` for successful execution, or `Err` for errors.
+fn execute_y_register_instruction<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    instr: u32,
+    opcode: u8,
+) -> Result<u32, RunResult> {
+    match opcode {
+        op::ALLOCATE => {
+            let y_count = decode_a(instr) as usize;
+            proc.extend_frame_y_regs(mem, y_count)
+                .map_err(|_| RunResult::Error(RuntimeError::StackOverflow))?;
+            Ok(1)
+        }
+        op::ALLOCATE_ZERO => {
+            let y_count = decode_a(instr) as usize;
+            proc.extend_frame_y_regs_zero(mem, y_count)
+                .map_err(|_| RunResult::Error(RuntimeError::StackOverflow))?;
+            Ok(1)
+        }
+        op::DEALLOCATE => {
+            let y_count = decode_a(instr) as usize;
+            if y_count != proc.current_y_count {
+                return Err(RunResult::Error(RuntimeError::FrameMismatch {
+                    allocated: proc.current_y_count,
+                    deallocate_count: y_count,
+                }));
+            }
+            proc.shrink_frame_y_regs(mem, y_count)
+                .map_err(|_| RunResult::Error(RuntimeError::StackOverflow))?;
+            Ok(1)
+        }
+        op::MOVE_XY => {
+            let y_idx = decode_a(instr) as usize;
+            let x_idx = decode_b(instr) as usize;
+            let value = proc.x_regs[x_idx];
+            if !proc.set_y(mem, y_idx, value) {
+                return Err(RunResult::Error(RuntimeError::YRegisterOutOfBounds {
+                    index: y_idx,
+                    allocated: proc.current_y_count,
+                }));
+            }
+            Ok(1)
+        }
+        op::MOVE_YX => {
+            let x_idx = decode_a(instr) as usize;
+            let y_idx = decode_b(instr) as usize;
+            match proc.get_y(mem, y_idx) {
+                Some(value) => {
+                    proc.x_regs[x_idx] = value;
+                    Ok(1)
+                }
+                None => Err(RunResult::Error(RuntimeError::YRegisterOutOfBounds {
+                    index: y_idx,
+                    allocated: proc.current_y_count,
+                })),
+            }
+        }
+        _ => Err(RunResult::Error(RuntimeError::InvalidOpcode(opcode))),
     }
 }
 
@@ -570,13 +693,7 @@ fn execute_instruction<M: MemorySpace>(
             decode_b(instr) as u8,
         )
         .map_err(RunResult::Error),
-        op::RETURN => {
-            if proc.pop_call_frame() {
-                Ok(1) // Continue in caller's context
-            } else {
-                Err(RunResult::Completed(proc.x_regs[0])) // Top-level return
-            }
-        }
+        op::RETURN => handle_return(proc, mem),
         op::HALT => Err(RunResult::Completed(proc.x_regs[0])),
         op::BUILD_TUPLE => {
             let c = decode_c(instr) as usize;
@@ -625,6 +742,12 @@ fn execute_instruction<M: MemorySpace>(
             .map_err(RunResult::Error)?;
             Ok(2)
         }
+
+        // Y register instructions (ALLOCATE, ALLOCATE_ZERO, DEALLOCATE, MOVE_XY, MOVE_YX)
+        op::ALLOCATE | op::ALLOCATE_ZERO | op::DEALLOCATE | op::MOVE_XY | op::MOVE_YX => {
+            execute_y_register_instruction(proc, mem, instr, opcode)
+        }
+
         _ => Err(RunResult::Error(RuntimeError::InvalidOpcode(opcode))),
     }
 }

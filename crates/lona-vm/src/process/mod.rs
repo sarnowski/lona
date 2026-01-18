@@ -50,6 +50,8 @@ mod copy_test;
 #[cfg(test)]
 mod execution_test;
 #[cfg(test)]
+mod frame_test;
+#[cfg(test)]
 mod namespace_test;
 #[cfg(test)]
 mod pool_test;
@@ -64,17 +66,8 @@ use crate::Vaddr;
 use crate::bytecode::Chunk;
 use crate::value::Value;
 
-#[cfg(any(test, feature = "std"))]
-use std::vec::Vec;
-
-#[cfg(not(any(test, feature = "std")))]
-use alloc::vec::Vec;
-
 /// Number of X registers (temporaries).
 pub const X_REG_COUNT: usize = 256;
-
-/// Maximum call stack depth.
-pub const MAX_CALL_DEPTH: usize = 256;
 
 /// Maximum number of interned keywords per process.
 ///
@@ -129,6 +122,64 @@ pub const INITIAL_OLD_HEAP_SIZE: usize = 12 * 1024;
 /// See `docs/architecture/process-model.md` for scheduling details.
 pub const MAX_REDUCTIONS: u32 = 2000;
 
+// ============================================================================
+// Stack Frame Constants
+// ============================================================================
+//
+// Stack frames are stored in the process stack region (grows down from `stop`).
+// Each frame has a fixed-size header followed by Y registers for local variables.
+//
+// Frame layout (from low to high addresses):
+//
+//     stop (after ALLOCATE)
+//     ┌─────────────────────────────────────────────────────────────────┐
+//     │ Y(0)             ← stop + 0 * size_of::<Value>()    (16 bytes) │
+//     │ Y(1)             ← stop + 1 * size_of::<Value>()    (16 bytes) │
+//     │ ...                                                            │
+//     │ Y(N-1)           ← stop + (N-1) * size_of::<Value>()(16 bytes) │
+//     ├────────────────────────────────────────────────────────────────┤ ← frame_base
+//     │ return_ip        ← frame_base + 0                   (u64)      │
+//     │ chunk_addr       ← frame_base + 8                   (u64)      │
+//     │ caller_frame_base← frame_base + 16 (0 if top level) (u64)      │
+//     │ y_count          ← frame_base + 24                  (u64)      │
+//     └────────────────────────────────────────────────────────────────┘
+//     (higher addresses - previous frame above)
+//
+// Key relationships:
+// - frame_base points to the header (return_ip slot)
+// - Y registers are BELOW the header (at lower addresses)
+// - Y registers are Value-sized (16 bytes), header fields are u64-sized (8 bytes)
+// - stop = frame_base - y_count * Y_REGISTER_SIZE
+// - Y(i) = stop + i * Y_REGISTER_SIZE
+
+/// Size of one Y register slot in bytes.
+/// Y registers store `Value`s, so this must equal `size_of::<Value>()`.
+pub const Y_REGISTER_SIZE: usize = core::mem::size_of::<Value>();
+
+/// Size of stack frame header in bytes.
+/// Contains: `return_ip`, `chunk_addr`, `caller_frame_base`, `y_count` (4 × u64).
+pub const FRAME_HEADER_SIZE: usize = 4 * core::mem::size_of::<u64>();
+
+/// Maximum Y registers per frame.
+/// BEAM allows up to 1024, but most functions use < 16.
+/// We use 64 as a reasonable limit that fits in 6 bits.
+pub const MAX_Y_REGISTERS: usize = 64;
+
+/// Minimum stack space to keep free (safety margin for GC, interrupts).
+pub const STACK_REDZONE: usize = 256;
+
+/// Offsets within frame header (from `frame_base`).
+pub mod frame_offset {
+    /// Offset of return instruction pointer.
+    pub const RETURN_IP: usize = 0;
+    /// Offset of chunk address (for reloading caller's chunk on return).
+    pub const CHUNK_ADDR: usize = 8;
+    /// Offset of caller's `frame_base` (0 if top level).
+    pub const CALLER_FRAME_BASE: usize = 16;
+    /// Offset of Y register count.
+    pub const Y_COUNT: usize = 24;
+}
+
 /// Process execution status.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -141,21 +192,6 @@ pub enum ProcessStatus {
     Completed = 2,
     /// Process encountered an error.
     Error = 3,
-}
-
-/// A saved call frame on the VM call stack.
-///
-/// Contains all state needed to resume the caller after the callee returns.
-/// When calling a function, we save the current execution context here
-/// so it can be restored on return.
-#[derive(Clone, Debug)]
-pub struct CallFrame {
-    /// Return address (instruction pointer to resume at).
-    pub return_ip: usize,
-    /// The caller's bytecode chunk.
-    pub chunk: Chunk,
-    /// Address of the function being called (for debugging/closures).
-    pub fn_addr: Vaddr,
 }
 
 /// Stack overflow error.
@@ -203,13 +239,21 @@ pub struct Process {
     pub ip: usize,
     /// X registers (temporaries).
     pub x_regs: [Value; X_REG_COUNT],
-    /// Current bytecode chunk being executed.
+    /// Current bytecode chunk being executed (cached copy for fast access).
     pub chunk: Option<Chunk>,
+    /// Address of current chunk's `CompiledFn` on heap.
+    /// `None` for top-level REPL code that hasn't been heap-allocated yet.
+    pub chunk_addr: Option<Vaddr>,
 
-    // Call stack
-    /// Saved call frames for function returns.
-    /// Uses `Vec` because `CallFrame` contains `Chunk` which is not `Copy`.
-    call_stack: Vec<CallFrame>,
+    // Stack-based frame tracking
+    /// Base of the innermost (current) stack frame.
+    /// Points to the `return_ip` slot of the current frame header.
+    /// `None` if at top level (no active call).
+    pub frame_base: Option<Vaddr>,
+    /// Number of Y registers in the current frame (cached for fast access).
+    pub current_y_count: usize,
+    /// Current call depth (number of frames on stack).
+    frame_depth: usize,
 
     // Interning tables
     /// Interned keywords (addresses of keyword `HeapString`s on the heap).
@@ -257,13 +301,8 @@ impl Process {
     /// * `young_size` - Size of young heap in bytes
     /// * `old_base` - Base address of old heap
     /// * `old_size` - Size of old heap in bytes
-    // Vec::new() is not const in alloc crate (no_std mode)
-    #[expect(
-        clippy::missing_const_for_fn,
-        reason = "Vec::new() is not const in no_std"
-    )]
     #[must_use]
-    pub fn new(
+    pub const fn new(
         pid: u64,
         young_base: Vaddr,
         young_size: usize,
@@ -292,8 +331,11 @@ impl Process {
             ip: 0,
             x_regs: [Value::Nil; X_REG_COUNT],
             chunk: None,
-            // Call stack
-            call_stack: Vec::new(),
+            chunk_addr: None,
+            // Stack-based frame tracking
+            frame_base: None,
+            current_y_count: 0,
+            frame_depth: 0,
             // Interning tables
             keyword_intern: [Vaddr::new(0); MAX_INTERNED_KEYWORDS],
             keyword_intern_len: 0,
@@ -386,66 +428,264 @@ impl Process {
     }
 
     /// Reset execution state for a new evaluation.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.ip = 0;
         self.x_regs = [Value::Nil; X_REG_COUNT];
-        self.call_stack.clear();
+        self.chunk_addr = None;
+        // Reset stack-based frame tracking
+        self.frame_base = None;
+        self.current_y_count = 0;
+        self.frame_depth = 0;
+        // Reset stack pointer to top of young heap
+        self.stop = self.hend;
         self.status = ProcessStatus::Ready;
     }
 
-    // --- Call stack methods ---
-
-    /// Push a call frame before entering a function.
-    ///
-    /// Takes ownership of the current chunk (moves it to the stack).
-    ///
-    /// # Errors
-    ///
-    /// Returns `Err(StackOverflow)` if:
-    /// - Call stack is full (reached `MAX_CALL_DEPTH`)
-    /// - No current chunk exists (process has no code)
-    pub fn push_call_frame(&mut self, fn_addr: Vaddr) -> Result<(), StackOverflow> {
-        if self.call_stack.len() >= MAX_CALL_DEPTH {
-            return Err(StackOverflow);
-        }
-
-        // Take the current chunk - it goes on the stack
-        let Some(caller_chunk) = self.chunk.take() else {
-            return Err(StackOverflow);
-        };
-
-        self.call_stack.push(CallFrame {
-            return_ip: self.ip,
-            chunk: caller_chunk,
-            fn_addr,
-        });
-        Ok(())
-    }
-
-    /// Pop a call frame after returning from a function.
-    ///
-    /// Restores the caller's chunk and IP.
-    /// Returns `false` if at top level (call stack empty).
-    pub fn pop_call_frame(&mut self) -> bool {
-        let Some(frame) = self.call_stack.pop() else {
-            return false;
-        };
-
-        self.ip = frame.return_ip;
-        self.chunk = Some(frame.chunk);
-        true
-    }
-
-    /// Check if at top level (no active calls).
+    /// Check if at top level (no active call frames).
     #[must_use]
-    pub fn at_top_level(&self) -> bool {
-        self.call_stack.is_empty()
+    pub const fn at_top_level(&self) -> bool {
+        self.frame_base.is_none()
     }
 
     /// Get the current call stack depth.
     #[must_use]
-    pub fn call_depth(&self) -> usize {
-        self.call_stack.len()
+    pub const fn call_depth(&self) -> usize {
+        self.frame_depth
+    }
+
+    // --- Stack-based frame methods ---
+
+    /// Allocate a new stack frame for a function call.
+    ///
+    /// Creates a frame header in the stack region. The frame starts with
+    /// no Y registers; use `extend_frame_y_regs` to add them.
+    ///
+    /// # Arguments
+    /// * `mem` - Memory space for writing frame header
+    /// * `return_ip` - Instruction pointer to resume at on return
+    /// * `chunk_addr` - Address of caller's `CompiledFn` (for reloading chunk on return)
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(StackOverflow)` if insufficient stack space.
+    pub fn allocate_frame<M: crate::platform::MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        return_ip: usize,
+        chunk_addr: Vaddr,
+    ) -> Result<(), StackOverflow> {
+        // Check stack space (with redzone)
+        let new_stop = self
+            .stop
+            .as_u64()
+            .checked_sub(FRAME_HEADER_SIZE as u64)
+            .ok_or(StackOverflow)?;
+
+        if new_stop < self.htop.as_u64() + STACK_REDZONE as u64 {
+            return Err(StackOverflow);
+        }
+
+        // Save caller's frame_base (0 if at top level)
+        let caller_frame_base = self.frame_base.map_or(0, Vaddr::as_u64);
+
+        // Allocate frame
+        self.stop = Vaddr::new(new_stop);
+        self.frame_base = Some(self.stop);
+        self.current_y_count = 0;
+        self.frame_depth += 1;
+
+        // Write frame header
+        let base = self.stop.as_u64();
+        mem.write(
+            Vaddr::new(base + frame_offset::RETURN_IP as u64),
+            return_ip as u64,
+        );
+        mem.write(
+            Vaddr::new(base + frame_offset::CHUNK_ADDR as u64),
+            chunk_addr.as_u64(),
+        );
+        mem.write(
+            Vaddr::new(base + frame_offset::CALLER_FRAME_BASE as u64),
+            caller_frame_base,
+        );
+        mem.write(Vaddr::new(base + frame_offset::Y_COUNT as u64), 0u64);
+
+        Ok(())
+    }
+
+    /// Deallocate the current frame and restore caller's context.
+    ///
+    /// Returns `None` if at top level, otherwise returns `(return_ip, chunk_addr)`.
+    pub fn deallocate_frame<M: crate::platform::MemorySpace>(
+        &mut self,
+        mem: &M,
+    ) -> Option<(usize, Vaddr)> {
+        let frame_base = self.frame_base?;
+
+        // Read frame header
+        let base = frame_base.as_u64();
+        let return_ip: u64 = mem.read(Vaddr::new(base + frame_offset::RETURN_IP as u64));
+        let chunk_addr: u64 = mem.read(Vaddr::new(base + frame_offset::CHUNK_ADDR as u64));
+        let caller_frame_base: u64 =
+            mem.read(Vaddr::new(base + frame_offset::CALLER_FRAME_BASE as u64));
+
+        // Restore caller's context
+        self.frame_depth = self.frame_depth.saturating_sub(1);
+
+        if caller_frame_base == 0 {
+            // Top level - no caller frame
+            self.frame_base = None;
+            self.current_y_count = 0;
+            self.stop = self.hend;
+        } else {
+            // Restore caller's frame
+            let caller_fb = Vaddr::new(caller_frame_base);
+            self.frame_base = Some(caller_fb);
+
+            // Read caller's y_count from its header
+            let caller_y_count: u64 =
+                mem.read(Vaddr::new(caller_frame_base + frame_offset::Y_COUNT as u64));
+            self.current_y_count = caller_y_count as usize;
+
+            // Restore stop: frame_base - y_count * slot_size
+            self.stop = Vaddr::new(caller_frame_base - caller_y_count * Y_REGISTER_SIZE as u64);
+        }
+
+        Some((return_ip as usize, Vaddr::new(chunk_addr)))
+    }
+
+    /// Extend the current frame with Y registers.
+    ///
+    /// Allocates space for Y registers below the frame header.
+    /// Y registers are NOT initialized (use `extend_frame_y_regs_zero` for that).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(StackOverflow)` if:
+    /// - No frame exists
+    /// - Too many Y registers requested
+    /// - Insufficient stack space
+    pub fn extend_frame_y_regs<M: crate::platform::MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        y_count: usize,
+    ) -> Result<(), StackOverflow> {
+        let frame_base = self.frame_base.ok_or(StackOverflow)?;
+
+        if y_count > MAX_Y_REGISTERS {
+            return Err(StackOverflow);
+        }
+
+        // Calculate new stop position
+        let y_space = y_count * Y_REGISTER_SIZE;
+        let new_stop = frame_base
+            .as_u64()
+            .checked_sub(y_space as u64)
+            .ok_or(StackOverflow)?;
+
+        if new_stop < self.htop.as_u64() + STACK_REDZONE as u64 {
+            return Err(StackOverflow);
+        }
+
+        // Update state
+        self.stop = Vaddr::new(new_stop);
+        self.current_y_count = y_count;
+
+        // Update y_count in frame header
+        mem.write(
+            Vaddr::new(frame_base.as_u64() + frame_offset::Y_COUNT as u64),
+            y_count as u64,
+        );
+
+        Ok(())
+    }
+
+    /// Extend the current frame with Y registers and initialize them to nil.
+    ///
+    /// This is GC-safe: all Y registers are valid from the start.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(StackOverflow)` if extension fails.
+    pub fn extend_frame_y_regs_zero<M: crate::platform::MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        y_count: usize,
+    ) -> Result<(), StackOverflow> {
+        self.extend_frame_y_regs(mem, y_count)?;
+
+        // Initialize Y registers to nil
+        for i in 0..y_count {
+            let y_addr = Vaddr::new(self.stop.as_u64() + i as u64 * Y_REGISTER_SIZE as u64);
+            mem.write(y_addr, Value::Nil);
+        }
+
+        Ok(())
+    }
+
+    /// Shrink the current frame by releasing Y registers.
+    ///
+    /// # Arguments
+    /// * `y_count` - Number of Y registers to release (must match current count)
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(StackOverflow)` if no frame exists or count mismatch.
+    pub fn shrink_frame_y_regs<M: crate::platform::MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        y_count: usize,
+    ) -> Result<(), StackOverflow> {
+        let frame_base = self.frame_base.ok_or(StackOverflow)?;
+
+        if y_count != self.current_y_count {
+            return Err(StackOverflow);
+        }
+
+        // Move stop back to frame_base
+        self.stop = frame_base;
+        self.current_y_count = 0;
+
+        // Update y_count in frame header
+        mem.write(
+            Vaddr::new(frame_base.as_u64() + frame_offset::Y_COUNT as u64),
+            0u64,
+        );
+
+        Ok(())
+    }
+
+    /// Get Y register value from current frame.
+    ///
+    /// Returns `None` if index out of bounds or no frame exists.
+    #[inline]
+    #[must_use]
+    pub fn get_y<M: crate::platform::MemorySpace>(&self, mem: &M, index: usize) -> Option<Value> {
+        if self.frame_base.is_none() || index >= self.current_y_count {
+            return None;
+        }
+
+        let y_addr = Vaddr::new(self.stop.as_u64() + index as u64 * Y_REGISTER_SIZE as u64);
+        Some(mem.read(y_addr))
+    }
+
+    /// Set Y register value in current frame.
+    ///
+    /// Returns `false` if index out of bounds or no frame exists.
+    #[inline]
+    pub fn set_y<M: crate::platform::MemorySpace>(
+        &self,
+        mem: &mut M,
+        index: usize,
+        value: Value,
+    ) -> bool {
+        if self.frame_base.is_none() || index >= self.current_y_count {
+            return false;
+        }
+
+        let y_addr = Vaddr::new(self.stop.as_u64() + index as u64 * Y_REGISTER_SIZE as u64);
+        mem.write(y_addr, value);
+        true
     }
 
     // --- Reduction counting methods ---

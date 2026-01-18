@@ -9,7 +9,7 @@ use super::{eval, setup};
 use crate::Vaddr;
 use crate::bytecode::{Chunk, encode_abc, encode_abx, op};
 use crate::platform::MockVSpace;
-use crate::process::{MAX_CALL_DEPTH, MAX_REDUCTIONS, Process};
+use crate::process::{MAX_REDUCTIONS, Process};
 use crate::realm::{Realm, bootstrap};
 use crate::value::Value;
 use crate::vm::{RunResult, Vm};
@@ -122,54 +122,62 @@ fn reductions_are_consumed() {
     assert_eq!(proc.reductions, 97);
 }
 
-// --- Call stack tests ---
+// --- Stack frame tests ---
 
 #[test]
-fn call_stack_push_pop() {
-    let (mut proc, _, _) = create_test_env();
+fn stack_frame_allocate_deallocate() {
+    let (mut proc, _, mut mem) = create_test_env();
 
-    // Set up initial chunk
+    // Set up initial chunk and allocate it on heap
     let chunk = create_loadint_chunk(1);
     proc.set_chunk(chunk);
     proc.ip = 42;
+    proc.ensure_chunk_on_heap(&mut mem);
+    let original_chunk_addr = proc.chunk_addr.unwrap();
 
-    // Push frame
-    let result = proc.push_call_frame(Vaddr::new(0x1000));
+    // Allocate frame
+    let result = proc.allocate_frame(&mut mem, proc.ip, original_chunk_addr);
     assert!(result.is_ok());
     assert_eq!(proc.call_depth(), 1);
-    assert!(proc.chunk.is_none()); // Chunk moved to stack
 
     // Set callee state
     proc.chunk = Some(create_loadint_chunk(1));
     proc.ip = 0;
 
-    // Pop frame
-    assert!(proc.pop_call_frame());
+    // Deallocate frame
+    let result = proc.deallocate_frame(&mem);
+    assert!(result.is_some());
+    let (return_ip, chunk_addr) = result.unwrap();
+    assert_eq!(return_ip, 42);
+    assert_eq!(chunk_addr, original_chunk_addr);
     assert_eq!(proc.call_depth(), 0);
-    assert_eq!(proc.ip, 42); // Restored
-    assert!(proc.chunk.is_some()); // Chunk restored
 }
 
 #[test]
-fn call_stack_overflow_detection() {
-    let (mut proc, _, _) = create_test_env();
+fn stack_frame_overflow_detection() {
+    let (mut proc, _, mut mem) = create_test_env();
 
-    // Fill call stack to max
-    for _ in 0..MAX_CALL_DEPTH {
-        proc.chunk = Some(create_loadint_chunk(1));
-        assert!(proc.push_call_frame(Vaddr::new(0x1000)).is_ok());
+    // Allocate frames until stack overflow
+    let mut frame_count = 0;
+    loop {
+        let result = proc.allocate_frame(&mut mem, 0, Vaddr::new(0));
+        if result.is_err() {
+            break;
+        }
+        frame_count += 1;
+        // Safety: don't loop forever
+        assert!(frame_count <= 10000, "Stack overflow not detected");
     }
 
-    // Next push should fail
-    proc.chunk = Some(create_loadint_chunk(1));
-    assert!(proc.push_call_frame(Vaddr::new(0x1000)).is_err());
+    // We should have allocated some frames before overflow
+    assert!(frame_count > 0, "Should allocate at least one frame");
 }
 
 #[test]
-fn pop_at_top_level_returns_false() {
-    let (mut proc, _, _) = create_test_env();
+fn deallocate_at_top_level_returns_none() {
+    let (mut proc, _, mem) = create_test_env();
     assert!(proc.at_top_level());
-    assert!(!proc.pop_call_frame());
+    assert!(proc.deallocate_frame(&mem).is_none());
 }
 
 // --- Integration tests for yield during function calls ---

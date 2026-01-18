@@ -4,6 +4,7 @@
 //! Function and closure allocation methods for Process.
 
 use crate::Vaddr;
+use crate::bytecode::Chunk;
 use crate::platform::MemorySpace;
 use crate::value::{HeapClosure, HeapCompiledFn, Value};
 
@@ -310,5 +311,80 @@ impl Process {
         }
 
         Some(Value::closure(dst_addr))
+    }
+
+    // --- Chunk loading methods (for stack-based call frames) ---
+
+    /// Load a chunk from a `CompiledFn` address on the heap.
+    ///
+    /// Reads the bytecode and constants from the heap and builds a `Chunk`.
+    /// Sets both `self.chunk` and `self.chunk_addr`.
+    ///
+    /// Returns `false` if the address is invalid or reading fails.
+    pub fn load_chunk_from<M: MemorySpace>(&mut self, mem: &M, fn_addr: Vaddr) -> bool {
+        // Read function header
+        let header: HeapCompiledFn = mem.read(fn_addr);
+
+        let code_len = header.code_len as usize;
+        let constants_len = header.constants_len as usize;
+
+        // Build chunk
+        let mut chunk = Chunk::new();
+
+        // Read bytecode
+        let code_addr = fn_addr.add(HeapCompiledFn::bytecode_offset() as u64);
+        for i in 0..code_len {
+            let instr_addr = code_addr.add((i * core::mem::size_of::<u32>()) as u64);
+            let instr: u32 = mem.read(instr_addr);
+            chunk.emit(instr);
+        }
+
+        // Read constants
+        let constants_addr = fn_addr.add(HeapCompiledFn::constants_offset(code_len) as u64);
+        for i in 0..constants_len {
+            let const_addr = constants_addr.add((i * core::mem::size_of::<Value>()) as u64);
+            let constant: Value = mem.read(const_addr);
+            chunk.add_constant(constant);
+        }
+
+        self.chunk = Some(chunk);
+        self.chunk_addr = Some(fn_addr);
+        true
+    }
+
+    /// Ensure the current chunk is allocated on the heap.
+    ///
+    /// If `chunk_addr` is already set, does nothing.
+    /// Otherwise, allocates the current chunk as a `CompiledFn` on the heap
+    /// and sets `chunk_addr` to its address.
+    ///
+    /// This is used when CALL is executed from top-level REPL code, where
+    /// the chunk hasn't been heap-allocated yet.
+    ///
+    /// Returns `false` if allocation fails (OOM) or no chunk exists.
+    pub fn ensure_chunk_on_heap<M: MemorySpace>(&mut self, mem: &mut M) -> bool {
+        // Already on heap
+        if self.chunk_addr.is_some() {
+            return true;
+        }
+
+        // Get current chunk - take ownership temporarily to avoid borrow conflict
+        let Some(chunk) = self.chunk.take() else {
+            return false;
+        };
+
+        // Allocate on heap as a pseudo-function (arity=0, not variadic)
+        let result = self.alloc_compiled_fn(mem, 0, false, 0, &chunk.code, &chunk.constants);
+
+        // Restore the chunk
+        self.chunk = Some(chunk);
+
+        // Set chunk_addr if allocation succeeded
+        let Some(Value::CompiledFn(addr)) = result else {
+            return false;
+        };
+
+        self.chunk_addr = Some(addr);
+        true
     }
 }

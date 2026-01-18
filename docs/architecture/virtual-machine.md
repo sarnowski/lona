@@ -24,7 +24,7 @@ The Lona VM is a register-based bytecode interpreter embedded in every realm. It
 |----------|-------------|
 | **Architecture** | Register-based (not stack-based) |
 | **Instruction size** | Fixed 32-bit (4 bytes) |
-| **Value size** | 64-bit tagged values |
+| **Value size** | 16-byte tagged enum (see [Value Representation](#value-representation)) |
 | **Registers** | X registers (temporaries), Y registers (locals) |
 | **Dispatch** | Direct threading (function pointers) |
 | **Scheduling** | Reduction-based cooperative preemption |
@@ -68,23 +68,22 @@ Modern high-performance VMs (BEAM, Lua 5.0+, Dalvik/ART) use register-based arch
 
 ## Value Representation
 
-All values in the VM are represented as tagged 64-bit words. This enables efficient register storage and comparison.
+Values in the VM are represented as 16-byte tagged enums. The current implementation uses a Rust `#[repr(u8)]` enum with an 8-byte payload, resulting in 16 bytes total (1-byte tag + 7 bytes padding + 8-byte payload).
 
-### Tagged Value Layout
+> **Future Optimization**: A packed 64-bit representation (tag in low bits, 60-bit payload) could reduce memory usage and improve cache performance. This optimization can be added later without changing the VM's semantics.
+
+### Current Value Layout
 
 ```
-64-bit Tagged Value
+16-byte Value (Rust enum)
 ┌─────────────────────────────────────────────────────────────────────┐
 │                                                                     │
-│  Immediate values (tag in low bits):                                │
-│  ┌───────────────────────────────────────────────────────┬────────┐ │
-│  │  Payload (60 bits)                                    │ Tag(4) │ │
-│  └───────────────────────────────────────────────────────┴────────┘ │
+│  ┌────────┬─────────────────────────┬───────────────────────────┐   │
+│  │ Tag(1) │  Padding (7 bytes)      │  Payload (8 bytes)        │   │
+│  └────────┴─────────────────────────┴───────────────────────────┘   │
 │                                                                     │
-│  Pointer values (tag in low bits, pointer in high bits):            │
-│  ┌───────────────────────────────────────────────────────┬────────┐ │
-│  │  Heap Pointer (60 bits, 16-byte aligned)              │ Tag(4) │ │
-│  └───────────────────────────────────────────────────────┴────────┘ │
+│  Tag: u8 discriminant (0x0-0xF)                                     │
+│  Payload: i64 for integers, Vaddr (u64) for heap pointers           │
 │                                                                     │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -120,37 +119,38 @@ The 4-bit tag space supports up to 16 primary types:
 
 **Note**: The complete type system includes additional types (floats, vectors, sets, capabilities, etc.) documented in `docs/lonala/data-types.md`. Types are added to the VM as needed. The implementation source code (`crates/lona-vm/src/value/`) is the authoritative reference for currently supported types.
 
-### Small Integer Optimization
+### Integer Representation
 
-Most integers in typical programs fit in 60 bits. These are stored inline without heap allocation:
+Integers use the full 64-bit `i64` range and are stored inline in the `Value` enum's payload:
 
 ```
-Small Integer (inline, no allocation)
+Integer Value (inline in 16-byte Value)
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Range: -2^59 to 2^59 - 1  (±576 quadrillion)                       │
+│  Range: -2^63 to 2^63 - 1  (full i64 range)                         │
 │                                                                     │
-│  ┌───────────────────────────────────────────────────────┬────────┐ │
-│  │  Signed Integer Value (60 bits)                       │ 0x2    │ │
-│  └───────────────────────────────────────────────────────┴────────┘ │
+│  ┌────────┬─────────────────────────┬───────────────────────────┐   │
+│  │  0x2   │  Padding (7 bytes)      │  i64 value (8 bytes)      │   │
+│  └────────┴─────────────────────────┴───────────────────────────┘   │
 │                                                                     │
 │  Operations: Add, subtract, multiply check for overflow.            │
-│  On overflow: Promote to BigInt (heap-allocated).                   │
+│  On overflow: Promote to BigInt (heap-allocated, future).           │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Pointer Alignment
+### Heap Pointers
 
-Heap-allocated values are aligned to 16 bytes. This provides 4 bits for the tag in the pointer itself, eliminating the need for separate tag storage:
+Heap-allocated values store a `Vaddr` (virtual address) in the payload. The tag identifies the heap object type:
 
 ```
-Pointer Value (16-byte aligned)
+Pointer Value (in 16-byte Value)
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Memory address: 0x...........0  (low 4 bits always zero)           │
 │                                                                     │
-│  Tagged pointer: address | tag                                      │
+│  ┌────────┬─────────────────────────┬───────────────────────────┐   │
+│  │  Tag   │  Padding (7 bytes)      │  Vaddr (8 bytes)          │   │
+│  └────────┴─────────────────────────┴───────────────────────────┘   │
 │                                                                     │
-│  To get address: value & ~0xF                                       │
-│  To get tag:     value & 0xF                                        │
+│  Heap objects are 8-byte aligned.                                   │
+│  Tag determines how to interpret the pointed-to object.             │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -188,8 +188,6 @@ Properties:
 ```
 
 ### Y Registers (Locals)
-
-> **Implementation Status**: Y registers are not yet implemented. The current VM uses a `Vec<CallFrame>` approach where the caller's chunk and IP are saved on the call stack. Y registers will be added when the compiler needs to preserve locals across non-tail function calls (e.g., for `let` bindings used after nested calls).
 
 Y registers are stack-frame-local variables that persist across function calls:
 
@@ -672,7 +670,7 @@ Example compilation of (+ a b):
 
 ## Stack Frames and Calling Convention
 
-> **Implementation Status**: The full stack frame layout with Y registers, frame pointer, and ALLOCATE/DEALLOCATE is not yet implemented. Currently, the VM uses a simpler `Vec<CallFrame>` that stores the return IP and caller's bytecode chunk. The full BEAM-style stack will be implemented when Y registers are added.
+Stack frames are stored in the process's stack region (grows down from `hend`). Each frame has a fixed-size header followed by Y registers for local variables. See `crates/lona-vm/src/process/mod.rs` for the detailed implementation.
 
 ### Stack Layout
 

@@ -210,6 +210,22 @@ fn print_runtime_error<U: Uart>(e: &RuntimeError, uart: &mut U) {
             uart.write_str(expected);
         }
         RuntimeError::StackOverflow => uart.write_str("call stack overflow"),
+        RuntimeError::YRegisterOutOfBounds { index, allocated } => {
+            uart.write_str("Y register ");
+            print_usize(*index, uart);
+            uart.write_str(" out of bounds (");
+            print_usize(*allocated, uart);
+            uart.write_str(" allocated)");
+        }
+        RuntimeError::FrameMismatch {
+            allocated,
+            deallocate_count,
+        } => {
+            uart.write_str("frame mismatch: allocated ");
+            print_usize(*allocated, uart);
+            uart.write_str(" Y regs, tried to deallocate ");
+            print_usize(*deallocate_count, uart);
+        }
     }
 }
 

@@ -13,6 +13,7 @@ mod map_test;
 mod metadata_test;
 mod run_result_test;
 mod tuple_test;
+mod y_register_test;
 mod yield_test;
 
 use super::*;

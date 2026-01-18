@@ -53,6 +53,54 @@ pub mod op {
     pub const BUILD_CLOSURE: u8 = 11;
     /// Build vector: `X(A) := {X(B)..X(B+C-1)}` (C elements starting at X(B))
     pub const BUILD_VECTOR: u8 = 12;
+
+    // --- Y Register Instructions ---
+
+    /// Allocate Y registers for current frame (uninitialized).
+    ///
+    /// Format: `ALLOCATE A, B`
+    /// - A: number of Y registers to allocate (0-63)
+    /// - B: number of live X registers (for future GC)
+    ///
+    /// The frame must already exist (created by CALL). This extends it with Y register slots.
+    /// Y registers are NOT initialized - use `ALLOCATE_ZERO` for GC-safe initialization.
+    pub const ALLOCATE: u8 = 13;
+
+    /// Allocate Y registers and initialize to nil (GC-safe).
+    ///
+    /// Format: `ALLOCATE_ZERO A, B`
+    /// - A: number of Y registers to allocate (0-63)
+    /// - B: number of live X registers (for future GC)
+    ///
+    /// Same as ALLOCATE, but initializes all Y registers to nil.
+    /// Use this when Y registers may not be assigned before a potential GC point.
+    pub const ALLOCATE_ZERO: u8 = 14;
+
+    /// Deallocate Y registers before return.
+    ///
+    /// Format: `DEALLOCATE A`
+    /// - A: number of Y registers to release (must match ALLOCATE)
+    ///
+    /// Releases Y register space. Must be called before RETURN if ALLOCATE was used.
+    pub const DEALLOCATE: u8 = 15;
+
+    /// Move X register to Y register: `Y(A) := X(B)`.
+    ///
+    /// Format: `MOVE_XY A, B`
+    /// - A: Y register index (destination)
+    /// - B: X register index (source)
+    ///
+    /// Saves a value from an X register to a Y register for preservation across calls.
+    pub const MOVE_XY: u8 = 16;
+
+    /// Move Y register to X register: `X(A) := Y(B)`.
+    ///
+    /// Format: `MOVE_YX A, B`
+    /// - A: X register index (destination)
+    /// - B: Y register index (source)
+    ///
+    /// Restores a value from a Y register to an X register after a call.
+    pub const MOVE_YX: u8 = 17;
 }
 
 /// Bit widths for instruction fields.
