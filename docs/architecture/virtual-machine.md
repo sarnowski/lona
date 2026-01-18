@@ -189,6 +189,8 @@ Properties:
 
 ### Y Registers (Locals)
 
+> **Implementation Status**: Y registers are not yet implemented. The current VM uses a `Vec<CallFrame>` approach where the caller's chunk and IP are saved on the call stack. Y registers will be added when the compiler needs to preserve locals across non-tail function calls (e.g., for `let` bindings used after nested calls).
+
 Y registers are stack-frame-local variables that persist across function calls:
 
 ```
@@ -421,10 +423,20 @@ Each instruction has an associated reduction cost for scheduling fairness:
 | Arithmetic | 1 | Single operation |
 | Comparison | 1 | Single comparison |
 | Jump | 1 | Branch |
-| Function call | 1 + arg_count | Setup overhead |
-| Intrinsic | 1-10+ | Depends on intrinsic |
-| Collection ops | 1-5 | Depends on size |
-| Process ops | 10-100 | I/O and scheduling |
+| Function call (CALL) | 1 | CALL instruction only (per BEAM) |
+| Intrinsic | 1-10 | Depends on complexity (see below) |
+| Collection build | 1 + size/8 | Scales with element count |
+| Namespace/var ops | 10 | Heap and registry access |
+
+**Intrinsic costs by category:**
+
+| Category | Cost | Examples |
+|----------|------|----------|
+| Predicates, arithmetic, comparison | 1 | `+`, `-`, `=`, `nil?`, `integer?` |
+| Simple sequence ops | 2 | `count`, `first`, `empty?` |
+| Collection access, strings | 3 | `get`, `nth`, `rest`, `str`, `name` |
+| Collection mutation | 5 | `put` |
+| Namespace/var operations | 10 | `intern`, `var-get`, `def-root` |
 
 ---
 
@@ -488,29 +500,38 @@ fn execute(process: &mut Process) -> RunResult {
         let instruction = process.chunk.code[process.pc];
         process.pc += 1;
 
-        // Decode opcode
-        let opcode = instruction >> 26;
-
-        // Dispatch to handler
-        match opcode {
+        // Decode and execute, getting reduction cost
+        let cost = match decode_opcode(instruction) {
             OP_MOVE => {
-                let a = decode_a(instruction);
-                let b = decode_b(instruction);
-                process.reg[a] = process.reg[b];
-                process.reductions -= 1;
+                process.reg[decode_a(instruction)] = process.reg[decode_b(instruction)];
+                1  // Simple ops cost 1
             }
-            OP_ADD => {
-                let a = decode_a(instruction);
-                let b = decode_rk(instruction, process);
-                let c = decode_rk_c(instruction, process);
-                process.reg[a] = add(b, c)?;
-                process.reductions -= 1;
+            OP_INTRINSIC => {
+                let id = decode_a(instruction);
+                call_intrinsic(id, process)?;
+                intrinsic_cost(id)  // Variable cost: 1-10
+            }
+            OP_CALL => {
+                // Push frame, set up callee
+                push_call_frame(process);
+                1  // CALL itself costs 1 (per BEAM)
+            }
+            OP_BUILD_TUPLE => {
+                let count = decode_c(instruction);
+                build_tuple(process, count)?;
+                1 + count / 8  // Scales with size
             }
             OP_RETURN => {
-                return RunResult::Completed(process.reg[0]);
+                if !pop_call_frame(process) {
+                    return RunResult::Completed(process.reg[0]);
+                }
+                1
             }
             // ... other opcodes
-        }
+        };
+
+        // Consume reductions
+        process.reductions = process.reductions.saturating_sub(cost);
     }
 }
 ```
@@ -546,25 +567,26 @@ Benefits:
 
 ### Reduction Counting
 
-Every instruction decrements a reduction counter. When the counter reaches zero, the process yields:
+Each instruction consumes reductions based on its complexity (see [Instruction Execution Cost](#instruction-execution-cost)). When the budget is exhausted, the process yields:
 
 ```
 REDUCTION COUNTING
 ════════════════════════════════════════════════════════════════════════
 
-const MAX_REDUCTIONS: u32 = 4000;  // ~1ms time slice
+const MAX_REDUCTIONS: u32 = 2000;  // ~500µs time slice
 
 Process execution:
 1. Set reductions = MAX_REDUCTIONS
-2. Execute instructions, decrementing reductions
+2. Execute instruction, consume its cost from reductions
 3. When reductions == 0, yield to scheduler
-4. Scheduler picks next process
+4. Scheduler picks next process, resets its budget
 5. Repeat
 
 This ensures:
 - Fair scheduling among processes
 - No process can monopolize CPU
 - Bounded latency for other processes
+- Expensive operations (intrinsics, collection builds) cost more
 - Works with cooperative yielding (receive, etc.)
 ```
 
@@ -649,6 +671,8 @@ Example compilation of (+ a b):
 ---
 
 ## Stack Frames and Calling Convention
+
+> **Implementation Status**: The full stack frame layout with Y registers, frame pointer, and ALLOCATE/DEALLOCATE is not yet implemented. Currently, the VM uses a simpler `Vec<CallFrame>` that stores the return IP and caller's bytecode chunk. The full BEAM-style stack will be implemented when Y registers are added.
 
 ### Stack Layout
 

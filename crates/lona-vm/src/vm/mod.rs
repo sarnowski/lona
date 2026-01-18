@@ -6,17 +6,26 @@
 //! The VM executes compiled bytecode chunks. It is stateless - all execution
 //! state lives in the `Process` struct, which owns registers, heap, and IP.
 //!
+//! The VM uses an explicit call stack for function calls instead of Rust recursion,
+//! enabling cooperative scheduling via reduction counting. Long-running computations
+//! can yield after exhausting their reduction budget and resume later.
+//!
 //! See `docs/architecture/virtual-machine.md` for the full specification.
 
 #[cfg(test)]
 mod vm_test;
 
-use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op};
-use crate::intrinsics::{self, CoreCollectionError, IntrinsicError, core_get, core_nth};
+use crate::Vaddr;
+use crate::bytecode::{
+    Chunk, decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op,
+};
+use crate::intrinsics::{
+    self, CoreCollectionError, IntrinsicError, core_get, core_nth, intrinsic_cost,
+};
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::Realm;
-use crate::value::Value;
+use crate::value::{HeapCompiledFn, Value};
 
 /// Maximum number of elements in a tuple literal.
 const MAX_TUPLE_ELEMENTS: usize = 64;
@@ -64,22 +73,19 @@ fn build_vector<M: MemorySpace>(
     Ok(())
 }
 
-/// Execute a user-defined function.
+/// Prepare a user-defined function call (validate arity, build chunk).
 ///
-/// Reads the function's bytecode from the heap, builds a temporary chunk,
-/// and executes it. Arguments should already be in X1..X(argc).
+/// This does NOT push a call frame - the caller must do that.
+/// Arguments should already be in X1..X(argc).
 ///
 /// For variadic functions, extra arguments are collected into a tuple
 /// and placed in the rest parameter register (X(arity+1)).
-fn call_user_fn<M: MemorySpace>(
+fn prepare_user_fn<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
-    realm: &mut Realm,
-    fn_addr: crate::Vaddr,
+    fn_addr: Vaddr,
     argc: u8,
-) -> Result<Value, RuntimeError> {
-    use crate::value::HeapCompiledFn;
-
+) -> Result<Chunk, RuntimeError> {
     // Read function header
     let header: HeapCompiledFn = mem.read(fn_addr);
 
@@ -120,7 +126,7 @@ fn call_user_fn<M: MemorySpace>(
     }
 
     // Build chunk from function bytecode and constants
-    let mut chunk = crate::bytecode::Chunk::new();
+    let mut chunk = Chunk::new();
 
     // Read bytecode
     let code_addr = fn_addr.add(HeapCompiledFn::bytecode_offset() as u64);
@@ -139,22 +145,32 @@ fn call_user_fn<M: MemorySpace>(
         chunk.add_constant(constant);
     }
 
-    // Save current execution state
-    let saved_chunk = proc.chunk.take();
-    let saved_ip = proc.ip;
+    Ok(chunk)
+}
 
-    // Set up function execution
-    proc.chunk = Some(chunk);
-    proc.ip = 0;
+/// Prepare a closure call (load captures, validate arity, build chunk).
+///
+/// This does NOT push a call frame - the caller must do that.
+/// Returns the function address and chunk for the closure's underlying function.
+fn prepare_closure<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    closure_addr: Vaddr,
+    argc: u8,
+) -> Result<(Vaddr, Chunk), RuntimeError> {
+    let closure: crate::value::HeapClosure = mem.read(closure_addr);
 
-    // Execute the function
-    let result = Vm::run(proc, mem, realm);
+    // Load captured values into registers after regular args
+    let captures_base = argc as usize + 1;
+    let captures_offset = closure_addr.add(crate::value::HeapClosure::captures_offset() as u64);
 
-    // Restore caller's state
-    proc.chunk = saved_chunk;
-    proc.ip = saved_ip;
+    for i in 0..closure.captures_len as usize {
+        let capture_addr = captures_offset.add((i * core::mem::size_of::<Value>()) as u64);
+        proc.x_regs[captures_base + i] = mem.read(capture_addr);
+    }
 
-    result
+    let chunk = prepare_user_fn(proc, mem, closure.function, argc)?;
+    Ok((closure.function, chunk))
 }
 
 /// Maximum number of captured variables in a closure.
@@ -267,55 +283,70 @@ fn call_tuple<M: MemorySpace>(
     })
 }
 
-/// Execute a CALL instruction - dispatch based on callable type.
+/// Handle CALL instruction without recursion.
+///
+/// For native functions, keywords, maps, tuples: execute immediately and return cost.
+/// For compiled functions and closures: push call frame, set up callee's chunk/IP.
 ///
 /// Handles:
 /// - `NativeFn(id)`: Native/intrinsic function call
-/// - `CompiledFn(addr)`: User-defined function call
-/// - `Closure(addr)`: Closure call (function + captures)
+/// - `CompiledFn(addr)`: User-defined function call (non-recursive)
+/// - `Closure(addr)`: Closure call (function + captures, non-recursive)
 /// - `Keyword(_)`: `(:key map [default])` → `(get map :key [default])`
 /// - `Map(_)`: `(map key [default])` → `(get map key [default])`
 /// - `Tuple(_)`: `(tuple idx [default])` → `(nth tuple idx [default])`
-fn execute_call<M: MemorySpace>(
+fn handle_call<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
     fn_reg: usize,
     argc: u8,
-) -> Result<(), RuntimeError> {
+) -> Result<u32, RuntimeError> {
     let fn_val = proc.x_regs[fn_reg];
 
     match fn_val {
-        Value::NativeFn(id) => intrinsics::call_intrinsic(id as u8, argc, proc, mem, realm)?,
+        Value::NativeFn(id) => {
+            intrinsics::call_intrinsic(id as u8, argc, proc, mem, realm)?;
+            Ok(intrinsic_cost(id as u8))
+        }
+
         Value::CompiledFn(fn_addr) => {
-            proc.x_regs[0] = call_user_fn(proc, mem, realm, fn_addr, argc)?;
+            let callee_chunk = prepare_user_fn(proc, mem, fn_addr, argc)?;
+            proc.push_call_frame(fn_addr)
+                .map_err(|_| RuntimeError::StackOverflow)?;
+            proc.chunk = Some(callee_chunk);
+            proc.ip = 0;
+            Ok(1)
         }
+
         Value::Closure(closure_addr) => {
-            let closure: crate::value::HeapClosure = mem.read(closure_addr);
-
-            // Load captured values into registers after regular args
-            let captures_base = argc as usize + 1;
-            let captures_offset =
-                closure_addr.add(crate::value::HeapClosure::captures_offset() as u64);
-
-            for i in 0..closure.captures_len as usize {
-                let capture_addr = captures_offset.add((i * core::mem::size_of::<Value>()) as u64);
-                proc.x_regs[captures_base + i] = mem.read(capture_addr);
-            }
-
-            proc.x_regs[0] = call_user_fn(proc, mem, realm, closure.function, argc)?;
+            let (fn_addr, callee_chunk) = prepare_closure(proc, mem, closure_addr, argc)?;
+            proc.push_call_frame(fn_addr)
+                .map_err(|_| RuntimeError::StackOverflow)?;
+            proc.chunk = Some(callee_chunk);
+            proc.ip = 0;
+            Ok(1)
         }
-        Value::Keyword(_) => proc.x_regs[0] = call_keyword(proc, mem, fn_val, argc)?,
-        Value::Map(_) => proc.x_regs[0] = call_map(proc, mem, fn_val, argc)?,
-        Value::Tuple(_) => proc.x_regs[0] = call_tuple(proc, mem, fn_val, argc)?,
-        _ => {
-            return Err(RuntimeError::NotCallable {
-                type_name: fn_val.type_name(),
-            });
+
+        Value::Keyword(_) => {
+            proc.x_regs[0] = call_keyword(proc, mem, fn_val, argc)?;
+            Ok(2)
         }
+
+        Value::Map(_) => {
+            proc.x_regs[0] = call_map(proc, mem, fn_val, argc)?;
+            Ok(2)
+        }
+
+        Value::Tuple(_) => {
+            proc.x_regs[0] = call_tuple(proc, mem, fn_val, argc)?;
+            Ok(2)
+        }
+
+        _ => Err(RuntimeError::NotCallable {
+            type_name: fn_val.type_name(),
+        }),
     }
-
-    Ok(())
 }
 
 /// Build a closure from a compiled function and captures tuple.
@@ -459,148 +490,213 @@ impl From<IntrinsicError> for RuntimeError {
     }
 }
 
+/// Result of running a process for one time slice.
+///
+/// Used by the scheduler to determine what to do next with a process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunResult {
+    /// Process completed execution normally. Contains return value.
+    Completed(Value),
+
+    /// Process yielded due to exhausted reduction budget.
+    /// The process can be resumed later by calling `Vm::run` again.
+    Yielded,
+
+    /// Process encountered a runtime error.
+    Error(RuntimeError),
+}
+
+impl RunResult {
+    /// Returns true if execution completed (success or error).
+    ///
+    /// Terminal results mean the process should not be resumed.
+    #[must_use]
+    pub const fn is_terminal(&self) -> bool {
+        matches!(self, Self::Completed(_) | Self::Error(_))
+    }
+
+    /// Returns true if execution can be resumed.
+    #[must_use]
+    pub const fn is_yielded(&self) -> bool {
+        matches!(self, Self::Yielded)
+    }
+}
+
+/// Execute a single instruction and return its reduction cost.
+///
+/// Returns `Ok(cost)` to continue execution, or `Err(result)` to terminate.
+fn execute_instruction<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    realm: &mut Realm,
+    instr: u32,
+    opcode: u8,
+    constant_value: Option<Value>,
+) -> Result<u32, RunResult> {
+    match opcode {
+        op::LOADNIL => {
+            proc.x_regs[decode_a(instr) as usize] = Value::Nil;
+            Ok(1)
+        }
+        op::LOADBOOL => {
+            proc.x_regs[decode_a(instr) as usize] = Value::bool(decode_bx(instr) != 0);
+            Ok(1)
+        }
+        op::LOADINT => {
+            proc.x_regs[decode_a(instr) as usize] = Value::int(i64::from(decode_sbx(instr)));
+            Ok(1)
+        }
+        op::LOADK => {
+            if let Some(value) = constant_value {
+                proc.x_regs[decode_a(instr) as usize] = value;
+            }
+            Ok(1)
+        }
+        op::MOVE => {
+            proc.x_regs[decode_a(instr) as usize] = proc.x_regs[decode_b(instr) as usize];
+            Ok(1)
+        }
+        op::INTRINSIC => {
+            let id = decode_a(instr);
+            intrinsics::call_intrinsic(id, decode_b(instr) as u8, proc, mem, realm)
+                .map_err(|e| RunResult::Error(e.into()))?;
+            Ok(intrinsic_cost(id))
+        }
+        op::CALL => handle_call(
+            proc,
+            mem,
+            realm,
+            decode_a(instr) as usize,
+            decode_b(instr) as u8,
+        )
+        .map_err(RunResult::Error),
+        op::RETURN => {
+            if proc.pop_call_frame() {
+                Ok(1) // Continue in caller's context
+            } else {
+                Err(RunResult::Completed(proc.x_regs[0])) // Top-level return
+            }
+        }
+        op::HALT => Err(RunResult::Completed(proc.x_regs[0])),
+        op::BUILD_TUPLE => {
+            let c = decode_c(instr) as usize;
+            build_tuple(
+                proc,
+                mem,
+                decode_a(instr) as usize,
+                decode_b(instr) as usize,
+                c,
+            )
+            .map_err(RunResult::Error)?;
+            Ok(1 + (c / 8) as u32)
+        }
+        op::BUILD_VECTOR => {
+            let c = decode_c(instr) as usize;
+            build_vector(
+                proc,
+                mem,
+                decode_a(instr) as usize,
+                decode_b(instr) as usize,
+                c,
+            )
+            .map_err(RunResult::Error)?;
+            Ok(1 + (c / 8) as u32)
+        }
+        op::BUILD_MAP => {
+            let c = decode_c(instr) as usize;
+            build_map(
+                proc,
+                mem,
+                decode_a(instr) as usize,
+                decode_b(instr) as usize,
+                c,
+            )
+            .map_err(RunResult::Error)?;
+            Ok(1 + (c / 4) as u32)
+        }
+        op::BUILD_CLOSURE => {
+            build_closure(
+                proc,
+                mem,
+                decode_a(instr) as usize,
+                decode_b(instr) as usize,
+                decode_c(instr) as usize,
+            )
+            .map_err(RunResult::Error)?;
+            Ok(2)
+        }
+        _ => Err(RunResult::Error(RuntimeError::InvalidOpcode(opcode))),
+    }
+}
+
 /// Stateless bytecode virtual machine.
 ///
 /// The VM is a namespace for execution functions. All state lives in `Process`.
 pub struct Vm;
 
 impl Vm {
-    /// Run bytecode from a Process until completion.
+    /// Run bytecode until completion, yield, or error.
     ///
     /// The process must have a chunk set via `Process::set_chunk`.
-    /// Execution state (ip, `x_regs`) is read from and written to the process.
+    /// Execution state (ip, `x_regs`, call stack) is read from and written to the process.
     ///
-    /// Returns the value in X0 when execution completes (HALT or RETURN).
+    /// This implementation is non-recursive: function calls use the Process's call stack
+    /// instead of Rust stack recursion, enabling the VM to yield and resume at any call depth.
     ///
-    /// # Errors
-    ///
-    /// Returns an error if execution fails.
-    pub fn run<M: MemorySpace>(
-        proc: &mut Process,
-        mem: &mut M,
-        realm: &mut Realm,
-    ) -> Result<Value, RuntimeError> {
+    /// Returns:
+    /// - `RunResult::Completed(value)` when execution finishes (HALT or top-level RETURN)
+    /// - `RunResult::Yielded` when the reduction budget is exhausted (can be resumed)
+    /// - `RunResult::Error(e)` when a runtime error occurs
+    pub fn run<M: MemorySpace>(proc: &mut Process, mem: &mut M, realm: &mut Realm) -> RunResult {
         loop {
-            // Access chunk fresh each iteration to avoid borrow conflicts with intrinsics
-            let Some(chunk) = proc.chunk.as_ref() else {
-                return Err(RuntimeError::NoCode);
-            };
-
-            // Bounds check
-            if proc.ip >= chunk.code.len() {
-                return Err(RuntimeError::IpOutOfBounds);
+            // Check reduction budget
+            if proc.should_yield() {
+                return RunResult::Yielded;
             }
 
-            // Fetch instruction
+            // Get current chunk
+            let Some(chunk) = proc.chunk.as_ref() else {
+                return RunResult::Error(RuntimeError::NoCode);
+            };
+
+            // Bounds check and fetch
+            if proc.ip >= chunk.code.len() {
+                return RunResult::Error(RuntimeError::IpOutOfBounds);
+            }
             let instr = chunk.code[proc.ip];
             proc.ip += 1;
 
-            // Decode opcode
+            // Decode and pre-fetch constant for LOADK
             let opcode = decode_opcode(instr);
-
-            // For LOADK, get constant value before we release the chunk borrow
             let constant_value = if opcode == op::LOADK {
                 let bx = decode_bx(instr);
-                Some(
-                    chunk
-                        .constants
-                        .get(bx as usize)
-                        .copied()
-                        .ok_or(RuntimeError::ConstantOutOfBounds(bx))?,
-                )
+                match chunk.constants.get(bx as usize).copied() {
+                    Some(v) => Some(v),
+                    None => return RunResult::Error(RuntimeError::ConstantOutOfBounds(bx)),
+                }
             } else {
                 None
             };
 
-            // Dispatch - chunk borrow ends here, allowing mutable proc access
-            match opcode {
-                op::LOADNIL => {
-                    let a = decode_a(instr) as usize;
-                    proc.x_regs[a] = Value::Nil;
+            // Execute instruction
+            match execute_instruction(proc, mem, realm, instr, opcode, constant_value) {
+                Ok(cost) => {
+                    proc.consume_reductions(cost);
                 }
-
-                op::LOADBOOL => {
-                    let a = decode_a(instr) as usize;
-                    let bx = decode_bx(instr);
-                    proc.x_regs[a] = Value::bool(bx != 0);
-                }
-
-                op::LOADINT => {
-                    let a = decode_a(instr) as usize;
-                    let sbx = decode_sbx(instr);
-                    proc.x_regs[a] = Value::int(i64::from(sbx));
-                }
-
-                op::LOADK => {
-                    let a = decode_a(instr) as usize;
-                    // SAFETY: constant_value is always Some when opcode is LOADK
-                    // (computed in the if block above)
-                    if let Some(value) = constant_value {
-                        proc.x_regs[a] = value;
-                    }
-                }
-
-                op::MOVE => {
-                    let a = decode_a(instr) as usize;
-                    let b = decode_b(instr) as usize;
-                    proc.x_regs[a] = proc.x_regs[b];
-                }
-
-                op::INTRINSIC => {
-                    let intrinsic_id = decode_a(instr);
-                    let argc = decode_b(instr) as u8;
-                    intrinsics::call_intrinsic(intrinsic_id, argc, proc, mem, realm)?;
-                }
-
-                op::RETURN | op::HALT => {
-                    return Ok(proc.x_regs[0]);
-                }
-
-                op::BUILD_TUPLE => {
-                    let a = decode_a(instr) as usize;
-                    let b = decode_b(instr) as usize;
-                    let c = decode_c(instr) as usize;
-                    build_tuple(proc, mem, a, b, c)?;
-                }
-
-                op::BUILD_MAP => {
-                    let a = decode_a(instr) as usize;
-                    let b = decode_b(instr) as usize;
-                    let c = decode_c(instr) as usize;
-                    build_map(proc, mem, a, b, c)?;
-                }
-
-                op::CALL => {
-                    let fn_reg = decode_a(instr) as usize;
-                    let argc = decode_b(instr) as u8;
-                    execute_call(proc, mem, realm, fn_reg, argc)?;
-                }
-
-                op::BUILD_CLOSURE => {
-                    let target = decode_a(instr) as usize;
-                    let fn_reg = decode_b(instr) as usize;
-                    let captures_reg = decode_c(instr) as usize;
-                    build_closure(proc, mem, target, fn_reg, captures_reg)?;
-                }
-
-                op::BUILD_VECTOR => {
-                    let a = decode_a(instr) as usize;
-                    let b = decode_b(instr) as usize;
-                    let c = decode_c(instr) as usize;
-                    build_vector(proc, mem, a, b, c)?;
-                }
-
-                _ => {
-                    return Err(RuntimeError::InvalidOpcode(opcode));
-                }
+                Err(result) => return result,
             }
         }
     }
 }
 
-/// Convenience function to execute a process's bytecode.
+/// Convenience function to execute a process's bytecode to completion.
 ///
 /// The process must have a chunk set via `Process::set_chunk`.
+/// Automatically handles yielding by resetting the reduction budget and resuming.
+///
+/// Use this when you want to run a computation to completion without worrying
+/// about cooperative scheduling. For proper multi-process scheduling, use
+/// `Vm::run` directly and handle `RunResult::Yielded` appropriately.
 ///
 /// # Errors
 ///
@@ -610,5 +706,17 @@ pub fn execute<M: MemorySpace>(
     mem: &mut M,
     realm: &mut Realm,
 ) -> Result<Value, RuntimeError> {
-    Vm::run(proc, mem, realm)
+    // Initialize reduction budget
+    proc.reset_reductions();
+
+    loop {
+        match Vm::run(proc, mem, realm) {
+            RunResult::Completed(value) => return Ok(value),
+            RunResult::Yielded => {
+                // Single-threaded execution: just continue with fresh budget
+                proc.reset_reductions();
+            }
+            RunResult::Error(e) => return Err(e),
+        }
+    }
 }

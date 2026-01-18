@@ -54,6 +54,8 @@ mod namespace_test;
 #[cfg(test)]
 mod pool_test;
 #[cfg(test)]
+mod reduction_test;
+#[cfg(test)]
 mod stack_test;
 #[cfg(test)]
 mod value_alloc_test;
@@ -61,6 +63,12 @@ mod value_alloc_test;
 use crate::Vaddr;
 use crate::bytecode::Chunk;
 use crate::value::Value;
+
+#[cfg(any(test, feature = "std"))]
+use std::vec::Vec;
+
+#[cfg(not(any(test, feature = "std")))]
+use alloc::vec::Vec;
 
 /// Number of X registers (temporaries).
 pub const X_REG_COUNT: usize = 256;
@@ -115,6 +123,12 @@ pub const INITIAL_YOUNG_HEAP_SIZE: usize = 48 * 1024;
 /// Initial old heap size (12 KB).
 pub const INITIAL_OLD_HEAP_SIZE: usize = 12 * 1024;
 
+/// Maximum reductions per time slice.
+///
+/// Tuned for ~500µs execution time to fit within typical MCS budgets.
+/// See `docs/architecture/process-model.md` for scheduling details.
+pub const MAX_REDUCTIONS: u32 = 2000;
+
 /// Process execution status.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,17 +143,24 @@ pub enum ProcessStatus {
     Error = 3,
 }
 
-/// A saved call frame on the call stack.
+/// A saved call frame on the VM call stack.
 ///
+/// Contains all state needed to resume the caller after the callee returns.
 /// When calling a function, we save the current execution context here
 /// so it can be restored on return.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct CallFrame {
     /// Return address (instruction pointer to resume at).
     pub return_ip: usize,
+    /// The caller's bytecode chunk.
+    pub chunk: Chunk,
     /// Address of the function being called (for debugging/closures).
     pub fn_addr: Vaddr,
 }
+
+/// Stack overflow error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StackOverflow;
 
 /// A lightweight process with BEAM-style memory layout.
 ///
@@ -152,6 +173,12 @@ pub struct Process {
     pub pid: u64,
     /// Current execution status.
     pub status: ProcessStatus,
+
+    // Reduction counting
+    /// Remaining reductions before yield.
+    pub reductions: u32,
+    /// Total reductions executed by this process (for monitoring).
+    pub total_reductions: u64,
 
     // Young heap (stack grows down, heap grows up)
     /// Base (low address) of the young heap.
@@ -181,9 +208,8 @@ pub struct Process {
 
     // Call stack
     /// Saved call frames for function returns.
-    call_stack: [CallFrame; MAX_CALL_DEPTH],
-    /// Number of frames on the call stack (stack top index).
-    call_stack_len: usize,
+    /// Uses `Vec` because `CallFrame` contains `Chunk` which is not `Copy`.
+    call_stack: Vec<CallFrame>,
 
     // Interning tables
     /// Interned keywords (addresses of keyword `HeapString`s on the heap).
@@ -231,8 +257,13 @@ impl Process {
     /// * `young_size` - Size of young heap in bytes
     /// * `old_base` - Base address of old heap
     /// * `old_size` - Size of old heap in bytes
+    // Vec::new() is not const in alloc crate (no_std mode)
+    #[expect(
+        clippy::missing_const_for_fn,
+        reason = "Vec::new() is not const in no_std"
+    )]
     #[must_use]
-    pub const fn new(
+    pub fn new(
         pid: u64,
         young_base: Vaddr,
         young_size: usize,
@@ -245,6 +276,9 @@ impl Process {
         Self {
             pid,
             status: ProcessStatus::Ready,
+            // Reduction counting - starts at 0, must call reset_reductions() before run
+            reductions: 0,
+            total_reductions: 0,
             // Young heap: htop starts at base (grows up), stop starts at end (grows down)
             heap: young_base,
             hend: young_end,
@@ -259,11 +293,7 @@ impl Process {
             x_regs: [Value::Nil; X_REG_COUNT],
             chunk: None,
             // Call stack
-            call_stack: [CallFrame {
-                return_ip: 0,
-                fn_addr: Vaddr::new(0),
-            }; MAX_CALL_DEPTH],
-            call_stack_len: 0,
+            call_stack: Vec::new(),
             // Interning tables
             keyword_intern: [Vaddr::new(0); MAX_INTERNED_KEYWORDS],
             keyword_intern_len: 0,
@@ -356,42 +386,97 @@ impl Process {
     }
 
     /// Reset execution state for a new evaluation.
-    pub const fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.ip = 0;
         self.x_regs = [Value::Nil; X_REG_COUNT];
-        self.call_stack_len = 0;
+        self.call_stack.clear();
         self.status = ProcessStatus::Ready;
     }
 
     // --- Call stack methods ---
 
-    /// Push a call frame onto the stack.
+    /// Push a call frame before entering a function.
     ///
-    /// Returns `false` if the call stack is full (stack overflow).
-    pub const fn push_call_frame(&mut self, return_ip: usize, fn_addr: Vaddr) -> bool {
-        if self.call_stack_len >= MAX_CALL_DEPTH {
-            return false;
+    /// Takes ownership of the current chunk (moves it to the stack).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Err(StackOverflow)` if:
+    /// - Call stack is full (reached `MAX_CALL_DEPTH`)
+    /// - No current chunk exists (process has no code)
+    pub fn push_call_frame(&mut self, fn_addr: Vaddr) -> Result<(), StackOverflow> {
+        if self.call_stack.len() >= MAX_CALL_DEPTH {
+            return Err(StackOverflow);
         }
-        self.call_stack[self.call_stack_len] = CallFrame { return_ip, fn_addr };
-        self.call_stack_len += 1;
+
+        // Take the current chunk - it goes on the stack
+        let Some(caller_chunk) = self.chunk.take() else {
+            return Err(StackOverflow);
+        };
+
+        self.call_stack.push(CallFrame {
+            return_ip: self.ip,
+            chunk: caller_chunk,
+            fn_addr,
+        });
+        Ok(())
+    }
+
+    /// Pop a call frame after returning from a function.
+    ///
+    /// Restores the caller's chunk and IP.
+    /// Returns `false` if at top level (call stack empty).
+    pub fn pop_call_frame(&mut self) -> bool {
+        let Some(frame) = self.call_stack.pop() else {
+            return false;
+        };
+
+        self.ip = frame.return_ip;
+        self.chunk = Some(frame.chunk);
         true
     }
 
-    /// Pop a call frame from the stack.
-    ///
-    /// Returns `None` if the call stack is empty.
-    pub const fn pop_call_frame(&mut self) -> Option<CallFrame> {
-        if self.call_stack_len == 0 {
-            return None;
-        }
-        self.call_stack_len -= 1;
-        Some(self.call_stack[self.call_stack_len])
+    /// Check if at top level (no active calls).
+    #[must_use]
+    pub fn at_top_level(&self) -> bool {
+        self.call_stack.is_empty()
     }
 
     /// Get the current call stack depth.
     #[must_use]
-    pub const fn call_depth(&self) -> usize {
-        self.call_stack_len
+    pub fn call_depth(&self) -> usize {
+        self.call_stack.len()
+    }
+
+    // --- Reduction counting methods ---
+
+    /// Reset reduction budget for a new time slice.
+    pub const fn reset_reductions(&mut self) {
+        self.reductions = MAX_REDUCTIONS;
+    }
+
+    /// Consume reductions. Returns false if budget exhausted.
+    ///
+    /// If the cost exceeds remaining budget, consumes all remaining reductions
+    /// and returns false. The `total_reductions` counter is always updated
+    /// with the actual amount consumed.
+    pub fn consume_reductions(&mut self, cost: u32) -> bool {
+        if self.reductions >= cost {
+            self.reductions -= cost;
+            self.total_reductions = self.total_reductions.wrapping_add(u64::from(cost));
+            true
+        } else {
+            let remaining = self.reductions;
+            self.reductions = 0;
+            self.total_reductions = self.total_reductions.wrapping_add(u64::from(remaining));
+            false
+        }
+    }
+
+    /// Check if budget is exhausted.
+    #[must_use]
+    pub const fn should_yield(&self) -> bool {
+        self.reductions == 0
     }
 
     // --- Process-bound var bindings ---

@@ -31,7 +31,8 @@ PROCESS (Pure Userspace Construct)
 │  Execution State:                                                   │
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │  status: Running | Waiting | Exited                         │    │
-│  │  reductions: u32       - Instructions until yield           │    │
+│  │  reductions: u32       - Remaining budget (weighted costs)  │    │
+│  │  total_reductions: u64 - Lifetime reductions (monitoring)   │    │
 │  │  ip: usize             - Instruction pointer                │    │
 │  │  x_regs: [Value; 256]  - X registers (temporaries)          │    │
 │  └─────────────────────────────────────────────────────────────┘    │
@@ -760,7 +761,7 @@ Within a realm, processes yield cooperatively after executing a certain number o
 REDUCTION COUNTING
 ════════════════════════════════════════════════════════════════════════════════
 
-const MAX_REDUCTIONS: u32 = 4000;  // Tune for ~1ms time slice
+const MAX_REDUCTIONS: u32 = 2000;  // Tune for ~500µs (MCS budget)
 
 fn run_process(proc: &mut Process) -> RunResult {
     while proc.reductions > 0 {

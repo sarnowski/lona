@@ -21,6 +21,8 @@ mod arithmetic_test;
 #[cfg(test)]
 mod boolean_test;
 #[cfg(test)]
+mod cost_test;
+#[cfg(test)]
 mod keyword_intrinsic_test;
 #[cfg(test)]
 mod lookup_test;
@@ -232,6 +234,76 @@ pub fn lookup_intrinsic(name: &str) -> Option<u8> {
 #[must_use]
 pub fn intrinsic_name(id: u8) -> Option<&'static str> {
     INTRINSIC_NAMES.get(id as usize).copied()
+}
+
+/// Get reduction cost for an intrinsic.
+///
+/// Returns the number of reductions to charge for executing this intrinsic.
+/// Costs are approximate and grouped by operation complexity:
+/// - Arithmetic, comparison, predicates: 1
+/// - Simple collection ops (count, first, rest, empty): 2
+/// - Collection access (get, nth, keys, vals): 3
+/// - String operations: 3
+/// - Collection mutation (put): 5
+/// - Namespace/var operations: 10
+#[must_use]
+pub const fn intrinsic_cost(id: u8) -> u32 {
+    match id {
+        // Arithmetic, comparison, boolean logic, type predicates: cost 1
+        id::ADD
+        | id::SUB
+        | id::MUL
+        | id::DIV
+        | id::MOD
+        | id::EQ
+        | id::LT
+        | id::GT
+        | id::LE
+        | id::GE
+        | id::NOT
+        | id::IDENTICAL
+        | id::IS_NIL
+        | id::IS_INT
+        | id::IS_STR
+        | id::IS_KEYWORD
+        | id::IS_SYMBOL
+        | id::IS_TUPLE
+        | id::IS_MAP
+        | id::IS_VECTOR
+        | id::IS_NAMESPACE
+        | id::IS_FN
+        | id::IS_VAR => 1,
+
+        // Simple collection ops: cost 2
+        id::COUNT | id::FIRST | id::IS_EMPTY => 2,
+
+        // Collection access, string ops, metadata: cost 3
+        id::NTH
+        | id::GET
+        | id::KEYS
+        | id::VALS
+        | id::REST
+        | id::KEYWORD
+        | id::NAME
+        | id::NAMESPACE
+        | id::STR
+        | id::META
+        | id::WITH_META => 3,
+
+        // Namespace and var operations: cost 10
+        id::CREATE_NS
+        | id::FIND_NS
+        | id::NS_NAME
+        | id::NS_MAP
+        | id::INTERN
+        | id::VAR_GET
+        | id::DEF_ROOT
+        | id::DEF_BINDING
+        | id::DEF_META => 10,
+
+        // Unknown and PUT: default cost 5
+        _ => 5,
+    }
 }
 
 /// Runtime error from intrinsic execution.
