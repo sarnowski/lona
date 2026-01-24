@@ -63,7 +63,7 @@ Semantics:
 - Patterns tried in order
 - First match executes corresponding body
 - `when` introduces a guard (boolean expression)
-- No match exits process with `[:error :badmatch %{:value v}]`
+- No match exits process with reason `[:error :badmatch %{:value v}]`
 - Each body is a single expression (use `do` for multiple)
 
 ### Pattern Syntax

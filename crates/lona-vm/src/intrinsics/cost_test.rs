@@ -53,6 +53,7 @@ fn simple_collection_ops_cost_two() {
 fn collection_access_ops_cost_three() {
     assert_eq!(intrinsic_cost(id::NTH), 3);
     assert_eq!(intrinsic_cost(id::GET), 3);
+    assert_eq!(intrinsic_cost(id::CONTAINS), 3);
     assert_eq!(intrinsic_cost(id::KEYS), 3);
     assert_eq!(intrinsic_cost(id::VALS), 3);
     assert_eq!(intrinsic_cost(id::REST), 3);

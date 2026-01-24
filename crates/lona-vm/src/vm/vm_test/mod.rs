@@ -11,6 +11,7 @@ mod keyword_test;
 mod literal_test;
 mod map_test;
 mod metadata_test;
+mod pattern_test;
 mod run_result_test;
 mod tuple_test;
 mod y_register_test;

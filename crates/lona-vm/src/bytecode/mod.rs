@@ -101,6 +101,146 @@ pub mod op {
     ///
     /// Restores a value from a Y register to an X register after a call.
     pub const MOVE_YX: u8 = 17;
+
+    // --- Pattern Matching Instructions ---
+
+    /// Test if X(A) is nil. Jump to Bx if NOT nil.
+    ///
+    /// Format: `IS_NIL A, Bx`
+    /// - A: register to test
+    /// - Bx: fail label (instruction offset to jump to if test fails)
+    pub const IS_NIL: u8 = 18;
+
+    /// Test if X(A) is a boolean. Jump to Bx if NOT boolean.
+    ///
+    /// Format: `IS_BOOL A, Bx`
+    pub const IS_BOOL: u8 = 19;
+
+    /// Test if X(A) is an integer. Jump to Bx if NOT integer.
+    ///
+    /// Format: `IS_INT A, Bx`
+    pub const IS_INT: u8 = 20;
+
+    /// Test if X(A) is a tuple. Jump to Bx if NOT tuple.
+    ///
+    /// Format: `IS_TUPLE A, Bx`
+    pub const IS_TUPLE: u8 = 21;
+
+    /// Test if X(A) is a vector. Jump to Bx if NOT vector.
+    ///
+    /// Format: `IS_VECTOR A, Bx`
+    pub const IS_VECTOR: u8 = 22;
+
+    /// Test if X(A) is a map. Jump to Bx if NOT map.
+    ///
+    /// Format: `IS_MAP A, Bx`
+    pub const IS_MAP: u8 = 23;
+
+    /// Test if X(A) is a keyword. Jump to Bx if NOT keyword.
+    ///
+    /// Format: `IS_KEYWORD A, Bx`
+    pub const IS_KEYWORD: u8 = 24;
+
+    /// Test if X(A) is a string. Jump to Bx if NOT string.
+    ///
+    /// Format: `IS_STRING A, Bx`
+    pub const IS_STRING: u8 = 25;
+
+    /// Test tuple arity: Jump to C if X(A) is not a tuple of length B.
+    ///
+    /// Format: `TEST_ARITY A, B, C`
+    /// - A: register containing tuple
+    /// - B: expected arity
+    /// - C: fail label (jump if arity mismatch or not a tuple)
+    pub const TEST_ARITY: u8 = 26;
+
+    /// Test vector length: Jump to C if X(A) is not a vector of length B.
+    ///
+    /// Format: `TEST_VEC_LEN A, B, C`
+    /// - A: register containing vector
+    /// - B: expected length
+    /// - C: fail label (jump if length mismatch or not a vector)
+    pub const TEST_VEC_LEN: u8 = 27;
+
+    /// Get tuple element: `X(A) := tuple(X(B))[C]`.
+    ///
+    /// Format: `GET_TUPLE_ELEM A, B, C`
+    /// - A: destination register
+    /// - B: register containing tuple
+    /// - C: element index (0-based)
+    ///
+    /// Extracts element at index C from the tuple in X(B) and stores it in X(A).
+    /// Caller must ensure X(B) is a tuple and C is within bounds.
+    pub const GET_TUPLE_ELEM: u8 = 28;
+
+    /// Get vector element: `X(A) := vector(X(B))[C]`.
+    ///
+    /// Format: `GET_VEC_ELEM A, B, C`
+    /// - A: destination register
+    /// - B: register containing vector
+    /// - C: element index (0-based)
+    ///
+    /// Extracts element at index C from the vector in X(B) and stores it in X(A).
+    /// Caller must ensure X(B) is a vector and C is within bounds.
+    pub const GET_VEC_ELEM: u8 = 29;
+
+    /// Exact equality test: Jump to C if X(A) != X(B).
+    ///
+    /// Format: `IS_EQ A, B, C`
+    /// - A: first register
+    /// - B: second register
+    /// - C: fail label (jump if not equal)
+    ///
+    /// Tests structural equality. Falls through if equal, jumps to C if not equal.
+    pub const IS_EQ: u8 = 30;
+
+    /// Unconditional jump: `IP := Bx`.
+    ///
+    /// Format: `JUMP _, Bx`
+    /// - Bx: target instruction offset (absolute)
+    ///
+    /// Jumps unconditionally to the instruction at offset Bx.
+    pub const JUMP: u8 = 31;
+
+    /// Conditional jump: if X(A) is falsy, `IP := Bx`.
+    ///
+    /// Format: `JUMP_IF_FALSE A, Bx`
+    /// - A: register to test
+    /// - Bx: target instruction offset (absolute)
+    ///
+    /// Falsy values are nil and false. All other values are truthy.
+    /// Jumps to Bx if X(A) is falsy, otherwise falls through.
+    pub const JUMP_IF_FALSE: u8 = 32;
+
+    /// Extract tuple slice: `X(A) := tuple(X(B))[C..]`.
+    ///
+    /// Format: `TUPLE_SLICE A, B, C`
+    /// - A: destination register for new tuple
+    /// - B: register containing source tuple
+    /// - C: start index (0-based)
+    ///
+    /// Creates a new tuple containing elements from index C to end of tuple.
+    /// If C >= tuple length, creates an empty tuple.
+    /// Caller must ensure X(B) is a tuple.
+    pub const TUPLE_SLICE: u8 = 33;
+
+    /// Test minimum tuple arity: Jump to C if X(A) has fewer than B elements.
+    ///
+    /// Format: `TEST_ARITY_GE A, B, C`
+    /// - A: register containing tuple
+    /// - B: minimum required arity
+    /// - C: fail label (jump if arity < B or not a tuple)
+    ///
+    /// Used for tuple rest patterns like `[a b & t]` which require at least 2 elements.
+    pub const TEST_ARITY_GE: u8 = 34;
+
+    /// Raise badmatch error: process exits with `[:error :badmatch %{:value X(A)}]`.
+    ///
+    /// Format: `BADMATCH A`
+    /// - A: register containing the value that failed to match
+    ///
+    /// Terminates the process with `RuntimeError::Badmatch`.
+    pub const BADMATCH: u8 = 35;
 }
 
 /// Bit widths for instruction fields.

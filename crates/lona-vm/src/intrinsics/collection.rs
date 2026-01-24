@@ -86,6 +86,48 @@ pub fn core_get<M: MemorySpace>(
     Ok(default)
 }
 
+/// Core map contains - checks if a key exists in a map.
+///
+/// This is the pure existence check logic.
+/// Used by pattern matching to detect missing keys.
+///
+/// # Arguments
+/// * `proc` - Process for heap access
+/// * `mem` - Memory space
+/// * `map_val` - The map to search (must be `Value::Map`)
+/// * `key` - The key to check
+///
+/// # Errors
+/// Returns `CoreCollectionError::NotAMap` if `map_val` is not a map.
+pub fn core_contains<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    map_val: Value,
+    key: Value,
+) -> Result<bool, CoreCollectionError> {
+    let Value::Map(_) = map_val else {
+        return Err(CoreCollectionError::NotAMap);
+    };
+
+    let map = proc
+        .read_map(mem, map_val)
+        .ok_or(CoreCollectionError::OutOfMemory)?;
+
+    // Search the association list for the key
+    let mut current = map.entries;
+    while let Some(pair) = proc.read_pair(mem, current) {
+        // Each pair.first is a [key value] tuple
+        if let Some(entry_key) = proc.read_tuple_element(mem, pair.first, 0) {
+            if values_equal(entry_key, key, proc, mem) {
+                return Ok(true);
+            }
+        }
+        current = pair.rest;
+    }
+
+    Ok(false)
+}
+
 /// Core tuple/indexed access - returns element at index, or default/error on OOB.
 ///
 /// This is the pure index logic extracted from `intrinsic_nth`.
@@ -416,4 +458,27 @@ fn reverse_list<M: MemorySpace>(
         current = pair.rest;
     }
     Ok(result)
+}
+
+/// Check if map contains key.
+///
+/// `(contains? m k)` - returns true if key exists in map
+pub fn intrinsic_contains<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    id: u8,
+) -> Result<Value, IntrinsicError> {
+    let map_val = proc.x_regs[1];
+    let key = proc.x_regs[2];
+
+    core_contains(proc, mem, map_val, key)
+        .map(Value::bool)
+        .map_err(|e| match e {
+            CoreCollectionError::NotAMap => IntrinsicError::TypeError {
+                intrinsic: id,
+                arg: 0,
+                expected: "map",
+            },
+            _ => IntrinsicError::OutOfMemory,
+        })
 }

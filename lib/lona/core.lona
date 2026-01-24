@@ -51,7 +51,7 @@
 
   Evaluates `expr` and tries each pattern in order. The first
   matching pattern executes its body. Use `when` for guards.
-  If no pattern matches, the process exits with `:badmatch`."
+  If no pattern matches, the process exits with `[:badmatch value]`."
        :arglists '([expr & clauses])}
   match)
 

@@ -428,6 +428,16 @@ Get map values.
 (vals map)  ; → list of values
 ```
 
+### `contains?`
+
+Check if map contains key.
+
+```clojure
+(contains? map key)  ; → true if key exists, false otherwise
+```
+
+Note: Unlike Clojure's `contains?`, this only works on maps (not vectors/sets with indices).
+
 ---
 
 ## Sequences
@@ -1024,7 +1034,6 @@ The following are **not intrinsics** and should be implemented in Lonala:
 - `vals`, `into`, `merge`
 - `conj` (polymorphic add)
 - `update`, `update-in`, `get-in`, `assoc-in`
-- `contains?`
 
 **Predicates:**
 - `seq?`, `coll?`, `seqable?`

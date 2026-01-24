@@ -47,12 +47,13 @@ use arithmetic::{
     intrinsic_le, intrinsic_lt, intrinsic_mod, intrinsic_mul, intrinsic_not, intrinsic_sub,
 };
 use collection::{
-    intrinsic_count, intrinsic_get, intrinsic_is_map, intrinsic_is_symbol, intrinsic_is_tuple,
-    intrinsic_is_vector, intrinsic_keys, intrinsic_nth, intrinsic_put, intrinsic_vals,
+    intrinsic_contains, intrinsic_count, intrinsic_get, intrinsic_is_map, intrinsic_is_symbol,
+    intrinsic_is_tuple, intrinsic_is_vector, intrinsic_keys, intrinsic_nth, intrinsic_put,
+    intrinsic_vals,
 };
 
 // Re-export core functions for use by callable data structures in VM
-pub use collection::{CoreCollectionError, core_get, core_nth};
+pub use collection::{CoreCollectionError, core_contains, core_get, core_nth};
 use meta::{
     intrinsic_create_ns, intrinsic_def_binding, intrinsic_def_meta, intrinsic_def_root,
     intrinsic_find_ns, intrinsic_intern, intrinsic_is_fn, intrinsic_is_namespace, intrinsic_is_var,
@@ -161,10 +162,12 @@ pub mod id {
     pub const IS_EMPTY: u8 = 45;
     /// Reference identity: `(identical? a b)` -> same object?
     pub const IDENTICAL: u8 = 46;
+    /// Map contains key: `(contains? m k)` -> is key in map?
+    pub const CONTAINS: u8 = 47;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 47;
+pub const INTRINSIC_COUNT: usize = 48;
 
 /// Intrinsic name lookup table.
 const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
@@ -215,6 +218,7 @@ const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
     "rest",        // 44: REST
     "empty?",      // 45: IS_EMPTY
     "identical?",  // 46: IDENTICAL
+    "contains?",   // 47: CONTAINS
 ];
 
 /// Look up an intrinsic ID by name.
@@ -280,6 +284,7 @@ pub const fn intrinsic_cost(id: u8) -> u32 {
         // Collection access, string ops, metadata: cost 3
         id::NTH
         | id::GET
+        | id::CONTAINS
         | id::KEYS
         | id::VALS
         | id::REST
@@ -401,6 +406,7 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::REST => intrinsic_rest(proc, mem, intrinsic_id)?,
         id::IS_EMPTY => intrinsic_is_empty(proc, mem, intrinsic_id)?,
         id::IDENTICAL => intrinsic_identical(proc),
+        id::CONTAINS => intrinsic_contains(proc, mem, intrinsic_id)?,
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };
     proc.x_regs[0] = result;

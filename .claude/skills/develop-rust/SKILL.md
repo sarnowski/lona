@@ -103,8 +103,8 @@ fn regression_off_by_one_in_vector_nth() {
 **Step 2: Run the test - it MUST FAIL**
 
 ```bash
-cargo test regression_off_by_one
-# Expected output: FAILED
+make verify
+# Expected: test regression_off_by_one FAILED
 # This proves the test actually catches the bug
 ```
 
@@ -115,8 +115,8 @@ Edit the implementation code to fix the bug.
 **Step 4: Run the test - it MUST PASS**
 
 ```bash
-cargo test regression_off_by_one
-# Expected output: PASSED
+make verify
+# Expected: all tests PASSED
 # This proves the fix works
 ```
 

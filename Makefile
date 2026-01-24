@@ -16,6 +16,7 @@
 # ============================================================
 
 # Configuration
+VERBOSE ?= 0
 DOCKER_IMAGE = lona-build
 SEL4_VERSION = 14.0.0
 RUST_SEL4_VERSION = 3.0.0
@@ -77,6 +78,25 @@ DOCKER_IT = docker run --rm -it \
 	-w /source \
 	$(DOCKER_IMAGE)
 
+# Helper to run commands quietly, showing output only on failure (or if VERBOSE=1)
+define run-quiet
+	@printf "  %-20s " "$(1)..." && \
+	TMPFILE=$$(mktemp) && \
+	START=$$(date +%s) && \
+	($(2)) > "$$TMPFILE" 2>&1; \
+	RESULT=$$?; \
+	DURATION=$$((($$(date +%s) - $$START))); \
+	if [ $$RESULT -eq 0 ]; then \
+		printf "\033[32m✓\033[0m (%ds)\n" "$$DURATION"; \
+		if [ "$(VERBOSE)" = "1" ]; then cat "$$TMPFILE"; fi; \
+	else \
+		printf "\033[31m✗\033[0m (%ds)\n" "$$DURATION"; \
+		cat "$$TMPFILE"; \
+	fi; \
+	rm -f "$$TMPFILE"; \
+	exit $$RESULT
+endef
+
 # Marker files for make dependency tracking (on host filesystem)
 # These track what's been built in the Docker volume
 MARKER_DIR = .build-markers
@@ -112,10 +132,11 @@ help:
 	@echo "  make integration-test Run all E2E tests"
 	@echo ""
 	@echo "Development:"
-	@echo "  make format           Check code formatting"
+	@echo "  make format           Format code"
 	@echo "  make clippy           Run clippy lints"
 	@echo "  make test             Run unit tests"
-	@echo "  make verify           Run all checks"
+	@echo "  make verify           Run all checks (quiet output)"
+	@echo "  make verify VERBOSE=1 Run all checks (full output)"
 	@echo "  make venv             Create Python virtual environment"
 	@echo "  make mcp              Start MCP server for AI agents"
 	@echo ""
@@ -561,8 +582,15 @@ test: $(MARKER_ENV)
 	$(DOCKER) sh -c 'LONA_VERSION=$(VERSION) cargo test && LONA_VERSION=$(VERSION) cargo llvm-cov --fail-under-lines 85'
 
 .PHONY: verify
-verify: format clippy test integration-test
-	@echo "=== All checks passed ==="
+verify: $(MARKER_ENV)
+	@echo "Running verification..."
+	$(call run-quiet,format,$(DOCKER) cargo fmt)
+	$(call run-quiet,clippy,$(DOCKER) env LONA_VERSION=$(VERSION) cargo clippy --all-targets -- -D warnings)
+	$(call run-quiet,test,$(DOCKER) sh -c 'LONA_VERSION=$(VERSION) cargo test && LONA_VERSION=$(VERSION) cargo llvm-cov --fail-under-lines 85')
+	$(call run-quiet,aarch64-e2e,$(MAKE) aarch64-test)
+	$(call run-quiet,x86_64-e2e,$(MAKE) x86_64-test)
+	@echo ""
+	@printf "\033[32m✓ All checks passed\033[0m\n"
 
 # ============================================================
 # Python Tooling (runs on host, not in Docker)

@@ -15,9 +15,15 @@
 mod call;
 mod collection;
 mod fn_compile;
+mod match_compile;
+pub mod pattern;
 
 #[cfg(test)]
 mod compiler_test;
+#[cfg(test)]
+mod match_test;
+#[cfg(test)]
+mod pattern_test;
 
 #[cfg(any(test, feature = "std"))]
 mod disassemble;

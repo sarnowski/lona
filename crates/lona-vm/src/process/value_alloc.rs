@@ -316,6 +316,45 @@ impl Process {
         Some(mem.read(elem_addr))
     }
 
+    /// Read a vector's length from the heap.
+    ///
+    /// Returns `None` if the value is not a vector.
+    /// Use this when you need to match specifically on vectors (not tuples).
+    #[must_use]
+    pub fn read_vector_len<M: MemorySpace>(&self, mem: &M, value: Value) -> Option<usize> {
+        let Value::Vector(addr) = value else {
+            return None;
+        };
+
+        let header: HeapTuple = mem.read(addr);
+        Some(header.len as usize)
+    }
+
+    /// Read a vector element at the given index.
+    ///
+    /// Returns `None` if the value is not a vector or index is out of bounds.
+    /// Use this when you need to match specifically on vectors (not tuples).
+    #[must_use]
+    pub fn read_vector_element<M: MemorySpace>(
+        &self,
+        mem: &M,
+        value: Value,
+        index: usize,
+    ) -> Option<Value> {
+        let Value::Vector(addr) = value else {
+            return None;
+        };
+
+        let header: HeapTuple = mem.read(addr);
+        if index >= header.len as usize {
+            return None;
+        }
+
+        let data_addr = addr.add(HeapTuple::HEADER_SIZE as u64);
+        let elem_addr = data_addr.add((index * core::mem::size_of::<Value>()) as u64);
+        Some(mem.read(elem_addr))
+    }
+
     /// Allocate a map on the young heap.
     ///
     /// A map is an association list: a Pair chain where each `first` is a `[key value]` tuple.

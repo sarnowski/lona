@@ -68,8 +68,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
                 return self.compile_def(pair.rest, target, temp_base);
             }
             if name == "match" {
-                // match is a special form but not yet implemented
-                // For now, fall through to var lookup which will find it as special form var
+                return self.compile_match(pair.rest, target, temp_base);
             }
 
             // Check if it's a bound parameter (function value in local scope)

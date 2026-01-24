@@ -226,6 +226,9 @@ fn print_runtime_error<U: Uart>(e: &RuntimeError, uart: &mut U) {
             uart.write_str(" Y regs, tried to deallocate ");
             print_usize(*deallocate_count, uart);
         }
+        RuntimeError::Badmatch { .. } => {
+            uart.write_str("badmatch: no clause matched");
+        }
     }
 }
 

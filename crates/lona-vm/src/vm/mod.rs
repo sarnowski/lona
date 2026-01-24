@@ -15,6 +15,8 @@
 #[cfg(test)]
 mod vm_test;
 
+mod pattern;
+
 use crate::Vaddr;
 use crate::bytecode::{
     Chunk, decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op,
@@ -527,6 +529,14 @@ pub enum RuntimeError {
         /// Number of Y registers DEALLOCATE tried to release.
         deallocate_count: usize,
     },
+
+    /// Pattern match failure - no clause matched the value.
+    ///
+    /// This causes the process to exit with reason `[:error :badmatch %{:value v}]`.
+    Badmatch {
+        /// The value that failed to match any pattern.
+        value: Value,
+    },
 }
 
 impl From<IntrinsicError> for RuntimeError {
@@ -578,6 +588,60 @@ fn handle_return<M: MemorySpace>(proc: &mut Process, mem: &M) -> Result<u32, Run
             Ok(1)
         }
         None => Err(RunResult::Completed(proc.x_regs[0])),
+    }
+}
+
+/// Execute a load instruction.
+const fn execute_load_instruction(
+    proc: &mut Process,
+    instr: u32,
+    opcode: u8,
+    constant_value: Option<Value>,
+) -> u32 {
+    let a = decode_a(instr) as usize;
+    proc.x_regs[a] = match opcode {
+        op::LOADNIL => Value::Nil,
+        op::LOADBOOL => Value::bool(decode_bx(instr) != 0),
+        op::LOADINT => Value::int(decode_sbx(instr) as i64),
+        op::LOADK => match constant_value {
+            Some(v) => v,
+            None => return 1,
+        },
+        op::MOVE => proc.x_regs[decode_b(instr) as usize],
+        _ => return 1,
+    };
+    1
+}
+
+/// Execute a collection build instruction.
+fn execute_build_instruction<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    instr: u32,
+    opcode: u8,
+) -> Result<u32, RuntimeError> {
+    let a = decode_a(instr) as usize;
+    let b = decode_b(instr) as usize;
+    let c = decode_c(instr) as usize;
+
+    match opcode {
+        op::BUILD_TUPLE => {
+            build_tuple(proc, mem, a, b, c)?;
+            Ok(1 + (c / 8) as u32)
+        }
+        op::BUILD_VECTOR => {
+            build_vector(proc, mem, a, b, c)?;
+            Ok(1 + (c / 8) as u32)
+        }
+        op::BUILD_MAP => {
+            build_map(proc, mem, a, b, c)?;
+            Ok(1 + (c / 4) as u32)
+        }
+        op::BUILD_CLOSURE => {
+            build_closure(proc, mem, a, b, c)?;
+            Ok(2)
+        }
+        _ => Ok(1),
     }
 }
 
@@ -657,34 +721,18 @@ fn execute_instruction<M: MemorySpace>(
     constant_value: Option<Value>,
 ) -> Result<u32, RunResult> {
     match opcode {
-        op::LOADNIL => {
-            proc.x_regs[decode_a(instr) as usize] = Value::Nil;
-            Ok(1)
-        }
-        op::LOADBOOL => {
-            proc.x_regs[decode_a(instr) as usize] = Value::bool(decode_bx(instr) != 0);
-            Ok(1)
-        }
-        op::LOADINT => {
-            proc.x_regs[decode_a(instr) as usize] = Value::int(i64::from(decode_sbx(instr)));
-            Ok(1)
-        }
-        op::LOADK => {
-            if let Some(value) = constant_value {
-                proc.x_regs[decode_a(instr) as usize] = value;
-            }
-            Ok(1)
-        }
-        op::MOVE => {
-            proc.x_regs[decode_a(instr) as usize] = proc.x_regs[decode_b(instr) as usize];
-            Ok(1)
-        }
+        // Load and move instructions
+        op::LOADNIL | op::LOADBOOL | op::LOADINT | op::LOADK | op::MOVE => Ok(
+            execute_load_instruction(proc, instr, opcode, constant_value),
+        ),
+
         op::INTRINSIC => {
             let id = decode_a(instr);
             intrinsics::call_intrinsic(id, decode_b(instr) as u8, proc, mem, realm)
                 .map_err(|e| RunResult::Error(e.into()))?;
             Ok(intrinsic_cost(id))
         }
+
         op::CALL => handle_call(
             proc,
             mem,
@@ -693,60 +741,41 @@ fn execute_instruction<M: MemorySpace>(
             decode_b(instr) as u8,
         )
         .map_err(RunResult::Error),
+
         op::RETURN => handle_return(proc, mem),
         op::HALT => Err(RunResult::Completed(proc.x_regs[0])),
-        op::BUILD_TUPLE => {
-            let c = decode_c(instr) as usize;
-            build_tuple(
-                proc,
-                mem,
-                decode_a(instr) as usize,
-                decode_b(instr) as usize,
-                c,
-            )
-            .map_err(RunResult::Error)?;
-            Ok(1 + (c / 8) as u32)
-        }
-        op::BUILD_VECTOR => {
-            let c = decode_c(instr) as usize;
-            build_vector(
-                proc,
-                mem,
-                decode_a(instr) as usize,
-                decode_b(instr) as usize,
-                c,
-            )
-            .map_err(RunResult::Error)?;
-            Ok(1 + (c / 8) as u32)
-        }
-        op::BUILD_MAP => {
-            let c = decode_c(instr) as usize;
-            build_map(
-                proc,
-                mem,
-                decode_a(instr) as usize,
-                decode_b(instr) as usize,
-                c,
-            )
-            .map_err(RunResult::Error)?;
-            Ok(1 + (c / 4) as u32)
-        }
-        op::BUILD_CLOSURE => {
-            build_closure(
-                proc,
-                mem,
-                decode_a(instr) as usize,
-                decode_b(instr) as usize,
-                decode_c(instr) as usize,
-            )
-            .map_err(RunResult::Error)?;
-            Ok(2)
+
+        // Build instructions
+        op::BUILD_TUPLE | op::BUILD_VECTOR | op::BUILD_MAP | op::BUILD_CLOSURE => {
+            execute_build_instruction(proc, mem, instr, opcode).map_err(RunResult::Error)
         }
 
-        // Y register instructions (ALLOCATE, ALLOCATE_ZERO, DEALLOCATE, MOVE_XY, MOVE_YX)
+        // Y register instructions
         op::ALLOCATE | op::ALLOCATE_ZERO | op::DEALLOCATE | op::MOVE_XY | op::MOVE_YX => {
             execute_y_register_instruction(proc, mem, instr, opcode)
         }
+
+        // Pattern matching instructions (read-only)
+        op::IS_NIL
+        | op::IS_BOOL
+        | op::IS_INT
+        | op::IS_TUPLE
+        | op::IS_VECTOR
+        | op::IS_MAP
+        | op::IS_KEYWORD
+        | op::IS_STRING
+        | op::TEST_ARITY
+        | op::TEST_VEC_LEN
+        | op::TEST_ARITY_GE
+        | op::GET_TUPLE_ELEM
+        | op::GET_VEC_ELEM
+        | op::IS_EQ
+        | op::JUMP
+        | op::JUMP_IF_FALSE
+        | op::BADMATCH => pattern::execute(proc, mem, instr, opcode),
+
+        // Pattern matching instructions (allocating)
+        op::TUPLE_SLICE => pattern::execute_tuple_slice(proc, mem, instr),
 
         _ => Err(RunResult::Error(RuntimeError::InvalidOpcode(opcode))),
     }
