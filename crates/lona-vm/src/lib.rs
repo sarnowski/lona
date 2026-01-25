@@ -10,7 +10,7 @@
 //! - UART drivers for aarch64 (PL011) and `x86_64` (COM1)
 //! - Reader (lexer/parser) for Lonala source code
 //! - Bytecode compiler and VM interpreter
-//! - Value representation and printing
+//! - Term representation (BEAM-style tagged words)
 //! - Library loading from embedded tar archives
 //! - REPL for interactive development
 //!
@@ -35,9 +35,9 @@ pub mod reader;
 pub mod realm;
 pub mod repl;
 pub mod scheduler;
+pub mod term;
 pub mod types;
 pub mod uart;
-pub mod value;
 pub mod vm;
 
 #[cfg(feature = "e2e-test")]

@@ -13,7 +13,7 @@
 #[cfg(test)]
 mod bytecode_test;
 
-use crate::value::Value;
+use crate::term::Term;
 
 #[cfg(any(test, feature = "std"))]
 use std::vec::Vec;
@@ -353,7 +353,7 @@ pub struct Chunk {
     /// The instruction sequence (fixed 32-bit instructions).
     pub code: Vec<u32>,
     /// Constant pool (strings, large integers, etc.).
-    pub constants: Vec<Value>,
+    pub constants: Vec<Term>,
 }
 
 impl Chunk {
@@ -375,12 +375,12 @@ impl Chunk {
     /// Add a constant to the pool and return its index.
     ///
     /// Returns `None` if the constant pool is full (max 262143 entries for 18-bit index).
-    pub fn add_constant(&mut self, value: Value) -> Option<u32> {
+    pub fn add_constant(&mut self, term: Term) -> Option<u32> {
         let index = self.constants.len();
         if index > BX_MASK as usize {
             return None;
         }
-        self.constants.push(value);
+        self.constants.push(term);
         Some(index as u32)
     }
 

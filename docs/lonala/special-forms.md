@@ -19,7 +19,6 @@ Semantics:
 - Returns the var
 
 ```clojure
-;; @todo
 (def x 42)
 x            ; => 42
 (var? #'x)   ; => true
@@ -28,16 +27,17 @@ x            ; => 42
 Def returns the var:
 
 ```clojure
-;; @todo
 (var? (def y 10))  ; => true
 ```
 
 Updating existing binding:
 
 ```clojure
-;; @todo
 (def z 1)
 z          ; => 1
+```
+
+```clojure
 (def z 2)
 z          ; => 2
 ```
@@ -53,8 +53,8 @@ With metadata:
 def errors:
 
 ```clojure
-(def 42 :value)  ; => ERROR :syntax-error  @todo
-(def :kw :value) ; => ERROR :syntax-error  @todo
+(def 42 :value)  ; => ERROR :syntax-error
+(def :kw :value) ; => ERROR :syntax-error
 (def)            ; => ERROR :syntax-error
 ```
 
@@ -79,16 +79,15 @@ Basic functions:
 
 ```clojure
 ((fn* [x] (+ x 1)) 5)       ; => 6
-((fn* [a b] (+ a b)) 3 4)   ; => 7  @todo
+((fn* [a b] (+ a b)) 3 4)   ; => 7
 ((fn* [] 42))               ; => 42
 ```
 
 Variadic functions:
 
 ```clojure
-;; @todo
 ((fn* [& args] (first args)) 1 2 3)  ; => 1
-((fn* [x & rest] rest) 1 2 3)        ; => (2 3)
+((fn* [x & rest] rest) 1 2 3)        ; => [2 3]
 ((fn* [x & rest] x) 1 2 3)           ; => 1
 ```
 
@@ -102,7 +101,6 @@ fn? predicate:
 Implicit do in body:
 
 ```clojure
-;; @todo
 (def counter 0)
 ((fn* []
    (def counter 1)
@@ -123,7 +121,6 @@ Named function for recursion:
 Closures capture lexical scope:
 
 ```clojure
-;; @todo
 (def make-adder (fn* [x] (fn* [y] (+ x y))))
 ((make-adder 10) 5)   ; => 15
 ```
@@ -131,7 +128,6 @@ Closures capture lexical scope:
 **fn* is single-arity only.** Use `match` in body for multi-arity:
 
 ```clojure
-;; @todo
 ;; fn* takes a single parameter vector
 ;; Multi-arity uses match inside the body, not multiple arities
 (def multi (fn* [& args]
@@ -153,7 +149,7 @@ Closures capture lexical scope:
 ;; Use match for destructuring
 ((fn* [pair]
    (match pair
-     [a b] (+ a b))) [1 2])  ; => 3  @todo
+     [a b] (+ a b))) [1 2])  ; => 3
 ```
 
 ---
@@ -204,14 +200,13 @@ Variable binding:
 Wildcard (no binding):
 
 ```clojure
-(match 42 _ :matched)        ; => :matched  @todo
+(match 42 _ :matched)        ; => :matched
 (match "anything" _ :ok)     ; => :ok
 ```
 
 Literal matching:
 
 ```clojure
-;; @todo
 (match 42
   42 :forty-two
   _ :other)           ; => :forty-two
@@ -222,7 +217,7 @@ Literal matching:
 
 (match "hello"
   "hello" :greeting
-  _ :other)           ; => :greeting
+  _ :other)           ; => :greeting  @todo
 ```
 
 Tuple patterns:
@@ -233,11 +228,11 @@ Tuple patterns:
 
 (match [:ok 42]
   [:ok val] val
-  [:error _] nil)     ; => 42  @todo
+  [:error _] nil)     ; => 42
 
 (match [:error :not-found]
   [:ok val] val
-  [:error reason] reason)  ; => :not-found  @todo
+  [:error reason] reason)  ; => :not-found
 ```
 
 Rest patterns in tuples:
@@ -262,7 +257,7 @@ Vector patterns:
 
 (match {}
   {} :empty
-  _ :not-empty)       ; => :empty  @todo
+  _ :not-empty)       ; => :empty
 ```
 
 Map patterns:
@@ -276,7 +271,7 @@ Map patterns:
 
 (match %{:a 1}
   %{:b x} :has-b
-  _ :no-b)            ; => :no-b  @todo
+  _ :no-b)            ; => :no-b
 ```
 
 Set patterns:
@@ -330,7 +325,6 @@ Bit field patterns:
 Multiple clauses (first match wins):
 
 ```clojure
-;; @todo
 (match 5
   1 :one
   2 :two
@@ -340,7 +334,6 @@ Multiple clauses (first match wins):
 ### Guards
 
 ```clojure
-;; @todo
 (match 5
   n when (> n 0) :positive
   n when (< n 0) :negative
@@ -362,7 +355,6 @@ Guards must be pure expressions.
 No match exits process:
 
 ```clojure
-;; @todo
 ;; When no pattern matches, process exits with badmatch
 (match 5
   1 :one
@@ -459,7 +451,7 @@ Quoting different types:
 
 ```clojure
 '42          ; => 42
-':keyword    ; => :keyword  @todo
+':keyword    ; => :keyword
 '"string"    ; => "string"
 '[1 2 3]     ; => [1 2 3]
 ```

@@ -7,7 +7,19 @@
 
 use super::*;
 use crate::platform::MockVSpace;
-use crate::value::var_flags;
+use crate::term::Term;
+use crate::term::header::Header;
+use crate::term::heap::HeapVar;
+use crate::term::tag::object;
+
+/// Check if a term is a namespace by reading its header.
+fn is_term_namespace(mem: &MockVSpace, term: Term) -> bool {
+    if !term.is_boxed() {
+        return false;
+    }
+    let header: Header = mem.read(term.to_vaddr());
+    header.object_tag() == object::NAMESPACE
+}
 
 /// Create a test realm with a 64KB code region.
 fn create_test_realm() -> (Realm, MockVSpace) {
@@ -181,6 +193,57 @@ fn test_symbol_and_keyword_separate() {
     assert_ne!(sym, kw);
 }
 
+/// Test that interned symbols satisfy identity semantics.
+///
+/// Per term-representation.md: "Symbol/keyword identity via pointer equality
+/// (index comparison)". Interning the same symbol name multiple times must
+/// return the same Term, ensuring (identical? 'foo 'foo) => true.
+#[test]
+fn test_interned_symbol_identity() {
+    let (mut realm, mut mem) = create_test_realm();
+
+    // Intern symbol twice with same name
+    let sym1 = realm.intern_symbol(&mut mem, "test-symbol").unwrap();
+    let sym2 = realm.intern_symbol(&mut mem, "test-symbol").unwrap();
+
+    // Must be bit-identical (same index in intern table)
+    assert_eq!(
+        sym1.as_raw(),
+        sym2.as_raw(),
+        "Interned symbols with same name must have identical bit representation"
+    );
+
+    // Extract indices and verify they're the same
+    let idx1 = sym1.as_symbol_index().unwrap();
+    let idx2 = sym2.as_symbol_index().unwrap();
+    assert_eq!(idx1, idx2, "Interned symbols must have same index");
+}
+
+/// Test that interned keywords satisfy identity semantics.
+///
+/// Similar to symbols, keywords must be identical when interned with the same name.
+/// This ensures (identical? :foo :foo) => true.
+#[test]
+fn test_interned_keyword_identity() {
+    let (mut realm, mut mem) = create_test_realm();
+
+    // Intern keyword twice with same name
+    let kw1 = realm.intern_keyword(&mut mem, "test-keyword").unwrap();
+    let kw2 = realm.intern_keyword(&mut mem, "test-keyword").unwrap();
+
+    // Must be bit-identical
+    assert_eq!(
+        kw1.as_raw(),
+        kw2.as_raw(),
+        "Interned keywords with same name must have identical bit representation"
+    );
+
+    // Extract indices and verify they're the same
+    let idx1 = kw1.as_keyword_index().unwrap();
+    let idx2 = kw2.as_keyword_index().unwrap();
+    assert_eq!(idx1, idx2, "Interned keywords must have same index");
+}
+
 // --- Namespace Registry Tests ---
 
 #[test]
@@ -192,16 +255,11 @@ fn test_realm_namespace_registry() {
 
     // Create namespace
     let ns = realm.alloc_namespace(&mut mem, name).unwrap();
-    assert!(ns.is_namespace());
+    assert!(is_term_namespace(&mem, ns));
 
-    // Register it
-    let Value::Symbol(name_addr) = name else {
-        panic!();
-    };
-    let Value::Namespace(ns_addr) = ns else {
-        panic!()
-    };
-    realm.register_namespace(name_addr, ns_addr).unwrap();
+    // Register it - name is now an immediate symbol Term
+    let ns_addr = ns.to_vaddr();
+    realm.register_namespace(name, ns_addr).unwrap();
 
     // Find it
     let found = realm.find_namespace(name).unwrap();
@@ -217,7 +275,7 @@ fn test_realm_get_or_create_namespace() {
 
     // First call creates namespace
     let ns1 = realm.get_or_create_namespace(&mut mem, name).unwrap();
-    assert!(ns1.is_namespace());
+    assert!(is_term_namespace(&mem, ns1));
 
     // Second call returns the same namespace
     let ns2 = realm.get_or_create_namespace(&mut mem, name).unwrap();
@@ -243,34 +301,23 @@ fn test_realm_alloc_var() {
 
     // Intern symbol for var name
     let name = realm.intern_symbol(&mut mem, "x").unwrap();
-    let Value::Symbol(name_addr) = name else {
-        panic!()
-    };
 
     // Create namespace
     let ns_name = realm.intern_symbol(&mut mem, "test.ns").unwrap();
     let ns = realm.get_or_create_namespace(&mut mem, ns_name).unwrap();
-    let Value::Namespace(ns_addr) = ns else {
-        panic!()
-    };
 
-    // Create var
-    let var = realm
-        .alloc_var(&mut mem, name_addr, ns_addr, Value::int(42), 0)
-        .unwrap();
-    assert!(var.is_var());
+    // Create var - alloc_var now takes Term args directly
+    let root = Term::small_int(42).unwrap();
+    let var = realm.alloc_var(&mut mem, name, ns, root).unwrap();
+    assert!(var.is_boxed()); // Vars are boxed terms
 
-    // Read the var content
-    let slot: VarSlot = mem.read(match var {
-        Value::Var(addr) => addr,
-        _ => panic!(),
-    });
-    let content: VarContent = mem.read(slot.content);
+    // Read the var content directly
+    let var_addr = var.to_vaddr();
+    let heap_var: HeapVar = mem.read(var_addr);
 
-    assert_eq!(content.name, name_addr);
-    assert_eq!(content.namespace, ns_addr);
-    assert_eq!(content.root, Value::int(42));
-    assert_eq!(content.flags, 0);
+    assert_eq!(heap_var.name, name);
+    assert_eq!(heap_var.namespace, ns);
+    assert_eq!(heap_var.root, root);
 }
 
 #[test]
@@ -279,71 +326,43 @@ fn test_realm_var_set_root() {
 
     // Create var with initial value
     let name = realm.intern_symbol(&mut mem, "x").unwrap();
-    let Value::Symbol(name_addr) = name else {
-        panic!()
-    };
     let ns_name = realm.intern_symbol(&mut mem, "test.ns").unwrap();
     let ns = realm.get_or_create_namespace(&mut mem, ns_name).unwrap();
-    let Value::Namespace(ns_addr) = ns else {
-        panic!()
-    };
 
-    let var = realm
-        .alloc_var(&mut mem, name_addr, ns_addr, Value::int(1), 0)
-        .unwrap();
+    let root1 = Term::small_int(1).unwrap();
+    let var = realm.alloc_var(&mut mem, name, ns, root1).unwrap();
 
     // Read initial value
-    let slot: VarSlot = mem.read(match var {
-        Value::Var(addr) => addr,
-        _ => panic!(),
-    });
-    let content: VarContent = mem.read(slot.content);
-    assert_eq!(content.root, Value::int(1));
+    let var_addr = var.to_vaddr();
+    let heap_var: HeapVar = mem.read(var_addr);
+    assert_eq!(heap_var.root, root1);
 
     // Update the root value
-    realm.var_set_root(&mut mem, var, Value::int(2)).unwrap();
+    let root2 = Term::small_int(2).unwrap();
+    realm.var_set_root(&mut mem, var, root2).unwrap();
 
-    // Read updated value - need to re-read slot since content pointer changed
-    let slot: VarSlot = mem.read(match var {
-        Value::Var(addr) => addr,
-        _ => panic!(),
-    });
-    let content: VarContent = mem.read(slot.content);
-    assert_eq!(content.root, Value::int(2));
+    // Read updated value
+    let heap_var: HeapVar = mem.read(var_addr);
+    assert_eq!(heap_var.root, root2);
 }
 
 #[test]
-fn test_realm_var_with_flags() {
+fn test_realm_var_basic_allocation() {
     let (mut realm, mut mem) = create_test_realm();
 
     let name = realm.intern_symbol(&mut mem, "*ns*").unwrap();
-    let Value::Symbol(name_addr) = name else {
-        panic!()
-    };
     let ns_name = realm.intern_symbol(&mut mem, "lona.core").unwrap();
     let ns = realm.get_or_create_namespace(&mut mem, ns_name).unwrap();
-    let Value::Namespace(ns_addr) = ns else {
-        panic!()
-    };
 
-    // Create process-bound var
-    let var = realm
-        .alloc_var(
-            &mut mem,
-            name_addr,
-            ns_addr,
-            Value::Nil,
-            var_flags::PROCESS_BOUND,
-        )
-        .unwrap();
+    // Create var with nil root
+    let var = realm.alloc_var(&mut mem, name, ns, Term::NIL).unwrap();
 
-    // Verify flags
-    let slot: VarSlot = mem.read(match var {
-        Value::Var(addr) => addr,
-        _ => panic!(),
-    });
-    let content: VarContent = mem.read(slot.content);
-    assert!(content.is_process_bound());
+    // Verify var was created correctly
+    let var_addr = var.to_vaddr();
+    let heap_var: HeapVar = mem.read(var_addr);
+    assert_eq!(heap_var.name, name);
+    assert_eq!(heap_var.namespace, ns);
+    assert_eq!(heap_var.root, Term::NIL);
 }
 
 // --- Metadata Table Tests ---

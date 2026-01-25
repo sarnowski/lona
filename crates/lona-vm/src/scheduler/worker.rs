@@ -10,7 +10,7 @@
 
 use super::RunQueue;
 use crate::process::{ProcessId, WorkerId, X_REG_COUNT};
-use crate::value::Value;
+use crate::term::Term;
 
 /// Per-worker state including X registers, run queue, and current process.
 pub struct Worker {
@@ -20,7 +20,7 @@ pub struct Worker {
     ///
     /// These are shared by all processes running on this worker.
     /// Arguments are passed in X1..X(argc), return value in X0.
-    pub x_regs: [Value; X_REG_COUNT],
+    pub x_regs: [Term; X_REG_COUNT],
     /// Run queue for this worker.
     pub run_queue: RunQueue,
     /// Currently running process (if any).
@@ -33,7 +33,7 @@ impl Worker {
     pub const fn new(id: WorkerId) -> Self {
         Self {
             id,
-            x_regs: [Value::Nil; X_REG_COUNT],
+            x_regs: [Term::NIL; X_REG_COUNT],
             run_queue: RunQueue::new(),
             current_pid: None,
         }
@@ -41,7 +41,7 @@ impl Worker {
 
     /// Reset X registers to nil.
     pub const fn reset_x_regs(&mut self) {
-        self.x_regs = [Value::Nil; X_REG_COUNT];
+        self.x_regs = [Term::NIL; X_REG_COUNT];
     }
 
     /// Enqueue process on this worker's run queue.

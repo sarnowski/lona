@@ -25,22 +25,26 @@ use crate::process::{Process, WorkerId};
 use crate::reader::read;
 use crate::realm::{Realm, bootstrap};
 use crate::scheduler::Worker;
+use crate::term::Term;
 
 /// Create a test environment with bootstrapped realm and process.
 ///
 /// Returns `None` if bootstrap fails (should not happen in tests).
 pub fn setup() -> Option<(Process, Realm, MockVSpace)> {
     let base = Vaddr::new(0x1_0000);
-    let mut mem = MockVSpace::new(256 * 1024, base);
+    // Increased from 256KB to 512KB to accommodate larger function allocations
+    // after alignment fix for constants in HeapFun
+    let mut mem = MockVSpace::new(512 * 1024, base);
     let young_base = base;
-    let young_size = 64 * 1024;
+    // Increased from 64KB to 128KB for tests with multiple function definitions
+    let young_size = 128 * 1024;
     let old_base = base.add(young_size as u64);
-    let old_size = 16 * 1024;
+    let old_size = 32 * 1024;
     let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
-    // Create realm at a higher address
-    let realm_base = base.add(128 * 1024);
-    let mut realm = Realm::new(realm_base, 64 * 1024);
+    // Create realm at a higher address (past young + old heaps)
+    let realm_base = base.add((young_size + old_size) as u64 + 64 * 1024);
+    let mut realm = Realm::new(realm_base, 96 * 1024);
 
     // Bootstrap realm and process
     let result = bootstrap(&mut realm, &mut mem)?;
@@ -57,7 +61,7 @@ pub fn eval(
     proc: &mut Process,
     realm: &mut Realm,
     mem: &mut MockVSpace,
-) -> Result<Value, RuntimeError> {
+) -> Result<Term, RuntimeError> {
     let expr = read(src, proc, realm, mem)
         .ok()
         .flatten()

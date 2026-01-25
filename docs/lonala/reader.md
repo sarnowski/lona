@@ -10,17 +10,17 @@ Symbols begin with a non-numeric character and can contain alphanumerics, `*`, `
 
 ```clojure
 'foo      ; => foo
-'my-var   ; => my-var  @todo
+'my-var   ; => my-var
 '*ns*     ; => *ns*
-'+limit+  ; => +limit+  @todo
-'valid?   ; => valid?  @todo
+'+limit+  ; => +limit+
+'valid?   ; => valid?
 ```
 
 Qualified symbols include a namespace:
 
 ```clojure
 'my.ns/bar      ; => my.ns/bar
-'lona.core/count ; => lona.core/count  @todo
+'lona.core/count ; => lona.core/count
 ```
 
 Symbol parsing:
@@ -39,7 +39,7 @@ Keywords begin with `:` and evaluate to themselves.
 ```clojure
 :foo    ; => :foo
 :ok     ; => :ok
-:error  ; => :error  @todo
+:error  ; => :error
 ```
 
 Qualified keywords:
@@ -362,7 +362,6 @@ Quote prevents evaluation:
 ### Var Reference
 
 ```clojure
-;; @todo
 (def x 42)
 (var? #'x)     ; => true
 (var-get #'x)  ; => 42

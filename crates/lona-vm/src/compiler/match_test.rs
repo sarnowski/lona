@@ -23,8 +23,13 @@ use crate::process::{Process, WorkerId};
 use crate::reader::read;
 use crate::realm::{Realm, bootstrap};
 use crate::scheduler::Worker;
-use crate::value::Value;
+use crate::term::Term;
 use crate::vm::execute;
+
+/// Helper to create a small integer Term.
+fn int(n: i64) -> Term {
+    Term::small_int(n).expect("integer out of small_int range")
+}
 
 // =============================================================================
 // Test setup helpers
@@ -50,7 +55,7 @@ fn setup() -> (Process, Realm, MockVSpace) {
 }
 
 /// Evaluate a Lonala expression and return the result.
-fn eval(src: &str, proc: &mut Process, realm: &mut Realm, mem: &mut MockVSpace) -> Value {
+fn eval(src: &str, proc: &mut Process, realm: &mut Realm, mem: &mut MockVSpace) -> Term {
     let expr = read(src, proc, realm, mem)
         .expect("read error")
         .expect("empty input");
@@ -58,6 +63,14 @@ fn eval(src: &str, proc: &mut Process, realm: &mut Realm, mem: &mut MockVSpace) 
     proc.set_chunk(chunk);
     let mut worker = Worker::new(WorkerId(0));
     execute(&mut worker, proc, mem, realm).expect("runtime error")
+}
+
+/// Get the string name of a keyword term using the realm's intern table.
+fn keyword_str<'a>(term: Term, realm: &Realm, mem: &'a MockVSpace) -> &'a str {
+    let index = term.as_keyword_index().expect("not a keyword");
+    realm
+        .keyword_name(mem, index)
+        .expect("keyword not found in intern table")
 }
 
 // =============================================================================
@@ -68,8 +81,8 @@ fn eval(src: &str, proc: &mut Process, realm: &mut Realm, mem: &mut MockVSpace) 
 fn match_literal_integer() {
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match 42 42 :yes _ :no)", &mut proc, &mut realm, &mut mem);
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "yes");
 }
 
@@ -77,8 +90,8 @@ fn match_literal_integer() {
 fn match_literal_integer_no_match_first_clause() {
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match 99 42 :no _ :yes)", &mut proc, &mut realm, &mut mem);
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "yes");
 }
 
@@ -91,7 +104,7 @@ fn match_literal_keyword() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(2));
+    assert_eq!(result, int(2));
 }
 
 #[test]
@@ -103,8 +116,8 @@ fn match_literal_nil() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "is-nil");
 }
 
@@ -117,8 +130,8 @@ fn match_literal_true() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "is-true");
 }
 
@@ -131,8 +144,8 @@ fn match_literal_false() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "is-false");
 }
 
@@ -144,14 +157,14 @@ fn match_literal_false() {
 fn match_binding_returns_value() {
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match 42 x x)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(42));
+    assert_eq!(result, int(42));
 }
 
 #[test]
 fn match_binding_in_expression() {
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match 42 x (+ x 1))", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(43));
+    assert_eq!(result, int(43));
 }
 
 #[test]
@@ -164,7 +177,7 @@ fn match_binding_multiple_variables() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(30));
+    assert_eq!(result, int(30));
 }
 
 // =============================================================================
@@ -175,8 +188,8 @@ fn match_binding_multiple_variables() {
 fn match_wildcard_always_matches() {
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match 42 _ :matched)", &mut proc, &mut realm, &mut mem);
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "matched");
 }
 
@@ -185,7 +198,7 @@ fn match_wildcard_ignores_value() {
     let (mut proc, mut realm, mut mem) = setup();
     // Wildcard discards the value, body doesn't reference it
     let result = eval("(match :any-value _ 123)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(123));
+    assert_eq!(result, int(123));
 }
 
 // =============================================================================
@@ -201,7 +214,7 @@ fn match_tuple_simple() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, int(3));
 }
 
 #[test]
@@ -213,7 +226,7 @@ fn match_tuple_three_elements() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(6));
+    assert_eq!(result, int(6));
 }
 
 #[test]
@@ -226,7 +239,7 @@ fn match_tuple_with_literal() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(42));
+    assert_eq!(result, int(42));
 }
 
 #[test]
@@ -238,7 +251,7 @@ fn match_tuple_with_wildcard() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(4));
+    assert_eq!(result, int(4));
 }
 
 #[test]
@@ -251,8 +264,8 @@ fn match_tuple_wrong_arity_falls_through() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "other");
 }
 
@@ -265,7 +278,7 @@ fn match_tuple_nested() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(6));
+    assert_eq!(result, int(6));
 }
 
 #[test]
@@ -278,8 +291,8 @@ fn match_non_tuple_against_tuple_pattern() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "not-tuple");
 }
 
@@ -296,7 +309,7 @@ fn match_vector_simple() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(6));
+    assert_eq!(result, int(6));
 }
 
 #[test]
@@ -309,8 +322,8 @@ fn match_non_vector_against_vector_pattern() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "not-vector");
 }
 
@@ -327,7 +340,7 @@ fn match_map_single_key() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(1));
+    assert_eq!(result, int(1));
 }
 
 #[test]
@@ -339,7 +352,7 @@ fn match_map_multiple_keys() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, int(3));
 }
 
 #[test]
@@ -352,8 +365,8 @@ fn match_map_missing_key_falls_through() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "missing-key");
 }
 
@@ -370,8 +383,8 @@ fn match_guard_positive() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "positive");
 }
 
@@ -384,8 +397,8 @@ fn match_guard_negative() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "negative");
 }
 
@@ -398,8 +411,8 @@ fn match_guard_zero() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "zero");
 }
 
@@ -413,8 +426,8 @@ fn match_guard_with_binding_in_guard() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "found");
 }
 
@@ -426,21 +439,21 @@ fn match_guard_with_binding_in_guard() {
 fn match_multiple_clauses_first() {
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match :a :a 1 :b 2 :c 3)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(1));
+    assert_eq!(result, int(1));
 }
 
 #[test]
 fn match_multiple_clauses_middle() {
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match :b :a 1 :b 2 :c 3)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(2));
+    assert_eq!(result, int(2));
 }
 
 #[test]
 fn match_multiple_clauses_last() {
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match :c :a 1 :b 2 :c 3)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(3));
+    assert_eq!(result, int(3));
 }
 
 // =============================================================================
@@ -457,7 +470,7 @@ fn match_tuple_with_keyword_tag() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(42));
+    assert_eq!(result, int(42));
 }
 
 #[test]
@@ -469,8 +482,8 @@ fn match_error_tuple() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "got-error");
 }
 
@@ -487,8 +500,8 @@ fn match_empty_tuple() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "empty");
 }
 
@@ -497,7 +510,7 @@ fn match_single_clause() {
     let (mut proc, mut realm, mut mem) = setup();
     // Match with just one clause that always matches
     let result = eval("(match 42 x x)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(42));
+    assert_eq!(result, int(42));
 }
 
 // =============================================================================
@@ -515,7 +528,7 @@ fn match_binding_survives_call() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(45));
+    assert_eq!(result, int(45));
 }
 
 #[test]
@@ -528,7 +541,7 @@ fn match_binding_used_multiple_times_with_calls() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(30));
+    assert_eq!(result, int(30));
 }
 
 #[test]
@@ -541,7 +554,7 @@ fn match_multiple_bindings_survive_calls() {
         &mut realm,
         &mut mem,
     );
-    assert_eq!(result, Value::Int(14));
+    assert_eq!(result, int(14));
 }
 
 // =============================================================================
@@ -554,13 +567,13 @@ fn match_tuple_rest_simple() {
     // [h & t] should bind h to first element, t to rest as a tuple
     let result = eval("(match [1 2 3] [h & t] t)", &mut proc, &mut realm, &mut mem);
     // t should be [2 3] (a tuple, not a list)
-    assert!(result.is_tuple());
-    let len = proc.read_tuple_len(&mem, result).unwrap();
+    assert!(proc.is_term_tuple(&mem, result));
+    let len = proc.read_term_tuple_len(&mem, result).unwrap();
     assert_eq!(len, 2);
-    let elem0 = proc.read_tuple_element(&mem, result, 0).unwrap();
-    let elem1 = proc.read_tuple_element(&mem, result, 1).unwrap();
-    assert_eq!(elem0, Value::Int(2));
-    assert_eq!(elem1, Value::Int(3));
+    let elem0 = proc.read_term_tuple_element(&mem, result, 0).unwrap();
+    let elem1 = proc.read_term_tuple_element(&mem, result, 1).unwrap();
+    assert_eq!(elem0, int(2));
+    assert_eq!(elem1, int(3));
 }
 
 #[test]
@@ -568,7 +581,7 @@ fn match_tuple_rest_head_binding() {
     let (mut proc, mut realm, mut mem) = setup();
     // Head element should be bound correctly
     let result = eval("(match [1 2 3] [h & t] h)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(1));
+    assert_eq!(result, int(1));
 }
 
 #[test]
@@ -581,13 +594,13 @@ fn match_tuple_rest_multiple_head() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_tuple());
-    let len = proc.read_tuple_len(&mem, result).unwrap();
+    assert!(proc.is_term_tuple(&mem, result));
+    let len = proc.read_term_tuple_len(&mem, result).unwrap();
     assert_eq!(len, 2);
-    let elem0 = proc.read_tuple_element(&mem, result, 0).unwrap();
-    let elem1 = proc.read_tuple_element(&mem, result, 1).unwrap();
-    assert_eq!(elem0, Value::Int(3));
-    assert_eq!(elem1, Value::Int(4));
+    let elem0 = proc.read_term_tuple_element(&mem, result, 0).unwrap();
+    let elem1 = proc.read_term_tuple_element(&mem, result, 1).unwrap();
+    assert_eq!(elem0, int(3));
+    assert_eq!(elem1, int(4));
 }
 
 #[test]
@@ -595,8 +608,8 @@ fn match_tuple_rest_empty_tail() {
     let (mut proc, mut realm, mut mem) = setup();
     // When rest is empty, t should be an empty tuple
     let result = eval("(match [1] [h & t] t)", &mut proc, &mut realm, &mut mem);
-    assert!(result.is_tuple());
-    let len = proc.read_tuple_len(&mem, result).unwrap();
+    assert!(proc.is_term_tuple(&mem, result));
+    let len = proc.read_term_tuple_len(&mem, result).unwrap();
     assert_eq!(len, 0);
 }
 
@@ -605,7 +618,7 @@ fn match_tuple_rest_with_wildcard() {
     let (mut proc, mut realm, mut mem) = setup();
     // [h & _] should discard the rest
     let result = eval("(match [1 2 3] [h & _] h)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Value::Int(1));
+    assert_eq!(result, int(1));
 }
 
 // =============================================================================
@@ -624,8 +637,8 @@ fn regression_tuple_rest_short_tuple_falls_through() {
         &mut realm,
         &mut mem,
     );
-    assert!(result.is_keyword());
-    let kw_str = proc.read_string(&mem, result).unwrap();
+    assert!(proc.is_term_keyword(result));
+    let kw_str = keyword_str(result, &realm, &mem);
     assert_eq!(kw_str, "nomatch");
 }
 
@@ -634,8 +647,8 @@ fn regression_tuple_rest_exact_head_count_matches() {
     // [a b & t] on [1 2] should match with t = []
     let (mut proc, mut realm, mut mem) = setup();
     let result = eval("(match [1 2] [a b & t] t)", &mut proc, &mut realm, &mut mem);
-    assert!(result.is_tuple());
-    let len = proc.read_tuple_len(&mem, result).unwrap();
+    assert!(proc.is_term_tuple(&mem, result));
+    let len = proc.read_term_tuple_len(&mem, result).unwrap();
     assert_eq!(len, 0);
 }
 
@@ -664,9 +677,9 @@ fn regression_match_no_clause_raises_badmatch() {
     // Should return RuntimeError::Badmatch with value 42
     match result {
         Err(crate::vm::RuntimeError::Badmatch { value }) => {
-            assert_eq!(value, Value::Int(42));
+            assert_eq!(value, Term::small_int(42).unwrap());
         }
         Err(other) => panic!("expected Badmatch error, got: {other:?}"),
-        Ok(value) => panic!("expected error, got value: {value:?}"),
+        Ok(val) => panic!("expected error, got value: {val:?}"),
     }
 }

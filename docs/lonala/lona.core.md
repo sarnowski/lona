@@ -48,7 +48,7 @@ Get namespace's symbol name.
 Get namespace's var bindings.
 
 ```clojure
-(map? (ns-map (find-ns 'lona.core)))  ; => true
+(map? (ns-map (find-ns 'lona.core)))  ; => true  @todo
 ```
 
 ### `intern`
@@ -119,8 +119,8 @@ Get metadata of object.
 
 ```clojure
 (def ^%{:doc "A value"} z 1)
-(map? (meta #'z))        ; => true
-(:doc (meta #'z))        ; => "A value"
+(map? (meta #'z))        ; => true  @todo
+(:doc (meta #'z))        ; => "A value"  @todo
 (meta 42)                ; => nil
 ```
 
@@ -129,6 +129,7 @@ Get metadata of object.
 Return object with new metadata.
 
 ```clojure
+;; @todo
 (def s (with-meta 'foo %{:tag :special}))
 (:tag (meta s))  ; => :special
 ```

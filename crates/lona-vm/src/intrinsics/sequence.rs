@@ -7,7 +7,7 @@
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
-use crate::value::Value;
+use crate::term::Term;
 
 use super::{IntrinsicError, XRegs};
 
@@ -24,43 +24,58 @@ pub fn intrinsic_first<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let coll = x_regs[1];
 
-    match coll {
-        Value::Nil => Ok(Value::Nil),
-        Value::Pair(_) => {
-            let pair = proc
-                .read_pair(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            Ok(pair.first)
-        }
-        Value::Tuple(_) | Value::Vector(_) => {
-            let len = proc
-                .read_tuple_len(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            if len == 0 {
-                Ok(Value::Nil)
-            } else {
-                proc.read_tuple_element(mem, coll, 0)
-                    .ok_or(IntrinsicError::OutOfMemory)
-            }
-        }
-        Value::Map(_) => {
-            let map = proc
-                .read_map(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            // pair.first is already a [key value] tuple
-            Ok(proc
-                .read_pair(mem, map.entries)
-                .map_or(Value::Nil, |pair| pair.first))
-        }
-        _ => Err(IntrinsicError::TypeError {
-            intrinsic: id,
-            arg: 0,
-            expected: "sequence",
-        }),
+    // Check immediate nil
+    if coll.is_nil() {
+        return Ok(Term::NIL);
     }
+
+    // Check list (pair)
+    if coll.is_list() {
+        let (head, _) = proc
+            .read_term_pair(mem, coll)
+            .ok_or(IntrinsicError::OutOfMemory)?;
+        return Ok(head);
+    }
+
+    // Check boxed types
+    if coll.is_boxed() {
+        // Try tuple
+        if let Some(len) = proc.read_term_tuple_len(mem, coll) {
+            if len == 0 {
+                return Ok(Term::NIL);
+            }
+            return proc
+                .read_term_tuple_element(mem, coll, 0)
+                .ok_or(IntrinsicError::OutOfMemory);
+        }
+
+        // Try vector
+        if let Some(len) = proc.read_term_vector_len(mem, coll) {
+            if len == 0 {
+                return Ok(Term::NIL);
+            }
+            return proc
+                .read_term_vector_element(mem, coll, 0)
+                .ok_or(IntrinsicError::OutOfMemory);
+        }
+
+        // Try map
+        if let Some(entries) = proc.read_term_map_entries(mem, coll) {
+            // First entry's pair.first is already a [key value] tuple
+            return Ok(proc
+                .read_term_pair(mem, entries)
+                .map_or(Term::NIL, |(head, _)| head));
+        }
+    }
+
+    Err(IntrinsicError::TypeError {
+        intrinsic: id,
+        arg: 0,
+        expected: "sequence",
+    })
 }
 
 /// Get the rest of a collection (all elements except the first).
@@ -77,59 +92,93 @@ pub fn intrinsic_rest<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let coll = x_regs[1];
 
-    match coll {
-        Value::Nil => Ok(Value::Nil),
-        Value::Pair(_) => {
-            let pair = proc
-                .read_pair(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            Ok(pair.rest)
-        }
-        Value::Tuple(_) | Value::Vector(_) => {
-            let len = proc
-                .read_tuple_len(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
+    // Check immediate nil
+    if coll.is_nil() {
+        return Ok(Term::NIL);
+    }
+
+    // Check list (pair)
+    if coll.is_list() {
+        let (_, rest) = proc
+            .read_term_pair(mem, coll)
+            .ok_or(IntrinsicError::OutOfMemory)?;
+        return Ok(rest);
+    }
+
+    // Check boxed types
+    if coll.is_boxed() {
+        // Try tuple
+        if let Some(len) = proc.read_term_tuple_len(mem, coll) {
             if len <= 1 {
-                return Ok(Value::Nil);
+                return Ok(Term::NIL);
             }
             // Build list from elements 1..len (back to front)
-            build_list_from_indexed(proc, mem, coll, 1, len)
+            return build_list_from_tuple(proc, mem, coll, 1, len);
         }
-        Value::Map(_) => {
-            let map = proc
-                .read_map(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
+
+        // Try vector
+        if let Some(len) = proc.read_term_vector_len(mem, coll) {
+            if len <= 1 {
+                return Ok(Term::NIL);
+            }
+            // Build list from elements 1..len (back to front)
+            return build_list_from_vector(proc, mem, coll, 1, len);
+        }
+
+        // Try map
+        if let Some(entries) = proc.read_term_map_entries(mem, coll) {
             // Return the rest of the entries list
-            Ok(proc
-                .read_pair(mem, map.entries)
-                .map_or(Value::Nil, |pair| pair.rest))
+            return Ok(proc
+                .read_term_pair(mem, entries)
+                .map_or(Term::NIL, |(_, rest)| rest));
         }
-        _ => Err(IntrinsicError::TypeError {
-            intrinsic: id,
-            arg: 0,
-            expected: "sequence",
-        }),
     }
+
+    Err(IntrinsicError::TypeError {
+        intrinsic: id,
+        arg: 0,
+        expected: "sequence",
+    })
 }
 
-/// Build a list from indexed elements [start..end) of a tuple/vector.
-fn build_list_from_indexed<M: MemorySpace>(
+/// Build a list from indexed elements [start..end) of a tuple.
+fn build_list_from_tuple<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
-    coll: Value,
+    coll: Term,
     start: usize,
     end: usize,
-) -> Result<Value, IntrinsicError> {
-    let mut result = Value::Nil;
+) -> Result<Term, IntrinsicError> {
+    let mut result = Term::NIL;
     for i in (start..end).rev() {
         let elem = proc
-            .read_tuple_element(mem, coll, i)
+            .read_term_tuple_element(mem, coll, i)
             .ok_or(IntrinsicError::OutOfMemory)?;
         result = proc
-            .alloc_pair(mem, elem, result)
+            .alloc_term_pair(mem, elem, result)
+            .ok_or(IntrinsicError::OutOfMemory)?;
+    }
+    Ok(result)
+}
+
+/// Build a list from indexed elements [start..end) of a vector.
+fn build_list_from_vector<M: MemorySpace>(
+    proc: &mut Process,
+    mem: &mut M,
+    coll: Term,
+    start: usize,
+    end: usize,
+) -> Result<Term, IntrinsicError> {
+    let mut result = Term::NIL;
+    for i in (start..end).rev() {
+        let elem = proc
+            .read_term_vector_element(mem, coll, i)
+            .ok_or(IntrinsicError::OutOfMemory)?;
+        result = proc
+            .alloc_term_pair(mem, elem, result)
             .ok_or(IntrinsicError::OutOfMemory)?;
     }
     Ok(result)
@@ -148,28 +197,40 @@ pub fn intrinsic_is_empty<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let coll = x_regs[1];
 
-    match coll {
-        Value::Nil => Ok(Value::bool(true)),
-        Value::Pair(_) => Ok(Value::bool(false)), // Pairs are never empty
-        Value::Tuple(_) | Value::Vector(_) => {
-            let len = proc
-                .read_tuple_len(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            Ok(Value::bool(len == 0))
-        }
-        Value::Map(_) => {
-            let map = proc
-                .read_map(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            Ok(Value::bool(map.entries.is_nil()))
-        }
-        _ => Err(IntrinsicError::TypeError {
-            intrinsic: id,
-            arg: 0,
-            expected: "sequence",
-        }),
+    // Check immediate nil
+    if coll.is_nil() {
+        return Ok(Term::TRUE);
     }
+
+    // Check list (pair) - pairs are never empty
+    if coll.is_list() {
+        return Ok(Term::FALSE);
+    }
+
+    // Check boxed types
+    if coll.is_boxed() {
+        // Try tuple
+        if let Some(len) = proc.read_term_tuple_len(mem, coll) {
+            return Ok(Term::bool(len == 0));
+        }
+
+        // Try vector
+        if let Some(len) = proc.read_term_vector_len(mem, coll) {
+            return Ok(Term::bool(len == 0));
+        }
+
+        // Try map
+        if let Some(entries) = proc.read_term_map_entries(mem, coll) {
+            return Ok(Term::bool(entries.is_nil()));
+        }
+    }
+
+    Err(IntrinsicError::TypeError {
+        intrinsic: id,
+        arg: 0,
+        expected: "sequence",
+    })
 }

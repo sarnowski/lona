@@ -6,8 +6,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::{eval, setup};
-use crate::value::Value;
+use crate::term::Term;
 use crate::vm::RuntimeError;
+
+/// Helper to create a small integer Term.
+fn int(n: i64) -> Term {
+    Term::small_int(n).expect("integer out of small_int range")
+}
 
 // --- Function tests ---
 
@@ -15,28 +20,29 @@ use crate::vm::RuntimeError;
 fn eval_fn_creation() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let result = eval("(fn* [x] x)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert!(result.is_fn());
+    // Function or closure
+    assert!(proc.is_term_fun(&mem, result) || proc.is_term_closure(&mem, result));
 }
 
 #[test]
 fn eval_fn_identity() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let result = eval("((fn* [x] x) 42)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(42));
+    assert_eq!(result, int(42));
 }
 
 #[test]
 fn eval_fn_with_body() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let result = eval("((fn* [x] (+ x 1)) 5)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(6));
+    assert_eq!(result, int(6));
 }
 
 #[test]
 fn eval_fn_two_args() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let result = eval("((fn* [a b] (+ a b)) 3 4)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(7));
+    assert_eq!(result, int(7));
 }
 
 #[test]
@@ -49,14 +55,14 @@ fn eval_fn_three_args() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(6));
+    assert_eq!(result, int(6));
 }
 
 #[test]
 fn eval_fn_zero_args() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let result = eval("((fn* [] 99))", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(99));
+    assert_eq!(result, int(99));
 }
 
 #[test]
@@ -70,21 +76,21 @@ fn eval_fn_returns_nil() {
 fn eval_fn_predicate_true() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let result = eval("(fn? (fn* [] nil))", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::bool(true));
+    assert_eq!(result, Term::TRUE);
 }
 
 #[test]
 fn eval_fn_predicate_false_int() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let result = eval("(fn? 42)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::bool(false));
+    assert_eq!(result, Term::FALSE);
 }
 
 #[test]
 fn eval_fn_predicate_false_keyword() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let result = eval("(fn? :keyword)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::bool(false));
+    assert_eq!(result, Term::FALSE);
 }
 
 #[test]
@@ -130,7 +136,7 @@ fn eval_fn_nested_call() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(30));
+    assert_eq!(result, int(30));
 }
 
 #[test]
@@ -144,7 +150,7 @@ fn eval_fn_with_tuple_param() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(3));
+    assert_eq!(result, int(3));
 }
 
 #[test]
@@ -158,7 +164,7 @@ fn eval_fn_with_map_param() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(42));
+    assert_eq!(result, int(42));
 }
 
 // --- Closure tests ---
@@ -174,7 +180,7 @@ fn eval_closure_simple() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(15));
+    assert_eq!(result, int(15));
 }
 
 #[test]
@@ -188,7 +194,7 @@ fn eval_closure_multiple_captures() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(6));
+    assert_eq!(result, int(6));
 }
 
 #[test]
@@ -203,7 +209,7 @@ fn eval_closure_nested_multi_level() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(6));
+    assert_eq!(result, int(6));
 }
 
 #[test]
@@ -217,7 +223,7 @@ fn eval_closure_is_fn() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::bool(true));
+    assert_eq!(result, Term::TRUE);
 }
 
 #[test]
@@ -231,5 +237,5 @@ fn eval_closure_capture_keyword() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(42));
+    assert_eq!(result, int(42));
 }

@@ -94,6 +94,26 @@ You are FORBIDDEN from: placeholders, TODO/FIXME comments, stub functions, parti
 
 If you create a plan, save it to `PLAN.md` and implement EVERY item. The finishing-work skill verifies against this plan. **If you cannot implement something completely, STOP and discuss with the user.**
 
+### Effort Estimation
+
+**NEVER use time-based estimates.** Statements like "this will take 2 hours" or "should be done in a few minutes" are meaningless and prohibited.
+
+Instead, use qualitative effort indicators:
+
+| Metric | Values | What It Means |
+|--------|--------|---------------|
+| **Complexity** | Low / Medium / High | How intricate the logic or integration is |
+| **Context windows** | 1-2 / 3-5 / 5+ | Estimated agent turns to implement completely |
+| **Scope** | Narrow / Moderate / Broad | How many files/modules are affected |
+
+Example in a plan:
+```markdown
+## Task: Add map iteration intrinsic
+- Complexity: Low (single function, clear semantics)
+- Context windows: 1-2
+- Scope: Narrow (sequence.rs + test file)
+```
+
 ---
 
 ## Test-First Development (MANDATORY)
@@ -219,16 +239,18 @@ This is the ONE command to verify changes work. No other command counts.
 
 Both support `arch` parameter: `aarch64` (default) or `x86_64`.
 
-### AI Agents
+### Review Subagents
 
-| Agent | Command |
+**ALL review agents MUST be executed on EVERY review. No exceptions.**
+
+| Agent | Purpose |
 |-------|---------|
-| **Claude** | `Task(subagent_type="reviewer", run_in_background=true, prompt="...")` |
-| **Gemini** | `Bash(run_in_background=true, timeout=600000, command='gemini -m gemini-3-pro-preview "..."')` |
-| **Codex** | `Bash(run_in_background=true, timeout=600000, command='codex exec -m gpt-5.2 -c model_reasoning_effort=medium -s read-only "..." 2>/dev/null')` |
+| `rust-code-reviewer` | Rust code quality, idiomaticity, best practices |
+| `architecture-reviewer` | Clean Code, YAGNI, KISS, DRY, SOLID principles |
+| `beam-vm-reviewer` | BEAM VM design patterns alignment |
+| `lonala-reviewer` | Lonala spec compliance, idiomatic patterns |
+| `lona-guardian` | Lona core principles, security model, design philosophy |
+| `sel4-expert-reviewer` | seL4 kernel compatibility, capability security |
+| `test-reviewer` | Test coverage, meaningfulness, goal-oriented testing |
 
-**Run all three IN PARALLEL** (single message, multiple tool calls). For Codex code reviews, use `-m gpt-5.2-codex`. Don't use any other models than shown here.
-
-**Codex output:** By default, `codex exec` streams progress to stderr and only the final message to stdout. The `2>/dev/null` suppresses progress spam while preserving the final response. Adjust `model_reasoning_effort` to `low` or `high` as needed.
-
-**Codex is SLOW:** Codex can take up to 20 minutes to complete a review. When waiting for Codex output, you will likely hit timeouts multiple times. Do NOT kill the agent when this happens - continue listening with `TaskOutput` until Codex finishes. Be patient and wait for the complete response.
+**Launch ALL 7 agents IN PARALLEL (single message with all 7 Task tool calls).** Results return together when all complete.

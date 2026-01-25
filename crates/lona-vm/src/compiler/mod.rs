@@ -33,7 +33,7 @@ use crate::intrinsics::id as intrinsic_id;
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::{Realm, lookup_var_in_ns};
-use crate::value::Value;
+use crate::term::Term;
 
 #[cfg(any(test, feature = "std"))]
 pub use disassemble::disassemble;
@@ -240,6 +240,15 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
         self.captures_len = 0;
     }
 
+    /// Get the name string for an immediate symbol.
+    ///
+    /// Returns the symbol name from the realm's symbol table.
+    /// Returns `None` if the term is not a symbol or the symbol index is invalid.
+    fn get_symbol_name(&self, sym: Term) -> Option<&str> {
+        let idx = sym.as_symbol_index()?;
+        self.realm.symbol_name(self.mem, idx)
+    }
+
     /// Force capture of all grandparent variables into the current scope.
     ///
     /// This must be called BEFORE saving state when compiling a nested function.
@@ -324,7 +333,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// # Errors
     ///
     /// Returns an error if compilation fails.
-    pub fn compile(mut self, expr: Value) -> Result<Chunk, CompileError> {
+    pub fn compile(mut self, expr: Term) -> Result<Chunk, CompileError> {
         // Compile the expression, result in X0
         // Start temp registers at TEMP_REG_BASE (128)
         self.compile_expr(expr, 0, TEMP_REG_BASE)?;
@@ -341,55 +350,89 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// this is bumped up to avoid register conflicts.
     ///
     /// Returns the next available temp register after compilation.
-    fn compile_expr(&mut self, expr: Value, target: u8, temp_base: u8) -> Result<u8, CompileError> {
-        match expr {
-            Value::Nil => {
-                self.chunk.emit(encode_abx(op::LOADNIL, target, 0));
-                Ok(temp_base)
-            }
-            Value::Bool(b) => {
-                self.chunk
-                    .emit(encode_abx(op::LOADBOOL, target, u32::from(b)));
-                Ok(temp_base)
-            }
-            Value::Int(n) => {
-                self.compile_int(n, target)?;
-                Ok(temp_base)
-            }
-            Value::String(_) => {
+    fn compile_expr(&mut self, expr: Term, target: u8, temp_base: u8) -> Result<u8, CompileError> {
+        // Check immediate types first
+        if expr.is_nil() {
+            self.chunk.emit(encode_abx(op::LOADNIL, target, 0));
+            return Ok(temp_base);
+        }
+
+        if let Some(b) = expr.as_bool() {
+            self.chunk
+                .emit(encode_abx(op::LOADBOOL, target, u32::from(b)));
+            return Ok(temp_base);
+        }
+
+        if let Some(n) = expr.as_small_int() {
+            self.compile_int(n, target)?;
+            return Ok(temp_base);
+        }
+
+        if expr.is_symbol() {
+            return self.compile_symbol(expr, target, temp_base);
+        }
+
+        if expr.is_keyword() {
+            // Keywords are self-evaluating constants
+            self.compile_constant(expr, target)?;
+            return Ok(temp_base);
+        }
+
+        if expr.is_native_fn() {
+            // Native functions are self-evaluating constants
+            self.compile_constant(expr, target)?;
+            return Ok(temp_base);
+        }
+
+        if expr.is_unbound() {
+            // Unbound is a special sentinel - shouldn't appear in source
+            return Err(CompileError::InvalidSyntax);
+        }
+
+        // Check list type (pairs)
+        if expr.is_list() {
+            return self.compile_list(expr, target, temp_base);
+        }
+
+        // Check boxed types (require checking the header)
+        if expr.is_boxed() {
+            // Check specific boxed types via process helpers
+            if self.proc.is_term_string(self.mem, expr) {
                 self.compile_constant(expr, target)?;
-                Ok(temp_base)
+                return Ok(temp_base);
             }
-            Value::Symbol(_) => self.compile_symbol(expr, target, temp_base),
-            Value::Keyword(_) => {
-                // Keywords are self-evaluating constants
-                self.compile_constant(expr, target)?;
-                Ok(temp_base)
+
+            if self.proc.is_term_tuple(self.mem, expr) {
+                return self.compile_tuple(expr, target, temp_base);
             }
-            Value::Pair(_) => self.compile_list(expr, target, temp_base),
-            Value::Tuple(_) => self.compile_tuple(expr, target, temp_base),
-            Value::Vector(_) => self.compile_vector(expr, target, temp_base),
-            Value::Map(_) => self.compile_map(expr, target, temp_base),
-            Value::Namespace(_) => {
+
+            if self.proc.is_term_vector(self.mem, expr) {
+                return self.compile_vector(expr, target, temp_base);
+            }
+
+            if self.proc.is_term_map(self.mem, expr) {
+                return self.compile_map(expr, target, temp_base);
+            }
+
+            if self.proc.is_term_namespace(self.mem, expr) {
                 // Namespaces are self-evaluating constants
                 self.compile_constant(expr, target)?;
-                Ok(temp_base)
+                return Ok(temp_base);
             }
-            Value::CompiledFn(_) | Value::Closure(_) | Value::NativeFn(_) => {
-                // Functions are self-evaluating constants
-                self.compile_constant(expr, target)?;
-                Ok(temp_base)
-            }
-            Value::Var(_) => {
+
+            if self.proc.is_term_var(self.mem, expr) {
                 // Vars are self-evaluating (return the var object itself)
                 self.compile_constant(expr, target)?;
-                Ok(temp_base)
+                return Ok(temp_base);
             }
-            Value::Unbound => {
-                // Unbound is a special sentinel - shouldn't appear in source
-                Err(CompileError::InvalidSyntax)
-            }
+
+            // Functions, closures are self-evaluating constants
+            self.compile_constant(expr, target)?;
+            return Ok(temp_base);
         }
+
+        // Unknown term type
+        Err(CompileError::InvalidSyntax)
     }
 
     /// Compile a symbol reference.
@@ -400,14 +443,13 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// 3. Namespace lookup via `*ns*`
     fn compile_symbol(
         &mut self,
-        expr: Value,
+        expr: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
-        // Read the symbol name into a local buffer to avoid borrow conflicts
+        // Get the symbol name from realm's symbol table
         let name_str = self
-            .proc
-            .read_string(self.mem, expr)
+            .get_symbol_name(expr)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // Copy to local buffer to release the borrow
@@ -460,7 +502,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     ///
     /// Handles both qualified (ns/name) and unqualified symbols.
     /// The `/` symbol by itself is treated as unqualified (it's the division intrinsic).
-    fn resolve_symbol(&self, name: &str) -> Option<Value> {
+    fn resolve_symbol(&self, name: &str) -> Option<Term> {
         // Special case: "/" alone is the division operator, not a qualified name
         if name == "/" {
             return self.resolve_unqualified(name);
@@ -473,7 +515,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     }
 
     /// Resolve a qualified symbol (ns/name).
-    fn resolve_qualified(&self, ns_name: &str, var_name: &str) -> Option<Value> {
+    fn resolve_qualified(&self, ns_name: &str, var_name: &str) -> Option<Term> {
         // Find the namespace by name
         let ns_sym = self.realm.find_symbol(self.mem, ns_name)?;
         let ns = self.realm.find_namespace(ns_sym)?;
@@ -483,19 +525,26 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     }
 
     /// Resolve an unqualified symbol via the current namespace (*ns*).
-    fn resolve_unqualified(&self, name: &str) -> Option<Value> {
+    fn resolve_unqualified(&self, name: &str) -> Option<Term> {
+        use crate::term::heap::HeapVar;
+
         // Get *ns* var
         let ns_var = lookup_var_in_ns(self.realm, self.mem, self.get_core_ns()?, "*ns*")?;
 
-        // Get the current namespace from *ns* (via process binding or root)
-        let current_ns = self.proc.var_get(self.mem, ns_var)?;
+        // Get the current namespace from *ns* - read HeapVar directly
+        if !ns_var.is_boxed() {
+            return None;
+        }
+        let var_addr = ns_var.to_vaddr();
+        let heap_var: HeapVar = self.mem.read(var_addr);
+        let current_ns = heap_var.root;
 
         // Look up the symbol in the current namespace
         lookup_var_in_ns(self.realm, self.mem, current_ns, name)
     }
 
     /// Get the lona.core namespace.
-    fn get_core_ns(&self) -> Option<Value> {
+    fn get_core_ns(&self) -> Option<Term> {
         let core_sym = self.realm.find_symbol(self.mem, "lona.core")?;
         self.realm.find_namespace(core_sym)
     }
@@ -505,7 +554,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// Emits code to load the var and call `VAR_GET` to get its value.
     fn compile_var_deref(
         &mut self,
-        var: Value,
+        var: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
@@ -541,19 +590,16 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
             Ok(())
         } else {
             // Too large for inline, use constant pool
-            self.compile_constant(Value::int(n), target)
+            let term = Term::small_int(n).ok_or(CompileError::IntegerTooLarge)?;
+            self.compile_constant(term, target)
         }
     }
 
     /// Compile a constant (load from constant pool).
-    pub(crate) fn compile_constant(
-        &mut self,
-        value: Value,
-        target: u8,
-    ) -> Result<(), CompileError> {
+    pub(crate) fn compile_constant(&mut self, term: Term, target: u8) -> Result<(), CompileError> {
         let idx = self
             .chunk
-            .add_constant(value)
+            .add_constant(term)
             .ok_or(CompileError::ConstantPoolFull)?;
         self.chunk.emit(encode_abx(op::LOADK, target, idx));
         Ok(())
@@ -565,7 +611,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
     /// and returns the value of the last one.
     pub(crate) fn compile_do(
         &mut self,
-        body: Value,
+        body: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
@@ -580,14 +626,14 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
 
         // Evaluate each expression
         while !current.is_nil() {
-            let pair = self
+            let (first, rest) = self
                 .proc
-                .read_pair(self.mem, current)
+                .read_term_pair(self.mem, current)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             // Compile each expression to target (last one's value is kept)
-            result = self.compile_expr(pair.first, target, temp_base)?;
-            current = pair.rest;
+            result = self.compile_expr(first, target, temp_base)?;
+            current = rest;
         }
 
         Ok(result)
@@ -600,7 +646,7 @@ impl<'a, M: MemorySpace> Compiler<'a, M> {
 ///
 /// Returns an error if compilation fails.
 pub fn compile<M: MemorySpace>(
-    expr: Value,
+    expr: Term,
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,

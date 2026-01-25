@@ -11,7 +11,7 @@ use alloc::vec::Vec;
 
 use crate::bytecode::{encode_abc, op};
 use crate::platform::MemorySpace;
-use crate::value::Value;
+use crate::term::Term;
 
 use super::{CompileError, Compiler};
 
@@ -21,14 +21,14 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// `[a b c]` evaluates each element and builds a tuple.
     pub(super) fn compile_tuple(
         &mut self,
-        tuple: Value,
+        tuple: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // Get tuple length and elements
         let len = self
             .proc
-            .read_tuple_len(self.mem, tuple)
+            .read_term_tuple_len(self.mem, tuple)
             .ok_or(CompileError::InvalidSyntax)?;
 
         if len == 0 {
@@ -48,7 +48,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
         for i in 0..len {
             let elem = self
                 .proc
-                .read_tuple_element(self.mem, tuple, i)
+                .read_term_tuple_element(self.mem, tuple, i)
                 .ok_or(CompileError::InvalidSyntax)?;
             let temp_reg = temp_base
                 .checked_add(i as u8)
@@ -72,14 +72,14 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// `{a b c}` evaluates each element and builds a vector.
     pub(super) fn compile_vector(
         &mut self,
-        vector: Value,
+        vector: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // Vectors share the same memory layout as tuples
         let len = self
             .proc
-            .read_tuple_len(self.mem, vector)
+            .read_term_vector_len(self.mem, vector)
             .ok_or(CompileError::InvalidSyntax)?;
 
         if len == 0 {
@@ -99,7 +99,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
         for i in 0..len {
             let elem = self
                 .proc
-                .read_tuple_element(self.mem, vector, i)
+                .read_term_vector_element(self.mem, vector, i)
                 .ok_or(CompileError::InvalidSyntax)?;
             let temp_reg = temp_base
                 .checked_add(i as u8)
@@ -123,32 +123,30 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// `%{:a 1 :b 2}` evaluates each key and value, then builds a map.
     pub(super) fn compile_map(
         &mut self,
-        map: Value,
+        map: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // Read the map's entries (association list)
-        let map_val = self
+        let mut current = self
             .proc
-            .read_map(self.mem, map)
+            .read_term_map_entries(self.mem, map)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // Count entries and collect key-value pairs
         let mut entries = Vec::new();
-        let mut current = map_val.entries;
-        while let Some(pair) = self.proc.read_pair(self.mem, current) {
-            // Each pair.first is a [key value] tuple
-            let kv = pair.first;
+        while let Some((entry, rest)) = self.proc.read_term_pair(self.mem, current) {
+            // Each entry is a [key value] tuple
             let key = self
                 .proc
-                .read_tuple_element(self.mem, kv, 0)
+                .read_term_tuple_element(self.mem, entry, 0)
                 .ok_or(CompileError::InvalidSyntax)?;
             let val = self
                 .proc
-                .read_tuple_element(self.mem, kv, 1)
+                .read_term_tuple_element(self.mem, entry, 1)
                 .ok_or(CompileError::InvalidSyntax)?;
             entries.push((key, val));
-            current = pair.rest;
+            current = rest;
         }
 
         if entries.is_empty() {

@@ -35,24 +35,15 @@
 //! For M2: Allocated but empty (no promotion without GC)
 //! ```
 
-mod function;
-mod namespace;
 pub mod pool;
-mod value_alloc;
-mod var;
+mod term_alloc;
 
 #[cfg(test)]
 mod allocation_test;
 #[cfg(test)]
-mod binding_test;
-#[cfg(test)]
-mod copy_test;
-#[cfg(test)]
 mod execution_test;
 #[cfg(test)]
 mod frame_test;
-#[cfg(test)]
-mod namespace_test;
 #[cfg(test)]
 mod pool_test;
 #[cfg(test)]
@@ -62,21 +53,18 @@ mod reduction_test;
 #[cfg(test)]
 mod stack_test;
 #[cfg(test)]
-mod value_alloc_test;
+mod term_alloc_test;
+
+extern crate alloc;
+
+use alloc::collections::BTreeMap;
 
 use crate::Vaddr;
 use crate::bytecode::Chunk;
-use crate::value::Value;
+use crate::term::Term;
 
 /// Number of X registers (temporaries).
 pub const X_REG_COUNT: usize = 256;
-
-/// Maximum number of process-bound variable bindings.
-///
-/// Process-bound vars (like `*ns*`) can have per-process values that shadow
-/// the root binding. This table maps var IDs (`VarSlot` addresses) to values.
-/// 32 bindings = 32 * (8 + 16) = 768 bytes, acceptable for per-process overhead.
-pub const MAX_BINDINGS: usize = 32;
 
 /// Initial young heap size (48 KB).
 ///
@@ -124,13 +112,13 @@ pub const MAX_REDUCTIONS: u32 = 2000;
 // Key relationships:
 // - frame_base points to the header (return_ip slot)
 // - Y registers are BELOW the header (at lower addresses)
-// - Y registers are Value-sized (16 bytes), header fields are u64-sized (8 bytes)
+// - Y registers are Term-sized (8 bytes), header fields are u64-sized (8 bytes)
 // - stop = frame_base - y_count * Y_REGISTER_SIZE
 // - Y(i) = stop + i * Y_REGISTER_SIZE
 
 /// Size of one Y register slot in bytes.
-/// Y registers store `Value`s, so this must equal `size_of::<Value>()`.
-pub const Y_REGISTER_SIZE: usize = core::mem::size_of::<Value>();
+/// Y registers store `Term`s, so this must equal `size_of::<Term>()`.
+pub const Y_REGISTER_SIZE: usize = core::mem::size_of::<crate::term::Term>();
 
 /// Size of stack frame header in bytes.
 /// Contains: `return_ip`, `chunk_addr`, `caller_frame_base`, `y_count` (4 × u64).
@@ -303,12 +291,8 @@ pub struct Process {
     frame_depth: usize,
 
     // Process-bound var bindings
-    /// Var IDs (`VarSlot` addresses) with process-local bindings.
-    pub(crate) binding_var_ids: [Vaddr; MAX_BINDINGS],
-    /// Process-local values for those vars.
-    pub(crate) binding_values: [Value; MAX_BINDINGS],
-    /// Number of bindings.
-    pub(crate) binding_len: usize,
+    /// Bindings (var address -> value).
+    pub(crate) bindings: BTreeMap<Vaddr, Term>,
 }
 
 impl Process {
@@ -358,9 +342,7 @@ impl Process {
             current_y_count: 0,
             frame_depth: 0,
             // Process-bound var bindings
-            binding_var_ids: [Vaddr::new(0); MAX_BINDINGS],
-            binding_values: [Value::Nil; MAX_BINDINGS],
-            binding_len: 0,
+            bindings: BTreeMap::new(),
         }
     }
 
@@ -369,7 +351,7 @@ impl Process {
     /// Returns `None` if there isn't enough space.
     ///
     /// Callers must request appropriate alignment for the type being allocated.
-    /// For `Value` types, use 8-byte alignment. For strings, 4-byte is sufficient.
+    /// For Term types, use 8-byte alignment. For strings, 4-byte is sufficient.
     pub const fn alloc(&mut self, size: usize, align: usize) -> Option<Vaddr> {
         if size == 0 {
             return Some(self.htop);
@@ -433,8 +415,13 @@ impl Process {
     }
 
     /// Set the bytecode chunk to execute.
+    ///
+    /// This clears any previous heap-saved chunk address since the new chunk
+    /// supersedes it. When a function is called, the caller's chunk will be
+    /// saved to heap at that time.
     pub fn set_chunk(&mut self, chunk: Chunk) {
         self.chunk = Some(chunk);
+        self.chunk_addr = None; // Clear stale heap address
         self.ip = 0;
     }
 
@@ -638,7 +625,7 @@ impl Process {
         // Initialize Y registers to nil
         for i in 0..y_count {
             let y_addr = Vaddr::new(self.stop.as_u64() + i as u64 * Y_REGISTER_SIZE as u64);
-            mem.write(y_addr, Value::Nil);
+            mem.write(y_addr, crate::term::Term::NIL);
         }
 
         Ok(())
@@ -681,7 +668,11 @@ impl Process {
     /// Returns `None` if index out of bounds or no frame exists.
     #[inline]
     #[must_use]
-    pub fn get_y<M: crate::platform::MemorySpace>(&self, mem: &M, index: usize) -> Option<Value> {
+    pub fn get_y<M: crate::platform::MemorySpace>(
+        &self,
+        mem: &M,
+        index: usize,
+    ) -> Option<crate::term::Term> {
         if self.frame_base.is_none() || index >= self.current_y_count {
             return None;
         }
@@ -698,7 +689,7 @@ impl Process {
         &self,
         mem: &mut M,
         index: usize,
-        value: Value,
+        value: crate::term::Term,
     ) -> bool {
         if self.frame_base.is_none() || index >= self.current_y_count {
             return false;
@@ -740,57 +731,88 @@ impl Process {
         self.reductions == 0
     }
 
-    // --- Process-bound var bindings ---
+    // --- Chunk management methods ---
 
-    /// Get process-local binding for a var, if any.
+    /// Ensure the current chunk is on the heap.
     ///
-    /// Returns the bound value if the var has a process-local binding,
-    /// `None` otherwise.
-    #[must_use]
-    pub fn get_binding(&self, var_id: Vaddr) -> Option<Value> {
-        for i in 0..self.binding_len {
-            if self.binding_var_ids[i] == var_id {
-                return Some(self.binding_values[i]);
-            }
+    /// For REPL-compiled code that starts in `proc.chunk` without a heap address,
+    /// this copies the chunk to the heap and sets `chunk_addr`.
+    ///
+    /// Returns `true` if the chunk is now on heap (or already was),
+    /// `false` if out of memory.
+    pub fn ensure_chunk_on_heap<M: crate::platform::MemorySpace>(&mut self, mem: &mut M) -> bool {
+        // If already on heap, nothing to do
+        if self.chunk_addr.is_some() {
+            return true;
         }
-        None
+
+        // Get the current chunk - clone data to avoid borrow issues
+        let (code, constants) = match &self.chunk {
+            Some(c) => (c.code.clone(), c.constants.clone()),
+            None => return true, // No chunk, nothing to copy
+        };
+
+        // Allocate the chunk on heap
+        let Some(fn_term) = self.alloc_term_compiled_fn(
+            mem, 0,     // arity (not used for REPL code)
+            false, // variadic
+            0,     // num_locals
+            &code, &constants,
+        ) else {
+            return false;
+        };
+
+        // Set chunk_addr to the allocated function
+        self.chunk_addr = Some(fn_term.to_vaddr());
+        true
     }
 
-    /// Set process-local binding for a var.
+    /// Load a chunk from a heap address.
     ///
-    /// If the var already has a binding, updates it.
-    /// Otherwise, adds a new binding.
-    ///
-    /// Returns `None` if the binding table is full.
-    pub fn set_binding(&mut self, var_id: Vaddr, value: Value) -> Option<()> {
-        // Check if already bound - update in place
-        for i in 0..self.binding_len {
-            if self.binding_var_ids[i] == var_id {
-                self.binding_values[i] = value;
-                return Some(());
-            }
+    /// Reads the `HeapFun` at the given address and creates a Chunk from it.
+    /// Returns `true` if successful, `false` if the address is invalid.
+    pub fn load_chunk_from<M: crate::platform::MemorySpace>(
+        &mut self,
+        mem: &M,
+        chunk_addr: Vaddr,
+    ) -> bool {
+        use crate::term::heap::HeapFun;
+
+        // Handle null address (top-level return)
+        if chunk_addr.is_null() {
+            self.chunk = None;
+            self.chunk_addr = None;
+            return true;
         }
 
-        // Add new binding
-        if self.binding_len >= MAX_BINDINGS {
-            return None; // Table full
+        // Read function header
+        let header: HeapFun = mem.read(chunk_addr);
+
+        // Build chunk from function bytecode and constants
+        let mut chunk = crate::bytecode::Chunk::new();
+
+        // HeapFun stores bytecode as raw bytes, code_len is the total byte count
+        // Instructions are 4 bytes each (u32), so instruction count = code_len / 4
+        let code_addr = chunk_addr.add(HeapFun::PREFIX_SIZE as u64);
+        let instruction_count = header.code_len as usize / 4;
+        for i in 0..instruction_count {
+            let instr_addr = code_addr.add((i * 4) as u64);
+            let instr: u32 = mem.read(instr_addr);
+            chunk.emit(instr);
         }
 
-        self.binding_var_ids[self.binding_len] = var_id;
-        self.binding_values[self.binding_len] = value;
-        self.binding_len += 1;
-        Some(())
-    }
-
-    /// Check if a var has a process-local binding.
-    #[must_use]
-    pub fn has_binding(&self, var_id: Vaddr) -> bool {
-        for i in 0..self.binding_len {
-            if self.binding_var_ids[i] == var_id {
-                return true;
-            }
+        // Read constants (at aligned offset after bytecode)
+        let constants_offset = HeapFun::constants_offset(header.code_len as usize);
+        let constants_addr = chunk_addr.add(constants_offset as u64);
+        for i in 0..header.const_count as usize {
+            let const_addr = constants_addr.add((i * core::mem::size_of::<Term>()) as u64);
+            let constant: Term = mem.read(const_addr);
+            chunk.add_constant(constant);
         }
-        false
+
+        self.chunk = Some(chunk);
+        self.chunk_addr = Some(chunk_addr);
+        true
     }
 
     /// Bootstrap this process with initial bindings from a realm.
@@ -801,10 +823,11 @@ impl Process {
     /// # Arguments
     /// * `ns_var` - The `*ns*` var from the realm (returned by `realm::bootstrap`)
     /// * `core_ns` - The `lona.core` namespace (returned by `realm::bootstrap`)
-    pub fn bootstrap(&mut self, ns_var: Value, core_ns: Value) {
-        if let Value::Var(var_id) = ns_var {
+    pub fn bootstrap(&mut self, ns_var: Term, core_ns: Term) {
+        if ns_var.is_boxed() {
             // Set *ns* to lona.core for this process
-            let _ = self.set_binding(var_id, core_ns);
+            let var_addr = ns_var.to_vaddr();
+            self.bindings.insert(var_addr, core_ns);
         }
     }
 }

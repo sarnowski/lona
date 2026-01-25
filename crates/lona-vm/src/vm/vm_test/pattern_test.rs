@@ -18,8 +18,13 @@ use crate::platform::MockVSpace;
 use crate::process::{Process, WorkerId};
 use crate::realm::{Realm, bootstrap};
 use crate::scheduler::Worker;
-use crate::value::Value;
+use crate::term::Term;
 use crate::vm::{RunResult, Vm};
+
+/// Helper to create a small integer Term.
+fn int(n: i64) -> Term {
+    Term::small_int(n).expect("integer out of small_int range")
+}
 
 // =============================================================================
 // Helper functions
@@ -81,7 +86,7 @@ fn is_nil_matches_nil() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -103,7 +108,7 @@ fn is_nil_rejects_integer() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 #[test]
@@ -121,7 +126,7 @@ fn is_nil_rejects_false() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -141,7 +146,7 @@ fn is_bool_matches_true() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -157,7 +162,7 @@ fn is_bool_matches_false() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -173,7 +178,7 @@ fn is_bool_rejects_nil() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -193,7 +198,7 @@ fn is_int_matches_integer() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -209,7 +214,7 @@ fn is_int_rejects_bool() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -233,7 +238,7 @@ fn is_tuple_matches_tuple() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 8: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -251,7 +256,7 @@ fn is_tuple_rejects_vector() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 #[test]
@@ -267,7 +272,7 @@ fn is_tuple_rejects_integer() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -288,7 +293,7 @@ fn is_vector_matches_vector() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -305,7 +310,7 @@ fn is_vector_rejects_tuple() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -316,10 +321,10 @@ fn is_vector_rejects_tuple() {
 fn is_map_matches_map() {
     let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
-    // Allocate a keyword for the map key
-    let keyword = proc.alloc_keyword(&mut mem, "key").unwrap();
+    // Intern a keyword for the map key
+    let keyword = realm.intern_keyword(&mut mem, "key").unwrap();
     worker.x_regs[1] = keyword;
-    worker.x_regs[2] = Value::int(42);
+    worker.x_regs[2] = int(42);
 
     let mut chunk = Chunk::new();
     // Note: X1 and X2 are already set by test setup
@@ -332,7 +337,7 @@ fn is_map_matches_map() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -349,7 +354,7 @@ fn is_map_rejects_tuple() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -360,8 +365,8 @@ fn is_map_rejects_tuple() {
 fn is_keyword_matches_keyword() {
     let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
-    // Allocate a keyword
-    let keyword = proc.alloc_keyword(&mut mem, "test").unwrap();
+    // Intern a keyword
+    let keyword = realm.intern_keyword(&mut mem, "test").unwrap();
     worker.x_regs[0] = keyword;
 
     let mut chunk = Chunk::new();
@@ -374,15 +379,15 @@ fn is_keyword_matches_keyword() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
 fn is_keyword_rejects_symbol() {
     let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
-    // Allocate a symbol
-    let symbol = proc.alloc_symbol(&mut mem, "test").unwrap();
+    // Intern a symbol
+    let symbol = realm.intern_symbol(&mut mem, "test").unwrap();
     worker.x_regs[0] = symbol;
 
     let mut chunk = Chunk::new();
@@ -395,7 +400,7 @@ fn is_keyword_rejects_symbol() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -407,7 +412,7 @@ fn is_string_matches_string() {
     let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // Allocate a string
-    let string = proc.alloc_string(&mut mem, "hello").unwrap();
+    let string = proc.alloc_term_string(&mut mem, "hello").unwrap();
     worker.x_regs[0] = string;
 
     let mut chunk = Chunk::new();
@@ -419,7 +424,7 @@ fn is_string_matches_string() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -435,7 +440,7 @@ fn is_string_rejects_integer() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -459,7 +464,7 @@ fn test_arity_matches_correct_size() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 9: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -478,7 +483,7 @@ fn test_arity_rejects_wrong_size() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 8: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 #[test]
@@ -495,7 +500,7 @@ fn test_arity_rejects_non_tuple() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -518,7 +523,7 @@ fn test_vec_len_matches_correct_size() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 8: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -536,7 +541,7 @@ fn test_vec_len_rejects_wrong_size() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 // =============================================================================
@@ -557,7 +562,7 @@ fn get_tuple_elem_extracts_first() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(10))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(10)));
 }
 
 #[test]
@@ -574,7 +579,7 @@ fn get_tuple_elem_extracts_middle() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(20))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(20)));
 }
 
 #[test]
@@ -591,7 +596,7 @@ fn get_tuple_elem_extracts_last() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(30))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(30)));
 }
 
 // =============================================================================
@@ -611,7 +616,7 @@ fn get_vec_elem_extracts_first() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(100))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(100)));
 }
 
 #[test]
@@ -627,7 +632,7 @@ fn get_vec_elem_extracts_last() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(200))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(200)));
 }
 
 // =============================================================================
@@ -649,7 +654,7 @@ fn is_eq_matches_equal_integers() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -667,7 +672,7 @@ fn is_eq_rejects_different_integers() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 #[test]
@@ -685,7 +690,7 @@ fn is_eq_matches_nil() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -703,7 +708,7 @@ fn is_eq_rejects_different_types() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 #[test]
@@ -725,7 +730,7 @@ fn is_eq_matches_same_keywords() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 // =============================================================================
@@ -744,7 +749,7 @@ fn jump_unconditional() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 4: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(42))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(42)));
 }
 
 #[test]
@@ -759,7 +764,7 @@ fn jump_forward_to_end() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 4: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(42))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(42)));
 }
 
 // =============================================================================
@@ -779,7 +784,7 @@ fn jump_if_false_on_nil() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 #[test]
@@ -795,7 +800,7 @@ fn jump_if_false_on_false() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(0))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(0)));
 }
 
 #[test]
@@ -811,7 +816,7 @@ fn jump_if_false_not_taken_on_true() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -827,7 +832,7 @@ fn jump_if_false_not_taken_on_integer() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -844,7 +849,7 @@ fn jump_if_false_not_taken_on_zero() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 // =============================================================================
@@ -873,7 +878,7 @@ fn pattern_match_literal_integer() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -898,7 +903,7 @@ fn pattern_match_falls_through_to_wildcard() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(1))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(1)));
 }
 
 #[test]
@@ -938,7 +943,7 @@ fn pattern_match_tuple_destructure() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 15: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(4))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(4)));
 }
 
 // =============================================================================
@@ -965,7 +970,7 @@ fn tuple_slice_from_middle() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(2))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(2)));
 }
 
 #[test]
@@ -988,7 +993,7 @@ fn tuple_slice_from_end() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
-    assert!(matches!(result, RunResult::Completed(Value::Int(3))));
+    assert!(matches!(result, RunResult::Completed(v) if v == int(3)));
 }
 
 #[test]
@@ -1013,8 +1018,8 @@ fn tuple_slice_empty_result() {
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     // Should be an empty tuple
     if let RunResult::Completed(val) = result {
-        assert!(val.is_tuple());
-        let len = proc.read_tuple_len(&mem, val).unwrap();
+        assert!(proc.is_term_tuple(&mem, val));
+        let len = proc.read_term_tuple_len(&mem, val).unwrap();
         assert_eq!(len, 0);
     } else {
         panic!("Expected Completed result");
@@ -1042,15 +1047,15 @@ fn tuple_slice_full_copy() {
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     if let RunResult::Completed(val) = result {
-        assert!(val.is_tuple());
-        let len = proc.read_tuple_len(&mem, val).unwrap();
+        assert!(proc.is_term_tuple(&mem, val));
+        let len = proc.read_term_tuple_len(&mem, val).unwrap();
         assert_eq!(len, 3);
-        let elem0 = proc.read_tuple_element(&mem, val, 0).unwrap();
-        let elem1 = proc.read_tuple_element(&mem, val, 1).unwrap();
-        let elem2 = proc.read_tuple_element(&mem, val, 2).unwrap();
-        assert_eq!(elem0, Value::Int(1));
-        assert_eq!(elem1, Value::Int(2));
-        assert_eq!(elem2, Value::Int(3));
+        let elem0 = proc.read_term_tuple_element(&mem, val, 0).unwrap();
+        let elem1 = proc.read_term_tuple_element(&mem, val, 1).unwrap();
+        let elem2 = proc.read_term_tuple_element(&mem, val, 2).unwrap();
+        assert_eq!(elem0, int(1));
+        assert_eq!(elem1, int(2));
+        assert_eq!(elem2, int(3));
     } else {
         panic!("Expected Completed result");
     }
@@ -1077,8 +1082,8 @@ fn tuple_slice_beyond_length() {
 
     let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     if let RunResult::Completed(val) = result {
-        assert!(val.is_tuple());
-        let len = proc.read_tuple_len(&mem, val).unwrap();
+        assert!(proc.is_term_tuple(&mem, val));
+        let len = proc.read_term_tuple_len(&mem, val).unwrap();
         assert_eq!(len, 0);
     } else {
         panic!("Expected Completed result");

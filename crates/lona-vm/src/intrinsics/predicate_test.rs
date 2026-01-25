@@ -7,50 +7,55 @@
 
 use super::arithmetic_test::setup;
 use super::*;
-use crate::value::Value;
+use crate::term::Term;
+
+/// Helper to create a small integer Term.
+fn int(n: i64) -> Term {
+    Term::small_int(n).expect("integer out of small_int range")
+}
 
 #[test]
 fn is_nil() {
     let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    x_regs[1] = Value::nil();
+    x_regs[1] = Term::NIL;
     call_intrinsic(id::IS_NIL, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(x_regs[0], Value::bool(true));
+    assert_eq!(x_regs[0], Term::TRUE);
 
-    x_regs[1] = Value::int(0);
+    x_regs[1] = int(0);
     call_intrinsic(id::IS_NIL, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(x_regs[0], Value::bool(false));
+    assert_eq!(x_regs[0], Term::FALSE);
 
-    x_regs[1] = Value::bool(false);
+    x_regs[1] = Term::FALSE;
     call_intrinsic(id::IS_NIL, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(x_regs[0], Value::bool(false));
+    assert_eq!(x_regs[0], Term::FALSE);
 }
 
 #[test]
 fn is_int() {
     let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    x_regs[1] = Value::int(42);
+    x_regs[1] = int(42);
     call_intrinsic(id::IS_INT, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(x_regs[0], Value::bool(true));
+    assert_eq!(x_regs[0], Term::TRUE);
 
-    x_regs[1] = Value::nil();
+    x_regs[1] = Term::NIL;
     call_intrinsic(id::IS_INT, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(x_regs[0], Value::bool(false));
+    assert_eq!(x_regs[0], Term::FALSE);
 }
 
 #[test]
 fn is_str() {
     let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    let s = proc.alloc_string(&mut mem, "hello").unwrap();
+    let s = proc.alloc_term_string(&mut mem, "hello").unwrap();
     x_regs[1] = s;
     call_intrinsic(id::IS_STR, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(x_regs[0], Value::bool(true));
+    assert_eq!(x_regs[0], Term::TRUE);
 
-    x_regs[1] = Value::int(42);
+    x_regs[1] = int(42);
     call_intrinsic(id::IS_STR, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(x_regs[0], Value::bool(false));
+    assert_eq!(x_regs[0], Term::FALSE);
 }
 
 #[test]

@@ -18,30 +18,30 @@ fn eval_meta_nil_for_no_metadata() {
 fn eval_with_meta_and_meta() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
 
-    // Create a symbol and attach metadata, then check it
+    // Create a tuple and attach metadata, then check it
+    // Note: with-meta requires reference types (boxed values), not immediates like symbols
     let result = eval(
-        "(meta (with-meta 'x %{:doc \"hello\"}))",
+        "(meta (with-meta [1 2] %{:doc \"hello\"}))",
         &mut proc,
         &mut realm,
         &mut mem,
     )
     .unwrap();
-    assert!(result.is_map());
+    assert!(proc.is_term_map(&mem, result));
 }
 
 #[test]
 fn eval_meta_does_not_affect_equality() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
 
-    // Create two symbols, same value but different metadata
-    let a = eval("(with-meta 'x %{:a 1})", &mut proc, &mut realm, &mut mem).unwrap();
-    let b = eval("(with-meta 'x %{:b 2})", &mut proc, &mut realm, &mut mem).unwrap();
+    // Create two tuples with same content but different metadata
+    // Note: with-meta requires reference types (boxed values), not immediates like symbols
+    let a = eval("(with-meta [1 2] %{:a 1})", &mut proc, &mut realm, &mut mem).unwrap();
+    let b = eval("(with-meta [1 2] %{:b 2})", &mut proc, &mut realm, &mut mem).unwrap();
 
-    // They should be equal (identity comparison for symbols)
-    // Actually symbols compare by address, so different allocations won't be equal
-    // But metadata shouldn't break this
-    assert!(a.is_symbol());
-    assert!(b.is_symbol());
+    // Both should be tuples
+    assert!(proc.is_term_tuple(&mem, a));
+    assert!(proc.is_term_tuple(&mem, b));
 }
 
 #[test]
@@ -55,7 +55,7 @@ fn eval_meta_on_tuple() {
         &mut mem,
     )
     .unwrap();
-    assert!(tuple.is_tuple());
+    assert!(proc.is_term_tuple(&mem, tuple));
 
     let meta = eval(
         "(meta (with-meta [1 2 3] %{:tag :vector}))",
@@ -64,5 +64,5 @@ fn eval_meta_on_tuple() {
         &mut mem,
     )
     .unwrap();
-    assert!(meta.is_map());
+    assert!(proc.is_term_map(&mem, meta));
 }

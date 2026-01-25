@@ -5,8 +5,11 @@
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
-use crate::realm::{Realm, VisitedTracker, deep_copy_to_realm};
-use crate::value::{HeapMap, HeapTuple, Pair, Value, VarContent, VarSlot};
+use crate::realm::{Realm, VisitedTracker, deep_copy_term_to_realm};
+use crate::term::Term;
+use crate::term::header::Header;
+use crate::term::heap::{HeapMap, HeapPair, HeapTuple, HeapVar};
+use crate::term::tag::object;
 
 use super::{IntrinsicError, XRegs};
 
@@ -17,9 +20,9 @@ use super::{IntrinsicError, XRegs};
 /// `(meta obj)` - returns metadata map or nil
 ///
 /// All metadata is stored in the realm's metadata table.
-pub fn intrinsic_meta<M: MemorySpace>(x_regs: &XRegs, realm: &Realm, _mem: &M) -> Value {
+pub fn intrinsic_meta<M: MemorySpace>(x_regs: &XRegs, realm: &Realm, _mem: &M) -> Term {
     let obj = x_regs[1];
-    realm.get_metadata_value(obj)
+    realm.get_metadata_term(obj)
 }
 
 /// Attach metadata to an object.
@@ -30,50 +33,49 @@ pub fn intrinsic_meta<M: MemorySpace>(x_regs: &XRegs, realm: &Realm, _mem: &M) -
 pub fn intrinsic_with_meta<M: MemorySpace>(
     x_regs: &XRegs,
     realm: &mut Realm,
-    _mem: &M,
+    mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let obj = x_regs[1];
     let meta = x_regs[2];
 
     // Metadata must be a map (or nil to clear)
-    let meta_addr = match meta {
-        Value::Nil => {
-            // Clear metadata by not setting any - just return the object
-            return Ok(obj);
-        }
-        Value::Map(addr) => addr,
-        _ => {
-            return Err(IntrinsicError::TypeError {
-                intrinsic: id,
-                arg: 1,
-                expected: "map",
-            });
-        }
-    };
+    if meta.is_nil() {
+        // Clear metadata by not setting any - just return the object
+        return Ok(obj);
+    }
+
+    // Must be a map
+    if !obj.is_boxed() {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "reference type",
+        });
+    }
+
+    // Check that meta is a map
+    if !meta.is_boxed() {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 1,
+            expected: "map",
+        });
+    }
+
+    // Read the header to check it's a map
+    let meta_addr = meta.to_vaddr();
+    let header: Header = mem.read(meta_addr);
+    if header.object_tag() != object::MAP {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 1,
+            expected: "map",
+        });
+    }
 
     // Get the heap address of the object
-    let obj_addr = match obj {
-        Value::String(addr)
-        | Value::Pair(addr)
-        | Value::Symbol(addr)
-        | Value::Keyword(addr)
-        | Value::Tuple(addr)
-        | Value::Vector(addr)
-        | Value::Map(addr)
-        | Value::Namespace(addr)
-        | Value::Var(addr)
-        | Value::CompiledFn(addr)
-        | Value::Closure(addr) => addr,
-        // Immediates can't have metadata
-        Value::Nil | Value::Bool(_) | Value::Int(_) | Value::NativeFn(_) | Value::Unbound => {
-            return Err(IntrinsicError::TypeError {
-                intrinsic: id,
-                arg: 0,
-                expected: "reference type",
-            });
-        }
-    };
+    let obj_addr = obj.to_vaddr();
 
     // Store in realm metadata table
     realm
@@ -89,8 +91,8 @@ pub fn intrinsic_with_meta<M: MemorySpace>(
 /// Check if value is a namespace.
 ///
 /// `(namespace? x)` - returns true if x is a namespace
-pub const fn intrinsic_is_namespace(x_regs: &XRegs) -> Value {
-    Value::bool(x_regs[1].is_namespace())
+pub fn intrinsic_is_namespace<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Term {
+    Term::bool(proc.is_term_namespace(mem, x_regs[1]))
 }
 
 /// Create a namespace.
@@ -103,17 +105,17 @@ pub fn intrinsic_create_ns<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let name = x_regs[1];
 
-    // Name must be a symbol
-    let Value::Symbol(_) = name else {
+    // Name must be an immediate symbol
+    if !name.is_symbol() {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
             expected: "symbol",
         });
-    };
+    }
 
     // Create or find existing namespace in realm
     realm
@@ -126,20 +128,20 @@ pub fn intrinsic_create_ns<M: MemorySpace>(
 /// `(find-ns sym)` - returns namespace or nil if not found
 ///
 /// Looks up namespace in the realm's namespace registry.
-pub fn intrinsic_find_ns(x_regs: &XRegs, realm: &Realm, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_find_ns(x_regs: &XRegs, realm: &Realm, id: u8) -> Result<Term, IntrinsicError> {
     let name = x_regs[1];
 
-    // Name must be a symbol
-    let Value::Symbol(_) = name else {
+    // Name must be an immediate symbol
+    if !name.is_symbol() {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
             expected: "symbol",
         });
-    };
+    }
 
     // Find namespace in realm, return nil if not found
-    Ok(realm.find_namespace(name).unwrap_or(Value::Nil))
+    Ok(realm.find_namespace(name).unwrap_or(Term::NIL))
 }
 
 /// Get namespace name.
@@ -150,12 +152,12 @@ pub fn intrinsic_ns_name<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let ns_val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let ns_term = x_regs[1];
 
     // Must be a namespace
     let ns = proc
-        .read_namespace(mem, ns_val)
+        .read_term_namespace(mem, ns_term)
         .ok_or(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
@@ -173,12 +175,12 @@ pub fn intrinsic_ns_map<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let ns_val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let ns_term = x_regs[1];
 
     // Must be a namespace
     let ns = proc
-        .read_namespace(mem, ns_val)
+        .read_term_namespace(mem, ns_term)
         .ok_or(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
@@ -193,8 +195,8 @@ pub fn intrinsic_ns_map<M: MemorySpace>(
 /// Check if value is callable (function, closure, or native function).
 ///
 /// `(fn? x)` - returns true if x is any callable type
-pub const fn intrinsic_is_fn(x_regs: &XRegs) -> Value {
-    Value::bool(x_regs[1].is_fn())
+pub fn intrinsic_is_fn<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Term {
+    Term::bool(proc.is_term_callable(mem, x_regs[1]))
 }
 
 // --- Var intrinsics ---
@@ -202,8 +204,8 @@ pub const fn intrinsic_is_fn(x_regs: &XRegs) -> Value {
 /// Check if value is a var.
 ///
 /// `(var? x)` - returns true if x is a var
-pub const fn intrinsic_is_var(x_regs: &XRegs) -> Value {
-    Value::bool(x_regs[1].is_var())
+pub fn intrinsic_is_var<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Term {
+    Term::bool(proc.is_term_var(mem, x_regs[1]))
 }
 
 /// Intern a symbol in a namespace, creating or updating a var.
@@ -214,13 +216,13 @@ pub fn intrinsic_intern<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let ns = x_regs[1];
     let name = x_regs[2];
     let value = x_regs[3];
 
     // First arg must be a namespace
-    if !ns.is_namespace() {
+    if !proc.is_term_namespace(mem, ns) {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
@@ -229,7 +231,7 @@ pub fn intrinsic_intern<M: MemorySpace>(
     }
 
     // Second arg must be a symbol
-    if !matches!(name, Value::Symbol(_)) {
+    if !proc.is_term_symbol(name) {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 1,
@@ -238,7 +240,7 @@ pub fn intrinsic_intern<M: MemorySpace>(
     }
 
     // Intern the var
-    proc.intern_var(mem, ns, name, value)
+    proc.intern_var_term(mem, ns, name, value)
         .ok_or(IntrinsicError::OutOfMemory)
 }
 
@@ -250,11 +252,11 @@ pub fn intrinsic_var_get<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let var = x_regs[1];
 
     // Must be a var
-    if !var.is_var() {
+    if !proc.is_term_var(mem, var) {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
@@ -263,10 +265,12 @@ pub fn intrinsic_var_get<M: MemorySpace>(
     }
 
     // Get the var's value
-    let value = proc.var_get(mem, var).ok_or(IntrinsicError::OutOfMemory)?;
+    let value = proc
+        .var_get_term(mem, var)
+        .ok_or(IntrinsicError::OutOfMemory)?;
 
-    // Check for unbound var
-    if matches!(value, Value::Unbound) {
+    // Check for unbound var (Term::UNBOUND)
+    if value.is_unbound() {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
@@ -290,12 +294,22 @@ pub fn intrinsic_def_root<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let var = x_regs[1];
     let value = x_regs[2];
 
     // Must be a var
-    if !var.is_var() {
+    if !var.is_boxed() {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "var",
+        });
+    }
+
+    // Check it's actually a var
+    let header: Header = mem.read(var.to_vaddr());
+    if header.object_tag() != object::VAR {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
@@ -305,8 +319,8 @@ pub fn intrinsic_def_root<M: MemorySpace>(
 
     // Deep copy the value to the realm's code region
     let mut visited = VisitedTracker::new();
-    let realm_value =
-        deep_copy_to_realm(value, realm, mem, &mut visited).ok_or(IntrinsicError::OutOfMemory)?;
+    let realm_value = deep_copy_term_to_realm(value, realm, mem, &mut visited)
+        .ok_or(IntrinsicError::OutOfMemory)?;
 
     // Set the var's root binding to the copied value
     realm
@@ -325,23 +339,35 @@ pub fn intrinsic_def_root<M: MemorySpace>(
 pub fn intrinsic_def_binding<M: MemorySpace>(
     x_regs: &XRegs,
     proc: &mut Process,
-    _mem: &M,
+    mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let var = x_regs[1];
     let value = x_regs[2];
 
     // Extract var slot address
-    let Value::Var(var_id) = var else {
+    if !var.is_boxed() {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
             expected: "var",
         });
-    };
+    }
+
+    // Check it's actually a var
+    let header: Header = mem.read(var.to_vaddr());
+    if header.object_tag() != object::VAR {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "var",
+        });
+    }
+
+    let var_addr = var.to_vaddr();
 
     // Set process binding (value stays on process heap)
-    proc.set_binding(var_id, value)
+    proc.set_binding_term(var_addr, value)
         .ok_or(IntrinsicError::OutOfMemory)?;
 
     Ok(var)
@@ -361,61 +387,74 @@ pub fn intrinsic_def_meta<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let var = x_regs[1];
     let meta = x_regs[2];
 
     // First arg must be a var
-    let Value::Var(var_addr) = var else {
+    if !var.is_boxed() {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
             expected: "var",
         });
-    };
+    }
+
+    let var_addr = var.to_vaddr();
+    let var_header: Header = mem.read(var_addr);
+    if var_header.object_tag() != object::VAR {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "var",
+        });
+    }
 
     // Read the var's content to get name and namespace
-    let slot: VarSlot = mem.read(var_addr);
-    let content: VarContent = mem.read(slot.content);
+    let slot: HeapVar = mem.read(var_addr);
 
     // Second arg must be a map (or nil for no metadata)
     if meta.is_nil() {
         // No user metadata, but still add :name and :ns
         let final_meta_addr =
-            build_compiler_metadata(realm, mem, Value::Nil, content.name, content.namespace)?;
+            build_compiler_metadata(realm, mem, Term::NIL, slot.name, slot.namespace)?;
         realm
             .set_metadata(var_addr, final_meta_addr)
             .ok_or(IntrinsicError::OutOfMemory)?;
         return Ok(var);
     }
 
-    let Value::Map(_) = meta else {
+    // Check that meta is a map
+    if !meta.is_boxed() {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 1,
             expected: "map",
         });
-    };
+    }
+
+    let meta_header: Header = mem.read(meta.to_vaddr());
+    if meta_header.object_tag() != object::MAP {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 1,
+            expected: "map",
+        });
+    }
 
     // Deep copy the user metadata map to the realm's code region
     let mut visited = VisitedTracker::new();
-    let realm_meta =
-        deep_copy_to_realm(meta, realm, mem, &mut visited).ok_or(IntrinsicError::OutOfMemory)?;
+    let realm_meta = deep_copy_term_to_realm(meta, realm, mem, &mut visited)
+        .ok_or(IntrinsicError::OutOfMemory)?;
 
-    // Get the user entries
-    let Value::Map(user_meta_addr) = realm_meta else {
-        return Err(IntrinsicError::OutOfMemory);
-    };
-    let user_map: HeapMap = mem.read(user_meta_addr);
+    // Get the user entries (8-byte header + entries)
+    let user_meta_addr = realm_meta.to_vaddr();
+    let entries_addr = user_meta_addr.add(8);
+    let user_entries: Term = mem.read(entries_addr);
 
     // Build final metadata with compiler keys prepended
-    let final_meta_addr = build_compiler_metadata(
-        realm,
-        mem,
-        user_map.entries,
-        content.name,
-        content.namespace,
-    )?;
+    let final_meta_addr =
+        build_compiler_metadata(realm, mem, user_entries, slot.name, slot.namespace)?;
 
     // Store in realm's metadata table
     realm
@@ -429,9 +468,9 @@ pub fn intrinsic_def_meta<M: MemorySpace>(
 fn build_compiler_metadata<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
-    existing_entries: Value,
-    name_sym_addr: crate::Vaddr,
-    namespace_addr: crate::Vaddr,
+    existing_entries: Term,
+    name_sym: Term,
+    namespace: Term,
 ) -> Result<crate::Vaddr, IntrinsicError> {
     // Intern :name and :ns keywords
     let name_kw = realm
@@ -441,69 +480,78 @@ fn build_compiler_metadata<M: MemorySpace>(
         .intern_keyword(mem, "ns")
         .ok_or(IntrinsicError::OutOfMemory)?;
 
-    // Create values for name and namespace
-    let name_sym = Value::symbol(name_sym_addr);
-    let namespace = Value::namespace(namespace_addr);
-
     // Create [:name name_sym] tuple
     let name_tuple_size = HeapTuple::alloc_size(2);
     let name_tuple_addr = realm
         .alloc(name_tuple_size, 8)
         .ok_or(IntrinsicError::OutOfMemory)?;
-    let name_tuple_header = HeapTuple { len: 2, padding: 0 };
+    let name_tuple_header = HeapTuple::make_header(2);
     mem.write(name_tuple_addr, name_tuple_header);
     let name_elem0 = name_tuple_addr.add(HeapTuple::HEADER_SIZE as u64);
-    let name_elem1 = name_elem0.add(core::mem::size_of::<Value>() as u64);
+    let name_elem1 = name_elem0.add(core::mem::size_of::<Term>() as u64);
     mem.write(name_elem0, name_kw);
     mem.write(name_elem1, name_sym);
-    let name_tuple = Value::tuple(name_tuple_addr);
+    let name_tuple = Term::boxed_vaddr(name_tuple_addr);
 
     // Create [:ns namespace] tuple
     let ns_tuple_size = HeapTuple::alloc_size(2);
     let ns_tuple_addr = realm
         .alloc(ns_tuple_size, 8)
         .ok_or(IntrinsicError::OutOfMemory)?;
-    let ns_tuple_header = HeapTuple { len: 2, padding: 0 };
+    let ns_tuple_header = HeapTuple::make_header(2);
     mem.write(ns_tuple_addr, ns_tuple_header);
     let ns_elem0 = ns_tuple_addr.add(HeapTuple::HEADER_SIZE as u64);
-    let ns_elem1 = ns_elem0.add(core::mem::size_of::<Value>() as u64);
+    let ns_elem1 = ns_elem0.add(core::mem::size_of::<Term>() as u64);
     mem.write(ns_elem0, ns_kw);
     mem.write(ns_elem1, namespace);
-    let ns_tuple = Value::tuple(ns_tuple_addr);
+    let ns_tuple = Term::boxed_vaddr(ns_tuple_addr);
 
     // Build entries chain: ([:ns namespace] . ([:name name_sym] . existing_entries))
+    let name_pair_size = HeapPair::SIZE;
     let name_pair_addr = realm
-        .alloc(Pair::SIZE, 8)
+        .alloc(name_pair_size, 8)
         .ok_or(IntrinsicError::OutOfMemory)?;
     mem.write(
         name_pair_addr,
-        Pair {
-            first: name_tuple,
-            rest: existing_entries,
+        HeapPair {
+            head: name_tuple,
+            tail: existing_entries,
         },
     );
 
     let ns_pair_addr = realm
-        .alloc(Pair::SIZE, 8)
+        .alloc(name_pair_size, 8)
         .ok_or(IntrinsicError::OutOfMemory)?;
     mem.write(
         ns_pair_addr,
-        Pair {
-            first: ns_tuple,
-            rest: Value::pair(name_pair_addr),
+        HeapPair {
+            head: ns_tuple,
+            tail: Term::list_vaddr(name_pair_addr),
         },
     );
 
-    // Create final HeapMap
+    // Create final map (8-byte header + entries)
     let final_map_addr = realm
         .alloc(HeapMap::SIZE, 8)
         .ok_or(IntrinsicError::OutOfMemory)?;
-    mem.write(
-        final_map_addr,
-        HeapMap {
-            entries: Value::pair(ns_pair_addr),
-        },
-    );
+
+    // Count entries (2 new + existing)
+    let mut entry_count = 2;
+    let mut current = existing_entries;
+    while current.is_list() {
+        entry_count += 1;
+        let pair: HeapPair = mem.read(current.to_vaddr());
+        current = pair.tail;
+    }
+
+    // Write header
+    let map_header = HeapMap::make_header(entry_count);
+    mem.write(final_map_addr, map_header);
+
+    // Write entries
+    let entries_term = Term::list_vaddr(ns_pair_addr);
+    let entries_addr = final_map_addr.add(8);
+    mem.write(entries_addr, entries_term);
 
     Ok(final_map_addr)
 }

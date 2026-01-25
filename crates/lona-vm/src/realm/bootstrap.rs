@@ -13,7 +13,10 @@
 //! symbols resolve via namespace lookup.
 
 use crate::platform::MemorySpace;
-use crate::value::{Value, var_flags};
+use crate::term::Term;
+use crate::term::header::Header;
+use crate::term::heap::{HeapNamespace, HeapTuple};
+use crate::term::tag::object;
 
 use super::Realm;
 
@@ -80,9 +83,9 @@ const INTRINSIC_NAMES: &[&str] = &[
 /// Result of bootstrapping a realm.
 pub struct BootstrapResult {
     /// The `lona.core` namespace.
-    pub core_ns: Value,
+    pub core_ns: Term,
     /// The `*ns*` var (for process initialization).
-    pub ns_var: Value,
+    pub ns_var: Term,
 }
 
 /// Bootstrap the realm with essential vars.
@@ -107,27 +110,14 @@ pub fn bootstrap<M: MemorySpace>(realm: &mut Realm, mem: &mut M) -> Option<Boots
     let core_sym = realm.intern_symbol(mem, "lona.core")?;
     let core_ns = realm.get_or_create_namespace(mem, core_sym)?;
 
-    let Value::Namespace(core_ns_addr) = core_ns else {
-        return None;
-    };
-
     // === SPECIAL FORMS ===
     // These are hardcoded in the compiler and have SPECIAL_FORM flag
 
     for &name in SPECIAL_FORM_NAMES {
         let sym = realm.intern_symbol(mem, name)?;
-        let Value::Symbol(sym_addr) = sym else {
-            return None;
-        };
 
         // Special forms have Unbound root - they can't be called as values
-        let var = realm.alloc_var(
-            mem,
-            sym_addr,
-            core_ns_addr,
-            Value::Unbound,
-            var_flags::SPECIAL_FORM | var_flags::NATIVE,
-        )?;
+        let var = realm.alloc_var(mem, sym, core_ns, Term::UNBOUND)?;
 
         realm.add_ns_mapping(mem, core_ns, sym, var)?;
     }
@@ -137,17 +127,7 @@ pub fn bootstrap<M: MemorySpace>(realm: &mut Realm, mem: &mut M) -> Option<Boots
     // Root value is lona.core (default for new processes)
 
     let ns_sym = realm.intern_symbol(mem, "*ns*")?;
-    let Value::Symbol(ns_sym_addr) = ns_sym else {
-        return None;
-    };
-
-    let ns_var = realm.alloc_var(
-        mem,
-        ns_sym_addr,
-        core_ns_addr,
-        core_ns, // Root = lona.core
-        var_flags::PROCESS_BOUND,
-    )?;
+    let ns_var = realm.alloc_var(mem, ns_sym, core_ns, core_ns)?; // Root = lona.core
 
     realm.add_ns_mapping(mem, core_ns, ns_sym, ns_var)?;
 
@@ -161,18 +141,10 @@ pub fn bootstrap<M: MemorySpace>(realm: &mut Realm, mem: &mut M) -> Option<Boots
         }
 
         let sym = realm.intern_symbol(mem, name)?;
-        let Value::Symbol(sym_addr) = sym else {
-            return None;
-        };
 
         // Root value is the NativeFn with the intrinsic ID
-        let var = realm.alloc_var(
-            mem,
-            sym_addr,
-            core_ns_addr,
-            Value::native_fn(id as u16),
-            var_flags::NATIVE,
-        )?;
+        let native_fn = Term::native_fn(id as u16);
+        let var = realm.alloc_var(mem, sym, core_ns, native_fn)?;
 
         realm.add_ns_mapping(mem, core_ns, sym, var)?;
     }
@@ -187,54 +159,54 @@ pub fn bootstrap<M: MemorySpace>(realm: &mut Realm, mem: &mut M) -> Option<Boots
 ///
 /// Returns the var if found, `None` otherwise.
 pub fn lookup_var_in_ns<M: MemorySpace>(
-    _realm: &Realm,
+    realm: &Realm,
     mem: &M,
-    ns: Value,
+    ns: Term,
     name: &str,
-) -> Option<Value> {
-    use crate::value::{HeapMap, HeapTuple, Namespace, Pair};
+) -> Option<Term> {
+    use crate::term::heap::HeapPair;
 
-    let Value::Namespace(ns_addr) = ns else {
+    if !ns.is_boxed() {
         return None;
-    };
+    }
 
-    let ns_struct: Namespace = mem.read(ns_addr);
-    let Value::Map(map_addr) = ns_struct.mappings else {
+    let ns_addr = ns.to_vaddr();
+    let header: Header = mem.read(ns_addr);
+    if header.object_tag() != object::NAMESPACE {
         return None;
-    };
+    }
 
-    let map: HeapMap = mem.read(map_addr);
+    let ns_struct: HeapNamespace = mem.read(ns_addr);
 
-    // Walk the association list
-    let mut entries = map.entries;
-    while let Value::Pair(pair_addr) = entries {
-        let pair: Pair = mem.read(pair_addr);
+    // Walk the mappings list (association list of pairs)
+    let mut current = ns_struct.mappings;
+    while current.is_list() {
+        let pair_addr = current.to_vaddr();
+        let pair: HeapPair = mem.read(pair_addr);
 
         // Each entry is a [key value] tuple
-        if let Value::Tuple(tuple_addr) = pair.first {
-            let header: HeapTuple = mem.read(tuple_addr);
-            if header.len >= 2 {
+        if pair.head.is_boxed() {
+            let tuple_addr = pair.head.to_vaddr();
+            let tuple_header: Header = mem.read(tuple_addr);
+            if tuple_header.object_tag() == object::TUPLE && tuple_header.arity() >= 2 {
                 let key_addr = tuple_addr.add(HeapTuple::HEADER_SIZE as u64);
-                let value_addr = key_addr.add(core::mem::size_of::<Value>() as u64);
+                let value_addr = key_addr.add(core::mem::size_of::<Term>() as u64);
 
-                let key: Value = mem.read(key_addr);
+                let key: Term = mem.read(key_addr);
 
-                // Compare symbol name
-                if let Value::Symbol(sym_addr) = key {
-                    use crate::value::HeapString;
-                    let sym_header: HeapString = mem.read(sym_addr);
-                    let sym_data = sym_addr.add(HeapString::HEADER_SIZE as u64);
-                    let sym_bytes = mem.slice(sym_data, sym_header.len as usize);
-
-                    if sym_bytes == name.as_bytes() {
-                        let var: Value = mem.read(value_addr);
-                        return Some(var);
+                // Compare symbol name - symbols are now immediate values with indices
+                if let Some(idx) = key.as_symbol_index() {
+                    if let Some(sym_name) = realm.symbol_name(mem, idx) {
+                        if sym_name == name {
+                            let var: Term = mem.read(value_addr);
+                            return Some(var);
+                        }
                     }
                 }
             }
         }
 
-        entries = pair.rest;
+        current = pair.tail;
     }
 
     None
@@ -243,14 +215,14 @@ pub fn lookup_var_in_ns<M: MemorySpace>(
 /// Get the `*ns*` var from the realm.
 ///
 /// This is used during process initialization to set up the process binding.
-pub fn get_ns_var<M: MemorySpace>(realm: &Realm, mem: &M) -> Option<Value> {
+pub fn get_ns_var<M: MemorySpace>(realm: &Realm, mem: &M) -> Option<Term> {
     let core_sym = realm.find_symbol(mem, "lona.core")?;
     let core_ns = realm.find_namespace(core_sym)?;
     lookup_var_in_ns(realm, mem, core_ns, "*ns*")
 }
 
 /// Get the `lona.core` namespace from the realm.
-pub fn get_core_ns<M: MemorySpace>(realm: &Realm, mem: &M) -> Option<Value> {
+pub fn get_core_ns<M: MemorySpace>(realm: &Realm, mem: &M) -> Option<Term> {
     let core_sym = realm.find_symbol(mem, "lona.core")?;
     realm.find_namespace(core_sym)
 }

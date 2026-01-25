@@ -18,8 +18,8 @@ use crate::process::WorkerId;
 use crate::reader::{ReadError, read};
 use crate::realm::Realm;
 use crate::scheduler::Worker;
+use crate::term::printer::print_term;
 use crate::uart::{Uart, UartExt};
-use crate::value::print_value;
 use crate::vm::{self, RuntimeError};
 
 /// Maximum line buffer size.
@@ -100,7 +100,7 @@ pub fn run<M: MemorySpace, U: Uart>(
         };
 
         // Print result
-        print_value(result, proc, mem, uart);
+        print_term(result, proc, realm, mem, uart);
         uart.write_byte(b'\n');
 
         // Reset for next expression
@@ -425,7 +425,7 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
         };
 
         // Print result
-        print_value(result, proc, mem, uart);
+        print_term(result, proc, realm, mem, uart);
         uart.write_byte(b'\n');
 
         // Reset for next expression

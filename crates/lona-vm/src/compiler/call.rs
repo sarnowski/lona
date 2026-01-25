@@ -9,12 +9,12 @@ use std::vec::Vec;
 #[cfg(not(any(test, feature = "std")))]
 use alloc::vec::Vec;
 
-use crate::Vaddr;
 use crate::bytecode::{encode_abc, op};
 use crate::intrinsics::id as intrinsic_id;
 use crate::platform::MemorySpace;
 use crate::realm::lookup_var_in_ns;
-use crate::value::{Value, VarContent, VarSlot, var_flags};
+use crate::term::Term;
+use crate::term::heap::HeapVar;
 
 use super::{CompileError, Compiler, MAX_ARGS, MAX_SYMBOL_NAME_LEN};
 
@@ -27,21 +27,20 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// 3. Namespace lookup via `*ns*`
     pub(super) fn compile_list(
         &mut self,
-        list: Value,
+        list: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
-        let pair = self
+        let (first, rest) = self
             .proc
-            .read_pair(self.mem, list)
+            .read_term_pair(self.mem, list)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // Check if head is a symbol (could be special form, var, or bound parameter)
-        if let Value::Symbol(_) = pair.first {
-            // Look up the symbol name - copy to local buffer to avoid borrow conflicts
+        if first.is_symbol() {
+            // Look up the symbol name from realm's symbol table
             let name_str = self
-                .proc
-                .read_string(self.mem, pair.first)
+                .get_symbol_name(first)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             let mut name_buf = [0u8; MAX_SYMBOL_NAME_LEN];
@@ -53,43 +52,43 @@ impl<M: MemorySpace> Compiler<'_, M> {
 
             // Check for special forms first (these are hardcoded, not looked up via vars)
             if name == "quote" {
-                return self.compile_quote(pair.rest, target, temp_base);
+                return self.compile_quote(rest, target, temp_base);
             }
             if name == "fn*" {
-                return self.compile_fn(pair.rest, target, temp_base);
+                return self.compile_fn(rest, target, temp_base);
             }
             if name == "do" {
-                return self.compile_do(pair.rest, target, temp_base);
+                return self.compile_do(rest, target, temp_base);
             }
             if name == "var" {
-                return self.compile_var(pair.rest, target, temp_base);
+                return self.compile_var(rest, target, temp_base);
             }
             if name == "def" {
-                return self.compile_def(pair.rest, target, temp_base);
+                return self.compile_def(rest, target, temp_base);
             }
             if name == "match" {
-                return self.compile_match(pair.rest, target, temp_base);
+                return self.compile_match(rest, target, temp_base);
             }
 
             // Check if it's a bound parameter (function value in local scope)
             if self.lookup_binding_by_name(name).is_some() {
                 // It's a function call with a bound function
-                return self.compile_call(pair.first, pair.rest, target, temp_base);
+                return self.compile_call(first, rest, target, temp_base);
             }
 
             // Check if symbol is a captured variable
             if self.lookup_capture(name).is_some() {
-                return self.compile_call(pair.first, pair.rest, target, temp_base);
+                return self.compile_call(first, rest, target, temp_base);
             }
 
             // Check outer bindings for capture candidates
             if self.lookup_outer_binding(name).is_some() {
-                return self.compile_call(pair.first, pair.rest, target, temp_base);
+                return self.compile_call(first, rest, target, temp_base);
             }
 
             // Resolve via namespace lookup
             if let Some(var) = self.resolve_symbol(name) {
-                return self.compile_var_call(var, pair.rest, target, temp_base);
+                return self.compile_var_call(var, rest, target, temp_base);
             }
 
             // Unknown symbol
@@ -97,7 +96,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
         }
 
         // Head is not a symbol - compile it and call
-        self.compile_call(pair.first, pair.rest, target, temp_base)
+        self.compile_call(first, rest, target, temp_base)
     }
 
     /// Compile a call where the function is obtained from a var.
@@ -107,30 +106,23 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// - Otherwise, emit `VAR_GET` + CALL for late binding
     fn compile_var_call(
         &mut self,
-        var: Value,
-        arg_list: Value,
+        var: Term,
+        arg_list: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
-        let Value::Var(slot_addr) = var else {
-            return Err(CompileError::InvalidSyntax);
-        };
-
-        // Read var content to check if it's a NativeFn (optimization)
-        let slot: VarSlot = self.mem.read(slot_addr);
-        let content: VarContent = self.mem.read(slot.content);
-
-        // Special forms cannot be called
-        if content.flags & var_flags::SPECIAL_FORM != 0 {
+        if !var.is_boxed() {
             return Err(CompileError::InvalidSyntax);
         }
 
-        // Optimization: if root is NativeFn and var is native, emit INTRINSIC directly
+        // Read var content to check if it's a NativeFn (optimization)
+        let var_addr = var.to_vaddr();
+        let heap_var: HeapVar = self.mem.read(var_addr);
+
+        // Optimization: if root is NativeFn, emit INTRINSIC directly
         // This avoids the VAR_GET overhead for intrinsics
-        if content.is_native() {
-            if let Value::NativeFn(id) = content.root {
-                return self.compile_intrinsic_call(id as u8, arg_list, target, temp_base);
-            }
+        if let Some(id) = heap_var.root.as_native_fn_id() {
+            return self.compile_intrinsic_call(id as u8, arg_list, target, temp_base);
         }
 
         // General case: emit VAR_GET + CALL for late binding
@@ -143,20 +135,20 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// parameter registers (X1..Xn) that may be referenced by arguments.
     fn compile_var_call_late_binding(
         &mut self,
-        var: Value,
-        arg_list: Value,
+        var: Term,
+        arg_list: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // Collect arguments
-        let mut args: Vec<Value> = Vec::new();
+        let mut args: Vec<Term> = Vec::new();
         let mut arg_count: u8 = 0;
         let mut current = arg_list;
 
         while !current.is_nil() {
-            let pair = self
+            let (first, rest) = self
                 .proc
-                .read_pair(self.mem, current)
+                .read_term_pair(self.mem, current)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             arg_count = arg_count
@@ -166,8 +158,8 @@ impl<M: MemorySpace> Compiler<'_, M> {
                 return Err(CompileError::TooManyArguments);
             }
 
-            args.push(pair.first);
-            current = pair.rest;
+            args.push(first);
+            current = rest;
         }
 
         // Allocate temps: one for var, one for function, then one per argument
@@ -232,20 +224,20 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// are compiled and a CALL instruction is emitted.
     pub(super) fn compile_call(
         &mut self,
-        head: Value,
-        arg_list: Value,
+        head: Term,
+        arg_list: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // First, collect arguments
-        let mut args: Vec<Value> = Vec::new();
+        let mut args: Vec<Term> = Vec::new();
         let mut arg_count: u8 = 0;
         let mut current = arg_list;
 
         while !current.is_nil() {
-            let pair = self
+            let (first, rest) = self
                 .proc
-                .read_pair(self.mem, current)
+                .read_term_pair(self.mem, current)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             arg_count = arg_count
@@ -255,8 +247,8 @@ impl<M: MemorySpace> Compiler<'_, M> {
                 return Err(CompileError::TooManyArguments);
             }
 
-            args.push(pair.first);
-            current = pair.rest;
+            args.push(first);
+            current = rest;
         }
 
         // Allocate temps: one for the function, then one per argument
@@ -313,19 +305,19 @@ impl<M: MemorySpace> Compiler<'_, M> {
     pub(super) fn compile_intrinsic_call(
         &mut self,
         intrinsic_id: u8,
-        arg_list: Value,
+        arg_list: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // First, collect all arguments while counting
-        let mut args: Vec<Value> = Vec::new();
+        let mut args: Vec<Term> = Vec::new();
         let mut arg_count: u8 = 0;
         let mut current = arg_list;
 
         while !current.is_nil() {
-            let pair = self
+            let (first, rest) = self
                 .proc
-                .read_pair(self.mem, current)
+                .read_term_pair(self.mem, current)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             arg_count = arg_count
@@ -335,8 +327,8 @@ impl<M: MemorySpace> Compiler<'_, M> {
                 return Err(CompileError::TooManyArguments);
             }
 
-            args.push(pair.first);
-            current = pair.rest;
+            args.push(first);
+            current = rest;
         }
 
         // Handle zero-arg case
@@ -392,23 +384,23 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// `(quote expr)` returns `expr` unevaluated.
     pub(super) fn compile_quote(
         &mut self,
-        arg_list: Value,
+        arg_list: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // Get the single argument
-        let pair = self
+        let (first, rest) = self
             .proc
-            .read_pair(self.mem, arg_list)
+            .read_term_pair(self.mem, arg_list)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // quote takes exactly one argument
-        if !pair.rest.is_nil() {
+        if !rest.is_nil() {
             return Err(CompileError::InvalidSyntax);
         }
 
         // Load the quoted expression as a constant (unevaluated)
-        self.compile_constant(pair.first, target)?;
+        self.compile_constant(first, target)?;
         Ok(temp_base)
     }
 
@@ -421,30 +413,29 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// For unqualified symbols, looks up via `*ns*` (current namespace).
     pub(super) fn compile_var(
         &mut self,
-        arg_list: Value,
+        arg_list: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // Get the single argument (must be a symbol)
-        let pair = self
+        let (first, rest) = self
             .proc
-            .read_pair(self.mem, arg_list)
+            .read_term_pair(self.mem, arg_list)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // var takes exactly one argument
-        if !pair.rest.is_nil() {
+        if !rest.is_nil() {
             return Err(CompileError::InvalidSyntax);
         }
 
         // Argument must be a symbol
-        if !pair.first.is_symbol() {
+        if !first.is_symbol() {
             return Err(CompileError::InvalidSyntax);
         }
 
-        // Get the symbol name - copy to local buffer to avoid borrow conflicts
+        // Get the symbol name from realm's symbol table
         let name_str = self
-            .proc
-            .read_string(self.mem, pair.first)
+            .get_symbol_name(first)
             .ok_or(CompileError::InvalidSyntax)?;
 
         let mut name_buf = [0u8; MAX_SYMBOL_NAME_LEN];
@@ -482,7 +473,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// - Returns the var
     pub(super) fn compile_def(
         &mut self,
-        arg_list: Value,
+        arg_list: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
@@ -492,14 +483,13 @@ impl<M: MemorySpace> Compiler<'_, M> {
 
         // Get current namespace from *ns*
         let current_ns = self.get_current_namespace()?;
-        let Value::Namespace(ns_addr) = current_ns else {
+        if !current_ns.is_boxed() {
             return Err(CompileError::InvalidSyntax);
-        };
+        }
 
-        // Get symbol name for creating/finding var
+        // Get symbol name from realm's symbol table
         let name_str = self
-            .proc
-            .read_string(self.mem, name_sym)
+            .get_symbol_name(name_sym)
             .ok_or(CompileError::InvalidSyntax)?;
 
         let mut name_buf = [0u8; MAX_SYMBOL_NAME_LEN];
@@ -510,13 +500,13 @@ impl<M: MemorySpace> Compiler<'_, M> {
             core::str::from_utf8(&name_buf[..name_len]).map_err(|_| CompileError::InvalidSyntax)?;
 
         // Determine if this is a process-bound definition (from metadata)
-        let has_process_bound_meta = self.has_process_bound_meta(&metadata);
+        let has_process_bound_meta = self.has_process_bound_meta(metadata);
 
         // Get or create the var in the namespace at compile time
         // Returns the var and its ACTUAL process-bound status (may differ from metadata
         // when redefining an existing process-bound var without :process-bound metadata)
         let (var, is_process_bound) =
-            self.intern_or_get_var(current_ns, ns_addr, name_sym, name, has_process_bound_meta)?;
+            self.intern_or_get_var(current_ns, name_sym, name, has_process_bound_meta)?;
 
         // If there's an init expression, compile it and emit the appropriate intrinsic
         let mut next_temp = temp_base;
@@ -578,8 +568,8 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// metadata table.
     fn emit_store_metadata(
         &mut self,
-        var: Value,
-        metadata: Value,
+        var: Term,
+        metadata: Term,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // Allocate temps for var and metadata
@@ -613,76 +603,79 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// Parse def arguments: `[^meta] name [value]`
     ///
     /// Returns `(metadata, name_symbol, optional_init_expr)`
-    fn parse_def_args(
-        &self,
-        arg_list: Value,
-    ) -> Result<(Value, Value, Option<Value>), CompileError> {
+    fn parse_def_args(&self, arg_list: Term) -> Result<(Term, Term, Option<Term>), CompileError> {
         // def requires at least a name
         if arg_list.is_nil() {
             return Err(CompileError::InvalidSyntax);
         }
 
-        let first_pair = self
+        let (first, first_rest) = self
             .proc
-            .read_pair(self.mem, arg_list)
+            .read_term_pair(self.mem, arg_list)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // First element must be a symbol (the name)
         // Note: Metadata is attached to the symbol via reader macros ^meta
         // The reader already attached metadata to the symbol, we read it here
-        if !first_pair.first.is_symbol() {
+        if !first.is_symbol() {
             return Err(CompileError::InvalidSyntax);
         }
 
-        let name_sym = first_pair.first;
+        let name_sym = first;
 
         // Get metadata from the symbol (if any)
-        let metadata = self.realm.get_metadata_value(name_sym);
+        let metadata = self.realm.get_metadata_term(name_sym);
 
         // Check for optional value
-        if first_pair.rest.is_nil() {
+        if first_rest.is_nil() {
             // (def name) - unbound var
             return Ok((metadata, name_sym, None));
         }
 
-        let second_pair = self
+        let (second, second_rest) = self
             .proc
-            .read_pair(self.mem, first_pair.rest)
+            .read_term_pair(self.mem, first_rest)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // (def name value) - exactly two args
-        if !second_pair.rest.is_nil() {
+        if !second_rest.is_nil() {
             // More than 2 args - error
             return Err(CompileError::InvalidSyntax);
         }
 
-        Ok((metadata, name_sym, Some(second_pair.first)))
+        Ok((metadata, name_sym, Some(second)))
     }
 
     /// Get the current namespace from `*ns*`.
-    fn get_current_namespace(&self) -> Result<Value, CompileError> {
+    fn get_current_namespace(&self) -> Result<Term, CompileError> {
         // Look up *ns* var
         let core_ns = self.get_core_ns().ok_or(CompileError::InvalidSyntax)?;
         let ns_var = lookup_var_in_ns(self.realm, self.mem, core_ns, "*ns*")
             .ok_or(CompileError::InvalidSyntax)?;
 
-        // Get the value (process binding or root)
-        let ns = self
-            .proc
-            .var_get(self.mem, ns_var)
-            .ok_or(CompileError::InvalidSyntax)?;
+        // Get the value (process binding or root) - read directly from HeapVar
+        if !ns_var.is_boxed() {
+            return Err(CompileError::InvalidSyntax);
+        }
+        let var_addr = ns_var.to_vaddr();
+        let heap_var: HeapVar = self.mem.read(var_addr);
 
-        Ok(ns)
+        // Check for unbound
+        if heap_var.root.is_unbound() {
+            return Err(CompileError::InvalidSyntax);
+        }
+
+        Ok(heap_var.root)
     }
 
     /// Check if metadata contains `:process-bound true`.
-    fn has_process_bound_meta(&self, metadata: &Value) -> bool {
+    fn has_process_bound_meta(&self, metadata: Term) -> bool {
         if metadata.is_nil() {
             return false;
         }
 
-        // Metadata should be a map
-        if !metadata.is_map() {
+        // Metadata should be a map (check if boxed first)
+        if !self.proc.is_term_map(self.mem, metadata) {
             return false;
         }
 
@@ -690,10 +683,26 @@ impl<M: MemorySpace> Compiler<'_, M> {
         let pb_keyword = self.realm.find_keyword(self.mem, "process-bound");
 
         if let Some(keyword) = pb_keyword {
-            // Check if this key exists in the map
-            if let Some(value) = self.proc.map_get(self.mem, *metadata, keyword) {
-                // Check if value is truthy (not nil and not false)
-                return !value.is_nil() && value != Value::bool(false);
+            // Check if this key exists in the map by iterating through entries
+            if let Some(entries) = self.proc.read_term_map_entries(self.mem, metadata) {
+                let mut current = entries;
+                while current.is_list() {
+                    if let Some((entry, rest)) = self.proc.read_term_pair(self.mem, current) {
+                        // Each entry is a [key value] tuple
+                        if let (Some(k), Some(v)) = (
+                            self.proc.read_term_tuple_element(self.mem, entry, 0),
+                            self.proc.read_term_tuple_element(self.mem, entry, 1),
+                        ) {
+                            if k == keyword {
+                                // Check if value is truthy (not nil and not false)
+                                return !v.is_nil() && v != Term::FALSE;
+                            }
+                        }
+                        current = rest;
+                    } else {
+                        break;
+                    }
+                }
             }
         }
 
@@ -702,37 +711,22 @@ impl<M: MemorySpace> Compiler<'_, M> {
 
     /// Get or create a var in the namespace.
     ///
-    /// If the var already exists, returns it (validating process-bound consistency).
+    /// If the var already exists, returns it.
     /// If it doesn't exist, creates it at compile time in the realm.
     ///
-    /// Returns `(var, is_process_bound)` where `is_process_bound` reflects the var's
-    /// actual flags, not just the metadata. This is important for redefining existing
-    /// process-bound vars without explicit `:process-bound` metadata.
+    /// Returns `(var, is_process_bound)` - currently process-bound is always false
+    /// as the Term model doesn't have var flags.
     fn intern_or_get_var(
         &mut self,
-        ns: Value,
-        ns_addr: Vaddr,
-        name_sym: Value,
+        ns: Term,
+        name_sym: Term,
         name: &str,
-        is_process_bound: bool,
-    ) -> Result<(Value, bool), CompileError> {
+        _is_process_bound: bool,
+    ) -> Result<(Term, bool), CompileError> {
         // Check if var already exists in namespace
         if let Some(existing_var) = lookup_var_in_ns(self.realm, self.mem, ns, name) {
-            // Validate process-bound consistency
-            let Value::Var(slot_addr) = existing_var else {
-                return Err(CompileError::InvalidSyntax);
-            };
-            let slot: VarSlot = self.mem.read(slot_addr);
-            let content: VarContent = self.mem.read(slot.content);
-
-            // If redefining a non-process-bound var as process-bound, that's an error
-            if is_process_bound && !content.is_process_bound() {
-                return Err(CompileError::InvalidSyntax);
-            }
-
-            // Return the existing var and its ACTUAL process-bound status
-            // (which may differ from the metadata if redefining without :process-bound)
-            return Ok((existing_var, content.is_process_bound()));
+            // Return the existing var (process-bound checking removed - no flags in Term model)
+            return Ok((existing_var, false));
         }
 
         // Var doesn't exist - create it in the realm at compile time
@@ -745,21 +739,14 @@ impl<M: MemorySpace> Compiler<'_, M> {
             .realm
             .intern_symbol(self.mem, name)
             .ok_or(CompileError::InternalError)?;
-        let Value::Symbol(realm_sym_addr) = realm_sym else {
-            return Err(CompileError::InternalError);
-        };
 
-        // Determine flags
-        let flags = if is_process_bound {
-            var_flags::PROCESS_BOUND
-        } else {
-            0
-        };
+        // Get namespace address for alloc_var
+        let ns_addr = ns.to_vaddr();
 
-        // Allocate var in realm
+        // Allocate var in realm with UNBOUND root
         let var = self
             .realm
-            .alloc_var(self.mem, realm_sym_addr, ns_addr, Value::Unbound, flags)
+            .alloc_var(self.mem, realm_sym, ns, Term::UNBOUND)
             .ok_or(CompileError::InternalError)?;
 
         // Add mapping to namespace
@@ -767,6 +754,9 @@ impl<M: MemorySpace> Compiler<'_, M> {
             .add_ns_mapping(self.mem, ns, realm_sym, var)
             .ok_or(CompileError::InternalError)?;
 
-        Ok((var, is_process_bound))
+        // Note: ns_addr is now unused after removing Vaddr-based API
+        let _ = ns_addr;
+
+        Ok((var, false))
     }
 }

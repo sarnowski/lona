@@ -12,6 +12,7 @@ use crate::platform::MockVSpace;
 use crate::process::Process;
 use crate::reader::read;
 use crate::realm::{Realm, bootstrap};
+use crate::term::Term;
 
 /// Create a test environment with bootstrapped realm and process.
 fn setup() -> Option<(Process, Realm, MockVSpace)> {
@@ -129,7 +130,9 @@ fn compile_large_int_uses_constant() {
     // Too large for LOADINT, should use LOADK
     assert_eq!(decode_opcode(chunk.code[0]), op::LOADK);
     assert_eq!(chunk.constants.len(), 1);
-    assert_eq!(chunk.constants[0], Value::int(1_000_000));
+    // The constant should be the integer 1000000 as a Term
+    let expected = Term::small_int(1_000_000).unwrap();
+    assert_eq!(chunk.constants[0], expected);
 }
 
 #[test]
@@ -139,12 +142,11 @@ fn compile_string() {
 
     assert_eq!(decode_opcode(chunk.code[0]), op::LOADK);
     assert_eq!(chunk.constants.len(), 1);
-    // The string is stored in the constant pool
-    if let Value::String(_) = chunk.constants[0] {
-        // OK
-    } else {
-        panic!("Expected string constant");
-    }
+    // The string is stored in the constant pool - it should be a boxed term
+    assert!(
+        proc.is_term_string(&mem, chunk.constants[0]),
+        "Expected string constant"
+    );
 }
 
 // --- Intrinsic call tests ---

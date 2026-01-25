@@ -5,40 +5,45 @@
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
-use crate::value::Value;
+use crate::term::Term;
 
 use super::{IntrinsicError, XRegs, expect_int};
 
 // --- Arithmetic intrinsics ---
 
-pub fn intrinsic_add(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_add(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
-    Ok(Value::int(a.wrapping_add(b)))
+    let result = a.checked_add(b).ok_or(IntrinsicError::Overflow)?;
+    Term::small_int(result).ok_or(IntrinsicError::Overflow)
 }
 
-pub fn intrinsic_sub(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_sub(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
-    Ok(Value::int(a.wrapping_sub(b)))
+    let result = a.checked_sub(b).ok_or(IntrinsicError::Overflow)?;
+    Term::small_int(result).ok_or(IntrinsicError::Overflow)
 }
 
-pub fn intrinsic_mul(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_mul(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
-    Ok(Value::int(a.wrapping_mul(b)))
+    let result = a.checked_mul(b).ok_or(IntrinsicError::Overflow)?;
+    Term::small_int(result).ok_or(IntrinsicError::Overflow)
 }
 
-pub fn intrinsic_div(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_div(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
     if b == 0 {
         return Err(IntrinsicError::DivisionByZero);
     }
-    Ok(Value::int(a.wrapping_div(b)))
+    // Division can overflow in one case: i64::MIN / -1
+    let result = a.checked_div(b).ok_or(IntrinsicError::Overflow)?;
+    Term::small_int(result).ok_or(IntrinsicError::Overflow)
 }
 
-pub fn intrinsic_mod(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_mod(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
     if b == 0 {
@@ -46,66 +51,46 @@ pub fn intrinsic_mod(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
     }
     // Modulus: result has same sign as divisor (b)
     // This differs from remainder where sign follows dividend (a)
-    let rem = a.wrapping_rem(b);
+    // checked_rem can overflow in one case: i64::MIN % -1
+    let rem = a.checked_rem(b).ok_or(IntrinsicError::Overflow)?;
     let result = if (rem < 0 && b > 0) || (rem > 0 && b < 0) {
-        rem.wrapping_add(b)
+        rem.checked_add(b).ok_or(IntrinsicError::Overflow)?
     } else {
         rem
     };
-    Ok(Value::int(result))
+    Term::small_int(result).ok_or(IntrinsicError::Overflow)
 }
 
 // --- Comparison intrinsics ---
 
-pub fn intrinsic_eq<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Value {
+pub fn intrinsic_eq<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Term {
     let a = x_regs[1];
     let b = x_regs[2];
-    Value::bool(values_equal(a, b, proc, mem))
+    Term::bool(terms_equal(a, b, proc, mem))
 }
 
 /// Reference identity comparison.
 ///
-/// Returns true if two values are the exact same object (same address for
-/// heap-allocated values, same value for immediates).
-pub const fn intrinsic_identical(x_regs: &XRegs) -> Value {
+/// Returns true if two values are the exact same object (same bits for
+/// all values - immediates compare directly, heap pointers compare addresses).
+pub const fn intrinsic_identical(x_regs: &XRegs) -> Term {
     let a = x_regs[1];
     let b = x_regs[2];
-    Value::bool(values_identical(a, b))
+    Term::bool(terms_identical(a, b))
 }
 
-/// Check if two values are identical (reference equality).
+/// Check if two terms are identical (reference equality).
 ///
-/// For heap-allocated values, this compares addresses.
-/// For immediate values, this compares the values directly.
-const fn values_identical(a: Value, b: Value) -> bool {
-    match (a, b) {
-        // Immediate values without payload
-        (Value::Nil, Value::Nil) | (Value::Unbound, Value::Unbound) => true,
-        // Immediate values with payload - compare directly
-        (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Int(x), Value::Int(y)) => x == y,
-        (Value::NativeFn(x), Value::NativeFn(y)) => x == y,
-        // Heap-allocated values - compare addresses
-        (Value::String(a), Value::String(b))
-        | (Value::Pair(a), Value::Pair(b))
-        | (Value::Symbol(a), Value::Symbol(b))
-        | (Value::Keyword(a), Value::Keyword(b))
-        | (Value::Tuple(a), Value::Tuple(b))
-        | (Value::Vector(a), Value::Vector(b))
-        | (Value::Map(a), Value::Map(b))
-        | (Value::CompiledFn(a), Value::CompiledFn(b))
-        | (Value::Closure(a), Value::Closure(b))
-        | (Value::Var(a), Value::Var(b))
-        | (Value::Namespace(a), Value::Namespace(b)) => a.as_u64() == b.as_u64(),
-        // Different types are never identical
-        _ => false,
-    }
+/// For Term representation, this is simply bit equality - same tag + payload.
+/// Heap-allocated values are identical only if they point to the same address.
+const fn terms_identical(a: Term, b: Term) -> bool {
+    a.as_raw() == b.as_raw()
 }
 
 /// Maximum recursion depth for structural equality to prevent stack overflow.
 const MAX_EQ_DEPTH: usize = 64;
 
-/// Compare two values for equality.
+/// Compare two terms for equality.
 ///
 /// - Immediate values (nil, bool, int) compare by value
 /// - Strings compare by content
@@ -114,13 +99,13 @@ const MAX_EQ_DEPTH: usize = 64;
 /// - Pairs compare structurally (recursive element comparison)
 /// - Tuples compare structurally (recursive element comparison)
 /// - Maps compare structurally (same keys with equal values)
-pub fn values_equal<M: MemorySpace>(a: Value, b: Value, proc: &Process, mem: &M) -> bool {
-    values_equal_depth(a, b, proc, mem, 0)
+pub fn terms_equal<M: MemorySpace>(a: Term, b: Term, proc: &Process, mem: &M) -> bool {
+    terms_equal_depth(a, b, proc, mem, 0)
 }
 
-fn values_equal_depth<M: MemorySpace>(
-    a: Value,
-    b: Value,
+fn terms_equal_depth<M: MemorySpace>(
+    a: Term,
+    b: Term,
     proc: &Process,
     mem: &M,
     depth: usize,
@@ -129,123 +114,134 @@ fn values_equal_depth<M: MemorySpace>(
         return false;
     }
 
-    match (a, b) {
-        (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Int(x), Value::Int(y)) => x == y,
-        (Value::String(_), Value::String(_)) => {
+    // Fast path: identical bits means equal
+    if a.as_raw() == b.as_raw() {
+        return true;
+    }
+
+    // Different bits - check if they could still be structurally equal
+
+    // Immediates with different bits are not equal
+    if a.is_immediate() && b.is_immediate() {
+        // Both immediates but different bits means not equal
+        // (small_int, symbol index, keyword index, or special values)
+        return false;
+    }
+
+    // Check for list pairs
+    if a.is_list() && b.is_list() {
+        // Both are pairs - compare structurally
+        let Some((head_a, rest_a)) = proc.read_term_pair(mem, a) else {
+            return false;
+        };
+        let Some((head_b, rest_b)) = proc.read_term_pair(mem, b) else {
+            return false;
+        };
+        return terms_equal_depth(head_a, head_b, proc, mem, depth + 1)
+            && terms_equal_depth(rest_a, rest_b, proc, mem, depth + 1);
+    }
+
+    // Check for boxed values
+    if a.is_boxed() && b.is_boxed() {
+        return boxed_equal(a, b, proc, mem, depth);
+    }
+
+    // One is boxed, one is not (or one is list, one is not) - not equal
+    false
+}
+
+/// Compare two boxed values for structural equality.
+fn boxed_equal<M: MemorySpace>(a: Term, b: Term, proc: &Process, mem: &M, depth: usize) -> bool {
+    use crate::term::header::Header;
+    use crate::term::tag::object;
+
+    let addr_a = a.to_vaddr();
+    let addr_b = b.to_vaddr();
+
+    // Read headers to determine types
+    let header_a: Header = mem.read(addr_a);
+    let header_b: Header = mem.read(addr_b);
+
+    let tag_a = header_a.object_tag();
+    let tag_b = header_b.object_tag();
+
+    // Different types are never equal
+    if tag_a != tag_b {
+        return false;
+    }
+
+    match tag_a {
+        object::STRING => {
             // Compare string contents
-            let Some(sa) = proc.read_string(mem, a) else {
+            let Some(sa) = proc.read_term_string(mem, a) else {
                 return false;
             };
-            let Some(sb) = proc.read_string(mem, b) else {
-                return false;
-            };
-            sa == sb
-        }
-        (Value::Symbol(addr_a), Value::Symbol(addr_b)) => {
-            // Fast path: same address (interned symbols)
-            if addr_a == addr_b {
-                return true;
-            }
-            // Fallback: compare by content in case interning table was full
-            let Some(sa) = proc.read_string(mem, a) else {
-                return false;
-            };
-            let Some(sb) = proc.read_string(mem, b) else {
+            let Some(sb) = proc.read_term_string(mem, b) else {
                 return false;
             };
             sa == sb
         }
-        (Value::Keyword(_), Value::Keyword(_)) => {
-            // Keywords compare by content (like strings) to handle cases
-            // where interning table is full and identical keywords get
-            // different addresses.
-            let Some(sa) = proc.read_string(mem, a) else {
-                return false;
-            };
-            let Some(sb) = proc.read_string(mem, b) else {
-                return false;
-            };
-            sa == sb
+        object::TUPLE => {
+            // Compare tuples structurally
+            tuple_equal(a, b, proc, mem, depth)
         }
-        (Value::Pair(addr_a), Value::Pair(addr_b)) => {
-            // Fast path: same address
-            if addr_a == addr_b {
-                return true;
-            }
-            // Structural comparison
-            let Some(pa) = proc.read_pair(mem, a) else {
-                return false;
-            };
-            let Some(pb) = proc.read_pair(mem, b) else {
-                return false;
-            };
-            values_equal_depth(pa.first, pb.first, proc, mem, depth + 1)
-                && values_equal_depth(pa.rest, pb.rest, proc, mem, depth + 1)
+        object::VECTOR => {
+            // Compare vectors structurally
+            vector_equal(a, b, proc, mem, depth)
         }
-        // Tuples and vectors share the same memory layout
-        (Value::Tuple(addr_a), Value::Tuple(addr_b))
-        | (Value::Vector(addr_a), Value::Vector(addr_b)) => {
-            // Fast path: same address
-            if addr_a == addr_b {
-                return true;
-            }
-            indexed_equal(a, b, proc, mem, depth)
-        }
-        (Value::Map(addr_a), Value::Map(addr_b)) => {
-            // Fast path: same address
-            if addr_a == addr_b {
-                return true;
-            }
+        object::MAP => {
+            // Compare maps structurally
             maps_equal(proc, mem, a, b, depth + 1)
         }
-        (Value::CompiledFn(addr_a), Value::CompiledFn(addr_b)) => {
-            // Functions compare by identity
-            addr_a == addr_b
-        }
-        (Value::Closure(addr_a), Value::Closure(addr_b)) => {
-            // Closures compare by identity
-            addr_a == addr_b
-        }
-        (Value::NativeFn(id_a), Value::NativeFn(id_b)) => {
-            // Native functions compare by intrinsic ID
-            id_a == id_b
-        }
-        (Value::Namespace(addr_a), Value::Namespace(addr_b)) => {
-            // Namespaces compare by identity
-            addr_a == addr_b
-        }
-        // Nil and Unbound are immediate values that compare equal to themselves
-        (Value::Nil, Value::Nil) | (Value::Unbound, Value::Unbound) => true,
-        _ => false, // Different types are never equal
+        // Functions, namespaces, and unknown types compare by identity (already checked above)
+        _ => false,
     }
 }
 
-/// Compare two indexed collections (tuples or vectors) for structural equality.
-fn indexed_equal<M: MemorySpace>(
-    a: Value,
-    b: Value,
-    proc: &Process,
-    mem: &M,
-    depth: usize,
-) -> bool {
-    let Some(len_a) = proc.read_tuple_len(mem, a) else {
+/// Compare two tuples for structural equality.
+fn tuple_equal<M: MemorySpace>(a: Term, b: Term, proc: &Process, mem: &M, depth: usize) -> bool {
+    let Some(len_a) = proc.read_term_tuple_len(mem, a) else {
         return false;
     };
-    let Some(len_b) = proc.read_tuple_len(mem, b) else {
+    let Some(len_b) = proc.read_term_tuple_len(mem, b) else {
         return false;
     };
     if len_a != len_b {
         return false;
     }
     for i in 0..len_a {
-        let Some(ea) = proc.read_tuple_element(mem, a, i) else {
+        let Some(ea) = proc.read_term_tuple_element(mem, a, i) else {
             return false;
         };
-        let Some(eb) = proc.read_tuple_element(mem, b, i) else {
+        let Some(eb) = proc.read_term_tuple_element(mem, b, i) else {
             return false;
         };
-        if !values_equal_depth(ea, eb, proc, mem, depth + 1) {
+        if !terms_equal_depth(ea, eb, proc, mem, depth + 1) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Compare two vectors for structural equality.
+fn vector_equal<M: MemorySpace>(a: Term, b: Term, proc: &Process, mem: &M, depth: usize) -> bool {
+    let Some(len_a) = proc.read_term_vector_len(mem, a) else {
+        return false;
+    };
+    let Some(len_b) = proc.read_term_vector_len(mem, b) else {
+        return false;
+    };
+    if len_a != len_b {
+        return false;
+    }
+    for i in 0..len_a {
+        let Some(ea) = proc.read_term_vector_element(mem, a, i) else {
+            return false;
+        };
+        let Some(eb) = proc.read_term_vector_element(mem, b, i) else {
+            return false;
+        };
+        if !terms_equal_depth(ea, eb, proc, mem, depth + 1) {
             return false;
         }
     }
@@ -253,112 +249,140 @@ fn indexed_equal<M: MemorySpace>(
 }
 
 /// Count entries in a map's entry list.
-fn count_map_entries<M: MemorySpace>(proc: &Process, mem: &M, mut entries: Value) -> usize {
+fn count_map_entries<M: MemorySpace>(proc: &Process, mem: &M, mut entries: Term) -> usize {
     let mut count = 0;
-    while let Some(pair) = proc.read_pair(mem, entries) {
+    while let Some((_, rest)) = proc.read_term_pair(mem, entries) {
         count += 1;
-        entries = pair.rest;
+        entries = rest;
     }
     count
 }
 
 /// Look up a key in a map, returning the value if found.
-///
-/// Unlike `Process::map_get`, this returns `Some(Value::Nil)` for keys
-/// with nil values instead of returning `None`.
-fn map_lookup<M: MemorySpace>(
-    proc: &Process,
-    mem: &M,
-    map_val: Value,
-    key: Value,
-) -> Option<Value> {
-    let map = proc.read_map(mem, map_val)?;
-    let mut current = map.entries;
-    while let Some(pair) = proc.read_pair(mem, current) {
-        let entry_key = proc.read_tuple_element(mem, pair.first, 0)?;
-        if values_equal(entry_key, key, proc, mem) {
-            return proc.read_tuple_element(mem, pair.first, 1);
-        }
-        current = pair.rest;
+#[allow(dead_code)]
+fn map_lookup<'a, M: MemorySpace>(
+    proc: &'a Process,
+    mem: &'a M,
+    map_term: Term,
+) -> Option<impl Iterator<Item = (Term, Term)> + 'a> {
+    let entries = proc.read_term_map_entries(mem, map_term)?;
+    Some(MapIter {
+        proc,
+        mem,
+        current: entries,
+    })
+}
+
+/// Iterator over map entries.
+#[allow(dead_code)]
+struct MapIter<'a, M> {
+    proc: &'a Process,
+    mem: &'a M,
+    current: Term,
+}
+
+impl<M: MemorySpace> Iterator for MapIter<'_, M> {
+    type Item = (Term, Term);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (entry, rest) = self.proc.read_term_pair(self.mem, self.current)?;
+        self.current = rest;
+
+        // Each entry is a [key value] tuple
+        let key = self.proc.read_term_tuple_element(self.mem, entry, 0)?;
+        let value = self.proc.read_term_tuple_element(self.mem, entry, 1)?;
+        Some((key, value))
     }
-    None
 }
 
 /// Compare two maps for structural equality.
 fn maps_equal<M: MemorySpace>(
     proc: &Process,
     mem: &M,
-    map_a: Value,
-    map_b: Value,
+    map_a: Term,
+    map_b: Term,
     depth: usize,
 ) -> bool {
-    let Some(ma) = proc.read_map(mem, map_a) else {
+    let Some(entries_a) = proc.read_term_map_entries(mem, map_a) else {
         return false;
     };
-    let Some(mb) = proc.read_map(mem, map_b) else {
+    let Some(entries_b) = proc.read_term_map_entries(mem, map_b) else {
         return false;
     };
 
     // Count entries in both maps
-    let count_a = count_map_entries(proc, mem, ma.entries);
-    let count_b = count_map_entries(proc, mem, mb.entries);
+    let count_a = count_map_entries(proc, mem, entries_a);
+    let count_b = count_map_entries(proc, mem, entries_b);
     if count_a != count_b {
         return false;
     }
 
     // Check each entry in map_a exists in map_b with equal value
-    let mut current = ma.entries;
-    while let Some(pair) = proc.read_pair(mem, current) {
+    let mut current = entries_a;
+    while let Some((entry, rest)) = proc.read_term_pair(mem, current) {
         // Each entry is a [key value] tuple
-        let Some(key) = proc.read_tuple_element(mem, pair.first, 0) else {
+        let Some(key) = proc.read_term_tuple_element(mem, entry, 0) else {
             return false;
         };
-        let Some(val_a) = proc.read_tuple_element(mem, pair.first, 1) else {
+        let Some(val_a) = proc.read_term_tuple_element(mem, entry, 1) else {
             return false;
         };
 
-        // Look up key in map_b using Unbound as sentinel to distinguish
-        // "key not found" from "key has nil value"
-        match map_lookup(proc, mem, map_b, key) {
-            None => return false, // Key not found
-            Some(val_b) => {
-                if !values_equal_depth(val_a, val_b, proc, mem, depth) {
+        // Look up key in map_b
+        let mut found = false;
+        let mut search = entries_b;
+        while let Some((search_entry, search_rest)) = proc.read_term_pair(mem, search) {
+            let Some(search_key) = proc.read_term_tuple_element(mem, search_entry, 0) else {
+                return false;
+            };
+            if terms_equal_depth(key, search_key, proc, mem, depth) {
+                // Found the key, compare values
+                let Some(val_b) = proc.read_term_tuple_element(mem, search_entry, 1) else {
+                    return false;
+                };
+                if !terms_equal_depth(val_a, val_b, proc, mem, depth) {
                     return false;
                 }
+                found = true;
+                break;
             }
+            search = search_rest;
         }
-        current = pair.rest;
+        if !found {
+            return false;
+        }
+        current = rest;
     }
     true
 }
 
-pub fn intrinsic_lt(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_lt(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
-    Ok(Value::bool(a < b))
+    Ok(Term::bool(a < b))
 }
 
-pub fn intrinsic_gt(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_gt(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
-    Ok(Value::bool(a > b))
+    Ok(Term::bool(a > b))
 }
 
-pub fn intrinsic_le(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_le(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
-    Ok(Value::bool(a <= b))
+    Ok(Term::bool(a <= b))
 }
 
-pub fn intrinsic_ge(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+pub fn intrinsic_ge(x_regs: &XRegs, id: u8) -> Result<Term, IntrinsicError> {
     let a = expect_int(x_regs, 1, id, 0)?;
     let b = expect_int(x_regs, 2, id, 1)?;
-    Ok(Value::bool(a >= b))
+    Ok(Term::bool(a >= b))
 }
 
 // --- Boolean intrinsic ---
 
-pub const fn intrinsic_not(x_regs: &XRegs) -> Value {
+pub const fn intrinsic_not(x_regs: &XRegs) -> Term {
     // (not x) returns true if x is falsy (nil or false), false otherwise
-    Value::bool(!x_regs[1].is_truthy())
+    Term::bool(!x_regs[1].is_truthy())
 }

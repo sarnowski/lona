@@ -15,7 +15,7 @@ use std::{boxed::Box, vec::Vec};
 use alloc::{boxed::Box, vec::Vec};
 
 use crate::platform::MemorySpace;
-use crate::value::Value;
+use crate::term::Term;
 
 use super::{CompileError, Compiler, MAX_SYMBOL_NAME_LEN};
 
@@ -43,7 +43,7 @@ pub enum Pattern {
     },
 
     /// Literal - matches exact value (nil, bool, int, keyword, string).
-    Literal(Value),
+    Literal(Term),
 
     /// Tuple `[a b c]` - matches tuple of exact length with sub-patterns.
     Tuple(Vec<Self>),
@@ -60,7 +60,7 @@ pub enum Pattern {
     Vector(Vec<Self>),
 
     /// Map `%{:k v}` - matches map containing specified keys.
-    Map(Vec<(Value, Self)>),
+    Map(Vec<(Term, Self)>),
 }
 
 impl Pattern {
@@ -84,8 +84,8 @@ impl Pattern {
 
     /// Create a literal pattern.
     #[must_use]
-    pub const fn literal(value: Value) -> Self {
-        Self::Literal(value)
+    pub const fn literal(term: Term) -> Self {
+        Self::Literal(term)
     }
 
     /// Get the name of a binding pattern as a slice.
@@ -99,43 +99,57 @@ impl Pattern {
 }
 
 impl<M: MemorySpace> Compiler<'_, M> {
-    /// Parse a value as a pattern.
+    /// Parse a term as a pattern.
     ///
-    /// Converts a runtime `Value` (from parsed source) into a `Pattern`
+    /// Converts a runtime `Term` (from parsed source) into a `Pattern`
     /// suitable for compilation into bytecode tests.
     ///
     /// # Errors
     ///
-    /// Returns `CompileError::InvalidSyntax` if the value cannot be parsed as a pattern.
-    pub fn parse_pattern(&self, pat_val: Value) -> Result<Pattern, CompileError> {
-        match pat_val {
-            // Symbol: either wildcard `_` or binding `x`
-            Value::Symbol(_) => self.parse_symbol_pattern(pat_val),
-
-            // Literals: nil, bool, int, keyword, string
-            Value::Nil | Value::Bool(_) | Value::Int(_) | Value::Keyword(_) | Value::String(_) => {
-                Ok(Pattern::Literal(pat_val))
-            }
-
-            // Tuple pattern: `[a b]` or `[h & t]`
-            Value::Tuple(_) => self.parse_tuple_pattern(pat_val),
-
-            // Vector pattern: `{a b c}`
-            Value::Vector(_) => self.parse_vector_pattern(pat_val),
-
-            // Map pattern: `%{:k v}`
-            Value::Map(_) => self.parse_map_pattern(pat_val),
-
-            // Other types are invalid patterns
-            _ => Err(CompileError::InvalidSyntax),
+    /// Returns `CompileError::InvalidSyntax` if the term cannot be parsed as a pattern.
+    pub fn parse_pattern(&self, pat_term: Term) -> Result<Pattern, CompileError> {
+        // Symbol: either wildcard `_` or binding `x`
+        if pat_term.is_symbol() {
+            return self.parse_symbol_pattern(pat_term);
         }
+
+        // Literals: nil, bool, int, keyword
+        if pat_term.is_nil()
+            || pat_term.is_boolean()
+            || pat_term.is_small_int()
+            || pat_term.is_keyword()
+        {
+            return Ok(Pattern::Literal(pat_term));
+        }
+
+        // String literal (boxed)
+        if self.proc.is_term_string(self.mem, pat_term) {
+            return Ok(Pattern::Literal(pat_term));
+        }
+
+        // Tuple pattern: `[a b]` or `[h & t]`
+        if self.proc.is_term_tuple(self.mem, pat_term) {
+            return self.parse_tuple_pattern(pat_term);
+        }
+
+        // Vector pattern: `{a b c}`
+        if self.proc.is_term_vector(self.mem, pat_term) {
+            return self.parse_vector_pattern(pat_term);
+        }
+
+        // Map pattern: `%{:k v}`
+        if self.proc.is_term_map(self.mem, pat_term) {
+            return self.parse_map_pattern(pat_term);
+        }
+
+        // Other types are invalid patterns
+        Err(CompileError::InvalidSyntax)
     }
 
     /// Parse a symbol as a pattern (wildcard or binding).
-    fn parse_symbol_pattern(&self, sym: Value) -> Result<Pattern, CompileError> {
+    fn parse_symbol_pattern(&self, sym: Term) -> Result<Pattern, CompileError> {
         let name_str = self
-            .proc
-            .read_string(self.mem, sym)
+            .get_symbol_name(sym)
             .ok_or(CompileError::InvalidSyntax)?;
 
         if name_str == "_" {
@@ -147,10 +161,10 @@ impl<M: MemorySpace> Compiler<'_, M> {
     }
 
     /// Parse a tuple pattern `[a b]` or `[h & t]`.
-    fn parse_tuple_pattern(&self, tuple: Value) -> Result<Pattern, CompileError> {
+    fn parse_tuple_pattern(&self, tuple: Term) -> Result<Pattern, CompileError> {
         let len = self
             .proc
-            .read_tuple_len(self.mem, tuple)
+            .read_term_tuple_len(self.mem, tuple)
             .ok_or(CompileError::InvalidSyntax)?;
 
         if len > MAX_PATTERN_ELEMENTS {
@@ -162,14 +176,13 @@ impl<M: MemorySpace> Compiler<'_, M> {
         for i in 0..len {
             let elem = self
                 .proc
-                .read_tuple_element(self.mem, tuple, i)
+                .read_term_tuple_element(self.mem, tuple, i)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             // Check for `& rest` syntax
             if elem.is_symbol() {
                 let name = self
-                    .proc
-                    .read_string(self.mem, elem)
+                    .get_symbol_name(elem)
                     .ok_or(CompileError::InvalidSyntax)?;
 
                 if name == "&" {
@@ -178,11 +191,11 @@ impl<M: MemorySpace> Compiler<'_, M> {
                         return Err(CompileError::InvalidSyntax);
                     }
 
-                    let rest_val = self
+                    let rest_term = self
                         .proc
-                        .read_tuple_element(self.mem, tuple, i + 1)
+                        .read_term_tuple_element(self.mem, tuple, i + 1)
                         .ok_or(CompileError::InvalidSyntax)?;
-                    let rest_pat = self.parse_pattern(rest_val)?;
+                    let rest_pat = self.parse_pattern(rest_term)?;
 
                     return Ok(Pattern::TupleRest {
                         head: patterns,
@@ -198,10 +211,10 @@ impl<M: MemorySpace> Compiler<'_, M> {
     }
 
     /// Parse a vector pattern `{a b c}`.
-    fn parse_vector_pattern(&self, vector: Value) -> Result<Pattern, CompileError> {
+    fn parse_vector_pattern(&self, vector: Term) -> Result<Pattern, CompileError> {
         let len = self
             .proc
-            .read_tuple_len(self.mem, vector)
+            .read_term_vector_len(self.mem, vector)
             .ok_or(CompileError::InvalidSyntax)?;
 
         if len > MAX_PATTERN_ELEMENTS {
@@ -213,7 +226,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
         for i in 0..len {
             let elem = self
                 .proc
-                .read_tuple_element(self.mem, vector, i)
+                .read_term_vector_element(self.mem, vector, i)
                 .ok_or(CompileError::InvalidSyntax)?;
             patterns.push(self.parse_pattern(elem)?);
         }
@@ -222,35 +235,33 @@ impl<M: MemorySpace> Compiler<'_, M> {
     }
 
     /// Parse a map pattern `%{:k v}`.
-    fn parse_map_pattern(&self, map: Value) -> Result<Pattern, CompileError> {
-        let map_val = self
+    fn parse_map_pattern(&self, map: Term) -> Result<Pattern, CompileError> {
+        let mut current = self
             .proc
-            .read_map(self.mem, map)
+            .read_term_map_entries(self.mem, map)
             .ok_or(CompileError::InvalidSyntax)?;
 
         let mut pairs = Vec::new();
-        let mut current = map_val.entries;
 
-        while let Some(pair) = self.proc.read_pair(self.mem, current) {
+        while let Some((entry, rest)) = self.proc.read_term_pair(self.mem, current) {
             if pairs.len() >= MAX_MAP_PATTERN_PAIRS {
                 return Err(CompileError::InvalidSyntax);
             }
 
             // Each entry is a [key value] tuple
-            let kv = pair.first;
             let key = self
                 .proc
-                .read_tuple_element(self.mem, kv, 0)
+                .read_term_tuple_element(self.mem, entry, 0)
                 .ok_or(CompileError::InvalidSyntax)?;
             let val_pattern = self
                 .proc
-                .read_tuple_element(self.mem, kv, 1)
+                .read_term_tuple_element(self.mem, entry, 1)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             // Key must be a literal (usually a keyword)
             // Value is parsed as a sub-pattern
             pairs.push((key, self.parse_pattern(val_pattern)?));
-            current = pair.rest;
+            current = rest;
         }
 
         Ok(Pattern::Map(pairs))

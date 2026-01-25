@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 Tobias Sarnowski
 
-//! Deep copy infrastructure for copying values from process heap to realm code region.
+//! Deep copy infrastructure for copying Terms from process heap to realm code region.
 //!
 //! When `def` stores a value in the realm, all heap-allocated data must be copied
 //! to the realm's code region. This module provides the deep copy machinery.
@@ -11,7 +11,12 @@
 
 use crate::Vaddr;
 use crate::platform::MemorySpace;
-use crate::value::{HeapClosure, HeapCompiledFn, HeapMap, HeapString, HeapTuple, Pair, Value};
+use crate::term::Term;
+use crate::term::header::Header;
+use crate::term::heap::{
+    HeapClosure, HeapFun, HeapMap, HeapPair, HeapString, HeapTuple, HeapVector,
+};
+use crate::term::tag::object;
 
 use super::Realm;
 
@@ -76,132 +81,76 @@ impl Default for VisitedTracker {
     }
 }
 
-/// Deep copy a value from process heap to realm code region.
+/// Deep copy a Term from process heap to realm code region.
 ///
-/// This is the main entry point for copying values to the realm. It handles
-/// all value types, recursively copying heap-allocated structures.
+/// This is the main entry point for copying Terms to the realm. It handles
+/// all term types, recursively copying heap-allocated structures.
 ///
 /// # Arguments
-/// * `value` - The value to copy
+/// * `term` - The Term to copy
 /// * `realm` - The realm to allocate in
 /// * `mem` - The memory space (shared between process and realm)
 /// * `visited` - Tracker for already-copied addresses
 ///
 /// # Returns
-/// The copied value with all pointers updated to realm addresses,
+/// The copied Term with all pointers updated to realm addresses,
 /// or `None` if allocation fails.
-pub fn deep_copy_to_realm<M: MemorySpace>(
-    value: Value,
+pub fn deep_copy_term_to_realm<M: MemorySpace>(
+    term: Term,
     realm: &mut Realm,
     mem: &mut M,
     visited: &mut VisitedTracker,
-) -> Option<Value> {
-    match value {
-        // Immediates: no copy needed, pass through directly
-        Value::Nil | Value::Bool(_) | Value::Int(_) | Value::NativeFn(_) | Value::Unbound => {
-            Some(value)
-        }
-
-        // Realm references: already in realm, pass through
-        // (Vars and Namespaces are created in realm, not process heap)
-        Value::Var(_) | Value::Namespace(_) => Some(value),
-
-        // Strings: copy bytes to realm
-        Value::String(addr) => {
-            if let Some(dst) = visited.check(addr) {
-                return Some(Value::string(dst));
-            }
-            deep_copy_string(addr, realm, mem, visited, Value::string)
-        }
-
-        // Symbols: re-intern in realm (deduplication)
-        Value::Symbol(addr) => {
-            // Read the symbol's string content and copy to local buffer
-            let header: HeapString = mem.read(addr);
-            let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-            let len = header.len as usize;
-
-            // Copy to local buffer to avoid borrow conflict
-            let mut buf = [0u8; 256];
-            if len > buf.len() {
-                return None; // Symbol name too long
-            }
-            let bytes = mem.slice(data_addr, len);
-            buf[..len].copy_from_slice(bytes);
-
-            // Convert to string for intern lookup
-            let name = core::str::from_utf8(&buf[..len]).ok()?;
-            realm.intern_symbol(mem, name)
-        }
-
-        // Keywords: re-intern in realm (deduplication)
-        Value::Keyword(addr) => {
-            // Read the keyword's string content and copy to local buffer
-            let header: HeapString = mem.read(addr);
-            let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-            let len = header.len as usize;
-
-            // Copy to local buffer to avoid borrow conflict
-            let mut buf = [0u8; 256];
-            if len > buf.len() {
-                return None; // Keyword name too long
-            }
-            let bytes = mem.slice(data_addr, len);
-            buf[..len].copy_from_slice(bytes);
-
-            // Convert to string for intern lookup
-            let name = core::str::from_utf8(&buf[..len]).ok()?;
-            realm.intern_keyword(mem, name)
-        }
-
-        // Pairs: recursive copy
-        Value::Pair(addr) => {
-            if let Some(dst) = visited.check(addr) {
-                return Some(Value::pair(dst));
-            }
-            deep_copy_pair(addr, realm, mem, visited)
-        }
-
-        // Tuples: recursive copy
-        Value::Tuple(addr) => {
-            if let Some(dst) = visited.check(addr) {
-                return Some(Value::tuple(dst));
-            }
-            deep_copy_tuple(addr, realm, mem, visited)
-        }
-
-        // Vectors: recursive copy (same layout as tuples)
-        Value::Vector(addr) => {
-            if let Some(dst) = visited.check(addr) {
-                return Some(Value::vector(dst));
-            }
-            deep_copy_vector(addr, realm, mem, visited)
-        }
-
-        // Maps: recursive copy
-        Value::Map(addr) => {
-            if let Some(dst) = visited.check(addr) {
-                return Some(Value::map(dst));
-            }
-            deep_copy_map(addr, realm, mem, visited)
-        }
-
-        // Compiled functions: deep copy bytecode and constants
-        Value::CompiledFn(addr) => {
-            if let Some(dst) = visited.check(addr) {
-                return Some(Value::compiled_fn(dst));
-            }
-            deep_copy_compiled_fn(addr, realm, mem, visited)
-        }
-
-        // Closures: deep copy function and captures
-        Value::Closure(addr) => {
-            if let Some(dst) = visited.check(addr) {
-                return Some(Value::closure(dst));
-            }
-            deep_copy_closure(addr, realm, mem, visited)
-        }
+) -> Option<Term> {
+    // Immediates: no copy needed, pass through directly
+    if term.is_immediate() {
+        return Some(term);
     }
+
+    // Nil: pass through
+    if term.is_nil() {
+        return Some(term);
+    }
+
+    // List (cons cell): recursive copy
+    if term.is_list() {
+        let addr = term.to_vaddr();
+        if let Some(dst) = visited.check(addr) {
+            return Some(Term::list_vaddr(dst));
+        }
+        return deep_copy_pair(addr, realm, mem, visited);
+    }
+
+    // Boxed values: check header to determine type
+    if term.is_boxed() {
+        let addr = term.to_vaddr();
+
+        // Check visited first
+        if let Some(dst) = visited.check(addr) {
+            return Some(Term::boxed_vaddr(dst));
+        }
+
+        // Read header to determine type
+        let header: Header = mem.read(addr);
+        let tag = header.object_tag();
+
+        return match tag {
+            object::STRING => deep_copy_string(addr, realm, mem, visited),
+            // Note: SYMBOL and KEYWORD are now immediate values, not boxed
+            object::TUPLE => deep_copy_tuple(addr, realm, mem, visited),
+            object::VECTOR => deep_copy_vector(addr, realm, mem, visited),
+            object::MAP => deep_copy_map(addr, realm, mem, visited),
+            object::FUN => deep_copy_fun(addr, realm, mem, visited),
+            object::CLOSURE => deep_copy_closure(addr, realm, mem, visited),
+            object::VAR | object::NAMESPACE => {
+                // Vars and Namespaces are already in realm, pass through
+                Some(term)
+            }
+            _ => None, // Unknown object type
+        };
+    }
+
+    // Unknown term type
+    None
 }
 
 /// Deep copy a string to the realm's code region.
@@ -210,17 +159,14 @@ fn deep_copy_string<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
     visited: &mut VisitedTracker,
-    value_ctor: fn(Vaddr) -> Value,
-) -> Option<Value> {
+) -> Option<Term> {
     // Read source header
-    let header: HeapString = mem.read(src_addr);
-    let len = header.len as usize;
+    let header: Header = mem.read(src_addr);
+    let len = header.arity() as usize;
     let total_size = HeapString::alloc_size(len);
 
     // Allocate in realm
-    let dst_addr = realm.alloc(total_size, 4)?;
-
-    // Record before recursing (not that strings recurse, but for consistency)
+    let dst_addr = realm.alloc(total_size, 8)?;
     visited.record(src_addr, dst_addr);
 
     // Copy header
@@ -235,35 +181,39 @@ fn deep_copy_string<M: MemorySpace>(
         mem.write(dst_data.add(i as u64), byte);
     }
 
-    Some(value_ctor(dst_addr))
+    Some(Term::boxed_vaddr(dst_addr))
 }
 
-/// Deep copy a pair to the realm's code region.
+// Note: deep_copy_symbol and deep_copy_keyword removed - symbols/keywords are now
+// immediate values with indices into the realm's intern tables. Within the same realm,
+// they pass through unchanged. Cross-realm copy requires re-interning (see 8.7).
+
+/// Deep copy a pair (cons cell) to the realm's code region.
 fn deep_copy_pair<M: MemorySpace>(
     src_addr: Vaddr,
     realm: &mut Realm,
     mem: &mut M,
     visited: &mut VisitedTracker,
-) -> Option<Value> {
-    // Read source pair
-    let pair: Pair = mem.read(src_addr);
-
+) -> Option<Term> {
     // Allocate in realm first (record early to handle cycles)
-    let dst_addr = realm.alloc(Pair::SIZE, 8)?;
+    let dst_addr = realm.alloc(HeapPair::SIZE, 8)?;
     visited.record(src_addr, dst_addr);
 
-    // Deep copy first and rest
-    let dst_first = deep_copy_to_realm(pair.first, realm, mem, visited)?;
-    let dst_rest = deep_copy_to_realm(pair.rest, realm, mem, visited)?;
+    // Read source pair
+    let pair: HeapPair = mem.read(src_addr);
+
+    // Deep copy head and tail
+    let dst_head = deep_copy_term_to_realm(pair.head, realm, mem, visited)?;
+    let dst_tail = deep_copy_term_to_realm(pair.tail, realm, mem, visited)?;
 
     // Write destination pair
-    let dst_pair = Pair {
-        first: dst_first,
-        rest: dst_rest,
+    let dst_pair = HeapPair {
+        head: dst_head,
+        tail: dst_tail,
     };
     mem.write(dst_addr, dst_pair);
 
-    Some(Value::pair(dst_addr))
+    Some(Term::list_vaddr(dst_addr))
 }
 
 /// Deep copy a tuple to the realm's code region.
@@ -272,10 +222,10 @@ fn deep_copy_tuple<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
     visited: &mut VisitedTracker,
-) -> Option<Value> {
+) -> Option<Term> {
     // Read source header
-    let header: HeapTuple = mem.read(src_addr);
-    let len = header.len as usize;
+    let header: Header = mem.read(src_addr);
+    let len = header.arity() as usize;
     let total_size = HeapTuple::alloc_size(len);
 
     // Allocate in realm first
@@ -290,26 +240,26 @@ fn deep_copy_tuple<M: MemorySpace>(
     let dst_elements = dst_addr.add(HeapTuple::HEADER_SIZE as u64);
 
     for i in 0..len {
-        let offset = (i * core::mem::size_of::<Value>()) as u64;
-        let src_elem: Value = mem.read(src_elements.add(offset));
-        let dst_elem = deep_copy_to_realm(src_elem, realm, mem, visited)?;
+        let offset = (i * core::mem::size_of::<Term>()) as u64;
+        let src_elem: Term = mem.read(src_elements.add(offset));
+        let dst_elem = deep_copy_term_to_realm(src_elem, realm, mem, visited)?;
         mem.write(dst_elements.add(offset), dst_elem);
     }
 
-    Some(Value::tuple(dst_addr))
+    Some(Term::boxed_vaddr(dst_addr))
 }
 
-/// Deep copy a vector to the realm's code region (same layout as tuple).
+/// Deep copy a vector to the realm's code region.
 fn deep_copy_vector<M: MemorySpace>(
     src_addr: Vaddr,
     realm: &mut Realm,
     mem: &mut M,
     visited: &mut VisitedTracker,
-) -> Option<Value> {
-    // Read source header (vectors share layout with tuples)
-    let header: HeapTuple = mem.read(src_addr);
-    let len = header.len as usize;
-    let total_size = HeapTuple::alloc_size(len);
+) -> Option<Term> {
+    // Read source header
+    let header: Header = mem.read(src_addr);
+    let len = header.arity() as usize;
+    let total_size = HeapVector::alloc_size(len);
 
     // Allocate in realm first
     let dst_addr = realm.alloc(total_size, 8)?;
@@ -319,17 +269,18 @@ fn deep_copy_vector<M: MemorySpace>(
     mem.write(dst_addr, header);
 
     // Deep copy each element
+    // Note: Using HeapTuple layout (header + elements) for vectors during migration
     let src_elements = src_addr.add(HeapTuple::HEADER_SIZE as u64);
     let dst_elements = dst_addr.add(HeapTuple::HEADER_SIZE as u64);
 
     for i in 0..len {
-        let offset = (i * core::mem::size_of::<Value>()) as u64;
-        let src_elem: Value = mem.read(src_elements.add(offset));
-        let dst_elem = deep_copy_to_realm(src_elem, realm, mem, visited)?;
+        let offset = (i * core::mem::size_of::<Term>()) as u64;
+        let src_elem: Term = mem.read(src_elements.add(offset));
+        let dst_elem = deep_copy_term_to_realm(src_elem, realm, mem, visited)?;
         mem.write(dst_elements.add(offset), dst_elem);
     }
 
-    Some(Value::vector(dst_addr))
+    Some(Term::boxed_vaddr(dst_addr))
 }
 
 /// Deep copy a map to the realm's code region.
@@ -338,77 +289,69 @@ fn deep_copy_map<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
     visited: &mut VisitedTracker,
-) -> Option<Value> {
-    // Read source map
-    let map: HeapMap = mem.read(src_addr);
+) -> Option<Term> {
+    // Read source map header
+    let header: Header = mem.read(src_addr);
+    let entries_addr = src_addr.add(8);
+    let entries: Term = mem.read(entries_addr);
 
     // Allocate in realm first
     let dst_addr = realm.alloc(HeapMap::SIZE, 8)?;
     visited.record(src_addr, dst_addr);
 
     // Deep copy the entries list (association list of pairs)
-    let dst_entries = deep_copy_to_realm(map.entries, realm, mem, visited)?;
+    let dst_entries = deep_copy_term_to_realm(entries, realm, mem, visited)?;
 
-    // Write destination map
-    let dst_map = HeapMap {
-        entries: dst_entries,
-    };
-    mem.write(dst_addr, dst_map);
+    // Write header
+    mem.write(dst_addr, header);
 
-    Some(Value::map(dst_addr))
+    // Write entries
+    let dst_entries_addr = dst_addr.add(8);
+    mem.write(dst_entries_addr, dst_entries);
+
+    Some(Term::boxed_vaddr(dst_addr))
 }
 
-/// Deep copy a compiled function to the realm's code region.
-fn deep_copy_compiled_fn<M: MemorySpace>(
+/// Deep copy a function to the realm's code region.
+fn deep_copy_fun<M: MemorySpace>(
     src_addr: Vaddr,
     realm: &mut Realm,
     mem: &mut M,
     visited: &mut VisitedTracker,
-) -> Option<Value> {
+) -> Option<Term> {
     // Read source header
-    let header: HeapCompiledFn = mem.read(src_addr);
+    let header: HeapFun = mem.read(src_addr);
     let code_len = header.code_len as usize;
-    let constants_len = header.constants_len as usize;
-    let total_size = HeapCompiledFn::alloc_size(code_len, constants_len);
+    let const_count = header.const_count as usize;
+    let total_size = HeapFun::alloc_size(code_len, const_count);
 
     // Allocate in realm first
     let dst_addr = realm.alloc(total_size, 8)?;
     visited.record(src_addr, dst_addr);
 
-    // Copy header (will update source_file if needed)
-    let mut dst_header = header;
+    // Copy header (metadata is value-only, no pointers to deep copy)
+    mem.write(dst_addr, header);
 
-    // Deep copy source_file string if present
-    if !header.source_file.is_null() {
-        if let Some(Value::String(dst_file)) =
-            deep_copy_to_realm(Value::string(header.source_file), realm, mem, visited)
-        {
-            dst_header.source_file = dst_file;
-        }
-    }
-
-    mem.write(dst_addr, dst_header);
-
-    // Copy bytecode (no deep copy needed for u32 instructions)
-    let src_code = src_addr.add(HeapCompiledFn::bytecode_offset() as u64);
-    let dst_code = dst_addr.add(HeapCompiledFn::bytecode_offset() as u64);
+    // Copy bytecode (no deep copy needed, just raw bytes)
+    let src_code = src_addr.add(HeapFun::PREFIX_SIZE as u64);
+    let dst_code = dst_addr.add(HeapFun::PREFIX_SIZE as u64);
     for i in 0..code_len {
-        let offset = (i * core::mem::size_of::<u32>()) as u64;
-        let instr: u32 = mem.read(src_code.add(offset));
-        mem.write(dst_code.add(offset), instr);
+        let byte: u8 = mem.read(src_code.add(i as u64));
+        mem.write(dst_code.add(i as u64), byte);
     }
 
-    // Deep copy constants
-    let src_constants = src_addr.add(HeapCompiledFn::constants_offset(code_len) as u64);
-    let dst_constants = dst_addr.add(HeapCompiledFn::constants_offset(code_len) as u64);
-    for i in 0..constants_len {
-        let offset = (i * core::mem::size_of::<Value>()) as u64;
-        let src_const: Value = mem.read(src_constants.add(offset));
-        let dst_const = deep_copy_to_realm(src_const, realm, mem, visited)?;
+    // Deep copy constants (at aligned offset after bytecode)
+    let constants_offset = HeapFun::constants_offset(code_len);
+    let src_constants = src_addr.add(constants_offset as u64);
+    let dst_constants = dst_addr.add(constants_offset as u64);
+    for i in 0..const_count {
+        let offset = (i * core::mem::size_of::<Term>()) as u64;
+        let src_const: Term = mem.read(src_constants.add(offset));
+        let dst_const = deep_copy_term_to_realm(src_const, realm, mem, visited)?;
         mem.write(dst_constants.add(offset), dst_const);
     }
 
-    Some(Value::compiled_fn(dst_addr))
+    Some(Term::boxed_vaddr(dst_addr))
 }
 
 /// Deep copy a closure to the realm's code region.
@@ -417,39 +360,35 @@ fn deep_copy_closure<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
     visited: &mut VisitedTracker,
-) -> Option<Value> {
-    // Read source header
+) -> Option<Term> {
+    // Read source closure header
     let header: HeapClosure = mem.read(src_addr);
-    let captures_len = header.captures_len as usize;
+    let captures_len = header.capture_count();
     let total_size = HeapClosure::alloc_size(captures_len);
 
     // Allocate in realm first
     let dst_addr = realm.alloc(total_size, 8)?;
     visited.record(src_addr, dst_addr);
 
-    // Deep copy the underlying function
-    let dst_func = deep_copy_to_realm(Value::compiled_fn(header.function), realm, mem, visited)?;
-    let Value::CompiledFn(dst_func_addr) = dst_func else {
-        return None;
-    };
+    // Deep copy the underlying function (header.function is a Term)
+    let dst_func_term = deep_copy_term_to_realm(header.function, realm, mem, visited)?;
 
     // Write header with new function pointer
     let dst_header = HeapClosure {
-        function: dst_func_addr,
-        captures_len: header.captures_len,
-        padding: 0,
+        header: HeapClosure::make_header(captures_len),
+        function: dst_func_term,
     };
     mem.write(dst_addr, dst_header);
 
-    // Deep copy captures
-    let src_captures = src_addr.add(HeapClosure::captures_offset() as u64);
-    let dst_captures = dst_addr.add(HeapClosure::captures_offset() as u64);
+    // Deep copy captures (follows header + function term)
+    let src_captures = src_addr.add(HeapClosure::PREFIX_SIZE as u64);
+    let dst_captures = dst_addr.add(HeapClosure::PREFIX_SIZE as u64);
     for i in 0..captures_len {
-        let offset = (i * core::mem::size_of::<Value>()) as u64;
-        let src_cap: Value = mem.read(src_captures.add(offset));
-        let dst_cap = deep_copy_to_realm(src_cap, realm, mem, visited)?;
+        let offset = (i * core::mem::size_of::<Term>()) as u64;
+        let src_cap: Term = mem.read(src_captures.add(offset));
+        let dst_cap = deep_copy_term_to_realm(src_cap, realm, mem, visited)?;
         mem.write(dst_captures.add(offset), dst_cap);
     }
 
-    Some(Value::closure(dst_addr))
+    Some(Term::boxed_vaddr(dst_addr))
 }

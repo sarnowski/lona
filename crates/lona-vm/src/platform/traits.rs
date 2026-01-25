@@ -10,6 +10,25 @@ use core::result::Result;
 ///
 /// This trait allows VM code to read and write memory without knowing
 /// whether it's operating on a real seL4 `VSpace` or a mock buffer.
+///
+/// # Safety Contract for Implementors
+///
+/// Implementors MUST ensure:
+///
+/// - **Memory validity**: All addresses passed to read/write/slice methods are
+///   within the allocated memory region. Out-of-bounds access is undefined behavior.
+///
+/// - **Alignment**: Implementors should handle unaligned access appropriately for
+///   the target platform (either supporting it or panicking with a clear error).
+///
+/// - **No overlapping mutable borrows**: The `slice_mut` and `write` methods must
+///   not be called concurrently with other accesses to overlapping regions.
+///
+/// - **Initialization**: Memory returned by `slice` for types that require
+///   initialization (e.g., `Term`) must be properly initialized.
+///
+/// While this trait is not marked `unsafe trait` for ergonomic reasons, violations
+/// of these requirements can cause undefined behavior in the VM.
 pub trait MemorySpace {
     /// Read a value from a virtual address.
     fn read<T: Copy>(&self, vaddr: Vaddr) -> T;

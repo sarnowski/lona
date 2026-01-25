@@ -7,8 +7,13 @@
 
 use super::{eval, setup};
 use crate::intrinsics::IntrinsicError;
-use crate::value::Value;
+use crate::term::Term;
 use crate::vm::RuntimeError;
+
+/// Helper to create a small integer Term.
+fn int(n: i64) -> Term {
+    Term::small_int(n).expect("integer out of small_int range")
+}
 
 // --- Keywords as functions ---
 
@@ -17,7 +22,7 @@ fn eval_keyword_callable_basic() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     // (:a %{:a 1 :b 2}) → 1
     let result = eval("(:a %{:a 1 :b 2})", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(1));
+    assert_eq!(result, int(1));
 }
 
 #[test]
@@ -39,8 +44,9 @@ fn eval_keyword_callable_with_default() {
         &mut mem,
     )
     .unwrap();
-    assert!(result.is_keyword());
-    assert_eq!(proc.read_string(&mem, result).unwrap(), "default");
+    assert!(proc.is_term_keyword(result));
+    let idx = result.as_keyword_index().unwrap();
+    assert_eq!(realm.keyword_name(&mem, idx).unwrap(), "default");
 }
 
 #[test]
@@ -48,7 +54,7 @@ fn eval_keyword_callable_found_with_default() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     // (:a %{:a 1} :default) → 1 (ignores default when found)
     let result = eval("(:a %{:a 1} :default)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(1));
+    assert_eq!(result, int(1));
 }
 
 #[test]
@@ -101,7 +107,7 @@ fn eval_map_callable_basic() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     // (%{:a 1 :b 2} :a) → 1
     let result = eval("(%{:a 1 :b 2} :a)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(1));
+    assert_eq!(result, int(1));
 }
 
 #[test]
@@ -123,8 +129,9 @@ fn eval_map_callable_with_default() {
         &mut mem,
     )
     .unwrap();
-    assert!(result.is_keyword());
-    assert_eq!(proc.read_string(&mem, result).unwrap(), "default");
+    assert!(proc.is_term_keyword(result));
+    let idx = result.as_keyword_index().unwrap();
+    assert_eq!(realm.keyword_name(&mem, idx).unwrap(), "default");
 }
 
 #[test]
@@ -148,7 +155,7 @@ fn eval_tuple_callable_basic() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     // ([10 20 30] 1) → 20
     let result = eval("([10 20 30] 1)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(20));
+    assert_eq!(result, int(20));
 }
 
 #[test]
@@ -156,7 +163,7 @@ fn eval_tuple_callable_first_element() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     // ([10 20 30] 0) → 10
     let result = eval("([10 20 30] 0)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(10));
+    assert_eq!(result, int(10));
 }
 
 #[test]
@@ -164,7 +171,7 @@ fn eval_tuple_callable_last_element() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     // ([10 20 30] 2) → 30
     let result = eval("([10 20 30] 2)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(30));
+    assert_eq!(result, int(30));
 }
 
 #[test]
@@ -186,8 +193,9 @@ fn eval_tuple_callable_with_default() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     // ([10 20 30] 5 :default) → :default
     let result = eval("([10 20 30] 5 :default)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert!(result.is_keyword());
-    assert_eq!(proc.read_string(&mem, result).unwrap(), "default");
+    assert!(proc.is_term_keyword(result));
+    let idx = result.as_keyword_index().unwrap();
+    assert_eq!(realm.keyword_name(&mem, idx).unwrap(), "default");
 }
 
 #[test]
@@ -195,7 +203,7 @@ fn eval_tuple_callable_in_bounds_with_default() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     // ([10 20 30] 1 :default) → 20 (ignores default when in bounds)
     let result = eval("([10 20 30] 1 :default)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(20));
+    assert_eq!(result, int(20));
 }
 
 #[test]
@@ -240,8 +248,9 @@ fn eval_nth_with_default_out_of_bounds() {
         &mut mem,
     )
     .unwrap();
-    assert!(result.is_keyword());
-    assert_eq!(proc.read_string(&mem, result).unwrap(), "not-found");
+    assert!(proc.is_term_keyword(result));
+    let idx = result.as_keyword_index().unwrap();
+    assert_eq!(realm.keyword_name(&mem, idx).unwrap(), "not-found");
 }
 
 #[test]
@@ -255,7 +264,7 @@ fn eval_nth_with_default_in_bounds() {
         &mut mem,
     )
     .unwrap();
-    assert_eq!(result, Value::int(2));
+    assert_eq!(result, int(2));
 }
 
 #[test]
@@ -269,6 +278,7 @@ fn eval_nth_with_default_negative_index() {
         &mut mem,
     )
     .unwrap();
-    assert!(result.is_keyword());
-    assert_eq!(proc.read_string(&mem, result).unwrap(), "not-found");
+    assert!(proc.is_term_keyword(result));
+    let idx = result.as_keyword_index().unwrap();
+    assert_eq!(realm.keyword_name(&mem, idx).unwrap(), "not-found");
 }

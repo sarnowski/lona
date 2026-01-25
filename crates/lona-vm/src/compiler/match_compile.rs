@@ -20,7 +20,7 @@ use alloc::vec::Vec;
 use crate::bytecode::{BX_MASK, encode_abc, encode_abx, op};
 use crate::intrinsics::id as intrinsic_id;
 use crate::platform::MemorySpace;
-use crate::value::Value;
+use crate::term::Term;
 
 use super::pattern::Pattern;
 use super::{Binding, CompileError, Compiler, MAX_PARAMS, MAX_SYMBOL_NAME_LEN};
@@ -193,9 +193,9 @@ struct MatchClause {
     /// The pattern for this clause.
     pattern: Pattern,
     /// Optional guard expression (`when` clause).
-    guard: Option<Value>,
+    guard: Option<Term>,
     /// Body expression.
-    body: Value,
+    body: Term,
 }
 
 /// Context for compiling a single match clause.
@@ -235,7 +235,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// Returns `CompileError::ExpressionTooComplex` if there are too many clauses or labels.
     pub fn compile_match(
         &mut self,
-        args: Value,
+        args: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
@@ -310,17 +310,16 @@ impl<M: MemorySpace> Compiler<'_, M> {
     }
 
     /// Parse match arguments into expression and clauses.
-    fn parse_match_args(&self, args: Value) -> Result<(Value, Vec<MatchClause>), CompileError> {
+    fn parse_match_args(&self, args: Term) -> Result<(Term, Vec<MatchClause>), CompileError> {
         // First element is the expression to match
-        let first_pair = self
+        let (expr, rest) = self
             .proc
-            .read_pair(self.mem, args)
+            .read_term_pair(self.mem, args)
             .ok_or(CompileError::InvalidSyntax)?;
-        let expr = first_pair.first;
 
         // Rest are pattern-body pairs (possibly with guards)
         let mut clauses = Vec::new();
-        let mut current = first_pair.rest;
+        let mut current = rest;
 
         while !current.is_nil() {
             if clauses.len() >= MAX_CLAUSES {
@@ -339,50 +338,46 @@ impl<M: MemorySpace> Compiler<'_, M> {
     }
 
     /// Parse a single match clause from the argument list.
-    fn parse_single_clause(&self, current: &mut Value) -> Result<MatchClause, CompileError> {
+    fn parse_single_clause(&self, current: &mut Term) -> Result<MatchClause, CompileError> {
         // Get pattern
-        let pair = self
+        let (pattern_term, rest1) = self
             .proc
-            .read_pair(self.mem, *current)
+            .read_term_pair(self.mem, *current)
             .ok_or(CompileError::InvalidSyntax)?;
-        let pattern_val = pair.first;
-        let pattern = self.parse_pattern(pattern_val)?;
+        let pattern = self.parse_pattern(pattern_term)?;
 
         // Check for `when` keyword (guard)
-        let pair2 = self
+        let (second, rest2) = self
             .proc
-            .read_pair(self.mem, pair.rest)
+            .read_term_pair(self.mem, rest1)
             .ok_or(CompileError::InvalidSyntax)?;
 
-        let (guard, body, rest) = if pair2.first.is_symbol() {
+        let (guard, body, rest) = if second.is_symbol() {
             // Check if it's the `when` keyword
             let name = self
-                .proc
-                .read_string(self.mem, pair2.first)
+                .get_symbol_name(second)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             if name == "when" {
                 // Guard: `pattern when guard body`
-                let guard_pair = self
+                let (guard_term, rest3) = self
                     .proc
-                    .read_pair(self.mem, pair2.rest)
+                    .read_term_pair(self.mem, rest2)
                     .ok_or(CompileError::InvalidSyntax)?;
-                let guard = guard_pair.first;
 
-                let body_pair = self
+                let (body_term, rest4) = self
                     .proc
-                    .read_pair(self.mem, guard_pair.rest)
+                    .read_term_pair(self.mem, rest3)
                     .ok_or(CompileError::InvalidSyntax)?;
-                let body = body_pair.first;
 
-                (Some(guard), body, body_pair.rest)
+                (Some(guard_term), body_term, rest4)
             } else {
                 // No guard, the symbol is part of the body
-                (None, pair2.first, pair2.rest)
+                (None, second, rest2)
             }
         } else {
             // No guard
-            (None, pair2.first, pair2.rest)
+            (None, second, rest2)
         };
 
         *current = rest;
@@ -442,7 +437,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// Compile guard expression and emit conditional jump.
     fn compile_guard(
         &mut self,
-        guard: Value,
+        guard: Term,
         bindings: &[PatternBinding],
         pattern_next_temp: u8,
         ctx: &ClauseContext,
@@ -515,7 +510,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
     fn emit_literal_pattern(
         &mut self,
         value_reg: u8,
-        lit: Value,
+        lit: Term,
         ctx: &PatternContext,
         labels: &mut LabelManager,
     ) -> Result<u8, CompileError> {
@@ -703,7 +698,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// Emit tests for a map pattern.
     fn emit_map_pattern(
         &mut self,
-        pairs: &[(Value, Pattern)],
+        pairs: &[(Term, Pattern)],
         value_reg: u8,
         ctx: &PatternContext,
         bindings: &mut Vec<PatternBinding>,

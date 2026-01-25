@@ -21,14 +21,15 @@ use crate::Vaddr;
 use crate::bytecode::{
     Chunk, decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op,
 };
-use crate::intrinsics::{
-    self, CoreCollectionError, IntrinsicError, XRegs, core_get, core_nth, intrinsic_cost,
-};
+use crate::intrinsics::{self, IntrinsicError, XRegs, intrinsic_cost};
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::Realm;
 use crate::scheduler::Worker;
-use crate::value::{HeapCompiledFn, Value};
+use crate::term::Term;
+use crate::term::header::Header;
+use crate::term::heap::{HeapClosure, HeapFun};
+use crate::term::tag::object;
 
 /// Maximum number of elements in a tuple literal.
 const MAX_TUPLE_ELEMENTS: usize = 64;
@@ -46,11 +47,11 @@ fn build_tuple<M: MemorySpace>(
     count: usize,
 ) -> Result<(), RuntimeError> {
     let elem_count = count.min(MAX_TUPLE_ELEMENTS);
-    let mut elements = [Value::Nil; MAX_TUPLE_ELEMENTS];
+    let mut elements = [Term::NIL; MAX_TUPLE_ELEMENTS];
     elements[..elem_count].copy_from_slice(&x_regs[start_reg..start_reg + elem_count]);
 
     let tuple = proc
-        .alloc_tuple(mem, &elements[..elem_count])
+        .alloc_term_tuple(mem, &elements[..elem_count])
         .ok_or(RuntimeError::OutOfMemory)?;
 
     x_regs[target] = tuple;
@@ -67,11 +68,11 @@ fn build_vector<M: MemorySpace>(
     count: usize,
 ) -> Result<(), RuntimeError> {
     let elem_count = count.min(MAX_TUPLE_ELEMENTS);
-    let mut elements = [Value::Nil; MAX_TUPLE_ELEMENTS];
+    let mut elements = [Term::NIL; MAX_TUPLE_ELEMENTS];
     elements[..elem_count].copy_from_slice(&x_regs[start_reg..start_reg + elem_count]);
 
     let vector = proc
-        .alloc_vector(mem, &elements[..elem_count])
+        .alloc_term_vector(mem, &elements[..elem_count])
         .ok_or(RuntimeError::OutOfMemory)?;
 
     x_regs[target] = vector;
@@ -93,37 +94,39 @@ fn prepare_user_fn<M: MemorySpace>(
     argc: u8,
 ) -> Result<Chunk, RuntimeError> {
     // Read function header
-    let header: HeapCompiledFn = mem.read(fn_addr);
+    let header: HeapFun = mem.read(fn_addr);
+    let fn_arity = header.fn_arity;
+    let is_variadic = header.variadic != 0;
 
     // Check arity
-    if header.variadic {
-        // Variadic: must have at least `arity` args
-        if argc < header.arity {
+    if is_variadic {
+        // Variadic: must have at least `fn_arity` args
+        if argc < fn_arity {
             return Err(RuntimeError::ArityMismatch {
-                expected: header.arity,
+                expected: fn_arity,
                 got: argc,
                 variadic: true,
             });
         }
 
         // Collect extra args into a tuple for the rest parameter
-        let rest_start = header.arity as usize + 1;
-        let rest_count = (argc - header.arity) as usize;
-        let mut rest_elements = [Value::Nil; MAX_TUPLE_ELEMENTS];
+        let rest_start = fn_arity as usize + 1;
+        let rest_count = (argc - fn_arity) as usize;
+        let mut rest_elements = [Term::NIL; MAX_TUPLE_ELEMENTS];
         let rest_count = rest_count.min(MAX_TUPLE_ELEMENTS);
         rest_elements[..rest_count].copy_from_slice(&x_regs[rest_start..rest_start + rest_count]);
 
         let rest_tuple = proc
-            .alloc_tuple(mem, &rest_elements[..rest_count])
+            .alloc_term_tuple(mem, &rest_elements[..rest_count])
             .ok_or(RuntimeError::OutOfMemory)?;
 
-        // Place rest tuple in X(arity+1)
-        x_regs[header.arity as usize + 1] = rest_tuple;
+        // Place rest tuple in X(fn_arity+1)
+        x_regs[fn_arity as usize + 1] = rest_tuple;
     } else {
-        // Non-variadic: must have exactly `arity` args
-        if argc != header.arity {
+        // Non-variadic: must have exactly `fn_arity` args
+        if argc != fn_arity {
             return Err(RuntimeError::ArityMismatch {
-                expected: header.arity,
+                expected: fn_arity,
                 got: argc,
                 variadic: false,
             });
@@ -133,20 +136,22 @@ fn prepare_user_fn<M: MemorySpace>(
     // Build chunk from function bytecode and constants
     let mut chunk = Chunk::new();
 
-    // Read bytecode
-    let code_addr = fn_addr.add(HeapCompiledFn::bytecode_offset() as u64);
-    for i in 0..header.code_len as usize {
-        let instr_addr = code_addr.add((i * core::mem::size_of::<u32>()) as u64);
+    // HeapFun stores bytecode as raw bytes, code_len is the total byte count
+    // Instructions are 4 bytes each (u32), so instruction count = code_len / 4
+    let code_addr = fn_addr.add(HeapFun::PREFIX_SIZE as u64);
+    let instruction_count = header.code_len as usize / 4;
+    for i in 0..instruction_count {
+        let instr_addr = code_addr.add((i * 4) as u64);
         let instr: u32 = mem.read(instr_addr);
         chunk.emit(instr);
     }
 
-    // Read constants
-    let constants_addr =
-        fn_addr.add(HeapCompiledFn::constants_offset(header.code_len as usize) as u64);
-    for i in 0..header.constants_len as usize {
-        let const_addr = constants_addr.add((i * core::mem::size_of::<Value>()) as u64);
-        let constant: Value = mem.read(const_addr);
+    // Read constants (at aligned offset after bytecode)
+    let constants_offset = HeapFun::constants_offset(header.code_len as usize);
+    let constants_addr = fn_addr.add(constants_offset as u64);
+    for i in 0..header.const_count as usize {
+        let const_addr = constants_addr.add((i * core::mem::size_of::<Term>()) as u64);
+        let constant: Term = mem.read(const_addr);
         chunk.add_constant(constant);
     }
 
@@ -164,19 +169,22 @@ fn prepare_closure<M: MemorySpace>(
     closure_addr: Vaddr,
     argc: u8,
 ) -> Result<(Vaddr, Chunk), RuntimeError> {
-    let closure: crate::value::HeapClosure = mem.read(closure_addr);
+    let closure: HeapClosure = mem.read(closure_addr);
+    let capture_count = closure.capture_count();
 
-    // Load captured values into registers after regular args
+    // Load captured values (Terms) into registers after regular args
     let captures_base = argc as usize + 1;
-    let captures_offset = closure_addr.add(crate::value::HeapClosure::captures_offset() as u64);
+    let captures_offset = closure_addr.add(HeapClosure::PREFIX_SIZE as u64);
 
-    for i in 0..closure.captures_len as usize {
-        let capture_addr = captures_offset.add((i * core::mem::size_of::<Value>()) as u64);
+    for i in 0..capture_count {
+        let capture_addr = captures_offset.add((i * 8) as u64);
         x_regs[captures_base + i] = mem.read(capture_addr);
     }
 
-    let chunk = prepare_user_fn(x_regs, proc, mem, closure.function, argc)?;
-    Ok((closure.function, chunk))
+    // Extract function address from the closure's function Term
+    let fn_addr = closure.function.to_vaddr();
+    let chunk = prepare_user_fn(x_regs, proc, mem, fn_addr, argc)?;
+    Ok((fn_addr, chunk))
 }
 
 /// Maximum number of captured variables in a closure.
@@ -204,22 +212,26 @@ fn call_keyword<M: MemorySpace>(
     x_regs: &XRegs,
     proc: &Process,
     mem: &M,
-    key: Value,
+    key: Term,
     argc: u8,
-) -> Result<Value, RuntimeError> {
+) -> Result<Term, RuntimeError> {
     check_callable_arity(argc)?;
 
-    let map_val = x_regs[1];
-    let default = if argc >= 2 { x_regs[2] } else { Value::Nil };
+    let map_term = x_regs[1];
+    let default = if argc >= 2 { x_regs[2] } else { Term::NIL };
 
-    core_get(proc, mem, map_val, key, default).map_err(|e| match e {
-        CoreCollectionError::NotAMap => RuntimeError::CallableTypeError {
-            callable: "keyword",
-            arg: 0,
-            expected: "map",
-        },
-        _ => RuntimeError::OutOfMemory,
-    })
+    // Get map entries
+    let entries =
+        proc.read_term_map_entries(mem, map_term)
+            .ok_or(RuntimeError::CallableTypeError {
+                callable: "keyword",
+                arg: 0,
+                expected: "map",
+            })?;
+
+    // Search for key in entries
+    let result = map_get_term(proc, mem, entries, key, default);
+    Ok(result)
 }
 
 /// Call a map as a function: `(map key [default])`.
@@ -227,24 +239,61 @@ fn call_map<M: MemorySpace>(
     x_regs: &XRegs,
     proc: &Process,
     mem: &M,
-    map_val: Value,
+    map_term: Term,
     argc: u8,
-) -> Result<Value, RuntimeError> {
+) -> Result<Term, RuntimeError> {
     check_callable_arity(argc)?;
 
     let key = x_regs[1];
-    let default = if argc >= 2 { x_regs[2] } else { Value::Nil };
+    let default = if argc >= 2 { x_regs[2] } else { Term::NIL };
 
-    // Note: NotAMap shouldn't happen here since we already know it's a map,
-    // but we handle it for completeness.
-    core_get(proc, mem, map_val, key, default).map_err(|e| match e {
-        CoreCollectionError::NotAMap => RuntimeError::CallableTypeError {
-            callable: "map",
-            arg: 0,
-            expected: "map",
-        },
-        _ => RuntimeError::OutOfMemory,
-    })
+    // Get map entries
+    let entries =
+        proc.read_term_map_entries(mem, map_term)
+            .ok_or(RuntimeError::CallableTypeError {
+                callable: "map",
+                arg: 0,
+                expected: "map",
+            })?;
+
+    let result = map_get_term(proc, mem, entries, key, default);
+    Ok(result)
+}
+
+/// Search for a key in map entries and return value or default.
+fn map_get_term<M: MemorySpace>(
+    proc: &Process,
+    mem: &M,
+    entries: Term,
+    key: Term,
+    default: Term,
+) -> Term {
+    let mut current = entries;
+    while current.is_list() {
+        if let Some((head, tail)) = proc.read_term_pair(mem, current) {
+            // Each entry is a [key value] tuple
+            if let Some(entry_key) = proc.read_term_tuple_element(mem, head, 0) {
+                if terms_equal(proc, mem, entry_key, key) {
+                    return proc
+                        .read_term_tuple_element(mem, head, 1)
+                        .unwrap_or(default);
+                }
+            }
+            current = tail;
+        } else {
+            break;
+        }
+    }
+    default
+}
+
+/// Compare two terms for equality (structural comparison).
+///
+/// Uses the intrinsics module's `terms_equal` for full structural comparison
+/// with depth limiting. This ensures consistent equality semantics everywhere.
+#[inline]
+fn terms_equal<M: MemorySpace>(proc: &Process, mem: &M, a: Term, b: Term) -> bool {
+    intrinsics::terms_equal(a, b, proc, mem)
 }
 
 /// Call a tuple as a function: `(tuple idx [default])`.
@@ -252,46 +301,102 @@ fn call_tuple<M: MemorySpace>(
     x_regs: &XRegs,
     proc: &Process,
     mem: &M,
-    tuple_val: Value,
+    tuple_term: Term,
     argc: u8,
-) -> Result<Value, RuntimeError> {
+) -> Result<Term, RuntimeError> {
     check_callable_arity(argc)?;
 
-    let idx = x_regs[1];
+    let idx_term = x_regs[1];
     let default = if argc >= 2 { Some(x_regs[2]) } else { None };
 
-    // Note: NotATuple shouldn't happen here since we already know it's a tuple,
-    // but we handle it for completeness.
-    core_nth(proc, mem, tuple_val, idx, default).map_err(|e| match e {
-        CoreCollectionError::NotATuple => RuntimeError::CallableTypeError {
-            callable: "tuple",
-            arg: 0,
-            expected: "tuple",
-        },
-        CoreCollectionError::InvalidIndex => RuntimeError::CallableTypeError {
+    // Index must be a small integer
+    let idx = idx_term
+        .as_small_int()
+        .ok_or(RuntimeError::CallableTypeError {
             callable: "tuple",
             arg: 0,
             expected: "integer index",
-        },
-        CoreCollectionError::IndexOutOfBounds { index, len } => {
-            RuntimeError::Intrinsic(IntrinsicError::IndexOutOfBounds { index, len })
+        })?;
+
+    if idx < 0 {
+        return Ok(default.unwrap_or(Term::NIL));
+    }
+
+    let len = proc
+        .read_term_tuple_len(mem, tuple_term)
+        .ok_or(RuntimeError::CallableTypeError {
+            callable: "tuple",
+            arg: 0,
+            expected: "tuple",
+        })?;
+
+    // Check bounds: negative indices or indices >= len are out of bounds
+    let idx_usize = usize::try_from(idx).ok().filter(|&i| i < len);
+
+    let Some(valid_idx) = idx_usize else {
+        return default.map_or_else(
+            || {
+                Err(RuntimeError::Intrinsic(IntrinsicError::IndexOutOfBounds {
+                    index: idx,
+                    len,
+                }))
+            },
+            Ok,
+        );
+    };
+
+    proc.read_term_tuple_element(mem, tuple_term, valid_idx)
+        .ok_or(RuntimeError::OutOfMemory)
+}
+
+/// Get the type name for a Term (for error messages).
+fn term_type_name<M: MemorySpace>(mem: &M, term: Term) -> &'static str {
+    if term.is_nil() {
+        return "nil";
+    }
+    if term.is_immediate() {
+        if term.is_small_int() {
+            return "integer";
         }
-        _ => RuntimeError::OutOfMemory,
-    })
+        if term.is_boolean() {
+            return "boolean";
+        }
+        if term.is_native_fn() {
+            return "native-fn";
+        }
+        if term.is_symbol() {
+            return "symbol";
+        }
+        if term.is_keyword() {
+            return "keyword";
+        }
+        return "immediate";
+    }
+    if term.is_list() {
+        return "list";
+    }
+    if term.is_boxed() {
+        let header: Header = mem.read(term.to_vaddr());
+        return match header.object_tag() {
+            object::STRING => "string",
+            object::TUPLE => "tuple",
+            object::VECTOR => "vector",
+            object::MAP => "map",
+            object::FUN => "compiled-fn",
+            object::CLOSURE => "closure",
+            object::VAR => "var",
+            object::NAMESPACE => "namespace",
+            object::FLOAT => "float",
+            _ => "unknown",
+        };
+    }
+    "unknown"
 }
 
 /// Handle CALL instruction without recursion.
 ///
 /// For native functions, keywords, maps, tuples: execute immediately and return cost.
 /// For compiled functions and closures: push call frame, set up callee's chunk/IP.
-///
-/// Handles:
-/// - `NativeFn(id)`: Native/intrinsic function call
-/// - `CompiledFn(addr)`: User-defined function call (non-recursive)
-/// - `Closure(addr)`: Closure call (function + captures, non-recursive)
-/// - `Keyword(_)`: `(:key map [default])` → `(get map :key [default])`
-/// - `Map(_)`: `(map key [default])` → `(get map key [default])`
-/// - `Tuple(_)`: `(tuple idx [default])` → `(nth tuple idx [default])`
 fn handle_call<M: MemorySpace>(
     x_regs: &mut XRegs,
     proc: &mut Process,
@@ -300,75 +405,86 @@ fn handle_call<M: MemorySpace>(
     fn_reg: usize,
     argc: u8,
 ) -> Result<u32, RuntimeError> {
-    let fn_val = x_regs[fn_reg];
+    let fn_term = x_regs[fn_reg];
 
-    match fn_val {
-        Value::NativeFn(id) => {
-            intrinsics::call_intrinsic(id as u8, argc, x_regs, proc, mem, realm)?;
-            Ok(intrinsic_cost(id as u8))
-        }
-
-        Value::CompiledFn(fn_addr) => {
-            let callee_chunk = prepare_user_fn(x_regs, proc, mem, fn_addr, argc)?;
-
-            // Ensure caller's chunk is on heap (for REPL case)
-            if !proc.ensure_chunk_on_heap(mem) {
-                return Err(RuntimeError::OutOfMemory);
-            }
-
-            // Create stack frame for callee
-            let return_ip = proc.ip;
-            let caller_chunk_addr = proc.chunk_addr.unwrap_or(Vaddr::new(0));
-            proc.allocate_frame(mem, return_ip, caller_chunk_addr)
-                .map_err(|_| RuntimeError::StackOverflow)?;
-
-            // Set up callee's execution context
-            proc.chunk = Some(callee_chunk);
-            proc.chunk_addr = Some(fn_addr);
-            proc.ip = 0;
-            Ok(1)
-        }
-
-        Value::Closure(closure_addr) => {
-            let (fn_addr, callee_chunk) = prepare_closure(x_regs, proc, mem, closure_addr, argc)?;
-
-            // Ensure caller's chunk is on heap (for REPL case)
-            if !proc.ensure_chunk_on_heap(mem) {
-                return Err(RuntimeError::OutOfMemory);
-            }
-
-            // Create stack frame for callee
-            let return_ip = proc.ip;
-            let caller_chunk_addr = proc.chunk_addr.unwrap_or(Vaddr::new(0));
-            proc.allocate_frame(mem, return_ip, caller_chunk_addr)
-                .map_err(|_| RuntimeError::StackOverflow)?;
-
-            // Set up callee's execution context
-            proc.chunk = Some(callee_chunk);
-            proc.chunk_addr = Some(fn_addr);
-            proc.ip = 0;
-            Ok(1)
-        }
-
-        Value::Keyword(_) => {
-            x_regs[0] = call_keyword(x_regs, proc, mem, fn_val, argc)?;
-            Ok(2)
-        }
-
-        Value::Map(_) => {
-            x_regs[0] = call_map(x_regs, proc, mem, fn_val, argc)?;
-            Ok(2)
-        }
-
-        Value::Tuple(_) => {
-            x_regs[0] = call_tuple(x_regs, proc, mem, fn_val, argc)?;
-            Ok(2)
-        }
-
-        _ => Err(RuntimeError::NotCallable {
-            type_name: fn_val.type_name(),
-        }),
+    // Check for native function (immediate)
+    if let Some(id) = fn_term.as_native_fn_id() {
+        let id_u8 = id as u8;
+        intrinsics::call_intrinsic(id_u8, argc, x_regs, proc, mem, realm)?;
+        return Ok(intrinsic_cost(id_u8));
     }
+
+    // Check for keyword (immediate) - keywords are callable
+    if fn_term.is_keyword() {
+        x_regs[0] = call_keyword(x_regs, proc, mem, fn_term, argc)?;
+        return Ok(2);
+    }
+
+    // Check for boxed callable types
+    if fn_term.is_boxed() {
+        let fn_addr = fn_term.to_vaddr();
+        let header: Header = mem.read(fn_addr);
+
+        match header.object_tag() {
+            object::FUN => {
+                let callee_chunk = prepare_user_fn(x_regs, proc, mem, fn_addr, argc)?;
+
+                // Ensure caller's chunk is on heap (for REPL case)
+                if !proc.ensure_chunk_on_heap(mem) {
+                    return Err(RuntimeError::OutOfMemory);
+                }
+
+                // Create stack frame for callee
+                let return_ip = proc.ip;
+                let caller_chunk_addr = proc.chunk_addr.unwrap_or(Vaddr::new(0));
+                proc.allocate_frame(mem, return_ip, caller_chunk_addr)
+                    .map_err(|_| RuntimeError::StackOverflow)?;
+
+                // Set up callee's execution context
+                proc.chunk = Some(callee_chunk);
+                proc.chunk_addr = Some(fn_addr);
+                proc.ip = 0;
+                return Ok(1);
+            }
+
+            object::CLOSURE => {
+                let (fn_addr, callee_chunk) = prepare_closure(x_regs, proc, mem, fn_addr, argc)?;
+
+                // Ensure caller's chunk is on heap (for REPL case)
+                if !proc.ensure_chunk_on_heap(mem) {
+                    return Err(RuntimeError::OutOfMemory);
+                }
+
+                // Create stack frame for callee
+                let return_ip = proc.ip;
+                let caller_chunk_addr = proc.chunk_addr.unwrap_or(Vaddr::new(0));
+                proc.allocate_frame(mem, return_ip, caller_chunk_addr)
+                    .map_err(|_| RuntimeError::StackOverflow)?;
+
+                // Set up callee's execution context
+                proc.chunk = Some(callee_chunk);
+                proc.chunk_addr = Some(fn_addr);
+                proc.ip = 0;
+                return Ok(1);
+            }
+
+            object::MAP => {
+                x_regs[0] = call_map(x_regs, proc, mem, fn_term, argc)?;
+                return Ok(2);
+            }
+
+            object::TUPLE => {
+                x_regs[0] = call_tuple(x_regs, proc, mem, fn_term, argc)?;
+                return Ok(2);
+            }
+
+            _ => {}
+        }
+    }
+
+    Err(RuntimeError::NotCallable {
+        type_name: term_type_name(mem, fn_term),
+    })
 }
 
 /// Build a closure from a compiled function and captures tuple.
@@ -380,38 +496,46 @@ fn build_closure<M: MemorySpace>(
     fn_reg: usize,
     captures_reg: usize,
 ) -> Result<(), RuntimeError> {
-    // Get function address
-    let fn_val = x_regs[fn_reg];
-    let Value::CompiledFn(fn_addr) = fn_val else {
+    // Get function Term - verify it's a compiled function
+    let fn_term = x_regs[fn_reg];
+    if !fn_term.is_boxed() {
         return Err(RuntimeError::NotCallable {
-            type_name: fn_val.type_name(),
+            type_name: term_type_name(mem, fn_term),
         });
-    };
+    }
 
-    // Get captures tuple
-    let captures_val = x_regs[captures_reg];
-    let captures_len = if captures_val.is_nil() {
+    let fn_addr = fn_term.to_vaddr();
+    let header: Header = mem.read(fn_addr);
+    if header.object_tag() != object::FUN {
+        return Err(RuntimeError::NotCallable {
+            type_name: term_type_name(mem, fn_term),
+        });
+    }
+
+    // Get captures tuple - use Term-based methods
+    let captures_term = x_regs[captures_reg];
+    let captures_len = if captures_term.is_nil() {
         0
     } else {
-        proc.read_tuple_len(mem, captures_val)
+        proc.read_term_tuple_len(mem, captures_term)
             .ok_or(RuntimeError::OutOfMemory)?
     };
 
-    // Read capture values from tuple
-    let mut captures = [Value::Nil; MAX_CLOSURE_CAPTURES];
+    // Read capture values from tuple as Terms
+    let mut captures = [Term::NIL; MAX_CLOSURE_CAPTURES];
     for (i, capture) in captures
         .iter_mut()
         .enumerate()
         .take(captures_len.min(MAX_CLOSURE_CAPTURES))
     {
         *capture = proc
-            .read_tuple_element(mem, captures_val, i)
+            .read_term_tuple_element(mem, captures_term, i)
             .ok_or(RuntimeError::OutOfMemory)?;
     }
 
-    // Allocate closure
+    // Allocate closure using Term-based allocation
     let closure = proc
-        .alloc_closure(mem, fn_addr, &captures[..captures_len])
+        .alloc_term_closure(mem, fn_term, &captures[..captures_len])
         .ok_or(RuntimeError::OutOfMemory)?;
 
     x_regs[target] = closure;
@@ -429,26 +553,26 @@ fn build_map<M: MemorySpace>(
 ) -> Result<(), RuntimeError> {
     let pair_count = pair_count.min(MAX_MAP_PAIRS);
 
-    // Build entries list from back to front
-    let mut entries = Value::Nil;
+    // Build entries list from back to front using Term
+    let mut entries = Term::NIL;
     for i in (0..pair_count).rev() {
         let key_reg = start_reg + i * 2;
         let val_reg = start_reg + i * 2 + 1;
 
-        // Build [key value] tuple
+        // Build [key value] tuple using Term-based allocation
         let kv_elements = [x_regs[key_reg], x_regs[val_reg]];
         let kv_tuple = proc
-            .alloc_tuple(mem, &kv_elements)
+            .alloc_term_tuple(mem, &kv_elements)
             .ok_or(RuntimeError::OutOfMemory)?;
 
-        // Prepend to entries list
+        // Prepend to entries list using Term-based allocation
         entries = proc
-            .alloc_pair(mem, kv_tuple, entries)
+            .alloc_term_pair(mem, kv_tuple, entries)
             .ok_or(RuntimeError::OutOfMemory)?;
     }
 
     let map = proc
-        .alloc_map(mem, entries)
+        .alloc_term_map(mem, entries, pair_count)
         .ok_or(RuntimeError::OutOfMemory)?;
 
     x_regs[target] = map;
@@ -533,7 +657,7 @@ pub enum RuntimeError {
     /// This causes the process to exit with reason `[:error :badmatch %{:value v}]`.
     Badmatch {
         /// The value that failed to match any pattern.
-        value: Value,
+        value: Term,
     },
 }
 
@@ -549,7 +673,7 @@ impl From<IntrinsicError> for RuntimeError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunResult {
     /// Process completed execution normally. Contains return value.
-    Completed(Value),
+    Completed(Term),
 
     /// Process yielded due to exhausted reduction budget.
     /// The process can be resumed later by calling `Vm::run` again.
@@ -594,19 +718,25 @@ fn handle_return<M: MemorySpace>(
 }
 
 /// Execute a load instruction.
-const fn execute_load_instruction(
+fn execute_load_instruction(
     x_regs: &mut XRegs,
     instr: u32,
     opcode: u8,
-    constant_value: Option<Value>,
+    constant_term: Option<Term>,
 ) -> u32 {
     let a = decode_a(instr) as usize;
     x_regs[a] = match opcode {
-        op::LOADNIL => Value::Nil,
-        op::LOADBOOL => Value::bool(decode_bx(instr) != 0),
-        op::LOADINT => Value::int(decode_sbx(instr) as i64),
-        op::LOADK => match constant_value {
-            Some(v) => v,
+        op::LOADNIL => Term::NIL,
+        op::LOADBOOL => Term::bool(decode_bx(instr) != 0),
+        op::LOADINT => {
+            // small_int returns Option, unwrap since compiler ensures value fits
+            match Term::small_int(i64::from(decode_sbx(instr))) {
+                Some(term) => term,
+                None => return 1, // Shouldn't happen for valid bytecode
+            }
+        }
+        op::LOADK => match constant_term {
+            Some(term) => term,
             None => return 1,
         },
         op::MOVE => x_regs[decode_b(instr) as usize],
@@ -686,8 +816,7 @@ fn execute_y_register_instruction<M: MemorySpace>(
         op::MOVE_XY => {
             let y_idx = decode_a(instr) as usize;
             let x_idx = decode_b(instr) as usize;
-            let value = x_regs[x_idx];
-            if !proc.set_y(mem, y_idx, value) {
+            if !proc.set_y(mem, y_idx, x_regs[x_idx]) {
                 return Err(RunResult::Error(RuntimeError::YRegisterOutOfBounds {
                     index: y_idx,
                     allocated: proc.current_y_count,
@@ -699,8 +828,8 @@ fn execute_y_register_instruction<M: MemorySpace>(
             let x_idx = decode_a(instr) as usize;
             let y_idx = decode_b(instr) as usize;
             match proc.get_y(mem, y_idx) {
-                Some(value) => {
-                    x_regs[x_idx] = value;
+                Some(term) => {
+                    x_regs[x_idx] = term;
                     Ok(1)
                 }
                 None => Err(RunResult::Error(RuntimeError::YRegisterOutOfBounds {
@@ -723,12 +852,12 @@ fn execute_instruction<M: MemorySpace>(
     realm: &mut Realm,
     instr: u32,
     opcode: u8,
-    constant_value: Option<Value>,
+    constant_term: Option<Term>,
 ) -> Result<u32, RunResult> {
     match opcode {
         // Load and move instructions
         op::LOADNIL | op::LOADBOOL | op::LOADINT | op::LOADK | op::MOVE => Ok(
-            execute_load_instruction(x_regs, instr, opcode, constant_value),
+            execute_load_instruction(x_regs, instr, opcode, constant_term),
         ),
 
         op::INTRINSIC => {
@@ -832,10 +961,10 @@ impl Vm {
 
             // Decode and pre-fetch constant for LOADK
             let opcode = decode_opcode(instr);
-            let constant_value = if opcode == op::LOADK {
+            let constant_term = if opcode == op::LOADK {
                 let bx = decode_bx(instr);
                 match chunk.constants.get(bx as usize).copied() {
-                    Some(v) => Some(v),
+                    Some(term) => Some(term),
                     None => return RunResult::Error(RuntimeError::ConstantOutOfBounds(bx)),
                 }
             } else {
@@ -850,7 +979,7 @@ impl Vm {
                 realm,
                 instr,
                 opcode,
-                constant_value,
+                constant_term,
             ) {
                 Ok(cost) => {
                     proc.consume_reductions(cost);
@@ -878,13 +1007,13 @@ pub fn execute<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
-) -> Result<Value, RuntimeError> {
+) -> Result<Term, RuntimeError> {
     // Initialize reduction budget
     proc.reset_reductions();
 
     loop {
         match Vm::run(worker, proc, mem, realm) {
-            RunResult::Completed(value) => return Ok(value),
+            RunResult::Completed(term) => return Ok(term),
             RunResult::Yielded => {
                 // Single-threaded execution: just continue with fresh budget
                 proc.reset_reductions();

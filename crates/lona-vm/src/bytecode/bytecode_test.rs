@@ -75,21 +75,23 @@ fn decode_signed_bx_negative() {
 
 #[test]
 fn chunk_add_constant() {
+    use crate::term::Term;
+
     let mut chunk = Chunk::new();
 
-    let idx0 = chunk.add_constant(Value::int(42)).unwrap();
+    let idx0 = chunk.add_constant(Term::small_int(42).unwrap()).unwrap();
     assert_eq!(idx0, 0);
 
-    let idx1 = chunk.add_constant(Value::nil()).unwrap();
+    let idx1 = chunk.add_constant(Term::NIL).unwrap();
     assert_eq!(idx1, 1);
 
-    let idx2 = chunk.add_constant(Value::bool(true)).unwrap();
+    let idx2 = chunk.add_constant(Term::bool(true)).unwrap();
     assert_eq!(idx2, 2);
 
     assert_eq!(chunk.constants.len(), 3);
-    assert_eq!(chunk.constants[0], Value::int(42));
-    assert_eq!(chunk.constants[1], Value::nil());
-    assert_eq!(chunk.constants[2], Value::bool(true));
+    assert_eq!(chunk.constants[0], Term::small_int(42).unwrap());
+    assert_eq!(chunk.constants[1], Term::NIL);
+    assert_eq!(chunk.constants[2], Term::bool(true));
 }
 
 #[test]

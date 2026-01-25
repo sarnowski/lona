@@ -6,7 +6,7 @@
 //! A realm represents the persistent state that's shared across all processes
 //! within a protection domain. It owns:
 //!
-//! - A code region for persistent allocations (`VarSlot`s, `VarContent`s, functions)
+//! - A code region for persistent allocations (vars, functions)
 //! - Interning tables for symbols and keywords
 //! - A namespace registry mapping symbols to namespace addresses
 //! - A metadata table mapping object addresses to metadata maps
@@ -26,11 +26,14 @@ mod copy_test;
 mod realm_test;
 
 pub use bootstrap::{BootstrapResult, bootstrap, get_core_ns, get_ns_var, lookup_var_in_ns};
-pub use copy::{VisitedTracker, deep_copy_to_realm};
+pub use copy::{VisitedTracker, deep_copy_term_to_realm};
 
 use crate::Vaddr;
 use crate::platform::MemorySpace;
-use crate::value::{HeapMap, HeapString, HeapTuple, Namespace, Pair, Value, VarContent, VarSlot};
+use crate::term::Term;
+use crate::term::header::Header;
+use crate::term::heap::{HeapKeyword, HeapNamespace, HeapPair, HeapSymbol, HeapTuple, HeapVar};
+use crate::term::tag::object;
 
 /// Maximum number of interned symbols per realm.
 ///
@@ -51,7 +54,7 @@ pub const MAX_METADATA_ENTRIES: usize = 2000;
 /// A realm represents shared state across processes.
 ///
 /// The realm owns:
-/// - A code region for persistent allocations (`VarSlot`s, `VarContent`s, functions)
+/// - A code region for persistent allocations (vars, functions)
 /// - A namespace registry mapping symbols to namespace addresses
 /// - A metadata table mapping object addresses to metadata maps
 #[repr(C)]
@@ -65,18 +68,18 @@ pub struct Realm {
     pub code_top: Vaddr,
 
     // Interning tables (realm-level, shared across processes)
-    /// Interned symbols (addresses of symbol `HeapString`s in code region).
+    /// Interned symbols (addresses of symbol `HeapSymbol`s in code region).
     pub symbol_intern: [Vaddr; MAX_INTERNED_SYMBOLS],
     /// Number of interned symbols.
     pub symbol_intern_len: usize,
-    /// Interned keywords (addresses of keyword `HeapString`s in code region).
+    /// Interned keywords (addresses of keyword `HeapKeyword`s in code region).
     pub keyword_intern: [Vaddr; MAX_INTERNED_KEYWORDS],
     /// Number of interned keywords.
     pub keyword_intern_len: usize,
 
     // Namespace registry
-    /// Namespace name symbols (parallel array).
-    pub namespace_names: [Vaddr; MAX_NAMESPACES],
+    /// Namespace name symbols as immediate Terms (parallel array).
+    pub namespace_names: [Term; MAX_NAMESPACES],
     /// Namespace addresses (parallel array).
     pub namespace_addrs: [Vaddr; MAX_NAMESPACES],
     /// Number of registered namespaces.
@@ -111,7 +114,7 @@ impl Realm {
             keyword_intern: [Vaddr::new(0); MAX_INTERNED_KEYWORDS],
             keyword_intern_len: 0,
             // Namespace registry
-            namespace_names: [Vaddr::new(0); MAX_NAMESPACES],
+            namespace_names: [Term::NIL; MAX_NAMESPACES],
             namespace_addrs: [Vaddr::new(0); MAX_NAMESPACES],
             namespace_len: 0,
             // Metadata table
@@ -128,7 +131,6 @@ impl Realm {
     /// Returns `None` if the code region is full.
     ///
     /// Callers must request appropriate alignment for the type being allocated.
-    /// For `Value` types, use 8-byte alignment. For strings, 4-byte is sufficient.
     pub const fn alloc(&mut self, size: usize, align: usize) -> Option<Vaddr> {
         if size == 0 {
             return Some(self.code_top);
@@ -169,22 +171,26 @@ impl Realm {
 
     /// Intern a symbol in the realm's code region.
     ///
-    /// If a symbol with the same name already exists, returns it.
-    /// Otherwise, allocates a new symbol in the code region and interns it.
+    /// If a symbol with the same name already exists, returns the existing
+    /// immediate Term. Otherwise, allocates string storage in the code region
+    /// and returns a new immediate Term with the index.
+    ///
+    /// Returns an immediate `Term::symbol(index)` where index is the position
+    /// in the intern table. The string content is stored separately for lookup.
     ///
     /// Returns `None` if the code region is full or intern table is full.
-    pub fn intern_symbol<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Value> {
+    pub fn intern_symbol<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Term> {
         // Check intern table for existing symbol
         for i in 0..self.symbol_intern_len {
             let addr = self.symbol_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
-                // Use byte-by-byte comparison to avoid SIMD alignment issues on x86_64
+            let header: Header = mem.read(addr);
+            let len = header.arity() as usize;
+            if len == name.len() {
+                let data_addr = addr.add(HeapSymbol::HEADER_SIZE as u64);
+                let bytes = mem.slice(data_addr, len);
                 if bytes_eq(bytes, name.as_bytes()) {
-                    // Found existing interned symbol
-                    return Some(Value::symbol(addr));
+                    // Found existing interned symbol - return immediate with index
+                    return Some(Term::symbol(i as u32));
                 }
             }
         }
@@ -194,67 +200,91 @@ impl Realm {
             return None;
         }
 
-        // Allocate new symbol in code region
+        // Allocate string storage in code region
         let len = name.len();
-        let total_size = HeapString::alloc_size(len);
+        let total_size = HeapSymbol::alloc_size(len);
 
-        // Allocate space (align to 4 bytes for the header)
-        let addr = self.alloc(total_size, 4)?;
+        // Allocate space (align to 8 bytes for the header)
+        let addr = self.alloc(total_size, 8)?;
 
-        // Write header
-        let header = HeapString { len: len as u32 };
+        // Write header with proper SYMBOL object tag (for string storage)
+        let header = HeapSymbol::make_header(len);
         mem.write(addr, header);
 
         // Write string data
-        let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
+        let data_addr = addr.add(HeapSymbol::HEADER_SIZE as u64);
         let dest = mem.slice_mut(data_addr, len);
         dest.copy_from_slice(name.as_bytes());
 
-        // Add to intern table
-        self.symbol_intern[self.symbol_intern_len] = addr;
+        // Add to intern table and return immediate Term with the new index
+        let index = self.symbol_intern_len;
+        self.symbol_intern[index] = addr;
         self.symbol_intern_len += 1;
 
-        Some(Value::symbol(addr))
+        Some(Term::symbol(index as u32))
     }
 
     /// Find an existing interned symbol by name (read-only lookup).
     ///
-    /// Returns the symbol if found in the intern table, `None` otherwise.
+    /// Returns the immediate symbol Term if found, `None` otherwise.
     #[must_use]
-    pub fn find_symbol<M: MemorySpace>(&self, mem: &M, name: &str) -> Option<Value> {
+    pub fn find_symbol<M: MemorySpace>(&self, mem: &M, name: &str) -> Option<Term> {
         for i in 0..self.symbol_intern_len {
             let addr = self.symbol_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
+            let header: Header = mem.read(addr);
+            let len = header.arity() as usize;
+            if len == name.len() {
+                let data_addr = addr.add(HeapSymbol::HEADER_SIZE as u64);
+                let bytes = mem.slice(data_addr, len);
                 if bytes_eq(bytes, name.as_bytes()) {
-                    return Some(Value::symbol(addr));
+                    return Some(Term::symbol(i as u32));
                 }
             }
         }
         None
     }
 
+    /// Get the string name of an interned symbol by index.
+    ///
+    /// Returns the string slice if the index is valid, `None` otherwise.
+    #[must_use]
+    pub fn symbol_name<'a, M: MemorySpace>(&self, mem: &'a M, index: u32) -> Option<&'a str> {
+        let i = index as usize;
+        if i >= self.symbol_intern_len {
+            return None;
+        }
+        let addr = self.symbol_intern[i];
+        let header: Header = mem.read(addr);
+        let len = header.arity() as usize;
+        let data_addr = addr.add(HeapSymbol::HEADER_SIZE as u64);
+        let bytes = mem.slice(data_addr, len);
+        core::str::from_utf8(bytes).ok()
+    }
+
     // --- Keyword Interning ---
 
     /// Intern a keyword in the realm's code region.
     ///
-    /// If a keyword with the same name already exists, returns it.
-    /// Otherwise, allocates a new keyword in the code region and interns it.
+    /// If a keyword with the same name already exists, returns the existing
+    /// immediate Term. Otherwise, allocates string storage in the code region
+    /// and returns a new immediate Term with the index.
+    ///
+    /// Returns an immediate `Term::keyword(index)` where index is the position
+    /// in the intern table. The string content is stored separately for lookup.
     ///
     /// Returns `None` if the code region is full or intern table is full.
-    pub fn intern_keyword<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Value> {
+    pub fn intern_keyword<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Term> {
         // Check intern table for existing keyword
         for i in 0..self.keyword_intern_len {
             let addr = self.keyword_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
+            let header: Header = mem.read(addr);
+            let len = header.arity() as usize;
+            if len == name.len() {
+                let data_addr = addr.add(HeapKeyword::HEADER_SIZE as u64);
+                let bytes = mem.slice(data_addr, len);
                 if bytes_eq(bytes, name.as_bytes()) {
-                    // Found existing interned keyword
-                    return Some(Value::keyword(addr));
+                    // Found existing interned keyword - return immediate with index
+                    return Some(Term::keyword(i as u32));
                 }
             }
         }
@@ -264,63 +294,82 @@ impl Realm {
             return None;
         }
 
-        // Allocate new keyword in code region
+        // Allocate string storage in code region
         let len = name.len();
-        let total_size = HeapString::alloc_size(len);
+        let total_size = HeapKeyword::alloc_size(len);
 
-        // Allocate space (align to 4 bytes for the header)
-        let addr = self.alloc(total_size, 4)?;
+        // Allocate space (align to 8 bytes for the header)
+        let addr = self.alloc(total_size, 8)?;
 
-        // Write header
-        let header = HeapString { len: len as u32 };
+        // Write header with proper KEYWORD object tag (for string storage)
+        let header = HeapKeyword::make_header(len);
         mem.write(addr, header);
 
         // Write string data
-        let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
+        let data_addr = addr.add(HeapKeyword::HEADER_SIZE as u64);
         let dest = mem.slice_mut(data_addr, len);
         dest.copy_from_slice(name.as_bytes());
 
-        // Add to intern table
-        self.keyword_intern[self.keyword_intern_len] = addr;
+        // Add to intern table and return immediate Term with the new index
+        let index = self.keyword_intern_len;
+        self.keyword_intern[index] = addr;
         self.keyword_intern_len += 1;
 
-        Some(Value::keyword(addr))
+        Some(Term::keyword(index as u32))
     }
 
     /// Find an existing interned keyword by name (read-only lookup).
     ///
-    /// Returns the keyword if found in the intern table, `None` otherwise.
+    /// Returns the immediate keyword Term if found, `None` otherwise.
     #[must_use]
-    pub fn find_keyword<M: MemorySpace>(&self, mem: &M, name: &str) -> Option<Value> {
+    pub fn find_keyword<M: MemorySpace>(&self, mem: &M, name: &str) -> Option<Term> {
         for i in 0..self.keyword_intern_len {
             let addr = self.keyword_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
+            let header: Header = mem.read(addr);
+            let len = header.arity() as usize;
+            if len == name.len() {
+                let data_addr = addr.add(HeapKeyword::HEADER_SIZE as u64);
+                let bytes = mem.slice(data_addr, len);
                 if bytes_eq(bytes, name.as_bytes()) {
-                    return Some(Value::keyword(addr));
+                    return Some(Term::keyword(i as u32));
                 }
             }
         }
         None
     }
 
+    /// Get the string name of an interned keyword by index.
+    ///
+    /// Returns the string slice if the index is valid, `None` otherwise.
+    #[must_use]
+    pub fn keyword_name<'a, M: MemorySpace>(&self, mem: &'a M, index: u32) -> Option<&'a str> {
+        let i = index as usize;
+        if i >= self.keyword_intern_len {
+            return None;
+        }
+        let addr = self.keyword_intern[i];
+        let header: Header = mem.read(addr);
+        let len = header.arity() as usize;
+        let data_addr = addr.add(HeapKeyword::HEADER_SIZE as u64);
+        let bytes = mem.slice(data_addr, len);
+        core::str::from_utf8(bytes).ok()
+    }
+
     // --- Namespace Registry ---
 
     /// Find a namespace by its name symbol.
     ///
-    /// Compares namespace names by symbol address. Returns the namespace value
-    /// if found, `None` otherwise.
+    /// Compares namespace names by immediate symbol Term equality.
     #[must_use]
-    pub fn find_namespace(&self, name: Value) -> Option<Value> {
-        let Value::Symbol(name_addr) = name else {
+    pub fn find_namespace(&self, name: Term) -> Option<Term> {
+        // Symbols are now immediate values - simple Term equality check
+        if !name.is_symbol() {
             return None;
-        };
+        }
 
         for i in 0..self.namespace_len {
-            if self.namespace_names[i] == name_addr {
-                return Some(Value::namespace(self.namespace_addrs[i]));
+            if self.namespace_names[i] == name {
+                return Some(Term::boxed_vaddr(self.namespace_addrs[i]));
             }
         }
         None
@@ -328,14 +377,14 @@ impl Realm {
 
     /// Register a namespace in the registry.
     ///
-    /// Associates the namespace with its name for later lookup via `find_namespace`.
+    /// Associates the namespace with its name (immediate symbol Term) for lookup.
     /// If the namespace is already registered, updates the address.
     ///
     /// Returns `None` if the registry is full.
-    pub fn register_namespace(&mut self, name_addr: Vaddr, ns_addr: Vaddr) -> Option<()> {
+    pub fn register_namespace(&mut self, name: Term, ns_addr: Vaddr) -> Option<()> {
         // Check if already exists - update in place
         for i in 0..self.namespace_len {
-            if self.namespace_names[i] == name_addr {
+            if self.namespace_names[i] == name {
                 self.namespace_addrs[i] = ns_addr;
                 return Some(());
             }
@@ -346,7 +395,7 @@ impl Realm {
             return None;
         }
 
-        self.namespace_names[self.namespace_len] = name_addr;
+        self.namespace_names[self.namespace_len] = name;
         self.namespace_addrs[self.namespace_len] = ns_addr;
         self.namespace_len += 1;
         Some(())
@@ -354,35 +403,33 @@ impl Realm {
 
     /// Allocate a namespace in the code region.
     ///
-    /// Creates a namespace with the given name symbol and an empty mappings map.
+    /// Creates a namespace with the given name symbol and empty mappings.
     ///
-    /// Returns a `Value::Namespace` pointing to the allocated namespace, or `None` if OOM.
-    pub fn alloc_namespace<M: MemorySpace>(&mut self, mem: &mut M, name: Value) -> Option<Value> {
-        // Create empty mappings map in code region
-        let map_addr = self.alloc(HeapMap::SIZE, 8)?;
-        let empty_map = HeapMap {
-            entries: Value::Nil,
-        };
-        mem.write(map_addr, empty_map);
-        let mappings = Value::map(map_addr);
-
+    /// Returns a boxed Term pointing to the allocated namespace, or `None` if OOM.
+    pub fn alloc_namespace<M: MemorySpace>(&mut self, mem: &mut M, name: Term) -> Option<Term> {
         // Allocate namespace in code region
-        let ns_addr = self.alloc(Namespace::SIZE, 8)?;
-        let ns = Namespace { name, mappings };
+        let ns_addr = self.alloc(HeapNamespace::SIZE, 8)?;
+        let ns = HeapNamespace {
+            header: HeapNamespace::make_header(),
+            name,
+            mappings: Term::NIL, // Empty mappings list
+        };
         mem.write(ns_addr, ns);
 
-        Some(Value::namespace(ns_addr))
+        Some(Term::boxed_vaddr(ns_addr))
     }
 
     /// Create or find a namespace by name.
     ///
     /// If a namespace with the given name exists, returns it.
     /// Otherwise, creates a new namespace, registers it, and returns it.
+    ///
+    /// The `name` parameter should be an immediate symbol Term.
     pub fn get_or_create_namespace<M: MemorySpace>(
         &mut self,
         mem: &mut M,
-        name: Value,
-    ) -> Option<Value> {
+        name: Term,
+    ) -> Option<Term> {
         // Check if namespace already exists
         if let Some(ns) = self.find_namespace(name) {
             return Some(ns);
@@ -391,136 +438,116 @@ impl Realm {
         // Create new namespace
         let ns = self.alloc_namespace(mem, name)?;
 
-        // Register it
-        if let (Value::Symbol(name_addr), Value::Namespace(ns_addr)) = (name, ns) {
-            self.register_namespace(name_addr, ns_addr)?;
-        }
+        // Register it (name is an immediate symbol Term)
+        let ns_addr = ns.to_vaddr();
+        self.register_namespace(name, ns_addr)?;
 
         Some(ns)
     }
 
     // --- Var Allocation ---
 
-    /// Allocate a var (`VarSlot` + `VarContent`) in the code region.
+    /// Allocate a var in the code region.
     ///
-    /// Creates a new var with the given name symbol, namespace, root value, and flags.
-    /// Returns a `Value::Var` pointing to the allocated `VarSlot`, or `None` if OOM.
+    /// Creates a new var with the given name symbol, namespace, and root value.
+    /// Returns a boxed Term pointing to the allocated var, or `None` if OOM.
     pub fn alloc_var<M: MemorySpace>(
         &mut self,
         mem: &mut M,
-        name: Vaddr,
-        namespace: Vaddr,
-        root: Value,
-        flags: u32,
-    ) -> Option<Value> {
-        // Allocate VarContent first
-        let content_addr = self.alloc(VarContent::SIZE, 8)?;
-        let content = VarContent {
+        name: Term,
+        namespace: Term,
+        root: Term,
+    ) -> Option<Term> {
+        // Allocate var in code region
+        let var_addr = self.alloc(HeapVar::SIZE, 8)?;
+        let var = HeapVar {
+            header: HeapVar::make_header(),
             name,
             namespace,
             root,
-            flags,
-            padding: 0,
         };
-        mem.write(content_addr, content);
+        mem.write(var_addr, var);
 
-        // Allocate VarSlot
-        let slot_addr = self.alloc(VarSlot::SIZE, 8)?;
-        let slot = VarSlot {
-            content: content_addr,
-        };
-        mem.write(slot_addr, slot);
-
-        Some(Value::var(slot_addr))
+        Some(Term::boxed_vaddr(var_addr))
     }
 
-    /// Update a var's root value atomically (MVCC pattern).
+    /// Update a var's root value.
     ///
-    /// Creates a new `VarContent` with the updated value and atomically swaps
-    /// the `VarSlot`'s content pointer using Release ordering.
+    /// Updates the var's root binding in place.
     ///
-    /// Returns the var, or `None` if the value is not a var or OOM.
+    /// Returns `Some(())` on success, `None` if the value is not a var.
     pub fn var_set_root<M: MemorySpace>(
         &mut self,
         mem: &mut M,
-        var: Value,
-        new_root: Value,
-    ) -> Option<Value> {
-        let Value::Var(slot_addr) = var else {
+        var: Term,
+        new_root: Term,
+    ) -> Option<()> {
+        if !var.is_boxed() {
             return None;
-        };
+        }
 
-        // Read current content with Acquire ordering
-        let content_raw = mem.read_u64_acquire(slot_addr);
-        let old_content: VarContent = mem.read(Vaddr::new(content_raw));
+        let var_addr = var.to_vaddr();
+        let header: Header = mem.read(var_addr);
+        if header.object_tag() != object::VAR {
+            return None;
+        }
 
-        // Allocate new VarContent with updated root in code region
-        let new_content_addr = self.alloc(VarContent::SIZE, 8)?;
-        let new_content = VarContent {
-            name: old_content.name,
-            namespace: old_content.namespace,
-            root: new_root,
-            flags: old_content.flags,
-            padding: 0,
-        };
-        mem.write(new_content_addr, new_content);
+        // Read current var
+        let mut var_struct: HeapVar = mem.read(var_addr);
 
-        // Atomically update VarSlot to point to new content with Release ordering
-        mem.write_u64_release(slot_addr, new_content_addr.as_u64());
+        // Update root
+        var_struct.root = new_root;
 
-        Some(var)
+        // Write back
+        mem.write(var_addr, var_struct);
+
+        Some(())
     }
 
     /// Add a symbol→var mapping to a namespace.
     ///
-    /// Prepends the new mapping to the namespace's association list.
-    /// This is used during bootstrap to register vars in `lona.core`.
+    /// Prepends the new mapping to the namespace's mappings list.
     ///
     /// Returns `None` if allocation fails.
     pub fn add_ns_mapping<M: MemorySpace>(
         &mut self,
         mem: &mut M,
-        ns: Value,
-        name: Value,
-        var: Value,
+        ns: Term,
+        name: Term,
+        var: Term,
     ) -> Option<()> {
-        let Value::Namespace(ns_addr) = ns else {
+        if !ns.is_boxed() {
             return None;
-        };
+        }
 
-        let ns_struct: Namespace = mem.read(ns_addr);
-        let Value::Map(map_addr) = ns_struct.mappings else {
-            return None;
-        };
-        let map: HeapMap = mem.read(map_addr);
+        let ns_addr = ns.to_vaddr();
+        let mut ns_struct: HeapNamespace = mem.read(ns_addr);
 
         // Create [name var] tuple in realm
         let tuple_size = HeapTuple::alloc_size(2);
         let tuple_addr = self.alloc(tuple_size, 8)?;
 
-        let tuple_header = HeapTuple { len: 2, padding: 0 };
+        let tuple_header = HeapTuple::make_header(2);
         mem.write(tuple_addr, tuple_header);
 
         let elem0_addr = tuple_addr.add(HeapTuple::HEADER_SIZE as u64);
-        let elem1_addr = elem0_addr.add(core::mem::size_of::<Value>() as u64);
+        let elem1_addr = elem0_addr.add(core::mem::size_of::<Term>() as u64);
         mem.write(elem0_addr, name);
         mem.write(elem1_addr, var);
 
-        let kv_tuple = Value::tuple(tuple_addr);
+        let kv_tuple = Term::boxed_vaddr(tuple_addr);
 
-        // Create new pair: (kv_tuple . old_entries)
-        let pair_addr = self.alloc(Pair::SIZE, 8)?;
-        let new_pair = Pair {
-            first: kv_tuple,
-            rest: map.entries,
+        // Create new pair: (kv_tuple . old_mappings)
+        let pair_addr = self.alloc(HeapPair::SIZE, 8)?;
+        let new_pair = HeapPair {
+            head: kv_tuple,
+            tail: ns_struct.mappings,
         };
         mem.write(pair_addr, new_pair);
 
-        // Update map's entries
-        let new_map = HeapMap {
-            entries: Value::pair(pair_addr),
-        };
-        mem.write(map_addr, new_map);
+        // Update namespace mappings
+        ns_struct.mappings = Term::list_vaddr(pair_addr);
+        mem.write(ns_addr, ns_struct);
 
         Some(())
     }
@@ -566,37 +593,50 @@ impl Realm {
         None
     }
 
-    /// Get metadata for a value.
+    /// Get metadata for a Term.
     ///
-    /// Returns the metadata Value (usually a map) if the value has metadata,
-    /// `Value::Nil` otherwise.
+    /// Returns the metadata Term (usually a map) if the value has metadata,
+    /// `Term::NIL` otherwise.
     #[must_use]
-    pub fn get_metadata_value(&self, value: Value) -> Value {
-        // Extract address from heap-allocated values (immediate values cannot have metadata)
-        let (Value::Symbol(obj_addr)
-        | Value::Keyword(obj_addr)
-        | Value::String(obj_addr)
-        | Value::Tuple(obj_addr)
-        | Value::Vector(obj_addr)
-        | Value::Map(obj_addr)
-        | Value::Pair(obj_addr)
-        | Value::CompiledFn(obj_addr)
-        | Value::Closure(obj_addr)
-        | Value::Var(obj_addr)
-        | Value::Namespace(obj_addr)) = value
-        else {
-            return Value::Nil;
-        };
+    pub fn get_metadata_term(&self, term: Term) -> Term {
+        // Only boxed values can have metadata
+        if !term.is_boxed() && !term.is_list() {
+            return Term::NIL;
+        }
 
-        self.get_metadata(obj_addr).map_or(Value::Nil, Value::map)
+        let obj_addr = term.to_vaddr();
+        self.get_metadata(obj_addr)
+            .map_or(Term::NIL, Term::boxed_vaddr)
+    }
+
+    /// Read a string from a symbol/keyword/string Term.
+    ///
+    /// Returns the string slice if the term is a string-like type.
+    pub fn read_string<'a, M: MemorySpace>(&self, mem: &'a M, term: Term) -> Option<&'a str> {
+        if !term.is_boxed() {
+            return None;
+        }
+
+        let addr = term.to_vaddr();
+        let header: Header = mem.read(addr);
+        let tag = header.object_tag();
+
+        if tag != object::STRING && tag != object::SYMBOL && tag != object::KEYWORD {
+            return None;
+        }
+
+        let len = header.arity() as usize;
+        let data_addr = addr.add(HeapSymbol::HEADER_SIZE as u64);
+        let bytes = mem.slice(data_addr, len);
+
+        core::str::from_utf8(bytes).ok()
     }
 }
 
 /// Compare two byte slices byte-by-byte.
 ///
 /// This avoids SIMD-optimized comparisons that may have alignment requirements
-/// not met in the seL4 environment (static data may not be properly aligned
-/// for SIMD operations on `x86_64`).
+/// not met in the seL4 environment.
 fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;

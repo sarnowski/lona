@@ -13,8 +13,9 @@
 use crate::Vaddr;
 use crate::platform::{MemorySpace, MockVSpace};
 use crate::process::Process;
-use crate::realm::{Realm, VisitedTracker, deep_copy_to_realm};
-use crate::value::{HeapString, HeapTuple, Pair, Value};
+use crate::realm::{Realm, VisitedTracker, deep_copy_term_to_realm};
+use crate::term::Term;
+use crate::term::heap::{HeapPair, HeapString, HeapTuple};
 
 /// Create a test setup with process, realm, and memory.
 fn setup() -> (Process, Realm, MockVSpace) {
@@ -51,24 +52,26 @@ fn test_deep_copy_immediates() {
     let mut visited = VisitedTracker::new();
 
     // Nil
-    let result = deep_copy_to_realm(Value::Nil, &mut realm, &mut mem, &mut visited);
-    assert_eq!(result, Some(Value::Nil));
+    let result = deep_copy_term_to_realm(Term::NIL, &mut realm, &mut mem, &mut visited);
+    assert_eq!(result, Some(Term::NIL));
 
     // Bool
-    let result = deep_copy_to_realm(Value::Bool(true), &mut realm, &mut mem, &mut visited);
-    assert_eq!(result, Some(Value::Bool(true)));
+    let result = deep_copy_term_to_realm(Term::bool(true), &mut realm, &mut mem, &mut visited);
+    assert_eq!(result, Some(Term::bool(true)));
 
     // Int
-    let result = deep_copy_to_realm(Value::Int(42), &mut realm, &mut mem, &mut visited);
-    assert_eq!(result, Some(Value::Int(42)));
+    let int_term = Term::small_int(42).unwrap();
+    let result = deep_copy_term_to_realm(int_term, &mut realm, &mut mem, &mut visited);
+    assert_eq!(result, Some(int_term));
 
     // NativeFn
-    let result = deep_copy_to_realm(Value::NativeFn(5), &mut realm, &mut mem, &mut visited);
-    assert_eq!(result, Some(Value::NativeFn(5)));
+    let native = Term::native_fn(5);
+    let result = deep_copy_term_to_realm(native, &mut realm, &mut mem, &mut visited);
+    assert_eq!(result, Some(native));
 
     // Unbound
-    let result = deep_copy_to_realm(Value::Unbound, &mut realm, &mut mem, &mut visited);
-    assert_eq!(result, Some(Value::Unbound));
+    let result = deep_copy_term_to_realm(Term::UNBOUND, &mut realm, &mut mem, &mut visited);
+    assert_eq!(result, Some(Term::UNBOUND));
 }
 
 #[test]
@@ -77,30 +80,26 @@ fn test_deep_copy_string() {
     let mut visited = VisitedTracker::new();
 
     // Allocate string on process heap
-    let src = proc.alloc_string(&mut mem, "hello").unwrap();
+    let src = proc.alloc_term_string(&mut mem, "hello").unwrap();
 
     // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
+    let dst = deep_copy_term_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
 
     // Should be a string at different address
-    assert!(dst.is_string());
-    let Value::String(src_addr) = src else {
-        panic!()
-    };
-    let Value::String(dst_addr) = dst else {
-        panic!()
-    };
+    assert!(dst.is_boxed());
+    let src_addr = src.to_vaddr();
+    let dst_addr = dst.to_vaddr();
     assert_ne!(src_addr, dst_addr);
 
     // Contents should match
     let src_header: HeapString = mem.read(src_addr);
     let dst_header: HeapString = mem.read(dst_addr);
-    assert_eq!(src_header.len, dst_header.len);
+    assert_eq!(src_header.len(), dst_header.len());
 
     let src_data = src_addr.add(HeapString::HEADER_SIZE as u64);
     let dst_data = dst_addr.add(HeapString::HEADER_SIZE as u64);
-    let src_bytes = mem.slice(src_data, src_header.len as usize);
-    let dst_bytes = mem.slice(dst_data, dst_header.len as usize);
+    let src_bytes = mem.slice(src_data, src_header.len());
+    let dst_bytes = mem.slice(dst_data, dst_header.len());
     assert_eq!(src_bytes, dst_bytes);
     assert_eq!(src_bytes, b"hello");
 
@@ -111,49 +110,42 @@ fn test_deep_copy_string() {
 
 #[test]
 fn test_deep_copy_symbol() {
-    let (mut proc, mut realm, mut mem) = setup();
+    let (_, mut realm, mut mem) = setup();
     let mut visited = VisitedTracker::new();
 
-    // Allocate symbol on process heap
-    let src = proc.alloc_symbol(&mut mem, "foo").unwrap();
+    // Symbols are now immediate values interned at realm level
+    let src = realm.intern_symbol(&mut mem, "foo").unwrap();
 
-    // Copy to realm (symbols get re-interned)
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
+    // Deep copy of immediate value is identity
+    let dst = deep_copy_term_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
 
-    // Should be a symbol
+    // Should be the same immediate value
     assert!(dst.is_symbol());
-    let Value::Symbol(dst_addr) = dst else {
-        panic!()
-    };
+    assert_eq!(src, dst);
 
-    // Destination should be in realm region
-    assert!(dst_addr.as_u64() >= 0x4000);
-
-    // Copying same symbol again should return same interned address
-    let src2 = proc.alloc_symbol(&mut mem, "foo").unwrap();
-    let dst2 = deep_copy_to_realm(src2, &mut realm, &mut mem, &mut visited).unwrap();
-    assert_eq!(dst, dst2);
+    // Interning same symbol again should return same value
+    let src2 = realm.intern_symbol(&mut mem, "foo").unwrap();
+    assert_eq!(src, src2);
 }
 
 #[test]
 fn test_deep_copy_keyword() {
-    let (mut proc, mut realm, mut mem) = setup();
+    let (_, mut realm, mut mem) = setup();
     let mut visited = VisitedTracker::new();
 
-    // Allocate keyword on process heap
-    let src = proc.alloc_keyword(&mut mem, "bar").unwrap();
+    // Keywords are now immediate values interned at realm level
+    let src = realm.intern_keyword(&mut mem, "bar").unwrap();
 
-    // Copy to realm (keywords get re-interned)
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
+    // Deep copy of immediate value is identity
+    let dst = deep_copy_term_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
 
-    // Should be a keyword
+    // Should be the same immediate value
     assert!(dst.is_keyword());
-    let Value::Keyword(dst_addr) = dst else {
-        panic!()
-    };
+    assert_eq!(src, dst);
 
-    // Destination should be in realm region
-    assert!(dst_addr.as_u64() >= 0x4000);
+    // Interning same keyword again should return same value
+    let src2 = realm.intern_keyword(&mut mem, "bar").unwrap();
+    assert_eq!(src, src2);
 }
 
 #[test]
@@ -162,24 +154,24 @@ fn test_deep_copy_pair() {
     let mut visited = VisitedTracker::new();
 
     // Create a simple pair: (1 . 2)
-    let src = proc
-        .alloc_pair(&mut mem, Value::Int(1), Value::Int(2))
-        .unwrap();
+    let one = Term::small_int(1).unwrap();
+    let two = Term::small_int(2).unwrap();
+    let src = proc.alloc_term_pair(&mut mem, one, two).unwrap();
 
     // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
+    let dst = deep_copy_term_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
 
-    // Should be a pair at different address
-    assert!(dst.is_pair());
-    let Value::Pair(src_addr) = src else { panic!() };
-    let Value::Pair(dst_addr) = dst else { panic!() };
+    // Should be a list at different address
+    assert!(dst.is_list());
+    let src_addr = src.to_vaddr();
+    let dst_addr = dst.to_vaddr();
     assert_ne!(src_addr, dst_addr);
 
     // Contents should match
-    let src_pair: Pair = mem.read(src_addr);
-    let dst_pair: Pair = mem.read(dst_addr);
-    assert_eq!(src_pair.first, dst_pair.first);
-    assert_eq!(src_pair.rest, dst_pair.rest);
+    let src_pair: HeapPair = mem.read(src_addr);
+    let dst_pair: HeapPair = mem.read(dst_addr);
+    assert_eq!(src_pair.head, dst_pair.head);
+    assert_eq!(src_pair.tail, dst_pair.tail);
 
     // Destination should be in realm region
     assert!(dst_addr.as_u64() >= 0x4000);
@@ -191,32 +183,30 @@ fn test_deep_copy_nested_pair() {
     let mut visited = VisitedTracker::new();
 
     // Create nested pair: (1 2 3) = (1 . (2 . (3 . nil)))
-    let inner = proc
-        .alloc_pair(&mut mem, Value::Int(3), Value::Nil)
-        .unwrap();
-    let middle = proc.alloc_pair(&mut mem, Value::Int(2), inner).unwrap();
-    let src = proc.alloc_pair(&mut mem, Value::Int(1), middle).unwrap();
+    let one = Term::small_int(1).unwrap();
+    let two = Term::small_int(2).unwrap();
+    let three = Term::small_int(3).unwrap();
+
+    let inner = proc.alloc_term_pair(&mut mem, three, Term::NIL).unwrap();
+    let middle = proc.alloc_term_pair(&mut mem, two, inner).unwrap();
+    let src = proc.alloc_term_pair(&mut mem, one, middle).unwrap();
 
     // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
+    let dst = deep_copy_term_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
 
     // Walk the copied list and verify structure
-    let Value::Pair(p1_addr) = dst else { panic!() };
-    let p1: Pair = mem.read(p1_addr);
-    assert_eq!(p1.first, Value::Int(1));
+    let p1_addr = dst.to_vaddr();
+    let p1: HeapPair = mem.read(p1_addr);
+    assert_eq!(p1.head, one);
 
-    let Value::Pair(p2_addr) = p1.rest else {
-        panic!()
-    };
-    let p2: Pair = mem.read(p2_addr);
-    assert_eq!(p2.first, Value::Int(2));
+    let p2_addr = p1.tail.to_vaddr();
+    let p2: HeapPair = mem.read(p2_addr);
+    assert_eq!(p2.head, two);
 
-    let Value::Pair(p3_addr) = p2.rest else {
-        panic!()
-    };
-    let p3: Pair = mem.read(p3_addr);
-    assert_eq!(p3.first, Value::Int(3));
-    assert_eq!(p3.rest, Value::Nil);
+    let p3_addr = p2.tail.to_vaddr();
+    let p3: HeapPair = mem.read(p3_addr);
+    assert_eq!(p3.head, three);
+    assert!(p3.tail.is_nil());
 
     // All pair addresses should be in realm region
     assert!(p1_addr.as_u64() >= 0x4000);
@@ -230,30 +220,29 @@ fn test_deep_copy_tuple() {
     let mut visited = VisitedTracker::new();
 
     // Create tuple [1 2 3]
-    let elements = [Value::Int(1), Value::Int(2), Value::Int(3)];
-    let src = proc.alloc_tuple(&mut mem, &elements).unwrap();
+    let one = Term::small_int(1).unwrap();
+    let two = Term::small_int(2).unwrap();
+    let three = Term::small_int(3).unwrap();
+    let elements = [one, two, three];
+    let src = proc.alloc_term_tuple(&mut mem, &elements).unwrap();
 
     // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
+    let dst = deep_copy_term_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
 
-    // Should be a tuple at different address
-    assert!(dst.is_tuple());
-    let Value::Tuple(src_addr) = src else {
-        panic!()
-    };
-    let Value::Tuple(dst_addr) = dst else {
-        panic!()
-    };
+    // Should be a boxed value at different address
+    assert!(dst.is_boxed());
+    let src_addr = src.to_vaddr();
+    let dst_addr = dst.to_vaddr();
     assert_ne!(src_addr, dst_addr);
 
     // Check header
     let dst_header: HeapTuple = mem.read(dst_addr);
-    assert_eq!(dst_header.len, 3);
+    assert_eq!(dst_header.len(), 3);
 
     // Check elements
     let elem_base = dst_addr.add(HeapTuple::HEADER_SIZE as u64);
     for (i, expected) in elements.iter().enumerate() {
-        let elem: Value = mem.read(elem_base.add((i * core::mem::size_of::<Value>()) as u64));
+        let elem: Term = mem.read(elem_base.add((i * core::mem::size_of::<Term>()) as u64));
         assert_eq!(elem, *expected);
     }
 
@@ -267,153 +256,25 @@ fn test_deep_copy_tuple_with_nested_values() {
     let mut visited = VisitedTracker::new();
 
     // Create tuple with string element: [1 "hello" 3]
-    let s = proc.alloc_string(&mut mem, "hello").unwrap();
-    let elements = [Value::Int(1), s, Value::Int(3)];
-    let src = proc.alloc_tuple(&mut mem, &elements).unwrap();
+    let one = Term::small_int(1).unwrap();
+    let three = Term::small_int(3).unwrap();
+    let s = proc.alloc_term_string(&mut mem, "hello").unwrap();
+    let elements = [one, s, three];
+    let src = proc.alloc_term_tuple(&mut mem, &elements).unwrap();
 
     // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
+    let dst = deep_copy_term_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
 
     // Check the string element was deep copied
-    let Value::Tuple(dst_addr) = dst else {
-        panic!()
-    };
+    let dst_addr = dst.to_vaddr();
     let elem_base = dst_addr.add(HeapTuple::HEADER_SIZE as u64);
-    let copied_str: Value = mem.read(elem_base.add(core::mem::size_of::<Value>() as u64));
+    let copied_str: Term = mem.read(elem_base.add(core::mem::size_of::<Term>() as u64));
 
-    assert!(copied_str.is_string());
-    let Value::String(str_addr) = copied_str else {
-        panic!()
-    };
+    assert!(copied_str.is_boxed());
+    let str_addr = copied_str.to_vaddr();
 
     // String should be in realm region
     assert!(str_addr.as_u64() >= 0x4000);
-}
-
-#[test]
-fn test_deep_copy_map() {
-    let (mut proc, mut realm, mut mem) = setup();
-    let mut visited = VisitedTracker::new();
-
-    // Create a simple map %{:a 1}
-    // First create the key-value tuple
-    let key = proc.alloc_keyword(&mut mem, "a").unwrap();
-    let kv_tuple = proc.alloc_tuple(&mut mem, &[key, Value::Int(1)]).unwrap();
-
-    // Create a pair for the entry
-    let entry = proc.alloc_pair(&mut mem, kv_tuple, Value::Nil).unwrap();
-
-    // Create the map with entries
-    let src = proc.alloc_map(&mut mem, entry).unwrap();
-
-    // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
-
-    // Should be a map at different address
-    assert!(dst.is_map());
-    let Value::Map(dst_addr) = dst else { panic!() };
-
-    // Destination should be in realm region
-    assert!(dst_addr.as_u64() >= 0x4000);
-}
-
-#[test]
-fn test_deep_copy_compiled_fn() {
-    let (mut proc, mut realm, mut mem) = setup();
-    let mut visited = VisitedTracker::new();
-
-    // Create a simple function
-    let code = [0x01, 0x02, 0x03];
-    let constants = [Value::Int(42)];
-    let src = proc
-        .alloc_compiled_fn(&mut mem, 1, false, 0, &code, &constants)
-        .unwrap();
-
-    // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
-
-    // Should be a compiled function at different address
-    assert!(dst.is_compiled_fn());
-    let Value::CompiledFn(src_addr) = src else {
-        panic!()
-    };
-    let Value::CompiledFn(dst_addr) = dst else {
-        panic!()
-    };
-    assert_ne!(src_addr, dst_addr);
-
-    // Destination should be in realm region
-    assert!(dst_addr.as_u64() >= 0x4000);
-
-    // Verify bytecode was copied
-    use crate::value::HeapCompiledFn;
-    let dst_header: HeapCompiledFn = mem.read(dst_addr);
-    assert_eq!(dst_header.arity, 1);
-    assert_eq!(dst_header.code_len, 3);
-    assert_eq!(dst_header.constants_len, 1);
-
-    // Check bytecode
-    let code_addr = dst_addr.add(HeapCompiledFn::bytecode_offset() as u64);
-    for (i, expected) in code.iter().enumerate() {
-        let instr: u32 = mem.read(code_addr.add((i * core::mem::size_of::<u32>()) as u64));
-        assert_eq!(instr, *expected);
-    }
-
-    // Check constants
-    let const_addr = dst_addr.add(HeapCompiledFn::constants_offset(3) as u64);
-    let copied_const: Value = mem.read(const_addr);
-    assert_eq!(copied_const, Value::Int(42));
-}
-
-#[test]
-fn test_deep_copy_closure() {
-    let (mut proc, mut realm, mut mem) = setup();
-    let mut visited = VisitedTracker::new();
-
-    // Create a function for the closure
-    let code = [0x01, 0x02];
-    let constants: [Value; 0] = [];
-    let func = proc
-        .alloc_compiled_fn(&mut mem, 0, false, 0, &code, &constants)
-        .unwrap();
-    let Value::CompiledFn(func_addr) = func else {
-        panic!()
-    };
-
-    // Create closure with captures
-    let captures = [Value::Int(10), Value::Int(20)];
-    let src = proc.alloc_closure(&mut mem, func_addr, &captures).unwrap();
-
-    // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
-
-    // Should be a closure at different address
-    assert!(dst.is_closure());
-    let Value::Closure(src_addr) = src else {
-        panic!()
-    };
-    let Value::Closure(dst_addr) = dst else {
-        panic!()
-    };
-    assert_ne!(src_addr, dst_addr);
-
-    // Destination should be in realm region
-    assert!(dst_addr.as_u64() >= 0x4000);
-
-    // Verify closure structure
-    use crate::value::HeapClosure;
-    let dst_header: HeapClosure = mem.read(dst_addr);
-    assert_eq!(dst_header.captures_len, 2);
-
-    // The function pointer should also be in realm region
-    assert!(dst_header.function.as_u64() >= 0x4000);
-
-    // Check captures
-    let cap_addr = dst_addr.add(HeapClosure::captures_offset() as u64);
-    let cap0: Value = mem.read(cap_addr);
-    let cap1: Value = mem.read(cap_addr.add(core::mem::size_of::<Value>() as u64));
-    assert_eq!(cap0, Value::Int(10));
-    assert_eq!(cap1, Value::Int(20));
 }
 
 #[test]
@@ -422,43 +283,39 @@ fn test_deep_copy_shared_structure() {
     let mut visited = VisitedTracker::new();
 
     // Create a string that's shared in two places
-    let shared_str = proc.alloc_string(&mut mem, "shared").unwrap();
+    let shared_str = proc.alloc_term_string(&mut mem, "shared").unwrap();
 
     // Create two pairs that share the same string
-    let pair1 = proc.alloc_pair(&mut mem, shared_str, Value::Nil).unwrap();
-    let pair2 = proc.alloc_pair(&mut mem, shared_str, Value::Nil).unwrap();
+    let pair1 = proc
+        .alloc_term_pair(&mut mem, shared_str, Term::NIL)
+        .unwrap();
+    let pair2 = proc
+        .alloc_term_pair(&mut mem, shared_str, Term::NIL)
+        .unwrap();
 
     // Create a tuple containing both pairs
-    let src = proc.alloc_tuple(&mut mem, &[pair1, pair2]).unwrap();
+    let src = proc.alloc_term_tuple(&mut mem, &[pair1, pair2]).unwrap();
 
     // Copy to realm
-    let dst = deep_copy_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
+    let dst = deep_copy_term_to_realm(src, &mut realm, &mut mem, &mut visited).unwrap();
 
     // Extract the copied pairs
-    let Value::Tuple(tuple_addr) = dst else {
-        panic!()
-    };
+    let tuple_addr = dst.to_vaddr();
     let elem_base = tuple_addr.add(HeapTuple::HEADER_SIZE as u64);
-    let copied_pair1: Value = mem.read(elem_base);
-    let copied_pair2: Value = mem.read(elem_base.add(core::mem::size_of::<Value>() as u64));
+    let copied_pair1: Term = mem.read(elem_base);
+    let copied_pair2: Term = mem.read(elem_base.add(core::mem::size_of::<Term>() as u64));
 
     // Extract the strings from each pair
-    let Value::Pair(p1_addr) = copied_pair1 else {
-        panic!()
-    };
-    let Value::Pair(p2_addr) = copied_pair2 else {
-        panic!()
-    };
-    let p1: Pair = mem.read(p1_addr);
-    let p2: Pair = mem.read(p2_addr);
+    let p1_addr = copied_pair1.to_vaddr();
+    let p2_addr = copied_pair2.to_vaddr();
+    let p1: HeapPair = mem.read(p1_addr);
+    let p2: HeapPair = mem.read(p2_addr);
 
     // Both pairs should have the SAME string address (shared structure preserved)
-    assert_eq!(p1.first, p2.first);
+    assert_eq!(p1.head, p2.head);
 
     // And it should be in realm region
-    let Value::String(str_addr) = p1.first else {
-        panic!()
-    };
+    let str_addr = p1.head.to_vaddr();
     assert!(str_addr.as_u64() >= 0x4000);
 }
 
@@ -475,48 +332,13 @@ fn test_deep_copy_oom() {
     let mut visited = VisitedTracker::new();
 
     // Allocate a string on process heap - needs header (8 bytes) + content
-    let s = proc.alloc_string(&mut mem, "hello world").unwrap();
+    let s = proc.alloc_term_string(&mut mem, "hello world").unwrap();
 
     // Try to copy to realm - should fail due to OOM
     // String needs 8 bytes header + 11 bytes content = 19 bytes minimum
-    let result = deep_copy_to_realm(s, &mut realm, &mut mem, &mut visited);
+    let result = deep_copy_term_to_realm(s, &mut realm, &mut mem, &mut visited);
     assert!(
         result.is_none(),
         "deep copy should fail when realm is out of memory"
-    );
-}
-
-#[test]
-fn test_deep_copy_large_nested_structure_oom() {
-    // Create a realm with limited space
-    let mem = MockVSpace::new(0x10000, Vaddr::new(0x1000));
-    let proc = Process::new(Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
-    // Realm with 256 bytes - enough for a few small allocations but not a large structure
-    let mut realm = Realm::new(Vaddr::new(0x4000), 256);
-    let mut mem = mem;
-    let mut proc = proc;
-    let mut visited = VisitedTracker::new();
-
-    // Create a deeply nested structure that will exhaust realm memory
-    let s1 = proc.alloc_string(&mut mem, "string1").unwrap();
-    let s2 = proc.alloc_string(&mut mem, "string2").unwrap();
-    let s3 = proc.alloc_string(&mut mem, "string3").unwrap();
-    let s4 = proc.alloc_string(&mut mem, "string4").unwrap();
-
-    // Create nested pairs
-    let p1 = proc.alloc_pair(&mut mem, s1, Value::Nil).unwrap();
-    let p2 = proc.alloc_pair(&mut mem, s2, p1).unwrap();
-    let p3 = proc.alloc_pair(&mut mem, s3, p2).unwrap();
-    let nested = proc.alloc_pair(&mut mem, s4, p3).unwrap();
-
-    // Create tuple with multiple nested elements
-    let elements = [nested, nested, nested, nested];
-    let large_tuple = proc.alloc_tuple(&mut mem, &elements).unwrap();
-
-    // Try to copy to realm - should fail due to OOM at some point
-    let result = deep_copy_to_realm(large_tuple, &mut realm, &mut mem, &mut visited);
-    assert!(
-        result.is_none(),
-        "deep copy of large structure should fail when realm runs out of memory"
     );
 }

@@ -22,8 +22,8 @@ use crate::process::{Process, WorkerId};
 use crate::reader::read;
 use crate::realm::Realm;
 use crate::scheduler::Worker;
+use crate::term::printer::print_term;
 use crate::uart::Uart;
-use crate::value::print_value;
 use crate::vm;
 
 use super::spec_data::{self, ExpectedType, SPEC_BLOCKS};
@@ -294,7 +294,7 @@ fn eval_and_capture<M: MemorySpace>(
 
     // Capture output
     let mut output = OutputBuffer::new();
-    print_value(result, proc, mem, &mut output);
+    print_term(result, proc, realm, mem, &mut output);
 
     Ok(output)
 }

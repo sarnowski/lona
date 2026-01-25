@@ -9,7 +9,7 @@ use super::lexer::{LexError, Lexer, Token};
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::Realm;
-use crate::value::Value;
+use crate::term::Term;
 use core::option::Option::{self, None, Some};
 use core::result::Result::{self, Err, Ok};
 
@@ -143,7 +143,7 @@ impl<'a> Parser<'a> {
         proc: &mut Process,
         realm: &mut Realm,
         mem: &mut M,
-    ) -> Result<Option<Value>, ReadError> {
+    ) -> Result<Option<Term>, ReadError> {
         let token = match self.peek()? {
             Some(t) => t.clone(),
             None => return Ok(None),
@@ -151,15 +151,20 @@ impl<'a> Parser<'a> {
         self.advance();
 
         match token {
-            Token::Nil => Ok(Some(Value::nil())),
-            Token::True => Ok(Some(Value::bool(true))),
-            Token::False => Ok(Some(Value::bool(false))),
-            Token::Int(n) => Ok(Some(Value::int(n))),
+            Token::Nil => Ok(Some(Term::NIL)),
+            Token::True => Ok(Some(Term::TRUE)),
+            Token::False => Ok(Some(Term::FALSE)),
+            Token::Int(n) => {
+                // For small integers, use immediate encoding
+                // TODO: Support bignums for large integers
+                let term = Term::small_int(n).ok_or(ParseError::OutOfMemory)?;
+                Ok(Some(term))
+            }
             Token::String(s) => {
-                let value = proc
-                    .alloc_string(mem, s.as_str())
+                let term = proc
+                    .alloc_term_string(mem, s.as_str())
                     .ok_or(ParseError::OutOfMemory)?;
-                Ok(Some(value))
+                Ok(Some(term))
             }
             Token::Symbol(s) => {
                 let value = realm
@@ -183,10 +188,10 @@ impl<'a> Parser<'a> {
                     .ok_or(ParseError::OutOfMemory)?;
                 // Build (quote expr) = Pair(quote, Pair(expr, nil))
                 let inner = proc
-                    .alloc_pair(mem, expr, Value::nil())
+                    .alloc_term_pair(mem, expr, Term::NIL)
                     .ok_or(ParseError::OutOfMemory)?;
                 let outer = proc
-                    .alloc_pair(mem, quote_sym, inner)
+                    .alloc_term_pair(mem, quote_sym, inner)
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(outer))
             }
@@ -201,10 +206,10 @@ impl<'a> Parser<'a> {
                     .ok_or(ParseError::OutOfMemory)?;
                 // Build (var expr) = Pair(var, Pair(expr, nil))
                 let inner = proc
-                    .alloc_pair(mem, expr, Value::nil())
+                    .alloc_term_pair(mem, expr, Term::NIL)
                     .ok_or(ParseError::OutOfMemory)?;
                 let outer = proc
-                    .alloc_pair(mem, var_sym, inner)
+                    .alloc_term_pair(mem, var_sym, inner)
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(outer))
             }
@@ -224,9 +229,9 @@ impl<'a> Parser<'a> {
         proc: &mut Process,
         realm: &mut Realm,
         mem: &mut M,
-    ) -> Result<Option<Value>, ReadError> {
+    ) -> Result<Option<Term>, ReadError> {
         // Collect elements on stack before building linked list
-        let mut elements = [Value::nil(); MAX_LIST_ELEMENTS];
+        let mut elements = [Term::NIL; MAX_LIST_ELEMENTS];
         let mut count = 0;
 
         loop {
@@ -250,10 +255,10 @@ impl<'a> Parser<'a> {
         }
 
         // Build list from back to front: (a b c) = Pair(a, Pair(b, Pair(c, nil)))
-        let mut result = Value::nil();
+        let mut result = Term::NIL;
         for i in (0..count).rev() {
             result = proc
-                .alloc_pair(mem, elements[i], result)
+                .alloc_term_pair(mem, elements[i], result)
                 .ok_or(ParseError::OutOfMemory)?;
         }
 
@@ -265,9 +270,9 @@ impl<'a> Parser<'a> {
         proc: &mut Process,
         realm: &mut Realm,
         mem: &mut M,
-    ) -> Result<Option<Value>, ReadError> {
+    ) -> Result<Option<Term>, ReadError> {
         // Collect elements on stack before building tuple
-        let mut elements = [Value::nil(); MAX_TUPLE_ELEMENTS];
+        let mut elements = [Term::NIL; MAX_TUPLE_ELEMENTS];
         let mut count = 0;
 
         loop {
@@ -292,7 +297,7 @@ impl<'a> Parser<'a> {
 
         // Allocate and build the tuple
         let tuple = proc
-            .alloc_tuple(mem, &elements[..count])
+            .alloc_term_tuple(mem, &elements[..count])
             .ok_or(ParseError::OutOfMemory)?;
 
         Ok(Some(tuple))
@@ -303,9 +308,9 @@ impl<'a> Parser<'a> {
         proc: &mut Process,
         realm: &mut Realm,
         mem: &mut M,
-    ) -> Result<Option<Value>, ReadError> {
+    ) -> Result<Option<Term>, ReadError> {
         // Collect elements on stack before building vector
-        let mut elements = [Value::nil(); MAX_VECTOR_ELEMENTS];
+        let mut elements = [Term::NIL; MAX_VECTOR_ELEMENTS];
         let mut count = 0;
 
         loop {
@@ -330,7 +335,7 @@ impl<'a> Parser<'a> {
 
         // Allocate and build the vector
         let vector = proc
-            .alloc_vector(mem, &elements[..count])
+            .alloc_term_vector(mem, &elements[..count])
             .ok_or(ParseError::OutOfMemory)?;
 
         Ok(Some(vector))
@@ -341,10 +346,10 @@ impl<'a> Parser<'a> {
         proc: &mut Process,
         realm: &mut Realm,
         mem: &mut M,
-    ) -> Result<Option<Value>, ReadError> {
+    ) -> Result<Option<Term>, ReadError> {
         // Collect key-value pairs on stack before building map
-        // Each entry is 2 Values: key, value
-        let mut elements = [Value::nil(); MAX_MAP_ENTRIES * 2];
+        // Each entry is 2 Terms: key, value
+        let mut elements = [Term::NIL; MAX_MAP_ENTRIES * 2];
         let mut count = 0;
 
         loop {
@@ -374,23 +379,24 @@ impl<'a> Parser<'a> {
 
         // Build the map as association list from back to front
         // %{:a 1 :b 2} → Pair([:a 1], Pair([:b 2], nil))
-        let mut entries = Value::nil();
+        let mut entries = Term::NIL;
+        let entry_count = count / 2;
         for i in (0..count).step_by(2).rev() {
             // Build [key value] tuple
             let pair_elements = [elements[i], elements[i + 1]];
             let kv_tuple = proc
-                .alloc_tuple(mem, &pair_elements)
+                .alloc_term_tuple(mem, &pair_elements)
                 .ok_or(ParseError::OutOfMemory)?;
 
             // Prepend to entries list
             entries = proc
-                .alloc_pair(mem, kv_tuple, entries)
+                .alloc_term_pair(mem, kv_tuple, entries)
                 .ok_or(ParseError::OutOfMemory)?;
         }
 
         // Allocate the map with entries
         let map = proc
-            .alloc_map(mem, entries)
+            .alloc_term_map(mem, entries, entry_count)
             .ok_or(ParseError::OutOfMemory)?;
 
         Ok(Some(map))
@@ -405,15 +411,15 @@ impl<'a> Parser<'a> {
         proc: &mut Process,
         realm: &mut Realm,
         mem: &mut M,
-    ) -> Result<Option<Value>, ReadError> {
+    ) -> Result<Option<Term>, ReadError> {
         // Collect all metadata maps/keywords before the form
         // We need to merge multiple metadata: ^:a ^:b foo → {:a true :b true}
-        let mut meta_entries = [Value::nil(); MAX_MAP_ENTRIES * 2];
+        let mut meta_entries = [Term::NIL; MAX_MAP_ENTRIES * 2];
         let mut meta_count = 0;
 
         // Read the first metadata token (we already consumed the ^)
         let first_meta = self.read_metadata_value(proc, realm, mem)?;
-        add_metadata_entries(&first_meta, &mut meta_entries, &mut meta_count, proc, mem)?;
+        add_metadata_entries(first_meta, &mut meta_entries, &mut meta_count, proc, mem)?;
 
         // Check for additional metadata prefixes
         loop {
@@ -421,13 +427,7 @@ impl<'a> Parser<'a> {
                 Some(Token::Caret) => {
                     self.advance(); // consume ^
                     let next_meta = self.read_metadata_value(proc, realm, mem)?;
-                    add_metadata_entries(
-                        &next_meta,
-                        &mut meta_entries,
-                        &mut meta_count,
-                        proc,
-                        mem,
-                    )?;
+                    add_metadata_entries(next_meta, &mut meta_entries, &mut meta_count, proc, mem)?;
                 }
                 Some(_) => break,
                 None => return Err(ParseError::MissingFormAfterMetadata.into()),
@@ -440,26 +440,27 @@ impl<'a> Parser<'a> {
             .ok_or(ParseError::MissingFormAfterMetadata)?;
 
         // Build the merged metadata map
-        let mut entries = Value::nil();
+        let mut entries = Term::NIL;
+        let entry_count = meta_count / 2;
         for i in (0..meta_count).step_by(2).rev() {
             // Build [key value] tuple
             let pair_elements = [meta_entries[i], meta_entries[i + 1]];
             let kv_tuple = proc
-                .alloc_tuple(mem, &pair_elements)
+                .alloc_term_tuple(mem, &pair_elements)
                 .ok_or(ParseError::OutOfMemory)?;
 
             entries = proc
-                .alloc_pair(mem, kv_tuple, entries)
+                .alloc_term_pair(mem, kv_tuple, entries)
                 .ok_or(ParseError::OutOfMemory)?;
         }
 
         let meta_map = proc
-            .alloc_map(mem, entries)
+            .alloc_term_map(mem, entries, entry_count)
             .ok_or(ParseError::OutOfMemory)?;
 
         // Store the metadata for the form in the realm's metadata table
         // The actual form is returned; the caller (or later phases) can retrieve meta
-        if let (Value::Map(map_addr), Some(addr)) = (meta_map, get_heap_addr(form)) {
+        if let (Some(map_addr), Some(addr)) = (get_heap_addr(meta_map), get_heap_addr(form)) {
             realm
                 .set_metadata(addr, map_addr)
                 .ok_or(ParseError::OutOfMemory)?;
@@ -474,7 +475,7 @@ impl<'a> Parser<'a> {
         proc: &mut Process,
         realm: &mut Realm,
         mem: &mut M,
-    ) -> Result<Value, ReadError> {
+    ) -> Result<Term, ReadError> {
         match self.peek()? {
             None => Err(ParseError::MissingFormAfterMetadata.into()),
             Some(Token::MapStart) => {
@@ -515,71 +516,58 @@ pub fn read<M: MemorySpace>(
     proc: &mut Process,
     realm: &mut Realm,
     mem: &mut M,
-) -> Result<Option<Value>, ReadError> {
+) -> Result<Option<Term>, ReadError> {
     let mut parser = Parser::new(input);
     parser.read(proc, realm, mem)
 }
 
 /// Add entries from a metadata value (map or keyword) to the entries array.
 fn add_metadata_entries<M: MemorySpace>(
-    meta: &Value,
-    entries: &mut [Value],
+    meta: Term,
+    entries: &mut [Term],
     count: &mut usize,
     proc: &Process,
     mem: &M,
 ) -> Result<(), ReadError> {
-    match meta {
-        Value::Keyword(_) => {
-            // ^:keyword → {:keyword true}
-            if *count + 2 > entries.len() {
-                return Err(ParseError::MapTooLong.into());
-            }
-            entries[*count] = *meta;
-            entries[*count + 1] = Value::bool(true);
-            *count += 2;
+    if meta.is_keyword() {
+        // ^:keyword → {:keyword true}
+        if *count + 2 > entries.len() {
+            return Err(ParseError::MapTooLong.into());
         }
-        Value::Map(_) => {
-            // Copy all entries from the map
-            let map = proc.read_map(mem, *meta);
-            if let Some(map_val) = map {
-                let mut current = map_val.entries;
-                while let Some(pair) = proc.read_pair(mem, current) {
-                    // Each pair.first is a [key value] tuple
-                    if let Some(kv_key) = proc.read_tuple_element(mem, pair.first, 0) {
-                        if let Some(kv_val) = proc.read_tuple_element(mem, pair.first, 1) {
-                            if *count + 2 > entries.len() {
-                                return Err(ParseError::MapTooLong.into());
-                            }
-                            entries[*count] = kv_key;
-                            entries[*count + 1] = kv_val;
-                            *count += 2;
+        entries[*count] = meta;
+        entries[*count + 1] = Term::TRUE;
+        *count += 2;
+    } else if proc.is_term_map(mem, meta) {
+        // Copy all entries from the map
+        if let Some(mut current) = proc.read_term_map_entries(mem, meta) {
+            while let Some((entry, rest)) = proc.read_term_pair(mem, current) {
+                // Each entry is a [key value] tuple
+                if let Some(kv_key) = proc.read_term_tuple_element(mem, entry, 0) {
+                    if let Some(kv_val) = proc.read_term_tuple_element(mem, entry, 1) {
+                        if *count + 2 > entries.len() {
+                            return Err(ParseError::MapTooLong.into());
                         }
+                        entries[*count] = kv_key;
+                        entries[*count + 1] = kv_val;
+                        *count += 2;
                     }
-                    current = pair.rest;
                 }
+                current = rest;
             }
         }
-        _ => return Err(ParseError::InvalidMetadata.into()),
+    } else {
+        return Err(ParseError::InvalidMetadata.into());
     }
     Ok(())
 }
 
-/// Get the heap address of a value if it has one.
+/// Get the heap address of a term if it has one.
 ///
-/// Returns `Some(addr)` for heap-allocated values, `None` for immediates.
-const fn get_heap_addr(value: Value) -> Option<crate::Vaddr> {
-    match value {
-        Value::String(addr)
-        | Value::Pair(addr)
-        | Value::Symbol(addr)
-        | Value::Keyword(addr)
-        | Value::Tuple(addr)
-        | Value::Vector(addr)
-        | Value::Map(addr)
-        | Value::Var(addr)
-        | Value::Namespace(addr)
-        | Value::CompiledFn(addr)
-        | Value::Closure(addr) => Some(addr),
-        Value::Nil | Value::Bool(_) | Value::Int(_) | Value::NativeFn(_) | Value::Unbound => None,
+/// Returns `Some(addr)` for heap-allocated terms (boxed or list), `None` for immediates.
+const fn get_heap_addr(term: Term) -> Option<crate::Vaddr> {
+    if term.is_boxed() || term.is_list() {
+        Some(term.to_vaddr())
+    } else {
+        None
     }
 }

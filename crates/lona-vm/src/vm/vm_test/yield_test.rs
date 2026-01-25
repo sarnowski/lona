@@ -12,23 +12,29 @@ use crate::platform::MockVSpace;
 use crate::process::{MAX_REDUCTIONS, Process, WorkerId};
 use crate::realm::{Realm, bootstrap};
 use crate::scheduler::Worker;
-use crate::value::Value;
+use crate::term::Term;
 use crate::vm::{RunResult, Vm};
+
+/// Helper to create a small integer Term.
+fn int(n: i64) -> Term {
+    Term::small_int(n).expect("integer out of small_int range")
+}
 
 // --- Helper functions ---
 
 /// Create a test environment (worker, process, realm, memory).
 fn create_test_env() -> (Worker, Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
-    let mut mem = MockVSpace::new(256 * 1024, base);
+    // Increased sizes to accommodate larger function allocations after alignment fix
+    let mut mem = MockVSpace::new(512 * 1024, base);
     let young_base = base;
-    let young_size = 64 * 1024;
+    let young_size = 128 * 1024;
     let old_base = base.add(young_size as u64);
-    let old_size = 16 * 1024;
+    let old_size = 32 * 1024;
     let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
-    let realm_base = base.add(128 * 1024);
-    let mut realm = Realm::new(realm_base, 64 * 1024);
+    let realm_base = base.add((young_size + old_size) as u64 + 64 * 1024);
+    let mut realm = Realm::new(realm_base, 96 * 1024);
 
     let result = bootstrap(&mut realm, &mut mem).unwrap();
     proc.bootstrap(result.ns_var, result.core_ns);
@@ -96,15 +102,15 @@ fn vm_resumes_correctly() {
     // First run - should yield after 3 instructions
     let result1 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(result1, RunResult::Yielded));
-    assert_eq!(worker.x_regs[1], Value::int(1));
-    assert_eq!(worker.x_regs[2], Value::int(2));
-    assert_eq!(worker.x_regs[3], Value::int(3));
-    assert_eq!(worker.x_regs[4], Value::Nil); // Not yet executed
+    assert_eq!(worker.x_regs[1], int(1));
+    assert_eq!(worker.x_regs[2], int(2));
+    assert_eq!(worker.x_regs[3], int(3));
+    assert_eq!(worker.x_regs[4], Term::NIL); // Not yet executed
 
     // Resume with more budget
     proc.reductions = 100;
     let result2 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
-    assert!(matches!(result2, RunResult::Completed(v) if v == Value::int(42)));
+    assert!(matches!(result2, RunResult::Completed(v) if v == int(42)));
 }
 
 #[test]
@@ -207,10 +213,10 @@ fn yield_during_simple_function_call() {
             // Resume and complete
             proc.reductions = 100;
             let result2 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
-            assert!(matches!(result2, RunResult::Completed(v) if v == Value::int(6)));
+            assert!(matches!(result2, RunResult::Completed(v) if v == int(6)));
         }
         RunResult::Completed(v) => {
-            assert_eq!(v, Value::int(6));
+            assert_eq!(v, int(6));
         }
         RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
     }
@@ -268,7 +274,7 @@ fn yield_and_resume_nested_calls() {
     loop {
         match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
             RunResult::Completed(v) => {
-                assert_eq!(v, Value::int(14));
+                assert_eq!(v, int(14));
                 break;
             }
             RunResult::Yielded => {
@@ -287,12 +293,12 @@ fn yield_and_resume_nested_calls() {
 
 #[test]
 fn run_result_methods() {
-    assert!(RunResult::Completed(Value::Nil).is_terminal());
+    assert!(RunResult::Completed(Term::NIL).is_terminal());
     assert!(RunResult::Error(crate::vm::RuntimeError::NoCode).is_terminal());
     assert!(!RunResult::Yielded.is_terminal());
 
     assert!(RunResult::Yielded.is_yielded());
-    assert!(!RunResult::Completed(Value::Nil).is_yielded());
+    assert!(!RunResult::Completed(Term::NIL).is_yielded());
     assert!(!RunResult::Error(crate::vm::RuntimeError::NoCode).is_yielded());
 }
 
@@ -305,7 +311,7 @@ fn execute_handles_yielding_transparently() {
     // and always run to completion
     // Note: + is binary, so we nest the additions
     let result = eval("(+ (+ (+ 1 2) 3) 4)", &mut proc, &mut realm, &mut mem);
-    assert_eq!(result, Ok(Value::int(10)));
+    assert_eq!(result, Ok(int(10)));
 }
 
 #[test]
@@ -353,7 +359,7 @@ fn stress_many_yields() {
         match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
             RunResult::Completed(v) => {
                 // Final value should be the last iteration (999)
-                assert_eq!(v, Value::int(999));
+                assert_eq!(v, int(999));
                 break;
             }
             RunResult::Yielded => {
@@ -479,7 +485,7 @@ fn stress_recursive_with_yields() {
         match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
             RunResult::Completed(v) => {
                 // sum(1..10) = 55
-                assert_eq!(v, Value::int(55));
+                assert_eq!(v, int(55));
                 break;
             }
             RunResult::Yielded => {
@@ -565,7 +571,7 @@ fn stress_deep_call_chain_yield_resume() {
     loop {
         match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
             RunResult::Completed(v) => {
-                assert_eq!(v, Value::int(15));
+                assert_eq!(v, int(15));
                 break;
             }
             RunResult::Yielded => {

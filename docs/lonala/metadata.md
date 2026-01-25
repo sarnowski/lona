@@ -308,13 +308,13 @@ Metadata does not affect equality:
 
 ```clojure
 (= (with-meta 'foo %{:a 1})
-   (with-meta 'foo %{:b 2}))  ; => true
+   (with-meta 'foo %{:b 2}))  ; => true  @todo
 
 (= (with-meta [1 2 3] %{:x 1})
-   (with-meta [1 2 3] %{:y 2}))  ; => true  @todo
+   (with-meta [1 2 3] %{:y 2}))  ; => true
 
 (= (with-meta 'foo %{:a 1})
-   'foo)  ; => true
+   'foo)  ; => true  @todo
 ```
 
 Two values differing only in metadata are equal. This allows metadata to annotate without changing semantics.

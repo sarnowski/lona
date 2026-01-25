@@ -7,21 +7,20 @@ This document describes how to write testable examples in Lonala specification d
 ## Quick Reference
 
 ```clojure
-;; @todo
 ;; Setup line (no assertion, establishes state)
 (def x 42)
 
-;; Assertion (expression ; => expected)
+;; Assertion: expression followed by the arrow marker
 (+ x 8)  ; => 50
 
 ;; Error assertion
 (/ 1 0)  ; => ERROR
 
 ;; Specific error type
-(nth [] 5)  ; => ERROR :out-of-bounds
+(nth [] 5)  ; => ERROR :index-out-of-bounds
 
 ;; Mark unimplemented features
-(lazy-seq [1 2 3])  ; => (1 2 3)
+(lazy-seq [1 2 3])  ; => (1 2 3)  @todo
 ```
 
 ---
@@ -94,7 +93,7 @@ Optionally specify the error type:
 ```clojure
 (nth [] 10)     ; => ERROR :out-of-bounds  @todo
 (+ 1 :foo)      ; => ERROR :type-error
-(undefined-fn)  ; => ERROR :undefined  @todo
+(undefined-fn)  ; => ERROR :undefined
 ```
 
 ---
@@ -120,7 +119,6 @@ If a setup line causes an error, the entire block fails.
 Expressions can span multiple lines. Place the `; =>` marker after the closing delimiter:
 
 ```clojure
-;; @todo
 (match [:ok 42]
   [:ok result] result
   [:error _] nil)  ; => 42
@@ -232,7 +230,6 @@ Document when and how functions fail:
 When setup is needed, keep it minimal and clear:
 
 ```clojure
-;; @todo
 (def m %{:a 1 :b 2})
 (get m :a)  ; => 1
 (get m :c)  ; => nil

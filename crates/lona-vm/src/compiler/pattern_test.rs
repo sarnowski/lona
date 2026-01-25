@@ -12,7 +12,7 @@ use crate::platform::MockVSpace;
 use crate::process::Process;
 use crate::reader::read;
 use crate::realm::{Realm, bootstrap};
-use crate::value::Value;
+use crate::term::Term;
 
 /// Create a test environment with bootstrapped realm and process.
 fn setup() -> Option<(Process, Realm, MockVSpace)> {
@@ -90,35 +90,35 @@ fn parse_longer_binding_name() {
 fn parse_literal_nil() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let pattern = parse_pattern("nil", &mut proc, &mut realm, &mut mem);
-    assert_eq!(pattern, Pattern::Literal(Value::Nil));
+    assert_eq!(pattern, Pattern::Literal(Term::NIL));
 }
 
 #[test]
 fn parse_literal_true() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let pattern = parse_pattern("true", &mut proc, &mut realm, &mut mem);
-    assert_eq!(pattern, Pattern::Literal(Value::Bool(true)));
+    assert_eq!(pattern, Pattern::Literal(Term::TRUE));
 }
 
 #[test]
 fn parse_literal_false() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let pattern = parse_pattern("false", &mut proc, &mut realm, &mut mem);
-    assert_eq!(pattern, Pattern::Literal(Value::Bool(false)));
+    assert_eq!(pattern, Pattern::Literal(Term::FALSE));
 }
 
 #[test]
 fn parse_literal_integer() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let pattern = parse_pattern("42", &mut proc, &mut realm, &mut mem);
-    assert_eq!(pattern, Pattern::Literal(Value::Int(42)));
+    assert_eq!(pattern, Pattern::Literal(Term::small_int(42).unwrap()));
 }
 
 #[test]
 fn parse_literal_negative_integer() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
     let pattern = parse_pattern("-100", &mut proc, &mut realm, &mut mem);
-    assert_eq!(pattern, Pattern::Literal(Value::Int(-100)));
+    assert_eq!(pattern, Pattern::Literal(Term::small_int(-100).unwrap()));
 }
 
 #[test]
@@ -127,7 +127,7 @@ fn parse_literal_keyword() {
     let pattern = parse_pattern(":ok", &mut proc, &mut realm, &mut mem);
 
     match pattern {
-        Pattern::Literal(Value::Keyword(_)) => {}
+        Pattern::Literal(term) if term.is_keyword() => {}
         _ => panic!("expected Literal keyword pattern"),
     }
 }
@@ -138,7 +138,7 @@ fn parse_literal_string() {
     let pattern = parse_pattern("\"hello\"", &mut proc, &mut realm, &mut mem);
 
     match pattern {
-        Pattern::Literal(Value::String(_)) => {}
+        Pattern::Literal(term) if proc.is_term_string(&mem, term) => {}
         _ => panic!("expected Literal string pattern"),
     }
 }
@@ -183,9 +183,18 @@ fn parse_tuple_with_literals() {
     match pattern {
         Pattern::Tuple(elements) => {
             assert_eq!(elements.len(), 3);
-            assert!(matches!(&elements[0], Pattern::Literal(Value::Int(1))));
-            assert!(matches!(&elements[1], Pattern::Literal(Value::Keyword(_))));
-            assert!(matches!(&elements[2], Pattern::Literal(Value::Bool(true))));
+            match &elements[0] {
+                Pattern::Literal(term) => assert_eq!(*term, Term::small_int(1).unwrap()),
+                _ => panic!("expected literal"),
+            }
+            match &elements[1] {
+                Pattern::Literal(term) => assert!(term.is_keyword()),
+                _ => panic!("expected keyword literal"),
+            }
+            match &elements[2] {
+                Pattern::Literal(term) => assert_eq!(*term, Term::TRUE),
+                _ => panic!("expected true literal"),
+            }
         }
         _ => panic!("expected Tuple pattern"),
     }
@@ -199,7 +208,10 @@ fn parse_tuple_mixed() {
     match pattern {
         Pattern::Tuple(elements) => {
             assert_eq!(elements.len(), 2);
-            assert!(matches!(&elements[0], Pattern::Literal(Value::Keyword(_))));
+            match &elements[0] {
+                Pattern::Literal(term) => assert!(term.is_keyword()),
+                _ => panic!("expected keyword literal"),
+            }
             assert!(matches!(&elements[1], Pattern::Binding { .. }));
         }
         _ => panic!("expected Tuple pattern"),
@@ -359,7 +371,7 @@ fn parse_map_single_key() {
     match pattern {
         Pattern::Map(pairs) => {
             assert_eq!(pairs.len(), 1);
-            assert!(matches!(pairs[0].0, Value::Keyword(_)));
+            assert!(pairs[0].0.is_keyword());
             assert_eq!(pairs[0].1.binding_name(), Some(b"v".as_slice()));
         }
         _ => panic!("expected Map pattern"),
@@ -375,8 +387,8 @@ fn parse_map_multiple_keys() {
         Pattern::Map(pairs) => {
             assert_eq!(pairs.len(), 2);
             // Both keys should be keywords
-            assert!(matches!(pairs[0].0, Value::Keyword(_)));
-            assert!(matches!(pairs[1].0, Value::Keyword(_)));
+            assert!(pairs[0].0.is_keyword());
+            assert!(pairs[1].0.is_keyword());
             // Both values should be binding patterns
             assert!(matches!(&pairs[0].1, Pattern::Binding { .. }));
             assert!(matches!(&pairs[1].1, Pattern::Binding { .. }));
@@ -393,8 +405,11 @@ fn parse_map_with_literal_value_pattern() {
     match pattern {
         Pattern::Map(pairs) => {
             assert_eq!(pairs.len(), 1);
-            assert!(matches!(pairs[0].0, Value::Keyword(_)));
-            assert!(matches!(&pairs[0].1, Pattern::Literal(Value::Keyword(_))));
+            assert!(pairs[0].0.is_keyword());
+            match &pairs[0].1 {
+                Pattern::Literal(term) => assert!(term.is_keyword()),
+                _ => panic!("expected Literal keyword pattern"),
+            }
         }
         _ => panic!("expected Map pattern"),
     }
@@ -424,7 +439,10 @@ fn parse_map_with_nested_tuple() {
 #[test]
 fn binding_name_returns_none_for_non_binding() {
     assert_eq!(Pattern::Wildcard.binding_name(), None);
-    assert_eq!(Pattern::Literal(Value::Int(42)).binding_name(), None);
+    assert_eq!(
+        Pattern::Literal(Term::small_int(42).unwrap()).binding_name(),
+        None
+    );
 }
 
 #[test]
@@ -435,8 +453,9 @@ fn pattern_binding_constructor() {
 
 #[test]
 fn pattern_literal_constructor() {
-    let pattern = Pattern::literal(Value::Int(42));
-    assert_eq!(pattern, Pattern::Literal(Value::Int(42)));
+    let term = Term::small_int(42).unwrap();
+    let pattern = Pattern::literal(term);
+    assert_eq!(pattern, Pattern::Literal(term));
 }
 
 #[test]

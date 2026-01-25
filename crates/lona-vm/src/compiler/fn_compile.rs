@@ -5,7 +5,7 @@
 
 use crate::bytecode::{Chunk, encode_abc, encode_abx, op};
 use crate::platform::MemorySpace;
-use crate::value::Value;
+use crate::term::Term;
 
 use super::{
     Binding, CompileError, Compiler, MAX_CAPTURES, MAX_PARAMS, MAX_SYMBOL_NAME_LEN, TEMP_REG_BASE,
@@ -26,37 +26,35 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// - `(fn* [a b & rest] ...)` - 2 required params, rest collected in tuple
     pub(super) fn compile_fn(
         &mut self,
-        args: Value,
+        args: Term,
         target: u8,
         temp_base: u8,
     ) -> Result<u8, CompileError> {
         // Parse: (fn* [params] body...) or (fn* name [params] body...)
-        let pair = self
+        let (first, rest) = self
             .proc
-            .read_pair(self.mem, args)
+            .read_term_pair(self.mem, args)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // First argument can be a symbol (name) or tuple (params)
-        let (params, body) = match pair.first {
-            Value::Symbol(_) => {
-                // Named function: (fn* name [params] body...)
-                // Name is parsed for syntax but not stored (prints as #<fn/N>)
-                // Read the next element which should be params
-                let next_pair = self
-                    .proc
-                    .read_pair(self.mem, pair.rest)
-                    .ok_or(CompileError::InvalidSyntax)?;
-                let params = next_pair.first;
-                if !matches!(params, Value::Tuple(_)) {
-                    return Err(CompileError::InvalidSyntax);
-                }
-                (params, next_pair.rest)
+        let (params, body) = if first.is_symbol() {
+            // Named function: (fn* name [params] body...)
+            // Name is parsed for syntax but not stored (prints as #<fn/N>)
+            // Read the next element which should be params
+            let (next_first, next_rest) = self
+                .proc
+                .read_term_pair(self.mem, rest)
+                .ok_or(CompileError::InvalidSyntax)?;
+            let params = next_first;
+            if !self.proc.is_term_tuple(self.mem, params) {
+                return Err(CompileError::InvalidSyntax);
             }
-            Value::Tuple(_) => {
-                // Anonymous function: (fn* [params] body...)
-                (pair.first, pair.rest)
-            }
-            _ => return Err(CompileError::InvalidSyntax),
+            (params, next_rest)
+        } else if self.proc.is_term_tuple(self.mem, first) {
+            // Anonymous function: (fn* [params] body...)
+            (first, rest)
+        } else {
+            return Err(CompileError::InvalidSyntax);
         };
 
         // Parse parameter list, detecting variadic `&`
@@ -83,11 +81,11 @@ impl<M: MemorySpace> Compiler<'_, M> {
         for i in 0..arity as usize {
             let param = self
                 .proc
-                .read_tuple_element(self.mem, params, i)
+                .read_term_tuple_element(self.mem, params, i)
                 .ok_or(CompileError::InvalidSyntax)?;
 
             // Parameter must be a symbol
-            let Value::Symbol(_) = param else {
+            if !param.is_symbol() {
                 // Restore state on error
                 self.bindings = saved_bindings;
                 self.bindings_len = saved_bindings_len;
@@ -96,7 +94,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
                 self.captures_len = saved_captures_len;
                 self.inner_arity = saved_inner_arity;
                 return Err(CompileError::InvalidSyntax);
-            };
+            }
 
             self.bind_param(param, (i + 1) as u8)?;
         }
@@ -107,7 +105,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
             let rest_idx = arity as usize + 1; // Skip the `&` at index `arity`
             let rest_param = self
                 .proc
-                .read_tuple_element(self.mem, params, rest_idx)
+                .read_term_tuple_element(self.mem, params, rest_idx)
                 .ok_or(CompileError::InvalidSyntax)?;
             self.bind_param(rest_param, arity + 1)?;
         }
@@ -138,9 +136,9 @@ impl<M: MemorySpace> Compiler<'_, M> {
         self.inner_arity = saved_inner_arity;
 
         // Allocate the CompiledFn on the heap
-        let fn_val = self
+        let fn_term = self
             .proc
-            .alloc_compiled_fn(
+            .alloc_term_compiled_fn(
                 self.mem,
                 arity,
                 variadic,
@@ -152,11 +150,11 @@ impl<M: MemorySpace> Compiler<'_, M> {
 
         if captures_count == 0 {
             // No captures - just load the function as a constant
-            self.compile_constant(fn_val, target)?;
+            self.compile_constant(fn_term, target)?;
         } else {
             // Has captures - emit bytecode to create closure at runtime
             self.emit_closure_creation(
-                fn_val,
+                fn_term,
                 &capture_outer_regs,
                 captures_count,
                 target,
@@ -172,7 +170,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// The closure combines a compiled function with captured values from the enclosing scope.
     fn emit_closure_creation(
         &mut self,
-        fn_val: Value,
+        fn_term: Term,
         capture_outer_regs: &[u8; MAX_CAPTURES],
         captures_count: usize,
         target: u8,
@@ -185,7 +183,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
         let captures_base = closure_temp + 1;
 
         // Load function constant
-        self.compile_constant(fn_val, fn_temp)?;
+        self.compile_constant(fn_term, fn_temp)?;
 
         // Move capture values from outer registers to consecutive temp registers
         for (i, &src_reg) in capture_outer_regs.iter().enumerate().take(captures_count) {
@@ -217,7 +215,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
     ///
     /// The body is a list of expressions that are implicitly wrapped in `do`.
     /// Returns the compiled chunk with a RETURN instruction at the end.
-    fn compile_fn_body(&mut self, body: Value) -> Result<Chunk, CompileError> {
+    fn compile_fn_body(&mut self, body: Term) -> Result<Chunk, CompileError> {
         // Create a new chunk for the function body
         let mut fn_chunk = Chunk::new();
 
@@ -241,10 +239,9 @@ impl<M: MemorySpace> Compiler<'_, M> {
     }
 
     /// Bind a parameter symbol to a register.
-    fn bind_param(&mut self, param: Value, register: u8) -> Result<(), CompileError> {
+    fn bind_param(&mut self, param: Term, register: u8) -> Result<(), CompileError> {
         let param_name = self
-            .proc
-            .read_string(self.mem, param)
+            .get_symbol_name(param)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // Copy name to local buffer
@@ -274,23 +271,22 @@ impl<M: MemorySpace> Compiler<'_, M> {
     ///
     /// For `[a b & rest]`: arity=2, variadic=true
     /// For `[a b c]`: arity=3, variadic=false
-    fn parse_fn_params(&self, params: Value) -> Result<(u8, bool), CompileError> {
+    fn parse_fn_params(&self, params: Term) -> Result<(u8, bool), CompileError> {
         let len = self
             .proc
-            .read_tuple_len(self.mem, params)
+            .read_term_tuple_len(self.mem, params)
             .ok_or(CompileError::InvalidSyntax)?;
 
         // Check for `&` in parameter list
         for i in 0..len {
             let param = self
                 .proc
-                .read_tuple_element(self.mem, params, i)
+                .read_term_tuple_element(self.mem, params, i)
                 .ok_or(CompileError::InvalidSyntax)?;
 
-            if let Value::Symbol(_) = param {
+            if param.is_symbol() {
                 let name = self
-                    .proc
-                    .read_string(self.mem, param)
+                    .get_symbol_name(param)
                     .ok_or(CompileError::InvalidSyntax)?;
 
                 if name == "&" {
@@ -302,9 +298,9 @@ impl<M: MemorySpace> Compiler<'_, M> {
                     // Verify the rest param is a symbol
                     let rest_param = self
                         .proc
-                        .read_tuple_element(self.mem, params, i + 1)
+                        .read_term_tuple_element(self.mem, params, i + 1)
                         .ok_or(CompileError::InvalidSyntax)?;
-                    if !matches!(rest_param, Value::Symbol(_)) {
+                    if !rest_param.is_symbol() {
                         return Err(CompileError::InvalidSyntax);
                     }
                     // arity is the number of params before `&`

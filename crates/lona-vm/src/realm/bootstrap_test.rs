@@ -14,7 +14,10 @@
 use crate::Vaddr;
 use crate::platform::{MemorySpace, MockVSpace};
 use crate::realm::{Realm, bootstrap, get_core_ns, get_ns_var, lookup_var_in_ns};
-use crate::value::{Namespace, Value, VarContent};
+use crate::term::Term;
+use crate::term::header::Header;
+use crate::term::heap::{HeapNamespace, HeapVar};
+use crate::term::tag::object;
 
 /// Create a test setup with realm and memory.
 fn setup() -> (Realm, MockVSpace) {
@@ -22,6 +25,35 @@ fn setup() -> (Realm, MockVSpace) {
     let mem = MockVSpace::new(0x10000, Vaddr::new(0x1000));
     let realm = Realm::new(Vaddr::new(0x1000), 0xF000);
     (realm, mem)
+}
+
+/// Check if a term is a namespace by reading its header.
+fn is_term_namespace(mem: &MockVSpace, term: Term) -> bool {
+    if !term.is_boxed() {
+        return false;
+    }
+    let addr = term.to_vaddr();
+    let header: Header = mem.read(addr);
+    header.object_tag() == object::NAMESPACE
+}
+
+/// Check if a term is a var by reading its header.
+fn is_term_var(mem: &MockVSpace, term: Term) -> bool {
+    if !term.is_boxed() {
+        return false;
+    }
+    let addr = term.to_vaddr();
+    let header: Header = mem.read(addr);
+    header.object_tag() == object::VAR
+}
+
+/// Read a `HeapVar` from a term.
+fn read_heap_var(mem: &MockVSpace, term: Term) -> Option<HeapVar> {
+    if !is_term_var(mem, term) {
+        return None;
+    }
+    let addr = term.to_vaddr();
+    Some(mem.read(addr))
 }
 
 #[test]
@@ -32,7 +64,7 @@ fn test_bootstrap_creates_lona_core() {
     assert!(result.is_some());
 
     let result = result.unwrap();
-    assert!(result.core_ns.is_namespace());
+    assert!(is_term_namespace(&mem, result.core_ns));
 
     // Verify we can find lona.core by name
     let core_ns = get_core_ns(&realm, &mem);
@@ -51,19 +83,14 @@ fn test_bootstrap_seeds_ns_var() {
     assert!(ns_var.is_some());
     assert_eq!(ns_var.unwrap(), result.ns_var);
 
-    // *ns* should be process-bound
-    let Value::Var(slot_addr) = result.ns_var else {
-        panic!("Expected var");
-    };
+    // *ns* should be a var
+    assert!(is_term_var(&mem, result.ns_var));
 
-    use crate::value::VarSlot;
-    let slot: VarSlot = mem.read(slot_addr);
-    let content: VarContent = mem.read(slot.content);
-    assert!(content.is_process_bound());
+    let var = read_heap_var(&mem, result.ns_var).expect("Expected var");
 
     // Root should be lona.core namespace
-    assert!(content.root.is_namespace());
-    assert_eq!(content.root, result.core_ns);
+    assert!(is_term_namespace(&mem, var.root));
+    assert_eq!(var.root, result.core_ns);
 }
 
 #[test]
@@ -76,16 +103,12 @@ fn test_bootstrap_seeds_def() {
     let def_var = lookup_var_in_ns(&realm, &mem, result.core_ns, "def");
     assert!(def_var.is_some());
 
-    // def should be a special form
-    let Value::Var(slot_addr) = def_var.unwrap() else {
-        panic!("Expected var");
-    };
+    // def should be a var
+    assert!(is_term_var(&mem, def_var.unwrap()));
 
-    use crate::value::VarSlot;
-    let slot: VarSlot = mem.read(slot_addr);
-    let content: VarContent = mem.read(slot.content);
-    assert!(content.is_special_form());
-    assert!(content.is_native());
+    let var = read_heap_var(&mem, def_var.unwrap()).expect("Expected var for 'def'");
+    // def is a special form - root should be unbound (special forms are handled by compiler)
+    assert!(var.root.is_unbound());
 }
 
 #[test]
@@ -96,19 +119,20 @@ fn test_bootstrap_seeds_other_special_forms() {
 
     // All special forms should exist
     for name in ["fn*", "quote", "do", "var", "match"] {
-        let var = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
-        assert!(var.is_some(), "Special form '{}' should exist", name);
+        let var_term = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
+        assert!(var_term.is_some(), "Special form '{}' should exist", name);
 
-        let Value::Var(slot_addr) = var.unwrap() else {
-            panic!("Expected var for '{}'", name);
-        };
-
-        use crate::value::VarSlot;
-        let slot: VarSlot = mem.read(slot_addr);
-        let content: VarContent = mem.read(slot.content);
         assert!(
-            content.is_special_form(),
-            "'{}' should be special form",
+            is_term_var(&mem, var_term.unwrap()),
+            "'{}' should be a var",
+            name
+        );
+
+        let var = read_heap_var(&mem, var_term.unwrap()).expect("Expected var");
+        // Special forms have unbound root (handled by compiler)
+        assert!(
+            var.root.is_unbound(),
+            "'{}' should have unbound root (special form)",
             name
         );
     }
@@ -130,31 +154,19 @@ fn test_bootstrap_seeds_arithmetic_intrinsics() {
     ];
 
     for (name, id) in intrinsics {
-        let var = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
-        assert!(var.is_some(), "Intrinsic '{}' should exist", name);
+        let var_term = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
+        assert!(var_term.is_some(), "Intrinsic '{}' should exist", name);
 
-        let Value::Var(slot_addr) = var.unwrap() else {
-            panic!("Expected var for '{}'", name);
-        };
-
-        use crate::value::VarSlot;
-        let slot: VarSlot = mem.read(slot_addr);
-        let content: VarContent = mem.read(slot.content);
-
-        assert!(content.is_native(), "'{}' should be native", name);
-        assert!(
-            !content.is_special_form(),
-            "'{}' should not be special form",
-            name
-        );
+        let var = read_heap_var(&mem, var_term.unwrap()).expect("Expected var");
 
         // Root should be NativeFn with correct ID
-        match content.root {
-            Value::NativeFn(actual_id) => {
-                assert_eq!(actual_id, id, "'{}' should have id {}", name, id);
-            }
-            _ => panic!("'{}' should have NativeFn root", name),
-        }
+        assert!(
+            var.root.is_native_fn(),
+            "'{}' should have NativeFn root",
+            name
+        );
+        let actual_id = var.root.as_native_fn_id().expect("Expected native fn id");
+        assert_eq!(actual_id, id, "'{}' should have id {}", name, id);
     }
 }
 
@@ -173,23 +185,18 @@ fn test_bootstrap_seeds_comparison_intrinsics() {
     ];
 
     for (name, id) in intrinsics {
-        let var = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
-        assert!(var.is_some(), "Intrinsic '{}' should exist", name);
+        let var_term = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
+        assert!(var_term.is_some(), "Intrinsic '{}' should exist", name);
 
-        let Value::Var(slot_addr) = var.unwrap() else {
-            panic!()
-        };
+        let var = read_heap_var(&mem, var_term.unwrap()).expect("Expected var");
 
-        use crate::value::VarSlot;
-        let slot: VarSlot = mem.read(slot_addr);
-        let content: VarContent = mem.read(slot.content);
-
-        match content.root {
-            Value::NativeFn(actual_id) => {
-                assert_eq!(actual_id, id, "'{}' should have id {}", name, id);
-            }
-            _ => panic!("'{}' should have NativeFn root", name),
-        }
+        assert!(
+            var.root.is_native_fn(),
+            "'{}' should have NativeFn root",
+            name
+        );
+        let actual_id = var.root.as_native_fn_id().expect("Expected native fn id");
+        assert_eq!(actual_id, id, "'{}' should have id {}", name, id);
     }
 }
 
@@ -213,23 +220,18 @@ fn test_bootstrap_seeds_predicate_intrinsics() {
     ];
 
     for (name, id) in intrinsics {
-        let var = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
-        assert!(var.is_some(), "Intrinsic '{}' should exist", name);
+        let var_term = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
+        assert!(var_term.is_some(), "Intrinsic '{}' should exist", name);
 
-        let Value::Var(slot_addr) = var.unwrap() else {
-            panic!()
-        };
+        let var = read_heap_var(&mem, var_term.unwrap()).expect("Expected var");
 
-        use crate::value::VarSlot;
-        let slot: VarSlot = mem.read(slot_addr);
-        let content: VarContent = mem.read(slot.content);
-
-        match content.root {
-            Value::NativeFn(actual_id) => {
-                assert_eq!(actual_id, id, "'{}' should have id {}", name, id);
-            }
-            _ => panic!("'{}' should have NativeFn root", name),
-        }
+        assert!(
+            var.root.is_native_fn(),
+            "'{}' should have NativeFn root",
+            name
+        );
+        let actual_id = var.root.as_native_fn_id().expect("Expected native fn id");
+        assert_eq!(actual_id, id, "'{}' should have id {}", name, id);
     }
 }
 
@@ -239,23 +241,20 @@ fn test_bootstrap_namespace_has_correct_name() {
 
     let result = bootstrap(&mut realm, &mut mem).unwrap();
 
-    let Value::Namespace(ns_addr) = result.core_ns else {
-        panic!("Expected namespace");
-    };
+    assert!(is_term_namespace(&mem, result.core_ns));
 
-    let ns: Namespace = mem.read(ns_addr);
+    let ns_addr = result.core_ns.to_vaddr();
+    let ns: HeapNamespace = mem.read(ns_addr);
 
-    // Name should be symbol "lona.core"
+    // Name should be an immediate symbol (interned)
     assert!(ns.name.is_symbol());
 
-    use crate::value::HeapString;
-    let Value::Symbol(sym_addr) = ns.name else {
-        panic!()
-    };
-    let header: HeapString = mem.read(sym_addr);
-    let data_addr = sym_addr.add(HeapString::HEADER_SIZE as u64);
-    let bytes = mem.slice(data_addr, header.len as usize);
-    assert_eq!(bytes, b"lona.core");
+    // Look up symbol name from realm
+    let idx = ns.name.as_symbol_index().expect("Expected symbol index");
+    let name_str = realm
+        .symbol_name(&mem, idx)
+        .expect("Symbol should be in realm");
+    assert_eq!(name_str, "lona.core");
 }
 
 #[test]
@@ -267,7 +266,7 @@ fn test_lookup_var_finds_existing() {
     // Should find +
     let var = lookup_var_in_ns(&realm, &mem, result.core_ns, "+");
     assert!(var.is_some());
-    assert!(var.unwrap().is_var());
+    assert!(is_term_var(&mem, var.unwrap()));
 }
 
 #[test]

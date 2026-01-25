@@ -921,7 +921,7 @@ Accessors: `ns-name` (returns symbol), `ns-map` (returns var bindings map)
 ```clojure
 (def ns (find-ns 'lona.core))
 (symbol? (ns-name ns))  ; => true
-(map? (ns-map ns))      ; => true
+(map? (ns-map ns))      ; => true  @todo
 ```
 
 ---

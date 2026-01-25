@@ -9,9 +9,9 @@
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
-use crate::value::Value;
+use crate::term::Term;
 
-use super::arithmetic::values_equal;
+use super::arithmetic::terms_equal;
 use super::{IntrinsicError, XRegs};
 
 /// Error from core collection operations.
@@ -46,40 +46,40 @@ pub enum CoreCollectionError {
 /// # Arguments
 /// * `proc` - Process for heap access
 /// * `mem` - Memory space
-/// * `map_val` - The map to search (must be `Value::Map`)
+/// * `map_term` - The map to search (must be a boxed MAP)
 /// * `key` - The key to look up
 /// * `default` - Value to return if key not found
 ///
 /// # Errors
-/// Returns `CoreCollectionError::NotAMap` if `map_val` is not a map.
+/// Returns `CoreCollectionError::NotAMap` if `map_term` is not a map.
 pub fn core_get<M: MemorySpace>(
     proc: &Process,
     mem: &M,
-    map_val: Value,
-    key: Value,
-    default: Value,
-) -> Result<Value, CoreCollectionError> {
-    let Value::Map(_) = map_val else {
+    map_term: Term,
+    key: Term,
+    default: Term,
+) -> Result<Term, CoreCollectionError> {
+    if !proc.is_term_map(mem, map_term) {
         return Err(CoreCollectionError::NotAMap);
-    };
+    }
 
-    let map = proc
-        .read_map(mem, map_val)
+    let entries = proc
+        .read_term_map_entries(mem, map_term)
         .ok_or(CoreCollectionError::OutOfMemory)?;
 
     // Search the association list for the key
-    let mut current = map.entries;
-    while let Some(pair) = proc.read_pair(mem, current) {
-        // Each pair.first is a [key value] tuple
-        if let Some(entry_key) = proc.read_tuple_element(mem, pair.first, 0) {
-            if values_equal(entry_key, key, proc, mem) {
+    let mut current = entries;
+    while let Some((entry, rest)) = proc.read_term_pair(mem, current) {
+        // Each entry is a [key value] tuple
+        if let Some(entry_key) = proc.read_term_tuple_element(mem, entry, 0) {
+            if terms_equal(entry_key, key, proc, mem) {
                 // Found the key, return the value
                 return proc
-                    .read_tuple_element(mem, pair.first, 1)
+                    .read_term_tuple_element(mem, entry, 1)
                     .ok_or(CoreCollectionError::OutOfMemory);
             }
         }
-        current = pair.rest;
+        current = rest;
     }
 
     // Key not found, return default
@@ -94,35 +94,35 @@ pub fn core_get<M: MemorySpace>(
 /// # Arguments
 /// * `proc` - Process for heap access
 /// * `mem` - Memory space
-/// * `map_val` - The map to search (must be `Value::Map`)
+/// * `map_term` - The map to search (must be a boxed MAP)
 /// * `key` - The key to check
 ///
 /// # Errors
-/// Returns `CoreCollectionError::NotAMap` if `map_val` is not a map.
+/// Returns `CoreCollectionError::NotAMap` if `map_term` is not a map.
 pub fn core_contains<M: MemorySpace>(
     proc: &Process,
     mem: &M,
-    map_val: Value,
-    key: Value,
+    map_term: Term,
+    key: Term,
 ) -> Result<bool, CoreCollectionError> {
-    let Value::Map(_) = map_val else {
+    if !proc.is_term_map(mem, map_term) {
         return Err(CoreCollectionError::NotAMap);
-    };
+    }
 
-    let map = proc
-        .read_map(mem, map_val)
+    let entries = proc
+        .read_term_map_entries(mem, map_term)
         .ok_or(CoreCollectionError::OutOfMemory)?;
 
     // Search the association list for the key
-    let mut current = map.entries;
-    while let Some(pair) = proc.read_pair(mem, current) {
-        // Each pair.first is a [key value] tuple
-        if let Some(entry_key) = proc.read_tuple_element(mem, pair.first, 0) {
-            if values_equal(entry_key, key, proc, mem) {
+    let mut current = entries;
+    while let Some((entry, rest)) = proc.read_term_pair(mem, current) {
+        // Each entry is a [key value] tuple
+        if let Some(entry_key) = proc.read_term_tuple_element(mem, entry, 0) {
+            if terms_equal(entry_key, key, proc, mem) {
                 return Ok(true);
             }
         }
-        current = pair.rest;
+        current = rest;
     }
 
     Ok(false)
@@ -136,8 +136,8 @@ pub fn core_contains<M: MemorySpace>(
 /// # Arguments
 /// * `proc` - Process for heap access
 /// * `mem` - Memory space
-/// * `coll` - The collection (must be `Value::Tuple`)
-/// * `idx` - The index to access (must be `Value::Int`)
+/// * `coll` - The collection (must be a tuple)
+/// * `idx` - The index to access (must be a `small_int`)
 /// * `default` - If `Some`, return this on out-of-bounds. If `None`, return error.
 ///
 /// # Errors
@@ -147,20 +147,20 @@ pub fn core_contains<M: MemorySpace>(
 pub fn core_nth<M: MemorySpace>(
     proc: &Process,
     mem: &M,
-    coll: Value,
-    idx: Value,
-    default: Option<Value>,
-) -> Result<Value, CoreCollectionError> {
-    let Value::Int(idx_i64) = idx else {
+    coll: Term,
+    idx: Term,
+    default: Option<Term>,
+) -> Result<Term, CoreCollectionError> {
+    let Some(idx_i64) = idx.as_small_int() else {
         return Err(CoreCollectionError::InvalidIndex);
     };
 
-    let Value::Tuple(_) = coll else {
+    if !proc.is_term_tuple(mem, coll) {
         return Err(CoreCollectionError::NotATuple);
-    };
+    }
 
     let len = proc
-        .read_tuple_len(mem, coll)
+        .read_term_tuple_len(mem, coll)
         .ok_or(CoreCollectionError::OutOfMemory)?;
 
     // Convert to usize and check bounds
@@ -175,7 +175,7 @@ pub fn core_nth<M: MemorySpace>(
             })
         },
         |i| {
-            proc.read_tuple_element(mem, coll, i)
+            proc.read_term_tuple_element(mem, coll, i)
                 .ok_or(CoreCollectionError::OutOfMemory)
         },
     )
@@ -183,12 +183,12 @@ pub fn core_nth<M: MemorySpace>(
 
 // --- Tuple intrinsics ---
 
-pub const fn intrinsic_is_tuple(x_regs: &XRegs) -> Value {
-    Value::bool(x_regs[1].is_tuple())
+pub fn intrinsic_is_tuple<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Term {
+    Term::bool(proc.is_term_tuple(mem, x_regs[1]))
 }
 
-pub const fn intrinsic_is_vector(x_regs: &XRegs) -> Value {
-    Value::bool(x_regs[1].is_vector())
+pub fn intrinsic_is_vector<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Term {
+    Term::bool(proc.is_term_vector(mem, x_regs[1]))
 }
 
 /// Get element at index from a tuple.
@@ -201,7 +201,7 @@ pub fn intrinsic_nth<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let coll = x_regs[1];
     let idx = x_regs[2];
     let default = if argc >= 3 { Some(x_regs[3]) } else { None };
@@ -231,66 +231,76 @@ pub fn intrinsic_count<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     let coll = x_regs[1];
 
-    match coll {
-        Value::Nil => Ok(Value::int(0)),
-        Value::Tuple(_) | Value::Vector(_) => {
-            let len = proc
-                .read_tuple_len(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            let len_i64 = i64::try_from(len).map_err(|_| IntrinsicError::Overflow)?;
-            Ok(Value::int(len_i64))
-        }
-        Value::Pair(_) => {
-            // Count list length
-            let mut count: i64 = 0;
-            let mut current = coll;
-            while let Some(pair) = proc.read_pair(mem, current) {
-                count += 1;
-                current = pair.rest;
-            }
-            Ok(Value::int(count))
-        }
-        Value::String(_) => {
-            let s = proc
-                .read_string(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            let len_i64 = i64::try_from(s.len()).map_err(|_| IntrinsicError::Overflow)?;
-            Ok(Value::int(len_i64))
-        }
-        Value::Map(_) => {
-            // Count map entries
-            let map = proc
-                .read_map(mem, coll)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            let mut count: i64 = 0;
-            let mut current = map.entries;
-            while let Some(pair) = proc.read_pair(mem, current) {
-                count += 1;
-                current = pair.rest;
-            }
-            Ok(Value::int(count))
-        }
-        _ => Err(IntrinsicError::TypeError {
-            intrinsic: id,
-            arg: 0,
-            expected: "collection",
-        }),
+    // Check immediate types first
+    if coll.is_nil() {
+        return Term::small_int(0).ok_or(IntrinsicError::Overflow);
     }
+
+    // Check for list (pair)
+    if coll.is_list() {
+        // Count list length
+        let mut count: i64 = 0;
+        let mut current = coll;
+        while let Some((_, rest)) = proc.read_term_pair(mem, current) {
+            count += 1;
+            current = rest;
+        }
+        return Term::small_int(count).ok_or(IntrinsicError::Overflow);
+    }
+
+    // Check for boxed types
+    if coll.is_boxed() {
+        // Try tuple
+        if let Some(len) = proc.read_term_tuple_len(mem, coll) {
+            let len_i64 = i64::try_from(len).map_err(|_| IntrinsicError::Overflow)?;
+            return Term::small_int(len_i64).ok_or(IntrinsicError::Overflow);
+        }
+
+        // Try vector
+        if let Some(len) = proc.read_term_vector_len(mem, coll) {
+            let len_i64 = i64::try_from(len).map_err(|_| IntrinsicError::Overflow)?;
+            return Term::small_int(len_i64).ok_or(IntrinsicError::Overflow);
+        }
+
+        // Try string
+        if let Some(s) = proc.read_term_string(mem, coll) {
+            let len_i64 = i64::try_from(s.len()).map_err(|_| IntrinsicError::Overflow)?;
+            return Term::small_int(len_i64).ok_or(IntrinsicError::Overflow);
+        }
+
+        // Try map
+        if let Some(entries) = proc.read_term_map_entries(mem, coll) {
+            let mut count: i64 = 0;
+            let mut current = entries;
+            while let Some((_, rest)) = proc.read_term_pair(mem, current) {
+                count += 1;
+                current = rest;
+            }
+            return Term::small_int(count).ok_or(IntrinsicError::Overflow);
+        }
+    }
+
+    Err(IntrinsicError::TypeError {
+        intrinsic: id,
+        arg: 0,
+        expected: "collection",
+    })
 }
 
 // --- Symbol intrinsic ---
 
-pub const fn intrinsic_is_symbol(x_regs: &XRegs) -> Value {
-    Value::bool(matches!(x_regs[1], Value::Symbol(_)))
+#[inline]
+pub const fn intrinsic_is_symbol(x_regs: &XRegs, proc: &Process) -> Term {
+    Term::bool(proc.is_term_symbol(x_regs[1]))
 }
 
 // --- Map intrinsics ---
 
-pub const fn intrinsic_is_map(x_regs: &XRegs) -> Value {
-    Value::bool(x_regs[1].is_map())
+pub fn intrinsic_is_map<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Term {
+    Term::bool(proc.is_term_map(mem, x_regs[1]))
 }
 
 /// Get value from map by key.
@@ -303,12 +313,12 @@ pub fn intrinsic_get<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let map_val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let map_term = x_regs[1];
     let key = x_regs[2];
-    let default = if argc >= 3 { x_regs[3] } else { Value::Nil };
+    let default = if argc >= 3 { x_regs[3] } else { Term::NIL };
 
-    core_get(proc, mem, map_val, key, default).map_err(|e| match e {
+    core_get(proc, mem, map_term, key, default).map_err(|e| match e {
         CoreCollectionError::NotAMap => IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
@@ -329,36 +339,44 @@ pub fn intrinsic_put<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let map_val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let map_term = x_regs[1];
     let key = x_regs[2];
     let value = x_regs[3];
 
-    let Value::Map(_) = map_val else {
+    if !proc.is_term_map(mem, map_term) {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
             expected: "map",
         });
-    };
+    }
 
-    let map = proc
-        .read_map(mem, map_val)
+    let entries = proc
+        .read_term_map_entries(mem, map_term)
         .ok_or(IntrinsicError::OutOfMemory)?;
 
     // Create new [key value] tuple
     let kv_elements = [key, value];
     let kv_tuple = proc
-        .alloc_tuple(mem, &kv_elements)
+        .alloc_term_tuple(mem, &kv_elements)
         .ok_or(IntrinsicError::OutOfMemory)?;
 
     // Prepend to existing entries (structural sharing)
     let new_entries = proc
-        .alloc_pair(mem, kv_tuple, map.entries)
+        .alloc_term_pair(mem, kv_tuple, entries)
         .ok_or(IntrinsicError::OutOfMemory)?;
 
+    // Count entries for header (simple count, not deduped)
+    let mut entry_count = 0;
+    let mut current = new_entries;
+    while let Some((_, rest)) = proc.read_term_pair(mem, current) {
+        entry_count += 1;
+        current = rest;
+    }
+
     // Allocate new map with updated entries
-    proc.alloc_map(mem, new_entries)
+    proc.alloc_term_map(mem, new_entries, entry_count)
         .ok_or(IntrinsicError::OutOfMemory)
 }
 
@@ -370,32 +388,32 @@ pub fn intrinsic_keys<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let map_val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let map_term = x_regs[1];
 
-    let Value::Map(_) = map_val else {
+    if !proc.is_term_map(mem, map_term) {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
             expected: "map",
         });
-    };
+    }
 
-    let map = proc
-        .read_map(mem, map_val)
+    let entries = proc
+        .read_term_map_entries(mem, map_term)
         .ok_or(IntrinsicError::OutOfMemory)?;
 
     // Build list of keys from the association list
     // We need to reverse the order since we're prepending
-    let mut keys = Value::Nil;
-    let mut current = map.entries;
-    while let Some(pair) = proc.read_pair(mem, current) {
-        if let Some(key) = proc.read_tuple_element(mem, pair.first, 0) {
+    let mut keys = Term::NIL;
+    let mut current = entries;
+    while let Some((entry, rest)) = proc.read_term_pair(mem, current) {
+        if let Some(key) = proc.read_term_tuple_element(mem, entry, 0) {
             keys = proc
-                .alloc_pair(mem, key, keys)
+                .alloc_term_pair(mem, key, keys)
                 .ok_or(IntrinsicError::OutOfMemory)?;
         }
-        current = pair.rest;
+        current = rest;
     }
 
     // Reverse the list to match iteration order
@@ -410,31 +428,31 @@ pub fn intrinsic_vals<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let map_val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let map_term = x_regs[1];
 
-    let Value::Map(_) = map_val else {
+    if !proc.is_term_map(mem, map_term) {
         return Err(IntrinsicError::TypeError {
             intrinsic: id,
             arg: 0,
             expected: "map",
         });
-    };
+    }
 
-    let map = proc
-        .read_map(mem, map_val)
+    let entries = proc
+        .read_term_map_entries(mem, map_term)
         .ok_or(IntrinsicError::OutOfMemory)?;
 
     // Build list of values from the association list
-    let mut vals = Value::Nil;
-    let mut current = map.entries;
-    while let Some(pair) = proc.read_pair(mem, current) {
-        if let Some(val) = proc.read_tuple_element(mem, pair.first, 1) {
+    let mut vals = Term::NIL;
+    let mut current = entries;
+    while let Some((entry, rest)) = proc.read_term_pair(mem, current) {
+        if let Some(val) = proc.read_term_tuple_element(mem, entry, 1) {
             vals = proc
-                .alloc_pair(mem, val, vals)
+                .alloc_term_pair(mem, val, vals)
                 .ok_or(IntrinsicError::OutOfMemory)?;
         }
-        current = pair.rest;
+        current = rest;
     }
 
     // Reverse the list to match iteration order
@@ -445,15 +463,15 @@ pub fn intrinsic_vals<M: MemorySpace>(
 fn reverse_list<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
-    list: Value,
-) -> Result<Value, IntrinsicError> {
-    let mut result = Value::Nil;
+    list: Term,
+) -> Result<Term, IntrinsicError> {
+    let mut result = Term::NIL;
     let mut current = list;
-    while let Some(pair) = proc.read_pair(mem, current) {
+    while let Some((head, rest)) = proc.read_term_pair(mem, current) {
         result = proc
-            .alloc_pair(mem, pair.first, result)
+            .alloc_term_pair(mem, head, result)
             .ok_or(IntrinsicError::OutOfMemory)?;
-        current = pair.rest;
+        current = rest;
     }
     Ok(result)
 }
@@ -466,12 +484,12 @@ pub fn intrinsic_contains<M: MemorySpace>(
     proc: &Process,
     mem: &M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let map_val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let map_term = x_regs[1];
     let key = x_regs[2];
 
-    core_contains(proc, mem, map_val, key)
-        .map(Value::bool)
+    core_contains(proc, mem, map_term, key)
+        .map(Term::bool)
         .map_err(|e| match e {
             CoreCollectionError::NotAMap => IntrinsicError::TypeError {
                 intrinsic: id,

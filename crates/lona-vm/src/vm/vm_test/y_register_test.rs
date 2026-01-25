@@ -12,23 +12,29 @@ use crate::platform::MockVSpace;
 use crate::process::{Process, WorkerId};
 use crate::realm::{Realm, bootstrap};
 use crate::scheduler::Worker;
-use crate::value::Value;
+use crate::term::Term;
 use crate::vm::{RunResult, RuntimeError, Vm};
+
+/// Helper to create a small integer Term.
+fn int(n: i64) -> Term {
+    Term::small_int(n).expect("integer out of small_int range")
+}
 
 // --- Helper functions ---
 
 /// Create a test environment (worker, process, realm, memory).
 fn create_test_env() -> (Worker, Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
-    let mut mem = MockVSpace::new(256 * 1024, base);
+    // Increased sizes to accommodate larger function allocations after alignment fix
+    let mut mem = MockVSpace::new(512 * 1024, base);
     let young_base = base;
-    let young_size = 64 * 1024;
+    let young_size = 128 * 1024;
     let old_base = base.add(young_size as u64);
-    let old_size = 16 * 1024;
+    let old_size = 32 * 1024;
     let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
-    let realm_base = base.add(128 * 1024);
-    let mut realm = Realm::new(realm_base, 64 * 1024);
+    let realm_base = base.add((young_size + old_size) as u64 + 64 * 1024);
+    let mut realm = Realm::new(realm_base, 96 * 1024);
 
     let result = bootstrap(&mut realm, &mut mem).unwrap();
     proc.bootstrap(result.ns_var, result.core_ns);
@@ -67,9 +73,9 @@ fn allocate_zero_creates_y_registers() {
 
     // Verify Y registers exist and are nil
     assert_eq!(proc.current_y_count, 3);
-    assert_eq!(proc.get_y(&mem, 0), Some(Value::Nil));
-    assert_eq!(proc.get_y(&mem, 1), Some(Value::Nil));
-    assert_eq!(proc.get_y(&mem, 2), Some(Value::Nil));
+    assert_eq!(proc.get_y(&mem, 0), Some(Term::NIL));
+    assert_eq!(proc.get_y(&mem, 1), Some(Term::NIL));
+    assert_eq!(proc.get_y(&mem, 2), Some(Term::NIL));
 }
 
 #[test]
@@ -115,7 +121,7 @@ fn move_xy_saves_x_to_y() {
 
     Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
 
-    assert_eq!(proc.get_y(&mem, 0), Some(Value::int(42)));
+    assert_eq!(proc.get_y(&mem, 0), Some(int(42)));
 }
 
 #[test]
@@ -141,8 +147,8 @@ fn move_yx_restores_y_to_x() {
 
     Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
 
-    assert_eq!(worker.x_regs[0], Value::int(999)); // clobbered
-    assert_eq!(worker.x_regs[1], Value::int(42)); // restored from Y
+    assert_eq!(worker.x_regs[0], int(999)); // clobbered
+    assert_eq!(worker.x_regs[1], int(42)); // restored from Y
 }
 
 #[test]
@@ -173,9 +179,9 @@ fn y_register_preserves_multiple_values() {
 
     Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
 
-    assert_eq!(worker.x_regs[3], Value::int(10));
-    assert_eq!(worker.x_regs[4], Value::int(20));
-    assert_eq!(worker.x_regs[5], Value::int(30));
+    assert_eq!(worker.x_regs[3], int(10));
+    assert_eq!(worker.x_regs[4], int(20));
+    assert_eq!(worker.x_regs[5], int(30));
 }
 
 // --- DEALLOCATE tests ---
@@ -313,7 +319,7 @@ fn nested_function_calls_preserve_y() {
 
     // Call it: should work with call frame system
     let result = eval("(add1 5)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(6));
+    assert_eq!(result, int(6));
 }
 
 #[test]
@@ -345,7 +351,7 @@ fn deeply_nested_calls_work() {
 
     // f3(1) = f2(2) = f1(3) = 4
     let result = eval("(f3 1)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(4));
+    assert_eq!(result, int(4));
 }
 
 #[test]
@@ -413,5 +419,5 @@ fn recursive_function_works() {
 
     // a5(0) -> a4(1) -> a3(2) -> a2(3) -> a1(4) -> a0(5) -> 5
     let result = eval("(a5 0)", &mut proc, &mut realm, &mut mem).unwrap();
-    assert_eq!(result, Value::int(5));
+    assert_eq!(result, int(5));
 }

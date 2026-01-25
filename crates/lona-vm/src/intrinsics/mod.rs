@@ -40,10 +40,10 @@ mod tuple_intrinsic_test;
 use crate::platform::MemorySpace;
 use crate::process::{Process, X_REG_COUNT};
 use crate::realm::Realm;
-use crate::value::Value;
+use crate::term::Term;
 
-/// Type alias for X register array.
-pub type XRegs = [Value; X_REG_COUNT];
+/// Type alias for X register array (Term-based).
+pub type XRegs = [Term; X_REG_COUNT];
 
 use arithmetic::{
     intrinsic_add, intrinsic_div, intrinsic_eq, intrinsic_ge, intrinsic_gt, intrinsic_identical,
@@ -56,6 +56,7 @@ use collection::{
 };
 
 // Re-export core functions for use by callable data structures in VM
+pub use arithmetic::terms_equal;
 pub use collection::{CoreCollectionError, core_contains, core_get, core_nth};
 use meta::{
     intrinsic_create_ns, intrinsic_def_binding, intrinsic_def_meta, intrinsic_def_root,
@@ -363,88 +364,93 @@ pub fn call_intrinsic<M: MemorySpace>(
     mem: &mut M,
     realm: &mut Realm,
 ) -> Result<(), IntrinsicError> {
-    let result = match intrinsic_id {
+    x_regs[0] = match intrinsic_id {
+        // Arithmetic
         id::ADD => intrinsic_add(x_regs, intrinsic_id)?,
         id::SUB => intrinsic_sub(x_regs, intrinsic_id)?,
         id::MUL => intrinsic_mul(x_regs, intrinsic_id)?,
         id::DIV => intrinsic_div(x_regs, intrinsic_id)?,
         id::MOD => intrinsic_mod(x_regs, intrinsic_id)?,
+
+        // Comparison
         id::EQ => intrinsic_eq(x_regs, proc, mem),
         id::LT => intrinsic_lt(x_regs, intrinsic_id)?,
         id::GT => intrinsic_gt(x_regs, intrinsic_id)?,
         id::LE => intrinsic_le(x_regs, intrinsic_id)?,
         id::GE => intrinsic_ge(x_regs, intrinsic_id)?,
+        id::IDENTICAL => intrinsic_identical(x_regs),
+
+        // Boolean
         id::NOT => intrinsic_not(x_regs),
-        id::IS_NIL => intrinsic_is_nil(x_regs),
-        id::IS_INT => intrinsic_is_int(x_regs),
-        id::IS_STR => intrinsic_is_str(x_regs),
-        id::STR => intrinsic_str(x_regs, argc, proc, mem)?,
-        id::IS_KEYWORD => intrinsic_is_keyword(x_regs),
+
+        // Type predicates
+        id::IS_NIL => Term::bool(x_regs[1].is_nil()),
+        id::IS_INT => Term::bool(x_regs[1].is_small_int()),
+        id::IS_STR => Term::bool(proc.is_term_string(mem, x_regs[1])),
+        id::IS_KEYWORD => intrinsic_is_keyword(x_regs, proc),
+        id::IS_SYMBOL => intrinsic_is_symbol(x_regs, proc),
+        id::IS_TUPLE => intrinsic_is_tuple(x_regs, proc, mem),
+        id::IS_VECTOR => intrinsic_is_vector(x_regs, proc, mem),
+        id::IS_MAP => intrinsic_is_map(x_regs, proc, mem),
+        id::IS_NAMESPACE => intrinsic_is_namespace(x_regs, proc, mem),
+        id::IS_FN => intrinsic_is_fn(x_regs, proc, mem),
+        id::IS_VAR => intrinsic_is_var(x_regs, proc, mem),
+
+        // String operations
+        id::STR => intrinsic_str(x_regs, argc, proc, realm, mem)?,
         id::KEYWORD => intrinsic_keyword(x_regs, proc, realm, mem, intrinsic_id)?,
-        id::NAME => intrinsic_name_fn(x_regs, proc, mem, intrinsic_id)?,
-        id::NAMESPACE => intrinsic_namespace(x_regs, proc, mem, intrinsic_id)?,
-        id::IS_TUPLE => intrinsic_is_tuple(x_regs),
+        id::NAME => intrinsic_name_fn(x_regs, proc, realm, mem, intrinsic_id)?,
+        id::NAMESPACE => intrinsic_namespace(x_regs, proc, realm, mem, intrinsic_id)?,
+
+        // Collection operations
         id::NTH => intrinsic_nth(x_regs, argc, proc, mem, intrinsic_id)?,
         id::COUNT => intrinsic_count(x_regs, proc, mem, intrinsic_id)?,
-        id::IS_SYMBOL => intrinsic_is_symbol(x_regs),
-        id::IS_MAP => intrinsic_is_map(x_regs),
         id::GET => intrinsic_get(x_regs, argc, proc, mem, intrinsic_id)?,
         id::PUT => intrinsic_put(x_regs, proc, mem, intrinsic_id)?,
         id::KEYS => intrinsic_keys(x_regs, proc, mem, intrinsic_id)?,
         id::VALS => intrinsic_vals(x_regs, proc, mem, intrinsic_id)?,
+        id::CONTAINS => intrinsic_contains(x_regs, proc, mem, intrinsic_id)?,
+
+        // Sequence operations
+        id::FIRST => intrinsic_first(x_regs, proc, mem, intrinsic_id)?,
+        id::REST => intrinsic_rest(x_regs, proc, mem, intrinsic_id)?,
+        id::IS_EMPTY => intrinsic_is_empty(x_regs, proc, mem, intrinsic_id)?,
+
+        // Metadata operations
         id::META => intrinsic_meta(x_regs, realm, mem),
         id::WITH_META => intrinsic_with_meta(x_regs, realm, mem, intrinsic_id)?,
-        id::IS_NAMESPACE => intrinsic_is_namespace(x_regs),
+
+        // Namespace operations
         id::CREATE_NS => intrinsic_create_ns(x_regs, realm, mem, intrinsic_id)?,
         id::FIND_NS => intrinsic_find_ns(x_regs, realm, intrinsic_id)?,
         id::NS_NAME => intrinsic_ns_name(x_regs, proc, mem, intrinsic_id)?,
         id::NS_MAP => intrinsic_ns_map(x_regs, proc, mem, intrinsic_id)?,
-        id::IS_FN => intrinsic_is_fn(x_regs),
-        id::IS_VAR => intrinsic_is_var(x_regs),
+
+        // Var operations
         id::INTERN => intrinsic_intern(x_regs, proc, mem, intrinsic_id)?,
         id::VAR_GET => intrinsic_var_get(x_regs, proc, mem, intrinsic_id)?,
         id::DEF_ROOT => intrinsic_def_root(x_regs, proc, realm, mem, intrinsic_id)?,
         id::DEF_BINDING => intrinsic_def_binding(x_regs, proc, mem, intrinsic_id)?,
         id::DEF_META => intrinsic_def_meta(x_regs, proc, realm, mem, intrinsic_id)?,
-        id::IS_VECTOR => intrinsic_is_vector(x_regs),
-        id::FIRST => intrinsic_first(x_regs, proc, mem, intrinsic_id)?,
-        id::REST => intrinsic_rest(x_regs, proc, mem, intrinsic_id)?,
-        id::IS_EMPTY => intrinsic_is_empty(x_regs, proc, mem, intrinsic_id)?,
-        id::IDENTICAL => intrinsic_identical(x_regs),
-        id::CONTAINS => intrinsic_contains(x_regs, proc, mem, intrinsic_id)?,
+
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };
-    x_regs[0] = result;
     Ok(())
 }
 
-/// Extract an integer from a register, returning a type error if not an int.
+/// Extract an integer from a Term register, returning a type error if not an int.
 pub(crate) const fn expect_int(
     x_regs: &XRegs,
     reg: usize,
     intrinsic: u8,
     arg: u8,
 ) -> Result<i64, IntrinsicError> {
-    match x_regs[reg] {
-        Value::Int(n) => Ok(n),
-        _ => Err(IntrinsicError::TypeError {
+    match x_regs[reg].as_small_int() {
+        Some(n) => Ok(n),
+        None => Err(IntrinsicError::TypeError {
             intrinsic,
             arg,
             expected: "integer",
         }),
     }
-}
-
-// --- Type predicate intrinsics (kept in mod.rs as they're very small) ---
-
-const fn intrinsic_is_nil(x_regs: &XRegs) -> Value {
-    Value::bool(x_regs[1].is_nil())
-}
-
-const fn intrinsic_is_int(x_regs: &XRegs) -> Value {
-    Value::bool(matches!(x_regs[1], Value::Int(_)))
-}
-
-const fn intrinsic_is_str(x_regs: &XRegs) -> Value {
-    Value::bool(matches!(x_regs[1], Value::String(_)))
 }

@@ -41,6 +41,7 @@ __pycache__/
 # Temporary plans
 /PLAN*
 /ROADMAP*
+/ISSUE*
 
 # Hook override file
 /allow-suppressions

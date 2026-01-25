@@ -6,7 +6,8 @@
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::Realm;
-use crate::value::Value;
+use crate::term::Term;
+use crate::term::tag::object;
 
 use super::{IntrinsicError, XRegs};
 
@@ -20,20 +21,22 @@ pub fn intrinsic_str<M: MemorySpace>(
     x_regs: &XRegs,
     argc: u8,
     proc: &mut Process,
+    realm: &Realm,
     mem: &mut M,
-) -> Result<Value, IntrinsicError> {
+) -> Result<Term, IntrinsicError> {
     // Build the concatenated string in a buffer
     let mut buffer = [0u8; STR_BUFFER_SIZE];
     let mut pos = 0;
 
     for i in 0..argc as usize {
-        let val = x_regs[i + 1]; // Args start at X1
-        pos = write_value_to_buffer(&mut buffer, pos, val, proc, mem)?;
+        let term = x_regs[i + 1]; // Args start at X1
+        pos = write_term_to_buffer(&mut buffer, pos, term, proc, realm, mem)?;
     }
 
     // Allocate the result string
     let s = core::str::from_utf8(&buffer[..pos]).map_err(|_| IntrinsicError::OutOfMemory)?;
-    proc.alloc_string(mem, s).ok_or(IntrinsicError::OutOfMemory)
+    proc.alloc_term_string(mem, s)
+        .ok_or(IntrinsicError::OutOfMemory)
 }
 
 /// Helper to write a static byte slice to a buffer.
@@ -49,42 +52,72 @@ fn write_static_to_buffer(
     Ok(pos + s.len())
 }
 
-/// Write a value's string representation to a buffer.
-fn write_value_to_buffer<M: MemorySpace>(
+/// Write a term's string representation to a buffer.
+fn write_term_to_buffer<M: MemorySpace>(
     buffer: &mut [u8; STR_BUFFER_SIZE],
     pos: usize,
-    value: Value,
+    term: Term,
     proc: &Process,
+    realm: &Realm,
     mem: &M,
 ) -> Result<usize, IntrinsicError> {
-    match value {
-        Value::Nil => write_static_to_buffer(buffer, pos, b"nil"),
-        Value::Bool(true) => write_static_to_buffer(buffer, pos, b"true"),
-        Value::Bool(false) => write_static_to_buffer(buffer, pos, b"false"),
-        Value::Int(n) => write_int_to_buffer(buffer, pos, n),
-        Value::String(_) | Value::Symbol(_) => {
-            let Some(s) = proc.read_string(mem, value) else {
-                return Err(IntrinsicError::OutOfMemory);
-            };
-            write_static_to_buffer(buffer, pos, s.as_bytes())
+    // Check immediates first
+    if term.is_nil() {
+        return write_static_to_buffer(buffer, pos, b"nil");
+    }
+    if term.is_true() {
+        return write_static_to_buffer(buffer, pos, b"true");
+    }
+    if term.is_false() {
+        return write_static_to_buffer(buffer, pos, b"false");
+    }
+    if let Some(n) = term.as_small_int() {
+        return write_int_to_buffer(buffer, pos, n);
+    }
+    // Immediate symbols - look up name from realm
+    if let Some(idx) = term.as_symbol_index() {
+        if let Some(name) = realm.symbol_name(mem, idx) {
+            return write_static_to_buffer(buffer, pos, name.as_bytes());
         }
-        Value::Keyword(_) => {
-            let pos = write_static_to_buffer(buffer, pos, b":")?;
-            let Some(s) = proc.read_string(mem, value) else {
-                return Err(IntrinsicError::OutOfMemory);
-            };
-            write_static_to_buffer(buffer, pos, s.as_bytes())
+        return write_static_to_buffer(buffer, pos, b"<symbol>");
+    }
+    // Immediate keywords - look up name from realm, include colon prefix
+    if let Some(idx) = term.as_keyword_index() {
+        let new_pos = write_static_to_buffer(buffer, pos, b":")?;
+        if let Some(name) = realm.keyword_name(mem, idx) {
+            return write_static_to_buffer(buffer, new_pos, name.as_bytes());
         }
-        Value::Pair(_) => write_static_to_buffer(buffer, pos, b"<pair>"),
-        Value::Tuple(_) => write_static_to_buffer(buffer, pos, b"<tuple>"),
-        Value::Vector(_) => write_static_to_buffer(buffer, pos, b"<vector>"),
-        Value::Map(_) => write_static_to_buffer(buffer, pos, b"<map>"),
-        Value::Var(_) => write_static_to_buffer(buffer, pos, b"<var>"),
-        Value::Namespace(_) => write_static_to_buffer(buffer, pos, b"<namespace>"),
-        Value::CompiledFn(_) => write_static_to_buffer(buffer, pos, b"<fn>"),
-        Value::Closure(_) => write_static_to_buffer(buffer, pos, b"<closure>"),
-        Value::NativeFn(_) => write_static_to_buffer(buffer, pos, b"<native-fn>"),
-        Value::Unbound => write_static_to_buffer(buffer, pos, b"<unbound>"),
+        return write_static_to_buffer(buffer, new_pos, b"<keyword>");
+    }
+
+    // Check boxed types
+    if term.is_boxed() {
+        use crate::term::header::Header;
+        let addr = term.to_vaddr();
+        let header: Header = mem.read(addr);
+
+        match header.object_tag() {
+            object::STRING => {
+                let Some(s) = proc.read_term_string(mem, term) else {
+                    return Err(IntrinsicError::OutOfMemory);
+                };
+                write_static_to_buffer(buffer, pos, s.as_bytes())
+            }
+            object::TUPLE => write_static_to_buffer(buffer, pos, b"<tuple>"),
+            object::VECTOR => write_static_to_buffer(buffer, pos, b"<vector>"),
+            object::MAP => write_static_to_buffer(buffer, pos, b"<map>"),
+            object::VAR => write_static_to_buffer(buffer, pos, b"<var>"),
+            object::NAMESPACE => write_static_to_buffer(buffer, pos, b"<namespace>"),
+            object::FUN => write_static_to_buffer(buffer, pos, b"<fn>"),
+            object::CLOSURE => write_static_to_buffer(buffer, pos, b"<closure>"),
+            _ => write_static_to_buffer(buffer, pos, b"<unknown>"),
+        }
+    } else if term.is_list() {
+        // Pair (list)
+        write_static_to_buffer(buffer, pos, b"<pair>")
+    } else {
+        // Other (shouldn't happen with valid Terms)
+        write_static_to_buffer(buffer, pos, b"<unknown>")
     }
 }
 
@@ -144,8 +177,9 @@ fn write_int_to_buffer(
 
 // --- Keyword intrinsics ---
 
-pub const fn intrinsic_is_keyword(x_regs: &XRegs) -> Value {
-    Value::bool(x_regs[1].is_keyword())
+#[inline]
+pub const fn intrinsic_is_keyword(x_regs: &XRegs, proc: &Process) -> Term {
+    Term::bool(proc.is_term_keyword(x_regs[1]))
 }
 
 pub fn intrinsic_keyword<M: MemorySpace>(
@@ -154,27 +188,23 @@ pub fn intrinsic_keyword<M: MemorySpace>(
     realm: &mut Realm,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let term = x_regs[1];
 
     // Copy string to local buffer to avoid borrow conflict
     let mut buffer = [0u8; INTRINSIC_STRING_BUFFER_SIZE];
-    let len = match val {
-        Value::String(_) | Value::Symbol(_) | Value::Keyword(_) => {
-            let s = proc
-                .read_string(mem, val)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            let len = s.len().min(INTRINSIC_STRING_BUFFER_SIZE);
-            buffer[..len].copy_from_slice(&s.as_bytes()[..len]);
-            len
-        }
-        _ => {
-            return Err(IntrinsicError::TypeError {
-                intrinsic: id,
-                arg: 0,
-                expected: "string, symbol, or keyword",
-            });
-        }
+
+    // Check if it's a string-like type
+    let len = if let Some(s) = proc.read_term_string(mem, term) {
+        let len = s.len().min(INTRINSIC_STRING_BUFFER_SIZE);
+        buffer[..len].copy_from_slice(&s.as_bytes()[..len]);
+        len
+    } else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "string, symbol, or keyword",
+        });
     };
 
     let s = core::str::from_utf8(&buffer[..len]).map_err(|_| IntrinsicError::OutOfMemory)?;
@@ -189,36 +219,43 @@ pub fn intrinsic_keyword<M: MemorySpace>(
 pub fn intrinsic_name_fn<M: MemorySpace>(
     x_regs: &XRegs,
     proc: &mut Process,
+    realm: &Realm,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let term = x_regs[1];
 
     // Copy string to local buffer to avoid borrow conflict
     let mut buffer = [0u8; INTRINSIC_STRING_BUFFER_SIZE];
-    let len = match val {
-        Value::Keyword(_) | Value::Symbol(_) => {
-            let s = proc
-                .read_string(mem, val)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            let len = s.len().min(INTRINSIC_STRING_BUFFER_SIZE);
-            buffer[..len].copy_from_slice(&s.as_bytes()[..len]);
-            len
-        }
-        _ => {
-            return Err(IntrinsicError::TypeError {
-                intrinsic: id,
-                arg: 0,
-                expected: "keyword or symbol",
-            });
-        }
+    let len = if let Some(idx) = term.as_keyword_index() {
+        // Immediate keyword - look up name from realm
+        let Some(s) = realm.keyword_name(mem, idx) else {
+            return Err(IntrinsicError::OutOfMemory);
+        };
+        let len = s.len().min(INTRINSIC_STRING_BUFFER_SIZE);
+        buffer[..len].copy_from_slice(&s.as_bytes()[..len]);
+        len
+    } else if let Some(idx) = term.as_symbol_index() {
+        // Immediate symbol - look up name from realm
+        let Some(s) = realm.symbol_name(mem, idx) else {
+            return Err(IntrinsicError::OutOfMemory);
+        };
+        let len = s.len().min(INTRINSIC_STRING_BUFFER_SIZE);
+        buffer[..len].copy_from_slice(&s.as_bytes()[..len]);
+        len
+    } else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "keyword or symbol",
+        });
     };
 
     let s = core::str::from_utf8(&buffer[..len]).map_err(|_| IntrinsicError::OutOfMemory)?;
 
     // Find the last '/' and return everything after it
     let name = s.rfind('/').map_or(s, |pos| &s[pos + 1..]);
-    proc.alloc_string(mem, name)
+    proc.alloc_term_string(mem, name)
         .ok_or(IntrinsicError::OutOfMemory)
 }
 
@@ -227,39 +264,46 @@ pub fn intrinsic_name_fn<M: MemorySpace>(
 pub fn intrinsic_namespace<M: MemorySpace>(
     x_regs: &XRegs,
     proc: &mut Process,
+    realm: &Realm,
     mem: &mut M,
     id: u8,
-) -> Result<Value, IntrinsicError> {
-    let val = x_regs[1];
+) -> Result<Term, IntrinsicError> {
+    let term = x_regs[1];
 
     // Copy string to local buffer to avoid borrow conflict
     let mut buffer = [0u8; INTRINSIC_STRING_BUFFER_SIZE];
-    let len = match val {
-        Value::Keyword(_) | Value::Symbol(_) => {
-            let s = proc
-                .read_string(mem, val)
-                .ok_or(IntrinsicError::OutOfMemory)?;
-            let len = s.len().min(INTRINSIC_STRING_BUFFER_SIZE);
-            buffer[..len].copy_from_slice(&s.as_bytes()[..len]);
-            len
-        }
-        _ => {
-            return Err(IntrinsicError::TypeError {
-                intrinsic: id,
-                arg: 0,
-                expected: "keyword or symbol",
-            });
-        }
+    let len = if let Some(idx) = term.as_keyword_index() {
+        // Immediate keyword - look up name from realm
+        let Some(s) = realm.keyword_name(mem, idx) else {
+            return Err(IntrinsicError::OutOfMemory);
+        };
+        let len = s.len().min(INTRINSIC_STRING_BUFFER_SIZE);
+        buffer[..len].copy_from_slice(&s.as_bytes()[..len]);
+        len
+    } else if let Some(idx) = term.as_symbol_index() {
+        // Immediate symbol - look up name from realm
+        let Some(s) = realm.symbol_name(mem, idx) else {
+            return Err(IntrinsicError::OutOfMemory);
+        };
+        let len = s.len().min(INTRINSIC_STRING_BUFFER_SIZE);
+        buffer[..len].copy_from_slice(&s.as_bytes()[..len]);
+        len
+    } else {
+        return Err(IntrinsicError::TypeError {
+            intrinsic: id,
+            arg: 0,
+            expected: "keyword or symbol",
+        });
     };
 
     let s = core::str::from_utf8(&buffer[..len]).map_err(|_| IntrinsicError::OutOfMemory)?;
 
     // Find the last '/' - if present, return everything before it
     s.rfind('/').map_or_else(
-        || Ok(Value::nil()),
+        || Ok(Term::NIL),
         |pos| {
             let ns = &s[..pos];
-            proc.alloc_string(mem, ns)
+            proc.alloc_term_string(mem, ns)
                 .ok_or(IntrinsicError::OutOfMemory)
         },
     )

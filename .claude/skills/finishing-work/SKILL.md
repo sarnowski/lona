@@ -17,7 +17,7 @@ Work includes: concepts, plans, implementations, bug fixes, refactoring, documen
 │      ↓                                                          │
 │  Phase 1: Build & Test (make verify, make docs, REPL)           │
 │      ↓                                                          │
-│  Phase 2: Parallel Agent Review (3 agents)                      │
+│  Phase 2: Parallel Agent Review (7 agents)                      │
 │      ↓                                                          │
 │  Phase 3: Issue Resolution ←──────────────────────┐             │
 │      ↓                                            │             │
@@ -216,35 +216,21 @@ TEST COVERAGE ISSUE [BLOCKING]:
 .claude/skills/finishing-work/changed-files.sh
 ```
 
-### 2.2 Launch All Three Agents IN PARALLEL
+### 2.2 Launch ALL 7 Review Agents IN PARALLEL
 
-**CRITICAL: Launch all three in a SINGLE message with multiple tool calls.**
+**CRITICAL: ALL agents MUST be launched. No exceptions. Launch all 7 in a SINGLE message with multiple Task tool calls.**
 
-**Claude Reviewer:**
-```
-Task(subagent_type="reviewer", run_in_background=true, prompt="<REVIEW_PROMPT>")
-```
+| Agent | Purpose |
+|-------|---------|
+| `rust-code-reviewer` | Rust code quality, idiomaticity, best practices |
+| `architecture-reviewer` | Clean Code, YAGNI, KISS, DRY, SOLID principles |
+| `beam-vm-reviewer` | BEAM VM design patterns alignment |
+| `lonala-reviewer` | Lonala spec compliance, idiomatic patterns |
+| `lona-guardian` | Lona core principles, security model, design philosophy |
+| `sel4-expert-reviewer` | seL4 kernel compatibility, capability security |
+| `test-reviewer` | Test coverage, meaningfulness, goal-oriented testing |
 
-**Gemini:**
-```
-Bash(run_in_background=true, timeout=600000, command='gemini -m gemini-3-pro-preview "<REVIEW_PROMPT>"')
-```
-
-**Codex:**
-```
-Bash(run_in_background=true, timeout=600000, command='codex exec -m <MODEL> -c model_reasoning_effort=medium -s read-only "<REVIEW_PROMPT>" 2>/dev/null')
-```
-
-**Codex Model Selection:**
-- `-m gpt-5.2-codex` for code reviews
-- `-m gpt-5.2` for conceptual reviews (designs, plans, docs)
-
-**Codex Output Notes:**
-- `codex exec` streams progress to stderr, final message to stdout
-- `2>/dev/null` suppresses progress spam while preserving the final response
-- Adjust `model_reasoning_effort` to `low` or `high` as needed for deeper/faster analysis
-
-**Codex is SLOW:** Codex can take up to 20 minutes to complete a review. You will likely hit timeouts multiple times when waiting for Codex. Do NOT kill the agent - keep calling `TaskOutput` until Codex finishes. Be patient.
+**Launch ALL 7 agents IN PARALLEL (single message with all 7 Task tool calls).** Results return together when all complete.
 
 ### 2.3 The Review Prompt
 
@@ -280,19 +266,7 @@ INSTRUCTIONS:
 
 ## Phase 3: Issue Resolution
 
-### 3.1 Collect Reports
-
-Use `TaskOutput` to collect results:
-
-```
-TaskOutput(task_id="<agent_id>", block=true, timeout=300000)
-```
-
-**If timeout:** Call `TaskOutput` again with the same `task_id`. Repeat until complete. **Codex is especially slow** and can take up to 20 minutes - expect 5+ timeout retries. Do NOT kill the Codex agent; keep retrying `TaskOutput` until it finishes.
-
-**If agent fails:** Note the failure, consider re-launching once. If still failing, proceed with successful agents and document which failed.
-
-### 3.2 Synthesize and Verify
+### 3.1 Synthesize and Verify
 
 1. Combine all findings into a consolidated report
 2. Note which agent(s) raised each issue
@@ -301,7 +275,7 @@ TaskOutput(task_id="<agent_id>", block=true, timeout=300000)
    - Confirm the issue exists
    - Mark as **CONFIRMED** or **FALSE POSITIVE** (with explanation)
 
-### 3.3 Documentation Conflicts Require User Decision
+### 3.2 Documentation Conflicts Require User Decision
 
 **Documentation conflicts are SPECIAL.** When a reviewer reports `DOCUMENTATION CONFLICT [BLOCKING]`:
 
@@ -324,7 +298,7 @@ TaskOutput(task_id="<agent_id>", block=true, timeout=300000)
 
 **Never assume implementation is correct. Never assume documentation is correct. Ask.**
 
-### 3.4 Report to User
+### 3.3 Report to User
 
 Present verified issues:
 - Issue description
@@ -337,7 +311,7 @@ Present verified issues:
 - **Routine fixes** (typos, formatting, small corrections): Proceed immediately
 - **Significant changes** (architectural, behavioral): Ask user approval first
 
-### 3.5 Fix All Confirmed Issues
+### 3.4 Fix All Confirmed Issues
 
 **ALL confirmed issues MUST be fixed. No exceptions.**
 
@@ -352,7 +326,7 @@ For each issue:
 2. Verify fix is correct
 3. Do NOT introduce new issues
 
-### 3.6 Issue Accounting (MANDATORY)
+### 3.5 Issue Accounting (MANDATORY)
 
 Before re-review, account for EVERY confirmed issue:
 
@@ -372,13 +346,13 @@ USER SAID: <quote user's approval>
 
 There is no other option. You cannot skip without user approval.
 
-### 3.7 Review Loop
+### 3.6 Review Loop
 
 **If ANY source code changed during issue resolution:**
 
 1. Run `make verify` (if src/ or lib/ changed) - must pass
 2. Run `make docs` (if docs/ changed) - must pass
-3. Launch all three agents again
+3. Launch all 7 agents again
 4. Process findings
 5. If new issues found, fix and REPEAT
 6. Continue until **ZERO new issues**
@@ -413,7 +387,7 @@ Work is complete ONLY when ALL are true:
 - [ ] `make verify` passed (if src/ or lib/ changed)
 - [ ] `make docs` passed (if docs/ changed)
 - [ ] **Test coverage verified** (all new code has tests, bug fixes have regression tests)
-- [ ] All three agents reviewed
+- [ ] All 7 review agents completed
 - [ ] All confirmed issues resolved
 - [ ] Documentation is accurate and current
 - [ ] **Final agent review: ZERO issues**

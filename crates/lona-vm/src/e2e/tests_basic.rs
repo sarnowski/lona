@@ -18,9 +18,9 @@ use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::reader::read;
 use crate::realm::Realm;
+use crate::term::printer::print_term;
 use crate::types::{Paddr, Vaddr};
 use crate::uart::Uart;
-use crate::value::print_value;
 
 /// Test that VM initialization succeeds.
 pub fn test_vm_init<M: MemorySpace, U: Uart>(
@@ -165,7 +165,7 @@ impl Uart for OutputBuffer {
 ///
 /// This test exercises the same code path as the REPL:
 /// 1. `read()` parses the input string into a Value
-/// 2. `print_value()` converts the Value back to a string
+/// 2. `print_term()` converts the Value back to a string
 ///
 /// Input: `'(1 2 3)` (quoted list)
 /// Expected output: `(quote (1 2 3))`
@@ -184,7 +184,7 @@ pub fn test_read_quoted_list<M: MemorySpace, U: Uart>(
 
     // Print the value using the same function as the REPL
     let mut output = OutputBuffer::new();
-    print_value(value, proc, mem, &mut output);
+    print_term(value, proc, realm, mem, &mut output);
 
     // Verify the output matches expected
     let printed = output.as_str()?;

@@ -9,6 +9,12 @@ use super::allocation_test::setup;
 use super::*;
 use crate::Vaddr;
 use crate::platform::{MemorySpace, MockVSpace};
+use crate::term::Term;
+
+/// Helper to create a small integer Term.
+fn int(n: i64) -> Term {
+    Term::small_int(n).expect("integer out of small_int range")
+}
 
 // --- allocate_frame tests ---
 
@@ -178,7 +184,7 @@ fn extend_frame_zero_initializes() {
 
     // All Y registers should be nil
     for i in 0..3 {
-        assert_eq!(proc.get_y(&mem, i), Some(Value::Nil));
+        assert_eq!(proc.get_y(&mem, i), Some(Term::NIL));
     }
 }
 
@@ -190,16 +196,16 @@ fn y_register_get_set() {
     proc.extend_frame_y_regs_zero(&mut mem, 4).unwrap();
 
     // Set values
-    assert!(proc.set_y(&mut mem, 0, Value::int(42)));
-    assert!(proc.set_y(&mut mem, 3, Value::int(99)));
+    assert!(proc.set_y(&mut mem, 0, int(42)));
+    assert!(proc.set_y(&mut mem, 3, int(99)));
 
     // Get values
-    assert_eq!(proc.get_y(&mem, 0), Some(Value::int(42)));
-    assert_eq!(proc.get_y(&mem, 3), Some(Value::int(99)));
+    assert_eq!(proc.get_y(&mem, 0), Some(int(42)));
+    assert_eq!(proc.get_y(&mem, 3), Some(int(99)));
 
     // Unset registers should still be nil
-    assert_eq!(proc.get_y(&mem, 1), Some(Value::Nil));
-    assert_eq!(proc.get_y(&mem, 2), Some(Value::Nil));
+    assert_eq!(proc.get_y(&mem, 1), Some(Term::NIL));
+    assert_eq!(proc.get_y(&mem, 2), Some(Term::NIL));
 }
 
 #[test]
@@ -212,8 +218,8 @@ fn y_register_out_of_bounds() {
     // Out of bounds access
     assert_eq!(proc.get_y(&mem, 2), None);
     assert_eq!(proc.get_y(&mem, 100), None);
-    assert!(!proc.set_y(&mut mem, 2, Value::int(1)));
-    assert!(!proc.set_y(&mut mem, 100, Value::int(1)));
+    assert!(!proc.set_y(&mut mem, 2, int(1)));
+    assert!(!proc.set_y(&mut mem, 100, int(1)));
 }
 
 #[test]
@@ -249,25 +255,25 @@ fn nested_frames_preserve_y_registers() {
     proc.allocate_frame(&mut mem, 10, Vaddr::new(0x1000))
         .unwrap();
     proc.extend_frame_y_regs_zero(&mut mem, 2).unwrap();
-    proc.set_y(&mut mem, 0, Value::int(111));
-    proc.set_y(&mut mem, 1, Value::int(222));
+    proc.set_y(&mut mem, 0, int(111));
+    proc.set_y(&mut mem, 1, int(222));
 
     // Inner frame
     proc.allocate_frame(&mut mem, 20, Vaddr::new(0x2000))
         .unwrap();
     proc.extend_frame_y_regs_zero(&mut mem, 1).unwrap();
-    proc.set_y(&mut mem, 0, Value::int(333));
+    proc.set_y(&mut mem, 0, int(333));
 
     // Inner frame has different Y0
-    assert_eq!(proc.get_y(&mem, 0), Some(Value::int(333)));
+    assert_eq!(proc.get_y(&mem, 0), Some(int(333)));
 
     // Shrink and pop inner frame
     proc.shrink_frame_y_regs(&mut mem, 1).unwrap();
     proc.deallocate_frame(&mem).unwrap();
 
     // Outer frame's Y registers preserved
-    assert_eq!(proc.get_y(&mem, 0), Some(Value::int(111)));
-    assert_eq!(proc.get_y(&mem, 1), Some(Value::int(222)));
+    assert_eq!(proc.get_y(&mem, 0), Some(int(111)));
+    assert_eq!(proc.get_y(&mem, 1), Some(int(222)));
 }
 
 // --- Stack overflow tests ---
@@ -331,18 +337,17 @@ fn call_depth_tracking() {
 
 // --- Regression tests ---
 
-/// Regression test: `Y_REGISTER_SIZE` must equal `size_of::<Value>()`.
+/// Regression test: `Y_REGISTER_SIZE` must equal `size_of::<Term>()`.
 ///
-/// Before fix: `STACK_SLOT_SIZE` was 8 bytes but `Value` is 16 bytes.
-/// This caused Y register writes to overflow into adjacent memory,
-/// corrupting frame headers and causing segfaults on deallocate.
+/// Before fix: `STACK_SLOT_SIZE` was 8 bytes but `Value` was 16 bytes.
+/// Now Y registers store 8-byte Terms, so this should match.
 #[test]
-fn regression_y_register_size_matches_value_size() {
+fn regression_y_register_size_matches_term_size() {
     // Verify the constant is defined correctly
     assert_eq!(
         Y_REGISTER_SIZE,
-        core::mem::size_of::<Value>(),
-        "Y_REGISTER_SIZE must equal size_of::<Value>() to prevent memory corruption"
+        core::mem::size_of::<Term>(),
+        "Y_REGISTER_SIZE must equal size_of::<Term>() to prevent memory corruption"
     );
 }
 
@@ -366,16 +371,16 @@ fn regression_y_register_write_does_not_corrupt_header() {
 
     // Write to ALL Y registers, including the last one (Y3)
     // Before fix, Y3 write would corrupt return_ip in header
-    proc.set_y(&mut mem, 0, Value::int(100));
-    proc.set_y(&mut mem, 1, Value::int(200));
-    proc.set_y(&mut mem, 2, Value::int(300));
-    proc.set_y(&mut mem, 3, Value::int(400));
+    proc.set_y(&mut mem, 0, int(100));
+    proc.set_y(&mut mem, 1, int(200));
+    proc.set_y(&mut mem, 2, int(300));
+    proc.set_y(&mut mem, 3, int(400));
 
     // Verify Y registers are correct
-    assert_eq!(proc.get_y(&mem, 0), Some(Value::int(100)));
-    assert_eq!(proc.get_y(&mem, 1), Some(Value::int(200)));
-    assert_eq!(proc.get_y(&mem, 2), Some(Value::int(300)));
-    assert_eq!(proc.get_y(&mem, 3), Some(Value::int(400)));
+    assert_eq!(proc.get_y(&mem, 0), Some(int(100)));
+    assert_eq!(proc.get_y(&mem, 1), Some(int(200)));
+    assert_eq!(proc.get_y(&mem, 2), Some(int(300)));
+    assert_eq!(proc.get_y(&mem, 3), Some(int(400)));
 
     // CRITICAL: Verify frame header is NOT corrupted
     let stored_return_ip: u64 = mem.read(Vaddr::new(

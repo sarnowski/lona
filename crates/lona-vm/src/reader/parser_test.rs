@@ -10,7 +10,7 @@ use crate::Vaddr;
 use crate::platform::MockVSpace;
 use crate::process::Process;
 use crate::realm::Realm;
-use crate::value::Value;
+use crate::term::Term;
 
 fn setup() -> (Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
@@ -24,6 +24,22 @@ fn setup() -> (Process, Realm, MockVSpace) {
     let realm_base = base.add(128 * 1024);
     let realm = Realm::new(realm_base, 64 * 1024);
     (proc, realm, mem)
+}
+
+/// Get the string name of a keyword term using the realm's intern table.
+fn keyword_str<'a>(term: Term, realm: &Realm, mem: &'a MockVSpace) -> &'a str {
+    let index = term.as_keyword_index().expect("not a keyword");
+    realm
+        .keyword_name(mem, index)
+        .expect("keyword not found in intern table")
+}
+
+/// Get the string name of a symbol term using the realm's intern table.
+fn symbol_str<'a>(term: Term, realm: &Realm, mem: &'a MockVSpace) -> &'a str {
+    let index = term.as_symbol_index().expect("not a symbol");
+    realm
+        .symbol_name(mem, index)
+        .expect("symbol not found in intern table")
 }
 
 #[test]
@@ -42,12 +58,12 @@ fn read_booleans() {
     let t = read("true", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert_eq!(t, Value::bool(true));
+    assert_eq!(t, Term::TRUE);
 
     let f = read("false", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert_eq!(f, Value::bool(false));
+    assert_eq!(f, Term::FALSE);
 }
 
 #[test]
@@ -56,19 +72,19 @@ fn read_integers() {
 
     assert_eq!(
         read("0", &mut proc, &mut realm, &mut mem).unwrap().unwrap(),
-        Value::int(0)
+        Term::small_int(0).unwrap()
     );
     assert_eq!(
         read("42", &mut proc, &mut realm, &mut mem)
             .unwrap()
             .unwrap(),
-        Value::int(42)
+        Term::small_int(42).unwrap()
     );
     assert_eq!(
         read("-123", &mut proc, &mut realm, &mut mem)
             .unwrap()
             .unwrap(),
-        Value::int(-123)
+        Term::small_int(-123).unwrap()
     );
 }
 
@@ -79,7 +95,7 @@ fn read_strings() {
     let value = read("\"hello\"", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    let s = proc.read_string(&mem, value).unwrap();
+    let s = proc.read_term_string(&mem, value).unwrap();
     assert_eq!(s, "hello");
 }
 
@@ -100,18 +116,18 @@ fn read_list() {
     let value = read("(1 2 3)", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_pair());
+    assert!(value.is_list());
 
     // Check structure: (1 . (2 . (3 . nil)))
-    let p1 = proc.read_pair(&mem, value).unwrap();
-    assert_eq!(p1.first, Value::int(1));
+    let (head1, tail1) = proc.read_term_pair(&mem, value).unwrap();
+    assert_eq!(head1, Term::small_int(1).unwrap());
 
-    let p2 = proc.read_pair(&mem, p1.rest).unwrap();
-    assert_eq!(p2.first, Value::int(2));
+    let (head2, tail2) = proc.read_term_pair(&mem, tail1).unwrap();
+    assert_eq!(head2, Term::small_int(2).unwrap());
 
-    let p3 = proc.read_pair(&mem, p2.rest).unwrap();
-    assert_eq!(p3.first, Value::int(3));
-    assert!(p3.rest.is_nil());
+    let (head3, tail3) = proc.read_term_pair(&mem, tail2).unwrap();
+    assert_eq!(head3, Term::small_int(3).unwrap());
+    assert!(tail3.is_nil());
 }
 
 #[test]
@@ -122,15 +138,14 @@ fn read_nested_list() {
         .unwrap()
         .unwrap();
 
-    let p1 = proc.read_pair(&mem, value).unwrap();
-    assert_eq!(p1.first, Value::int(1));
+    let (head1, tail1) = proc.read_term_pair(&mem, value).unwrap();
+    assert_eq!(head1, Term::small_int(1).unwrap());
 
-    let inner = p1.rest;
-    let p2 = proc.read_pair(&mem, inner).unwrap();
-    assert!(p2.first.is_pair()); // (2 3)
+    let (head2, _tail2) = proc.read_term_pair(&mem, tail1).unwrap();
+    assert!(head2.is_list()); // (2 3)
 
-    let inner_list = proc.read_pair(&mem, p2.first).unwrap();
-    assert_eq!(inner_list.first, Value::int(2));
+    let (inner_head, _inner_tail) = proc.read_term_pair(&mem, head2).unwrap();
+    assert_eq!(inner_head, Term::small_int(2).unwrap());
 }
 
 #[test]
@@ -141,16 +156,16 @@ fn read_quote() {
     let value = read("'x", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_pair());
+    assert!(value.is_list());
 
-    let p1 = proc.read_pair(&mem, value).unwrap();
-    let quote_name = proc.read_string(&mem, p1.first).unwrap();
+    let (head1, tail1) = proc.read_term_pair(&mem, value).unwrap();
+    let quote_name = symbol_str(head1, &realm, &mem);
     assert_eq!(quote_name, "quote");
 
-    let p2 = proc.read_pair(&mem, p1.rest).unwrap();
-    let x_name = proc.read_string(&mem, p2.first).unwrap();
+    let (head2, tail2) = proc.read_term_pair(&mem, tail1).unwrap();
+    let x_name = symbol_str(head2, &realm, &mem);
     assert_eq!(x_name, "x");
-    assert!(p2.rest.is_nil());
+    assert!(tail2.is_nil());
 }
 
 #[test]
@@ -161,14 +176,14 @@ fn read_quote_list() {
     let value = read("'(1 2 3)", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_pair());
+    assert!(value.is_list());
 
-    let p1 = proc.read_pair(&mem, value).unwrap();
-    let quote_name = proc.read_string(&mem, p1.first).unwrap();
+    let (head1, tail1) = proc.read_term_pair(&mem, value).unwrap();
+    let quote_name = symbol_str(head1, &realm, &mem);
     assert_eq!(quote_name, "quote");
 
-    let p2 = proc.read_pair(&mem, p1.rest).unwrap();
-    assert!(p2.first.is_pair()); // The list (1 2 3)
+    let (head2, _tail2) = proc.read_term_pair(&mem, tail1).unwrap();
+    assert!(head2.is_list()); // The list (1 2 3)
 }
 
 #[test]
@@ -208,7 +223,7 @@ fn read_keyword_simple() {
         .unwrap()
         .unwrap();
     assert!(value.is_keyword());
-    let s = proc.read_string(&mem, value).unwrap();
+    let s = keyword_str(value, &realm, &mem);
     assert_eq!(s, "foo");
 }
 
@@ -219,7 +234,7 @@ fn read_keyword_qualified() {
         .unwrap()
         .unwrap();
     assert!(value.is_keyword());
-    let s = proc.read_string(&mem, value).unwrap();
+    let s = keyword_str(value, &realm, &mem);
     assert_eq!(s, "ns/bar");
 }
 
@@ -272,8 +287,8 @@ fn read_tuple_empty() {
     let value = read("[]", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_tuple());
-    let len = proc.read_tuple_len(&mem, value).unwrap();
+    assert!(proc.is_term_tuple(&mem, value));
+    let len = proc.read_term_tuple_len(&mem, value).unwrap();
     assert_eq!(len, 0);
 }
 
@@ -283,22 +298,22 @@ fn read_tuple_simple() {
     let value = read("[1 2 3]", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_tuple());
+    assert!(proc.is_term_tuple(&mem, value));
 
-    let len = proc.read_tuple_len(&mem, value).unwrap();
+    let len = proc.read_term_tuple_len(&mem, value).unwrap();
     assert_eq!(len, 3);
 
     assert_eq!(
-        proc.read_tuple_element(&mem, value, 0).unwrap(),
-        Value::int(1)
+        proc.read_term_tuple_element(&mem, value, 0).unwrap(),
+        Term::small_int(1).unwrap()
     );
     assert_eq!(
-        proc.read_tuple_element(&mem, value, 1).unwrap(),
-        Value::int(2)
+        proc.read_term_tuple_element(&mem, value, 1).unwrap(),
+        Term::small_int(2).unwrap()
     );
     assert_eq!(
-        proc.read_tuple_element(&mem, value, 2).unwrap(),
-        Value::int(3)
+        proc.read_term_tuple_element(&mem, value, 2).unwrap(),
+        Term::small_int(3).unwrap()
     );
 }
 
@@ -308,19 +323,23 @@ fn read_tuple_mixed() {
     let value = read("[1 \"hello\" nil]", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_tuple());
+    assert!(proc.is_term_tuple(&mem, value));
 
-    let len = proc.read_tuple_len(&mem, value).unwrap();
+    let len = proc.read_term_tuple_len(&mem, value).unwrap();
     assert_eq!(len, 3);
 
     assert_eq!(
-        proc.read_tuple_element(&mem, value, 0).unwrap(),
-        Value::int(1)
+        proc.read_term_tuple_element(&mem, value, 0).unwrap(),
+        Term::small_int(1).unwrap()
     );
-    let s = proc.read_tuple_element(&mem, value, 1).unwrap();
-    assert!(s.is_string());
-    assert_eq!(proc.read_string(&mem, s).unwrap(), "hello");
-    assert!(proc.read_tuple_element(&mem, value, 2).unwrap().is_nil());
+    let s = proc.read_term_tuple_element(&mem, value, 1).unwrap();
+    assert!(proc.is_term_string(&mem, s));
+    assert_eq!(proc.read_term_string(&mem, s).unwrap(), "hello");
+    assert!(
+        proc.read_term_tuple_element(&mem, value, 2)
+            .unwrap()
+            .is_nil()
+    );
 }
 
 #[test]
@@ -329,18 +348,18 @@ fn read_tuple_nested() {
     let value = read("[[1 2] [3 4]]", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_tuple());
+    assert!(proc.is_term_tuple(&mem, value));
 
-    let len = proc.read_tuple_len(&mem, value).unwrap();
+    let len = proc.read_term_tuple_len(&mem, value).unwrap();
     assert_eq!(len, 2);
 
-    let inner1 = proc.read_tuple_element(&mem, value, 0).unwrap();
-    assert!(inner1.is_tuple());
-    assert_eq!(proc.read_tuple_len(&mem, inner1).unwrap(), 2);
+    let inner1 = proc.read_term_tuple_element(&mem, value, 0).unwrap();
+    assert!(proc.is_term_tuple(&mem, inner1));
+    assert_eq!(proc.read_term_tuple_len(&mem, inner1).unwrap(), 2);
 
-    let inner2 = proc.read_tuple_element(&mem, value, 1).unwrap();
-    assert!(inner2.is_tuple());
-    assert_eq!(proc.read_tuple_len(&mem, inner2).unwrap(), 2);
+    let inner2 = proc.read_term_tuple_element(&mem, value, 1).unwrap();
+    assert!(proc.is_term_tuple(&mem, inner2));
+    assert_eq!(proc.read_term_tuple_len(&mem, inner2).unwrap(), 2);
 }
 
 #[test]
@@ -349,18 +368,18 @@ fn read_tuple_with_keywords() {
     let value = read("[:a :b]", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_tuple());
+    assert!(proc.is_term_tuple(&mem, value));
 
-    let len = proc.read_tuple_len(&mem, value).unwrap();
+    let len = proc.read_term_tuple_len(&mem, value).unwrap();
     assert_eq!(len, 2);
 
-    let k1 = proc.read_tuple_element(&mem, value, 0).unwrap();
+    let k1 = proc.read_term_tuple_element(&mem, value, 0).unwrap();
     assert!(k1.is_keyword());
-    assert_eq!(proc.read_string(&mem, k1).unwrap(), "a");
+    assert_eq!(keyword_str(k1, &realm, &mem), "a");
 
-    let k2 = proc.read_tuple_element(&mem, value, 1).unwrap();
+    let k2 = proc.read_term_tuple_element(&mem, value, 1).unwrap();
     assert!(k2.is_keyword());
-    assert_eq!(proc.read_string(&mem, k2).unwrap(), "b");
+    assert_eq!(keyword_str(k2, &realm, &mem), "b");
 }
 
 #[test]
@@ -378,9 +397,9 @@ fn read_map_empty() {
     let value = read("%{}", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_map());
-    let map = proc.read_map(&mem, value).unwrap();
-    assert!(map.entries.is_nil());
+    assert!(proc.is_term_map(&mem, value));
+    let entries = proc.read_term_map_entries(&mem, value).unwrap();
+    assert!(entries.is_nil());
 }
 
 #[test]
@@ -389,7 +408,7 @@ fn read_map_simple() {
     let value = read("%{:a 1 :b 2}", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_map());
+    assert!(proc.is_term_map(&mem, value));
 }
 
 #[test]
@@ -422,8 +441,9 @@ fn read_metadata_keyword() {
     let value = read("^:private foo", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_symbol());
-    assert_eq!(proc.read_string(&mem, value).unwrap(), "foo");
+    assert!(proc.is_term_symbol(value));
+    let idx = value.as_symbol_index().unwrap();
+    assert_eq!(realm.symbol_name(&mem, idx).unwrap(), "foo");
 }
 
 #[test]
@@ -432,8 +452,9 @@ fn read_metadata_map() {
     let value = read("^%{:doc \"hello\"} foo", &mut proc, &mut realm, &mut mem)
         .unwrap()
         .unwrap();
-    assert!(value.is_symbol());
-    assert_eq!(proc.read_string(&mem, value).unwrap(), "foo");
+    assert!(proc.is_term_symbol(value));
+    let idx = value.as_symbol_index().unwrap();
+    assert_eq!(realm.symbol_name(&mem, idx).unwrap(), "foo");
 }
 
 #[test]
