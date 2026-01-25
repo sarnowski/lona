@@ -29,6 +29,7 @@ QEMU_X86           = qemu-system-x86_64
 QEMU_X86_MACHINE   = q35
 QEMU_X86_CPU       = Cascadelake-Server
 QEMU_X86_MEMORY    = 1G
+QEMU_X86_SMP       = 1
 OVMF_CODE          = /usr/share/OVMF/OVMF_CODE.fd
 
 # QEMU aarch64 configuration
@@ -137,6 +138,7 @@ help:
 	@echo "  make test             Run unit tests"
 	@echo "  make verify           Run all checks (quiet output)"
 	@echo "  make verify VERBOSE=1 Run all checks (full output)"
+	@echo "  make spec-tests       Extract spec tests from docs (auto-runs before builds)"
 	@echo "  make venv             Create Python virtual environment"
 	@echo "  make mcp              Start MCP server for AI agents"
 	@echo ""
@@ -205,7 +207,7 @@ $(MARKER_X86_64_KERNEL): $(MARKER_SEL4_SRC)
 			-DKernelMaxNumNodes=64 \
 			-DKernelIsMCS=ON \
 			-DKernelVerificationBuild=OFF \
-			-DKernelDebugBuild=ON \
+			-DKernelDebugBuild=OFF \
 			-DKernelPrinting=ON \
 			-DKernelSupportPCID=OFF \
 			-DLibSel4FunctionAttributes=public && \
@@ -235,7 +237,7 @@ $(MARKER_AARCH64_KERNEL): $(MARKER_SEL4_SRC)
 			-DKernelIsMCS=ON \
 			-DKernelArmHypervisorSupport=ON \
 			-DKernelVerificationBuild=OFF \
-			-DKernelDebugBuild=ON \
+			-DKernelDebugBuild=OFF \
 			-DKernelPrinting=ON \
 			-DARM_CPU=cortex-a57 \
 			-DLibSel4FunctionAttributes=public && \
@@ -262,6 +264,7 @@ $(MARKER_AARCH64_LOADER): $(MARKER_AARCH64_KERNEL)
 		export AR=aarch64-linux-gnu-ar && \
 		cd /build/rust-sel4/crates/sel4-kernel-loader && \
 		cargo build --release --target aarch64-sel4 \
+			-Zunstable-options \
 			-Z build-std=core,alloc,compiler_builtins \
 			-Z build-std-features=compiler-builtins-mem && \
 		mkdir -p /build/sel4-aarch64/bin && \
@@ -270,14 +273,28 @@ $(MARKER_AARCH64_LOADER): $(MARKER_AARCH64_KERNEL)
 	@touch $(MARKER_AARCH64_LOADER)
 
 # ============================================================
+# Generated Code
+# ============================================================
+
+# Spec tests extracted from documentation - generates Rust code
+SPEC_DATA_RS = crates/lona-vm/src/e2e/spec_data.rs
+
+.PHONY: spec-tests
+spec-tests: $(SPEC_DATA_RS)
+
+$(SPEC_DATA_RS): $(wildcard docs/lonala/*.md) scripts/extract_spec_tests.py
+	@echo "=== Extracting spec tests from documentation ==="
+	python3 scripts/extract_spec_tests.py
+
+# ============================================================
 # Rust Builds
 # ============================================================
 
 # Common cargo flags for seL4 builds
-CARGO_SEL4_FLAGS = -Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem
+CARGO_SEL4_FLAGS = -Zunstable-options -Z build-std=core,alloc,compiler_builtins -Z build-std-features=compiler-builtins-mem
 
 .PHONY: x86_64-build
-x86_64-build: $(MARKER_X86_64_KERNEL)
+x86_64-build: $(MARKER_X86_64_KERNEL) spec-tests
 	@echo "=== Building Lona VM for x86_64 (release) ==="
 	$(DOCKER) env \
 		LONA_VERSION=$(VERSION) \
@@ -301,7 +318,7 @@ x86_64-build: $(MARKER_X86_64_KERNEL)
 			$(CARGO_SEL4_FLAGS)
 
 .PHONY: aarch64-build
-aarch64-build: $(MARKER_AARCH64_KERNEL)
+aarch64-build: $(MARKER_AARCH64_KERNEL) spec-tests
 	@echo "=== Building Lona VM for aarch64 (release) ==="
 	$(DOCKER) env \
 		LONA_VERSION=$(VERSION) \
@@ -325,7 +342,7 @@ aarch64-build: $(MARKER_AARCH64_KERNEL)
 			$(CARGO_SEL4_FLAGS)
 
 .PHONY: x86_64-build-test
-x86_64-build-test: $(MARKER_X86_64_KERNEL)
+x86_64-build-test: $(MARKER_X86_64_KERNEL) spec-tests
 	@echo "=== Building Lona VM for x86_64 (test) ==="
 	$(DOCKER) env \
 		LONA_VERSION=$(VERSION) \
@@ -349,7 +366,7 @@ x86_64-build-test: $(MARKER_X86_64_KERNEL)
 			$(CARGO_SEL4_FLAGS)
 
 .PHONY: aarch64-build-test
-aarch64-build-test: $(MARKER_AARCH64_KERNEL)
+aarch64-build-test: $(MARKER_AARCH64_KERNEL) spec-tests
 	@echo "=== Building Lona VM for aarch64 (test) ==="
 	$(DOCKER) env \
 		LONA_VERSION=$(VERSION) \
@@ -506,6 +523,7 @@ run-x86_64: x86_64
 	$(DOCKER_IT) $(QEMU_X86) \
 		-machine $(QEMU_X86_MACHINE) \
 		-cpu $(QEMU_X86_CPU) \
+		-smp $(QEMU_X86_SMP) \
 		-m $(QEMU_X86_MEMORY) \
 		-display none \
 		-serial stdio \
@@ -537,6 +555,7 @@ x86_64-test: x86_64-image-test
 		$(DOCKER) $(QEMU_X86) \
 			-machine $(QEMU_X86_MACHINE) \
 			-cpu $(QEMU_X86_CPU) \
+			-smp $(QEMU_X86_SMP) \
 			-m $(QEMU_X86_MEMORY) \
 			-display none \
 			-serial stdio \
@@ -572,17 +591,17 @@ format: $(MARKER_ENV)
 	$(DOCKER) cargo fmt
 
 .PHONY: clippy
-clippy: $(MARKER_ENV)
+clippy: $(MARKER_ENV) spec-tests
 	@echo "=== Running clippy ==="
 	$(DOCKER) env LONA_VERSION=$(VERSION) cargo clippy --all-targets -- -D warnings
 
 .PHONY: test
-test: $(MARKER_ENV)
+test: $(MARKER_ENV) spec-tests
 	@echo "=== Running unit tests ==="
 	$(DOCKER) sh -c 'LONA_VERSION=$(VERSION) cargo test && LONA_VERSION=$(VERSION) cargo llvm-cov --fail-under-lines 85'
 
 .PHONY: verify
-verify: $(MARKER_ENV)
+verify: $(MARKER_ENV) spec-tests
 	@echo "Running verification..."
 	$(call run-quiet,format,$(DOCKER) cargo fmt)
 	$(call run-quiet,clippy,$(DOCKER) env LONA_VERSION=$(VERSION) cargo clippy --all-targets -- -D warnings)

@@ -232,12 +232,17 @@ Bash(run_in_background=true, timeout=600000, command='gemini -m gemini-3-pro-pre
 
 **Codex:**
 ```
-Bash(run_in_background=true, timeout=600000, command='codex exec -m <MODEL> -c model_reasoning_effort=medium -c hide_agent_reasoning=true -s read-only "<REVIEW_PROMPT>"')
+Bash(run_in_background=true, timeout=600000, command='codex exec -m <MODEL> -c model_reasoning_effort=medium -s read-only "<REVIEW_PROMPT>" 2>/dev/null')
 ```
 
 **Codex Model Selection:**
 - `-m gpt-5.2-codex` for code reviews
 - `-m gpt-5.2` for conceptual reviews (designs, plans, docs)
+
+**Codex Output Notes:**
+- `codex exec` streams progress to stderr, final message to stdout
+- `2>/dev/null` suppresses progress spam while preserving the final response
+- Adjust `model_reasoning_effort` to `low` or `high` as needed for deeper/faster analysis
 
 ### 2.3 The Review Prompt
 

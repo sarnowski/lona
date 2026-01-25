@@ -34,6 +34,7 @@ pub mod process;
 pub mod reader;
 pub mod realm;
 pub mod repl;
+pub mod scheduler;
 pub mod types;
 pub mod uart;
 pub mod value;

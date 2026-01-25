@@ -12,9 +12,10 @@ use core::result::Result::{self, Err, Ok};
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
+use crate::realm::Realm;
 use crate::uart::Uart;
 
-use super::{tests_basic, tests_lmm, tests_lmm_demand};
+use super::{spec_runner, tests_basic, tests_lmm, tests_lmm_demand};
 
 /// Status of a single test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,8 +41,8 @@ pub struct TestResult {
 
 /// A test function signature.
 ///
-/// Tests receive the same process, memory space, and UART that the REPL uses.
-type TestFn<M, U> = fn(&mut Process, &mut M, &mut U) -> Result<(), &'static str>;
+/// Tests receive the same process, realm, memory space, and UART that the REPL uses.
+type TestFn<M, U> = fn(&mut Process, &mut Realm, &mut M, &mut U) -> Result<(), &'static str>;
 
 /// A registered test with metadata.
 struct TestCase<M: MemorySpace, U: Uart> {
@@ -137,7 +138,7 @@ fn get_test_cases<M: MemorySpace, U: Uart>() -> [TestCase<M, U>; 19] {
 
 /// Run all registered E2E tests and output results.
 ///
-/// Tests receive the same process, memory space, and UART that the REPL uses,
+/// Tests receive the same process, realm, memory space, and UART that the REPL uses,
 /// ensuring they exercise the exact same code paths as production.
 ///
 /// Returns `true` if all tests passed, `false` otherwise.
@@ -148,6 +149,7 @@ fn get_test_cases<M: MemorySpace, U: Uart>() -> [TestCase<M, U>; 19] {
 /// can be parsed by the host test runner.
 pub fn run_all_tests<M: MemorySpace, U: Uart>(
     proc: &mut Process,
+    realm: &mut Realm,
     mem: &mut M,
     uart: &mut U,
 ) -> bool {
@@ -163,7 +165,7 @@ pub fn run_all_tests<M: MemorySpace, U: Uart>(
     for (i, test) in test_cases.iter().enumerate() {
         sel4::debug_print!("[TEST] {} ... ", test.name);
 
-        let result = match (test.func)(proc, mem, uart) {
+        let result = match (test.func)(proc, realm, mem, uart) {
             Ok(()) => {
                 sel4::debug_println!("PASS");
                 passed += 1;
@@ -198,8 +200,11 @@ pub fn run_all_tests<M: MemorySpace, U: Uart>(
         skipped
     );
 
-    // Print verdict
-    let all_passed = failed == 0;
+    // Run specification tests
+    let spec_failed = spec_runner::run_spec_tests(proc, realm, mem, uart);
+
+    // Print verdict (includes both e2e and spec test results)
+    let all_passed = failed == 0 && spec_failed == 0;
     if all_passed {
         sel4::debug_println!("=== E2E_VERDICT: PASS ===");
     } else {

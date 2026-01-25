@@ -58,9 +58,7 @@ impl HeapCompiledFn {
     #[inline]
     #[must_use]
     pub const fn alloc_size(code_len: usize, constants_len: usize) -> usize {
-        Self::HEADER_SIZE
-            + code_len * core::mem::size_of::<u32>()
-            + constants_len * core::mem::size_of::<Value>()
+        Self::constants_offset(code_len) + constants_len * core::mem::size_of::<Value>()
     }
 
     /// Offset from header start to the bytecode array.
@@ -71,10 +69,15 @@ impl HeapCompiledFn {
     }
 
     /// Offset from header start to the constants pool.
+    ///
+    /// The offset is rounded up to 8-byte alignment to ensure Value array
+    /// elements are properly aligned for reading.
     #[inline]
     #[must_use]
     pub const fn constants_offset(code_len: usize) -> usize {
-        Self::HEADER_SIZE + code_len * core::mem::size_of::<u32>()
+        let raw_offset = Self::HEADER_SIZE + code_len * core::mem::size_of::<u32>();
+        // Round up to 8-byte alignment for Value array
+        (raw_offset + 7) & !7
     }
 }
 

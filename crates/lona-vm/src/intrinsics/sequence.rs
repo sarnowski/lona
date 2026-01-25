@@ -9,7 +9,7 @@ use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::value::Value;
 
-use super::IntrinsicError;
+use super::{IntrinsicError, XRegs};
 
 /// Get the first element of a collection.
 ///
@@ -20,11 +20,12 @@ use super::IntrinsicError;
 /// - `(first %{:a 1})` → [:a 1]
 /// - `(first '())` → nil
 pub fn intrinsic_first<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let coll = proc.x_regs[1];
+    let coll = x_regs[1];
 
     match coll {
         Value::Nil => Ok(Value::Nil),
@@ -72,11 +73,12 @@ pub fn intrinsic_first<M: MemorySpace>(
 /// - `(rest {1 2 3})` → (2 3) (list, not vector)
 /// - `(rest '(1))` → ()
 pub fn intrinsic_rest<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let coll = proc.x_regs[1];
+    let coll = x_regs[1];
 
     match coll {
         Value::Nil => Ok(Value::Nil),
@@ -142,11 +144,12 @@ fn build_list_from_indexed<M: MemorySpace>(
 /// - `(empty? {})` → true
 /// - `(empty? %{})` → true
 pub fn intrinsic_is_empty<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let coll = proc.x_regs[1];
+    let coll = x_regs[1];
 
     match coll {
         Value::Nil => Ok(Value::bool(true)),

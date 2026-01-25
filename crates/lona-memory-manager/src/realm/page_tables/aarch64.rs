@@ -32,8 +32,8 @@ fn create_page_table(
     let dest_slot = slots.alloc().ok_or(RealmError::OutOfSlots)?;
     let blueprint = ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::PT);
 
-    let (ut_slot, _, _) = untypeds
-        .allocate(12, slots, false) // Page tables are 4KB
+    let (ut_slot, _) = untypeds
+        .allocate(12, false) // Page tables are 4KB
         .ok_or(RealmError::OutOfMemory)?;
 
     let untyped: Cap<sel4::cap_type::Untyped> = Cap::from_bits(ut_slot as u64);

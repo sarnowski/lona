@@ -38,8 +38,8 @@ pub fn create_vspace(
     ));
 
     let size_bits = blueprint.physical_size_bits() as u8;
-    let (ut_slot, _, _) = untypeds
-        .allocate(size_bits, slots, false)
+    let (ut_slot, _) = untypeds
+        .allocate(size_bits, false)
         .ok_or(RealmError::OutOfMemory)?;
 
     // ut_slot is an absolute slot number, use Cap::from_bits directly
@@ -78,8 +78,8 @@ pub fn create_cnode(
     };
 
     let size_bits = blueprint.physical_size_bits() as u8;
-    let (ut_slot, _, _) = untypeds
-        .allocate(size_bits, slots, false)
+    let (ut_slot, _) = untypeds
+        .allocate(size_bits, false)
         .ok_or(RealmError::OutOfMemory)?;
 
     // ut_slot is an absolute slot number, use Cap::from_bits directly
@@ -106,8 +106,8 @@ pub fn create_endpoint(
     let blueprint = ObjectBlueprint::Endpoint;
 
     let size_bits = blueprint.physical_size_bits() as u8;
-    let (ut_slot, _, _) = untypeds
-        .allocate(size_bits, slots, false)
+    let (ut_slot, _) = untypeds
+        .allocate(size_bits, false)
         .ok_or(RealmError::OutOfMemory)?;
 
     // ut_slot is an absolute slot number, use Cap::from_bits directly
@@ -136,8 +136,8 @@ pub fn create_sched_context(
     };
 
     let size_bits = blueprint.physical_size_bits() as u8;
-    let (ut_slot, _, _) = untypeds
-        .allocate(size_bits, slots, false)
+    let (ut_slot, _) = untypeds
+        .allocate(size_bits, false)
         .ok_or(RealmError::OutOfMemory)?;
 
     // ut_slot is an absolute slot number, use Cap::from_bits directly
@@ -190,8 +190,8 @@ pub fn create_tcb(
     let blueprint = ObjectBlueprint::Tcb;
 
     let size_bits = blueprint.physical_size_bits() as u8;
-    let (ut_slot, _, _) = untypeds
-        .allocate(size_bits, slots, false)
+    let (ut_slot, _) = untypeds
+        .allocate(size_bits, false)
         .ok_or(RealmError::OutOfMemory)?;
 
     // ut_slot is an absolute slot number, use Cap::from_bits directly
@@ -220,8 +220,8 @@ pub fn create_reply(
     let blueprint = ObjectBlueprint::Reply;
 
     let size_bits = blueprint.physical_size_bits() as u8;
-    let (ut_slot, _, _) = untypeds
-        .allocate(size_bits, slots, false)
+    let (ut_slot, _) = untypeds
+        .allocate(size_bits, false)
         .ok_or(RealmError::OutOfMemory)?;
 
     let untyped: Cap<sel4::cap_type::Untyped> = Cap::from_bits(ut_slot as u64);

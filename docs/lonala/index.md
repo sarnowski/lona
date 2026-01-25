@@ -13,6 +13,19 @@ Lonala is a LISP dialect for the Lona operating system, running on the seL4 micr
 - **Homoiconic**: Code is data, fully manipulable via macros
 - **seL4 foundation**: Capability-based security, hardware-enforced isolation
 
+### Automatic TCO
+
+Tail-call optimization is guaranteed. Recursive functions in tail position use constant stack space:
+
+```clojure
+;; @todo
+;; This runs in constant stack space due to automatic TCO
+((fn* countdown [n]
+   (match n
+     0 :done
+     _ (countdown (- n 1)))) 10000)  ; => :done
+```
+
 ---
 
 ## What Lonala Is NOT
@@ -23,6 +36,24 @@ Lonala is a LISP dialect for the Lona operating system, running on the seL4 micr
 - No `try`/`catch`/`finally` (tuple returns instead)
 - Different collection syntax: `[]` = tuple, `{}` = vector
 - No STM (message passing instead)
+
+```clojure
+;; @todo
+;; Collection syntax differs from Clojure
+[]           ; => []        ; tuple (Clojure: vector)
+{}           ; => {}        ; vector (Clojure: map)
+%{}          ; => %{}       ; map
+[1 2 3]      ; => [1 2 3]   ; tuple
+{1 2 3}      ; => {1 2 3}   ; vector
+%{:a 1}      ; => %{:a 1}   ; map
+```
+
+```clojure
+;; @todo
+;; recur is not a special form - it's just an undefined symbol
+(read-string "recur")  ; => recur
+(symbol? (read-string "recur"))  ; => true
+```
 
 **Lonala is not Erlang/Elixir.** While inspired by BEAM's process model:
 - LISP syntax, not Erlang syntax
@@ -44,6 +75,7 @@ Lonala is a LISP dialect for the Lona operating system, running on the seL4 micr
 | [lona.kernel.md](lona.kernel.md) | seL4 kernel intrinsics |
 | [lona.io.md](lona.io.md) | Device I/O intrinsics |
 | [lona.time.md](lona.time.md) | Time intrinsics |
+| [spec-tests.md](spec-tests.md) | Writing testable specification examples |
 | [../development/lonala-coding-guidelines.md](../development/lonala-coding-guidelines.md) | Style conventions |
 
 ---

@@ -34,8 +34,12 @@ PROCESS (Pure Userspace Construct)
 │  │  reductions: u32       - Remaining budget (weighted costs)  │    │
 │  │  total_reductions: u64 - Lifetime reductions (monitoring)   │    │
 │  │  ip: usize             - Instruction pointer                │    │
-│  │  x_regs: [Value; 256]  - X registers (temporaries)          │    │
 │  └─────────────────────────────────────────────────────────────┘    │
+│                                                                     │
+│  Note: X registers (temporaries) are per-Worker, not per-Process.  │
+│  All processes on a worker share that worker's registers. Context  │
+│  switch saves/restores values via the process stack, not by        │
+│  copying registers between processes.                              │
 │                                                                     │
 │  Memory:                                                            │
 │  ┌─────────────────────────────────────────────────────────────┐    │
@@ -869,14 +873,14 @@ If a realm has multiple workers (TCBs), they can steal work from each other:
 WORK STEALING (Optional, if multiple workers per realm)
 ════════════════════════════════════════════════════════════════════════════════
 
-Each worker has a local run queue (deque):
-- Owner pushes/pops from BOTTOM (LIFO - cache locality)
-- Thieves steal from TOP (FIFO - oldest work)
+Each worker has a local run queue:
+- Owner pushes to back, pops from front (FIFO - round-robin fairness)
+- Thieves steal from back (most recently added)
 
 fn worker_loop(worker_id):
     loop {
         // Try local queue first
-        proc = local_queue.pop_bottom()
+        proc = local_queue.pop_front()
 
         if proc is None {
             // Try stealing from other workers

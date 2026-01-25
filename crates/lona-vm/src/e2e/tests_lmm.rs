@@ -22,6 +22,7 @@ use core::result::Result::{self, Err, Ok};
 use crate::platform::MemorySpace;
 use crate::platform::lmm::lmm_request_pages;
 use crate::process::Process;
+use crate::realm::Realm;
 use crate::types::Vaddr;
 use crate::uart::Uart;
 use lona_abi::ipc::IpcRegionType;
@@ -38,6 +39,7 @@ use lona_abi::ipc::IpcRegionType;
 /// 3. Returned address is page-aligned
 pub fn test_lmm_alloc_single_page<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -75,6 +77,7 @@ pub fn test_lmm_alloc_single_page<M: MemorySpace, U: Uart>(
 /// 2. All pages are contiguous (single allocation)
 pub fn test_lmm_alloc_multiple_pages<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -117,6 +120,7 @@ pub fn test_lmm_alloc_multiple_pages<M: MemorySpace, U: Uart>(
 /// 3. Read back and verify the pattern
 pub fn test_lmm_alloc_memory_usable<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -175,6 +179,7 @@ pub fn test_lmm_alloc_memory_usable<M: MemorySpace, U: Uart>(
 /// if the hint cannot be satisfied.
 pub fn test_lmm_alloc_with_hint<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -228,6 +233,7 @@ pub fn test_lmm_alloc_with_hint<M: MemorySpace, U: Uart>(
 /// 3. Valid request after rejected hints still works
 pub fn test_lmm_alloc_invalid_hint<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -272,6 +278,7 @@ pub fn test_lmm_alloc_invalid_hint<M: MemorySpace, U: Uart>(
 /// 2. Addresses are sequential (no gaps)
 pub fn test_lmm_alloc_sequential<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -326,6 +333,7 @@ pub fn test_lmm_alloc_sequential<M: MemorySpace, U: Uart>(
 /// 4. Each region returns addresses within valid bounds (base <= addr < limit)
 pub fn test_lmm_alloc_regions<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -398,6 +406,7 @@ pub fn test_lmm_alloc_regions<M: MemorySpace, U: Uart>(
 /// This test verifies large allocations work correctly.
 pub fn test_lmm_alloc_large<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -460,6 +469,7 @@ pub fn test_lmm_alloc_large<M: MemorySpace, U: Uart>(
 /// to force growth events while leaving room for other tests.
 pub fn test_lmm_pool_growth<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -543,6 +553,7 @@ pub fn test_lmm_pool_growth<M: MemorySpace, U: Uart>(
 /// We allocate for 5 processes = 15 pages = 60KB, enough to verify the pattern.
 pub fn test_lmm_process_allocation_pattern<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -615,6 +626,7 @@ pub fn test_lmm_process_allocation_pattern<M: MemorySpace, U: Uart>(
 /// stability with repeated requests.
 pub fn test_lmm_stress_allocations<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {

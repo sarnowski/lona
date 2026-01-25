@@ -6,11 +6,10 @@
 //! This module provides methods for allocating and reading basic heap values:
 //! strings, pairs, symbols, keywords, tuples, and maps.
 
-use crate::Vaddr;
 use crate::platform::MemorySpace;
 use crate::value::{HeapMap, HeapString, HeapTuple, Pair, Value};
 
-use super::{MAX_INTERNED_KEYWORDS, MAX_INTERNED_SYMBOLS, MAX_METADATA_ENTRIES, Process};
+use super::Process;
 
 impl Process {
     /// Allocate a string on the young heap.
@@ -56,27 +55,11 @@ impl Process {
 
     /// Allocate a symbol on the young heap (same as string but tagged differently).
     ///
-    /// Symbols are interned: the same symbol literal will return the same address.
-    /// This enables O(1) equality comparison via address comparison and is required
-    /// for namespace lookups (which compare symbol addresses).
+    /// This allocates without interning. For interned symbols (with identity semantics),
+    /// use `Realm::intern_symbol()` instead.
     ///
     /// Returns a `Value::Symbol` pointing to the allocated symbol, or `None` if OOM.
     pub fn alloc_symbol<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Value> {
-        // Check intern table for existing symbol
-        for i in 0..self.symbol_intern_len {
-            let addr = self.symbol_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
-                    // Found existing interned symbol
-                    return Some(Value::symbol(addr));
-                }
-            }
-        }
-
-        // Not found, allocate new symbol
         let len = name.len();
         let total_size = HeapString::alloc_size(len);
 
@@ -91,78 +74,17 @@ impl Process {
         let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
         let dest = mem.slice_mut(data_addr, len);
         dest.copy_from_slice(name.as_bytes());
-
-        // Add to intern table if not full
-        if self.symbol_intern_len < MAX_INTERNED_SYMBOLS {
-            self.symbol_intern[self.symbol_intern_len] = addr;
-            self.symbol_intern_len += 1;
-        }
 
         Some(Value::symbol(addr))
     }
 
-    /// Find an existing interned symbol by name (read-only lookup).
-    ///
-    /// Returns the symbol if found in the intern table, `None` otherwise.
-    /// Unlike `alloc_symbol`, this does not allocate or modify the intern table.
-    #[must_use]
-    pub fn find_interned_symbol<M: MemorySpace>(&self, mem: &M, name: &str) -> Option<Value> {
-        for i in 0..self.symbol_intern_len {
-            let addr = self.symbol_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
-                    return Some(Value::symbol(addr));
-                }
-            }
-        }
-        None
-    }
-
-    /// Find an existing interned keyword by name (read-only lookup).
-    ///
-    /// Returns the keyword if found in the intern table, `None` otherwise.
-    /// Unlike `alloc_keyword`, this does not allocate or modify the intern table.
-    #[must_use]
-    pub fn find_interned_keyword<M: MemorySpace>(&self, mem: &M, name: &str) -> Option<Value> {
-        for i in 0..self.keyword_intern_len {
-            let addr = self.keyword_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
-                    return Some(Value::keyword(addr));
-                }
-            }
-        }
-        None
-    }
-
     /// Allocate a keyword on the young heap (same as string but tagged differently).
     ///
-    /// Keywords are interned: the same keyword literal will return the same address.
-    /// This enables O(1) equality comparison via address comparison.
+    /// This allocates without interning. For interned keywords (with identity semantics),
+    /// use `Realm::intern_keyword()` instead.
     ///
     /// Returns a `Value::Keyword` pointing to the allocated keyword, or `None` if OOM.
     pub fn alloc_keyword<M: MemorySpace>(&mut self, mem: &mut M, name: &str) -> Option<Value> {
-        // Check intern table for existing keyword
-        for i in 0..self.keyword_intern_len {
-            let addr = self.keyword_intern[i];
-            let header: HeapString = mem.read(addr);
-            if header.len as usize == name.len() {
-                let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
-                let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
-                    // Found existing interned keyword
-                    return Some(Value::keyword(addr));
-                }
-            }
-        }
-
-        // Not found, allocate new keyword
         let len = name.len();
         let total_size = HeapString::alloc_size(len);
 
@@ -177,12 +99,6 @@ impl Process {
         let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
         let dest = mem.slice_mut(data_addr, len);
         dest.copy_from_slice(name.as_bytes());
-
-        // Add to intern table if not full
-        if self.keyword_intern_len < MAX_INTERNED_KEYWORDS {
-            self.keyword_intern[self.keyword_intern_len] = addr;
-            self.keyword_intern_len += 1;
-        }
 
         Some(Value::keyword(addr))
     }
@@ -381,65 +297,6 @@ impl Process {
         };
 
         Some(mem.read(addr))
-    }
-
-    /// Set metadata for an object.
-    ///
-    /// Associates the given metadata map address with the object address.
-    /// If the object already has metadata, it is replaced.
-    /// If the metadata table is full, this is a silent no-op.
-    pub fn set_metadata(&mut self, obj_addr: Vaddr, meta_addr: Vaddr) {
-        // Check if already exists - update in place
-        for i in 0..self.metadata_len {
-            if self.metadata_keys[i] == obj_addr {
-                self.metadata_values[i] = meta_addr;
-                return;
-            }
-        }
-
-        // Add new entry if table not full
-        if self.metadata_len < MAX_METADATA_ENTRIES {
-            self.metadata_keys[self.metadata_len] = obj_addr;
-            self.metadata_values[self.metadata_len] = meta_addr;
-            self.metadata_len += 1;
-        }
-    }
-
-    /// Get metadata for an object by address.
-    ///
-    /// Returns the metadata map address if the object has metadata, `None` otherwise.
-    #[must_use]
-    pub fn get_metadata(&self, obj_addr: Vaddr) -> Option<Vaddr> {
-        for i in 0..self.metadata_len {
-            if self.metadata_keys[i] == obj_addr {
-                return Some(self.metadata_values[i]);
-            }
-        }
-        None
-    }
-
-    /// Get metadata for a value.
-    ///
-    /// Returns the metadata Value (usually a map) if the value has metadata,
-    /// `Value::Nil` otherwise.
-    #[must_use]
-    pub fn get_metadata_value(&self, value: Value) -> Value {
-        // Extract address from heap-allocated values (immediate values cannot have metadata)
-        let (Value::Symbol(obj_addr)
-        | Value::Keyword(obj_addr)
-        | Value::String(obj_addr)
-        | Value::Tuple(obj_addr)
-        | Value::Map(obj_addr)
-        | Value::Pair(obj_addr)
-        | Value::CompiledFn(obj_addr)
-        | Value::Closure(obj_addr)
-        | Value::Var(obj_addr)
-        | Value::Namespace(obj_addr)) = value
-        else {
-            return Value::Nil;
-        };
-
-        self.get_metadata(obj_addr).map_or(Value::Nil, Value::map)
     }
 
     /// Look up a key in a map.

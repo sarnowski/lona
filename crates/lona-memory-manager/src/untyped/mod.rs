@@ -7,8 +7,6 @@
 //! The root task receives untyped capabilities representing all free
 //! physical memory at boot time.
 
-use crate::slots::SlotAllocator;
-
 /// Maximum number of untyped capabilities we track.
 const MAX_UNTYPEDS: usize = 256;
 
@@ -163,25 +161,18 @@ impl UntypedAllocator {
     /// # Arguments
     ///
     /// * `size_bits` - Size of the object in bits (size = 1 << `size_bits`)
-    /// * `slots` - Slot allocator for the destination slot
     /// * `device` - Whether to allocate from device memory
     ///
     /// # Returns
     ///
-    /// The (untyped slot, destination slot, physical address) or `None`.
-    pub fn allocate(
-        &mut self,
-        size_bits: u8,
-        slots: &mut SlotAllocator,
-        device: bool,
-    ) -> Option<(usize, usize, u64)> {
+    /// The (untyped slot, physical address) or `None`.
+    pub fn allocate(&mut self, size_bits: u8, device: bool) -> Option<(usize, u64)> {
         let idx = self.find_fit(size_bits, device)?;
-        let dest_slot = slots.alloc()?;
 
         let desc = self.untypeds[idx].as_mut()?;
         let paddr = desc.allocate(size_bits)?;
 
-        Some((desc.slot, dest_slot, paddr))
+        Some((desc.slot, paddr))
     }
 
     /// Returns the total remaining memory in non-device untypeds.

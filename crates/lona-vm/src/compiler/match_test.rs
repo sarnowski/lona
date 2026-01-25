@@ -19,9 +19,10 @@
 use crate::Vaddr;
 use crate::compiler::compile;
 use crate::platform::MockVSpace;
-use crate::process::Process;
+use crate::process::{Process, WorkerId};
 use crate::reader::read;
 use crate::realm::{Realm, bootstrap};
+use crate::scheduler::Worker;
 use crate::value::Value;
 use crate::vm::execute;
 
@@ -37,7 +38,7 @@ fn setup() -> (Process, Realm, MockVSpace) {
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
     let realm_base = base.add(128 * 1024);
     let mut realm = Realm::new(realm_base, 64 * 1024);
@@ -50,12 +51,13 @@ fn setup() -> (Process, Realm, MockVSpace) {
 
 /// Evaluate a Lonala expression and return the result.
 fn eval(src: &str, proc: &mut Process, realm: &mut Realm, mem: &mut MockVSpace) -> Value {
-    let expr = read(src, proc, mem)
+    let expr = read(src, proc, realm, mem)
         .expect("read error")
         .expect("empty input");
     let chunk = compile(expr, proc, mem, realm).expect("compile error");
     proc.set_chunk(chunk);
-    execute(proc, mem, realm).expect("runtime error")
+    let mut worker = Worker::new(WorkerId(0));
+    execute(&mut worker, proc, mem, realm).expect("runtime error")
 }
 
 // =============================================================================
@@ -646,12 +648,18 @@ fn regression_match_no_clause_raises_badmatch() {
     // When no clause matches, the process should exit with RuntimeError::Badmatch
     let (mut proc, mut realm, mut mem) = setup();
 
-    let expr = read("(match 42 1 :one 2 :two 3 :three)", &mut proc, &mut mem)
-        .expect("read error")
-        .expect("empty input");
+    let expr = read(
+        "(match 42 1 :one 2 :two 3 :three)",
+        &mut proc,
+        &mut realm,
+        &mut mem,
+    )
+    .expect("read error")
+    .expect("empty input");
     let chunk = compile(expr, &mut proc, &mut mem, &mut realm).expect("compile error");
     proc.set_chunk(chunk);
-    let result = execute(&mut proc, &mut mem, &mut realm);
+    let mut worker = Worker::new(WorkerId(0));
+    let result = execute(&mut worker, &mut proc, &mut mem, &mut realm);
 
     // Should return RuntimeError::Badmatch with value 42
     match result {

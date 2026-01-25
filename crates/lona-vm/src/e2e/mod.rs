@@ -31,8 +31,11 @@
 //! ```
 
 mod runner;
+mod spec_data;
+mod spec_runner;
 mod tests_basic;
 mod tests_lmm;
 mod tests_lmm_demand;
 
 pub use runner::{TestResult, TestStatus, run_all_tests};
+pub use spec_runner::run_spec_tests;

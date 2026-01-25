@@ -19,7 +19,7 @@ fn setup() -> Option<(Process, Realm, MockVSpace)> {
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
     // Create realm at a higher address
     let realm_base = base.add(128 * 1024);

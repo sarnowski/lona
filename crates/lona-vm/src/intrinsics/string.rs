@@ -5,9 +5,10 @@
 
 use crate::platform::MemorySpace;
 use crate::process::Process;
+use crate::realm::Realm;
 use crate::value::Value;
 
-use super::IntrinsicError;
+use super::{IntrinsicError, XRegs};
 
 /// Maximum buffer size for string concatenation.
 const STR_BUFFER_SIZE: usize = 1024;
@@ -16,8 +17,9 @@ const STR_BUFFER_SIZE: usize = 1024;
 const INTRINSIC_STRING_BUFFER_SIZE: usize = 256;
 
 pub fn intrinsic_str<M: MemorySpace>(
-    proc: &mut Process,
+    x_regs: &XRegs,
     argc: u8,
+    proc: &mut Process,
     mem: &mut M,
 ) -> Result<Value, IntrinsicError> {
     // Build the concatenated string in a buffer
@@ -25,7 +27,7 @@ pub fn intrinsic_str<M: MemorySpace>(
     let mut pos = 0;
 
     for i in 0..argc as usize {
-        let val = proc.x_regs[i + 1]; // Args start at X1
+        let val = x_regs[i + 1]; // Args start at X1
         pos = write_value_to_buffer(&mut buffer, pos, val, proc, mem)?;
     }
 
@@ -142,16 +144,18 @@ fn write_int_to_buffer(
 
 // --- Keyword intrinsics ---
 
-pub const fn intrinsic_is_keyword(proc: &Process) -> Value {
-    Value::bool(proc.x_regs[1].is_keyword())
+pub const fn intrinsic_is_keyword(x_regs: &XRegs) -> Value {
+    Value::bool(x_regs[1].is_keyword())
 }
 
 pub fn intrinsic_keyword<M: MemorySpace>(
-    proc: &mut Process,
+    x_regs: &XRegs,
+    proc: &Process,
+    realm: &mut Realm,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let val = proc.x_regs[1];
+    let val = x_regs[1];
 
     // Copy string to local buffer to avoid borrow conflict
     let mut buffer = [0u8; INTRINSIC_STRING_BUFFER_SIZE];
@@ -174,18 +178,21 @@ pub fn intrinsic_keyword<M: MemorySpace>(
     };
 
     let s = core::str::from_utf8(&buffer[..len]).map_err(|_| IntrinsicError::OutOfMemory)?;
-    proc.alloc_keyword(mem, s)
+    // Keywords are interned at realm level for consistent identity semantics
+    realm
+        .intern_keyword(mem, s)
         .ok_or(IntrinsicError::OutOfMemory)
 }
 
 /// Get the name part of a keyword or symbol.
 /// For `:ns/name` returns `"name"`, for `:name` returns `"name"`.
 pub fn intrinsic_name_fn<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let val = proc.x_regs[1];
+    let val = x_regs[1];
 
     // Copy string to local buffer to avoid borrow conflict
     let mut buffer = [0u8; INTRINSIC_STRING_BUFFER_SIZE];
@@ -218,11 +225,12 @@ pub fn intrinsic_name_fn<M: MemorySpace>(
 /// Get the namespace part of a qualified keyword or symbol.
 /// For `:ns/name` returns `"ns"`, for `:name` returns `nil`.
 pub fn intrinsic_namespace<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let val = proc.x_regs[1];
+    let val = x_regs[1];
 
     // Copy string to local buffer to avoid borrow conflict
     let mut buffer = [0u8; INTRINSIC_STRING_BUFFER_SIZE];

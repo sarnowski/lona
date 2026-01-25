@@ -91,11 +91,15 @@ use lona_vm::e2e;
 use lona_vm::loader::TarSource;
 #[cfg(not(any(test, feature = "std")))]
 use lona_vm::platform::Sel4VSpace;
+#[cfg(not(feature = "e2e-test"))]
+use lona_vm::process::WorkerId;
 use lona_vm::process::pool::ProcessPool;
 use lona_vm::process::{INITIAL_OLD_HEAP_SIZE, INITIAL_YOUNG_HEAP_SIZE, Process};
 use lona_vm::realm::Realm;
 #[cfg(not(feature = "e2e-test"))]
 use lona_vm::repl;
+#[cfg(not(feature = "e2e-test"))]
+use lona_vm::scheduler::Worker;
 use lona_vm::uart::{Uart, UartExt};
 
 #[cfg(target_arch = "aarch64")]
@@ -109,11 +113,29 @@ use lona_abi::types::CapSlot;
 use lona_vm::uart::Com1Uart;
 
 /// Entry point called when TCB is resumed.
-/// Boot arguments are passed in registers - must read them before any function calls.
+///
+/// Boot arguments are passed as function parameters. On x86_64, these come from:
+/// - `realm_id`: RDI
+/// - `worker_id`: RSI
+/// - `heap_start`: RDX
+/// - `heap_size`: RCX
+/// - `flags`: R8
+///
+/// On aarch64, these come from X0-X4.
+///
+/// The LMM writes these values to the TCB's registers before resuming it.
+/// By declaring them as function parameters, we force LLVM to treat them as
+/// real ABI inputs and preserve them across the function prologue.
 #[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
-    // Read boot arguments from registers immediately - MUST be first, before any function calls
-    let (realm_id, worker_id, heap_start, heap_size, flags) = read_boot_args();
+pub extern "C" fn _start(
+    realm_id: u64,
+    worker_id: u64,
+    heap_start: u64,
+    heap_size: u64,
+    flags: u64,
+) -> ! {
+    // Worker ID is passed as u64 but is guaranteed to fit in u16 (max 256 workers)
+    let worker_id = (worker_id & 0xFFFF) as u16;
 
     let boot_flags = BootFlags::new(flags);
 
@@ -151,7 +173,6 @@ pub extern "C" fn _start() -> ! {
 
     // Create REPL process with BEAM-style memory layout
     let mut process = Process::new(
-        1, // PID 1 for REPL
         young_base,
         INITIAL_YOUNG_HEAP_SIZE,
         old_base,
@@ -170,7 +191,7 @@ pub extern "C" fn _start() -> ! {
     // Run E2E tests when feature is enabled, otherwise start REPL
     #[cfg(feature = "e2e-test")]
     {
-        e2e::run_all_tests(&mut process, &mut vspace, &mut uart);
+        e2e::run_all_tests(&mut process, &mut realm, &mut vspace, &mut uart);
         halt_loop()
     }
 
@@ -179,7 +200,14 @@ pub extern "C" fn _start() -> ! {
         if boot_flags.has_uart() {
             uart.write_line("\nStarting REPL...\n");
         }
-        repl::run(&mut process, &mut vspace, &mut realm, &mut uart)
+        let mut worker = Worker::new(WorkerId(0));
+        repl::run(
+            &mut worker,
+            &mut process,
+            &mut vspace,
+            &mut realm,
+            &mut uart,
+        )
     }
 }
 
@@ -439,49 +467,6 @@ fn print_boot_info<U: Uart>(
             uart.write_str("  ERROR: Failed to load embedded archive\n");
         }
     }
-}
-
-/// Read boot arguments from CPU registers.
-/// Must be called at the very start before registers are clobbered.
-#[inline(always)]
-fn read_boot_args() -> (u64, u16, u64, u64, u64) {
-    let realm_id: u64;
-    let worker_id: u64;
-    let heap_start: u64;
-    let heap_size: u64;
-    let flags: u64;
-
-    #[cfg(target_arch = "aarch64")]
-    unsafe {
-        asm!(
-            "", // Empty asm block - just read the registers
-            out("x0") realm_id,
-            out("x1") worker_id,
-            out("x2") heap_start,
-            out("x3") heap_size,
-            out("x4") flags,
-            options(nomem, nostack, preserves_flags)
-        );
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    unsafe {
-        asm!(
-            "",
-            out("rdi") realm_id,
-            out("rsi") worker_id,
-            out("rdx") heap_start,
-            out("rcx") heap_size,
-            out("r8") flags,
-            options(nomem, nostack, preserves_flags)
-        );
-    }
-
-    // Worker ID is passed as u64 but is guaranteed to fit in u16 (max 256 workers)
-    // Mask to u16 range to ensure no truncation issues
-    let worker_id = (worker_id & 0xFFFF) as u16;
-
-    (realm_id, worker_id, heap_start, heap_size, flags)
 }
 
 fn print_u64<U: Uart>(uart: &mut U, mut n: u64) {

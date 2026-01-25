@@ -11,8 +11,8 @@ use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::value::Value;
 
-use super::IntrinsicError;
 use super::arithmetic::values_equal;
+use super::{IntrinsicError, XRegs};
 
 /// Error from core collection operations.
 ///
@@ -183,12 +183,12 @@ pub fn core_nth<M: MemorySpace>(
 
 // --- Tuple intrinsics ---
 
-pub const fn intrinsic_is_tuple(proc: &Process) -> Value {
-    Value::bool(proc.x_regs[1].is_tuple())
+pub const fn intrinsic_is_tuple(x_regs: &XRegs) -> Value {
+    Value::bool(x_regs[1].is_tuple())
 }
 
-pub const fn intrinsic_is_vector(proc: &Process) -> Value {
-    Value::bool(proc.x_regs[1].is_vector())
+pub const fn intrinsic_is_vector(x_regs: &XRegs) -> Value {
+    Value::bool(x_regs[1].is_vector())
 }
 
 /// Get element at index from a tuple.
@@ -196,18 +196,15 @@ pub const fn intrinsic_is_vector(proc: &Process) -> Value {
 /// `(nth tuple index)` - returns element or errors on OOB
 /// `(nth tuple index not-found)` - returns element or not-found on OOB
 pub fn intrinsic_nth<M: MemorySpace>(
-    proc: &Process,
+    x_regs: &XRegs,
     argc: u8,
+    proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let coll = proc.x_regs[1];
-    let idx = proc.x_regs[2];
-    let default = if argc >= 3 {
-        Some(proc.x_regs[3])
-    } else {
-        None
-    };
+    let coll = x_regs[1];
+    let idx = x_regs[2];
+    let default = if argc >= 3 { Some(x_regs[3]) } else { None };
 
     core_nth(proc, mem, coll, idx, default).map_err(|e| match e {
         CoreCollectionError::NotATuple => IntrinsicError::TypeError {
@@ -230,11 +227,12 @@ pub fn intrinsic_nth<M: MemorySpace>(
 }
 
 pub fn intrinsic_count<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let coll = proc.x_regs[1];
+    let coll = x_regs[1];
 
     match coll {
         Value::Nil => Ok(Value::int(0)),
@@ -285,14 +283,14 @@ pub fn intrinsic_count<M: MemorySpace>(
 
 // --- Symbol intrinsic ---
 
-pub const fn intrinsic_is_symbol(proc: &Process) -> Value {
-    Value::bool(matches!(proc.x_regs[1], Value::Symbol(_)))
+pub const fn intrinsic_is_symbol(x_regs: &XRegs) -> Value {
+    Value::bool(matches!(x_regs[1], Value::Symbol(_)))
 }
 
 // --- Map intrinsics ---
 
-pub const fn intrinsic_is_map(proc: &Process) -> Value {
-    Value::bool(proc.x_regs[1].is_map())
+pub const fn intrinsic_is_map(x_regs: &XRegs) -> Value {
+    Value::bool(x_regs[1].is_map())
 }
 
 /// Get value from map by key.
@@ -300,18 +298,15 @@ pub const fn intrinsic_is_map(proc: &Process) -> Value {
 /// `(get m k)` - returns value or nil
 /// `(get m k default)` - returns value or default
 pub fn intrinsic_get<M: MemorySpace>(
-    proc: &Process,
+    x_regs: &XRegs,
     argc: u8,
+    proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let map_val = proc.x_regs[1];
-    let key = proc.x_regs[2];
-    let default = if argc >= 3 {
-        proc.x_regs[3]
-    } else {
-        Value::Nil
-    };
+    let map_val = x_regs[1];
+    let key = x_regs[2];
+    let default = if argc >= 3 { x_regs[3] } else { Value::Nil };
 
     core_get(proc, mem, map_val, key, default).map_err(|e| match e {
         CoreCollectionError::NotAMap => IntrinsicError::TypeError {
@@ -330,13 +325,14 @@ pub fn intrinsic_get<M: MemorySpace>(
 ///
 /// `(put m k v)` - returns new map with k->v added/updated
 pub fn intrinsic_put<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let map_val = proc.x_regs[1];
-    let key = proc.x_regs[2];
-    let value = proc.x_regs[3];
+    let map_val = x_regs[1];
+    let key = x_regs[2];
+    let value = x_regs[3];
 
     let Value::Map(_) = map_val else {
         return Err(IntrinsicError::TypeError {
@@ -370,11 +366,12 @@ pub fn intrinsic_put<M: MemorySpace>(
 ///
 /// `(keys m)` - returns list of keys
 pub fn intrinsic_keys<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let map_val = proc.x_regs[1];
+    let map_val = x_regs[1];
 
     let Value::Map(_) = map_val else {
         return Err(IntrinsicError::TypeError {
@@ -409,11 +406,12 @@ pub fn intrinsic_keys<M: MemorySpace>(
 ///
 /// `(vals m)` - returns list of values
 pub fn intrinsic_vals<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let map_val = proc.x_regs[1];
+    let map_val = x_regs[1];
 
     let Value::Map(_) = map_val else {
         return Err(IntrinsicError::TypeError {
@@ -464,12 +462,13 @@ fn reverse_list<M: MemorySpace>(
 ///
 /// `(contains? m k)` - returns true if key exists in map
 pub fn intrinsic_contains<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let map_val = proc.x_regs[1];
-    let key = proc.x_regs[2];
+    let map_val = x_regs[1];
+    let key = x_regs[2];
 
     core_contains(proc, mem, map_val, key)
         .map(Value::bool)

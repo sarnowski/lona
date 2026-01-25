@@ -104,8 +104,8 @@ fn create_translation_table(
     };
 
     let size_bits = blueprint.physical_size_bits() as u8;
-    let (ut_slot, _, _) = untypeds
-        .allocate(size_bits, slots, false)
+    let (ut_slot, _) = untypeds
+        .allocate(size_bits, false)
         .ok_or(RealmError::OutOfMemory)?;
 
     let untyped: Cap<sel4::cap_type::Untyped> = Cap::from_bits(ut_slot as u64);

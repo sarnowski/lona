@@ -87,25 +87,30 @@ fn alloc_symbol() {
 }
 
 #[test]
-fn symbol_interning() {
+fn symbol_not_interned_at_process_level() {
     let (mut proc, mut mem) = setup();
 
-    // Same symbol name should return the same address (interned)
+    // Process-level symbol allocation does NOT intern (interning is at Realm level).
+    // Each allocation creates a new symbol on the heap.
     let sym1 = proc.alloc_symbol(&mut mem, "test").unwrap();
     let sym2 = proc.alloc_symbol(&mut mem, "test").unwrap();
     let sym3 = proc.alloc_symbol(&mut mem, "other").unwrap();
 
-    // Same name → same address
+    // Each allocation creates a new address (no interning)
     let Value::Symbol(addr1) = sym1 else { panic!() };
     let Value::Symbol(addr2) = sym2 else { panic!() };
     let Value::Symbol(addr3) = sym3 else { panic!() };
 
-    assert_eq!(
+    assert_ne!(
         addr1, addr2,
-        "Same symbol should be interned to same address"
+        "Process symbol allocation should not intern (use Realm for interning)"
     );
     assert_ne!(
         addr1, addr3,
+        "Different symbols should have different addresses"
+    );
+    assert_ne!(
+        addr2, addr3,
         "Different symbols should have different addresses"
     );
 }

@@ -637,7 +637,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
         let name_sym = first_pair.first;
 
         // Get metadata from the symbol (if any)
-        let metadata = self.proc.get_metadata_value(name_sym);
+        let metadata = self.realm.get_metadata_value(name_sym);
 
         // Check for optional value
         if first_pair.rest.is_nil() {
@@ -686,11 +686,8 @@ impl<M: MemorySpace> Compiler<'_, M> {
             return false;
         }
 
-        // Look for :process-bound key
-        let pb_keyword = self
-            .proc
-            .find_interned_keyword(self.mem, "process-bound")
-            .or_else(|| self.realm.find_keyword(self.mem, "process-bound"));
+        // Look for :process-bound key (keywords are interned at realm level)
+        let pb_keyword = self.realm.find_keyword(self.mem, "process-bound");
 
         if let Some(keyword) = pb_keyword {
             // Check if this key exists in the map

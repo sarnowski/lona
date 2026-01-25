@@ -5,7 +5,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::{HeapString, Pair, Value};
+use super::{HeapCompiledFn, HeapString, Pair, Value};
 use crate::Vaddr;
 
 #[test]
@@ -109,4 +109,44 @@ fn value_debug_format() {
     assert_eq!(format!("{:?}", Value::nil()), "Nil");
     assert_eq!(format!("{:?}", Value::bool(true)), "Bool(true)");
     assert_eq!(format!("{:?}", Value::int(42)), "Int(42)");
+}
+
+// --- Regression tests ---
+
+/// Regression: `constants_offset` must be 8-byte aligned for Value array.
+///
+/// When `code_len` is odd, the raw offset would be 4-byte aligned but not 8-byte
+/// aligned. Reading a Value (which requires 8-byte alignment) would fail
+/// Rust's debug-mode precondition check on `x86_64` (causing ud2 panic).
+#[test]
+fn regression_constants_offset_alignment() {
+    const VALUE_ALIGN: usize = core::mem::align_of::<Value>();
+
+    // Test with various code lengths, including odd numbers
+    for code_len in 0..20 {
+        let offset = HeapCompiledFn::constants_offset(code_len);
+        assert_eq!(
+            offset % VALUE_ALIGN,
+            0,
+            "constants_offset({code_len}) = {offset} is not {VALUE_ALIGN}-byte aligned",
+        );
+    }
+}
+
+#[test]
+fn regression_compiled_fn_layout_consistency() {
+    // Verify alloc_size accounts for alignment padding
+    for code_len in 0..10 {
+        for constants_len in 0..5 {
+            let alloc_size = HeapCompiledFn::alloc_size(code_len, constants_len);
+            let constants_offset = HeapCompiledFn::constants_offset(code_len);
+            let expected_size = constants_offset + constants_len * core::mem::size_of::<Value>();
+
+            assert_eq!(
+                alloc_size, expected_size,
+                "alloc_size({code_len}, {constants_len}) = {alloc_size} doesn't match \
+                 constants_offset({code_len}) + {constants_len} * sizeof(Value) = {expected_size}",
+            );
+        }
+    }
 }

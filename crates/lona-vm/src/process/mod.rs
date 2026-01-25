@@ -56,6 +56,8 @@ mod namespace_test;
 #[cfg(test)]
 mod pool_test;
 #[cfg(test)]
+mod process_id_test;
+#[cfg(test)]
 mod reduction_test;
 #[cfg(test)]
 mod stack_test;
@@ -69,51 +71,25 @@ use crate::value::Value;
 /// Number of X registers (temporaries).
 pub const X_REG_COUNT: usize = 256;
 
-/// Maximum number of interned keywords per process.
-///
-/// Keywords are interned so that identical keyword literals share the same address.
-/// This enables O(1) equality comparison via address comparison.
-///
-/// Note: This per-process table is used during compilation and REPL evaluation.
-/// Realm-level interning (see `realm::Realm`) handles persistent keywords that
-/// are part of `def`'d code. This table handles dynamically-constructed keywords.
-pub const MAX_INTERNED_KEYWORDS: usize = 1024;
-
-/// Maximum number of interned symbols per process.
-///
-/// Symbols are interned so that identical symbol literals share the same address.
-/// This enables O(1) equality comparison via address comparison and is required
-/// for namespace lookups (which compare symbol addresses).
-///
-/// Note: This per-process table is used during compilation and REPL evaluation.
-/// Realm-level interning (see `realm::Realm`) handles persistent symbols that
-/// are part of `def`'d code.
-pub const MAX_INTERNED_SYMBOLS: usize = 1024;
-
-/// Maximum number of metadata entries per process.
-///
-/// Metadata is stored separately from objects to avoid inline overhead.
-/// Most objects don't have metadata, so a separate table is more efficient.
-pub const MAX_METADATA_ENTRIES: usize = 1024;
-
-/// Maximum number of namespaces per process.
-///
-/// Namespaces are stored in a per-process registry for REPL and compilation.
-/// Realm-level namespace registry (see `realm::Realm`) handles persistent
-/// namespaces shared across processes. This table is used during bootstrap
-/// and for temporary namespace operations.
-pub const MAX_NAMESPACES: usize = 256;
-
 /// Maximum number of process-bound variable bindings.
 ///
 /// Process-bound vars (like `*ns*`) can have per-process values that shadow
 /// the root binding. This table maps var IDs (`VarSlot` addresses) to values.
-pub const MAX_BINDINGS: usize = 256;
+/// 32 bindings = 32 * (8 + 16) = 768 bytes, acceptable for per-process overhead.
+pub const MAX_BINDINGS: usize = 32;
 
 /// Initial young heap size (48 KB).
+///
+/// TODO: Reduce to ~2 KB once GC with heap growth is implemented.
+/// The spec calls for small initial heaps that grow via Fibonacci sequence,
+/// but currently process heaps are fixed-size. Without heap growth,
+/// complex operations exhaust the heap. See `docs/architecture/process-model.md`.
 pub const INITIAL_YOUNG_HEAP_SIZE: usize = 48 * 1024;
 
 /// Initial old heap size (12 KB).
+///
+/// TODO: Reduce to ~512 bytes once GC is implemented.
+/// Old heap holds promoted objects during generational GC.
 pub const INITIAL_OLD_HEAP_SIZE: usize = 12 * 1024;
 
 /// Maximum reductions per time slice.
@@ -180,6 +156,75 @@ pub mod frame_offset {
     pub const Y_COUNT: usize = 24;
 }
 
+// ============================================================================
+// Process Identity Types
+// ============================================================================
+
+/// Process identifier with generation counter for ABA safety.
+///
+/// When a slot is reused, generation increments to invalidate stale references.
+/// This prevents the ABA problem where a freed slot is reallocated and an old
+/// reference incorrectly accesses the new process.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ProcessId {
+    /// Slot index in process table.
+    index: u32,
+    /// Incremented on slot reuse.
+    generation: u32,
+}
+
+impl ProcessId {
+    /// The null process ID (invalid reference).
+    pub const NULL: Self = Self {
+        index: u32::MAX,
+        generation: 0,
+    };
+
+    /// Create a new process ID.
+    #[inline]
+    #[must_use]
+    pub const fn new(index: u32, generation: u32) -> Self {
+        Self { index, generation }
+    }
+
+    /// Get the slot index.
+    #[inline]
+    #[must_use]
+    pub const fn index(&self) -> usize {
+        self.index as usize
+    }
+
+    /// Get the generation counter.
+    #[inline]
+    #[must_use]
+    pub const fn generation(&self) -> u32 {
+        self.generation
+    }
+
+    /// Check if this is the null process ID.
+    #[inline]
+    #[must_use]
+    pub const fn is_null(&self) -> bool {
+        self.index == u32::MAX
+    }
+}
+
+impl core::fmt::Debug for ProcessId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        if self.is_null() {
+            write!(f, "ProcessId::NULL")
+        } else {
+            write!(f, "ProcessId({}, gen={})", self.index, self.generation)
+        }
+    }
+}
+
+/// Worker identifier (0 to MAX_WORKERS-1).
+///
+/// Each worker has its own run queue and can execute one process at a time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WorkerId(pub u8);
+
 /// Process execution status.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -205,8 +250,12 @@ pub struct StackOverflow;
 #[repr(C)]
 pub struct Process {
     // Identity
-    /// Process identifier.
-    pub pid: u64,
+    /// Process identifier with generation counter.
+    pub pid: ProcessId,
+    /// Parent process identifier (NULL for root processes).
+    pub parent_pid: ProcessId,
+    /// Worker this process is assigned to.
+    pub worker_id: WorkerId,
     /// Current execution status.
     pub status: ProcessStatus,
 
@@ -237,8 +286,6 @@ pub struct Process {
     // Execution state
     /// Instruction pointer (index into bytecode).
     pub ip: usize,
-    /// X registers (temporaries).
-    pub x_regs: [Value; X_REG_COUNT],
     /// Current bytecode chunk being executed (cached copy for fast access).
     pub chunk: Option<Chunk>,
     /// Address of current chunk's `CompiledFn` on heap.
@@ -255,34 +302,6 @@ pub struct Process {
     /// Current call depth (number of frames on stack).
     frame_depth: usize,
 
-    // Interning tables
-    /// Interned keywords (addresses of keyword `HeapString`s on the heap).
-    /// Keywords are interned so that identical keyword literals share the same address.
-    pub(crate) keyword_intern: [Vaddr; MAX_INTERNED_KEYWORDS],
-    /// Number of interned keywords.
-    pub(crate) keyword_intern_len: usize,
-    /// Interned symbols (addresses of symbol `HeapString`s on the heap).
-    /// Symbols are interned so that identical symbol literals share the same address.
-    pub(crate) symbol_intern: [Vaddr; MAX_INTERNED_SYMBOLS],
-    /// Number of interned symbols.
-    pub(crate) symbol_intern_len: usize,
-
-    // Metadata table
-    /// Metadata table: maps object addresses to metadata map addresses.
-    /// Stored as parallel arrays: `metadata_keys[i]` → `metadata_values[i]`.
-    pub(crate) metadata_keys: [Vaddr; MAX_METADATA_ENTRIES],
-    pub(crate) metadata_values: [Vaddr; MAX_METADATA_ENTRIES],
-    /// Number of metadata entries.
-    pub(crate) metadata_len: usize,
-
-    // Namespace registry
-    /// Namespace registry: maps namespace name symbols to namespace addresses.
-    /// Stored as parallel arrays: `namespace_names[i]` → `namespace_addrs[i]`.
-    pub(crate) namespace_names: [Vaddr; MAX_NAMESPACES],
-    pub(crate) namespace_addrs: [Vaddr; MAX_NAMESPACES],
-    /// Number of registered namespaces.
-    pub(crate) namespace_len: usize,
-
     // Process-bound var bindings
     /// Var IDs (`VarSlot` addresses) with process-local bindings.
     pub(crate) binding_var_ids: [Vaddr; MAX_BINDINGS],
@@ -295,15 +314,16 @@ pub struct Process {
 impl Process {
     /// Create a new process with the given heap regions.
     ///
+    /// The process starts with NULL pid and `parent_pid`, and `worker_id` 0.
+    /// The scheduler assigns the actual `ProcessId` when spawning.
+    ///
     /// # Arguments
-    /// * `pid` - Process identifier
     /// * `young_base` - Base address of young heap (low address)
     /// * `young_size` - Size of young heap in bytes
     /// * `old_base` - Base address of old heap
     /// * `old_size` - Size of old heap in bytes
     #[must_use]
     pub const fn new(
-        pid: u64,
         young_base: Vaddr,
         young_size: usize,
         old_base: Vaddr,
@@ -313,7 +333,9 @@ impl Process {
         let old_end = Vaddr::new(old_base.as_u64() + old_size as u64);
 
         Self {
-            pid,
+            pid: ProcessId::NULL,
+            parent_pid: ProcessId::NULL,
+            worker_id: WorkerId(0),
             status: ProcessStatus::Ready,
             // Reduction counting - starts at 0, must call reset_reductions() before run
             reductions: 0,
@@ -329,26 +351,12 @@ impl Process {
             old_htop: old_base,
             // Execution state
             ip: 0,
-            x_regs: [Value::Nil; X_REG_COUNT],
             chunk: None,
             chunk_addr: None,
             // Stack-based frame tracking
             frame_base: None,
             current_y_count: 0,
             frame_depth: 0,
-            // Interning tables
-            keyword_intern: [Vaddr::new(0); MAX_INTERNED_KEYWORDS],
-            keyword_intern_len: 0,
-            symbol_intern: [Vaddr::new(0); MAX_INTERNED_SYMBOLS],
-            symbol_intern_len: 0,
-            // Metadata table
-            metadata_keys: [Vaddr::new(0); MAX_METADATA_ENTRIES],
-            metadata_values: [Vaddr::new(0); MAX_METADATA_ENTRIES],
-            metadata_len: 0,
-            // Namespace registry
-            namespace_names: [Vaddr::new(0); MAX_NAMESPACES],
-            namespace_addrs: [Vaddr::new(0); MAX_NAMESPACES],
-            namespace_len: 0,
             // Process-bound var bindings
             binding_var_ids: [Vaddr::new(0); MAX_BINDINGS],
             binding_values: [Value::Nil; MAX_BINDINGS],
@@ -359,6 +367,9 @@ impl Process {
     /// Allocate bytes from the young heap (grows up).
     ///
     /// Returns `None` if there isn't enough space.
+    ///
+    /// Callers must request appropriate alignment for the type being allocated.
+    /// For `Value` types, use 8-byte alignment. For strings, 4-byte is sufficient.
     pub const fn alloc(&mut self, size: usize, align: usize) -> Option<Vaddr> {
         if size == 0 {
             return Some(self.htop);
@@ -428,9 +439,11 @@ impl Process {
     }
 
     /// Reset execution state for a new evaluation.
+    ///
+    /// Note: X registers are now owned by Worker, not Process.
+    /// The caller is responsible for resetting `Worker.x_regs` if needed.
     pub const fn reset(&mut self) {
         self.ip = 0;
-        self.x_regs = [Value::Nil; X_REG_COUNT];
         self.chunk_addr = None;
         // Reset stack-based frame tracking
         self.frame_base = None;
@@ -439,6 +452,14 @@ impl Process {
         // Reset stack pointer to top of young heap
         self.stop = self.hend;
         self.status = ProcessStatus::Ready;
+    }
+
+    /// Reset heap allocation pointer, clearing all heap allocations.
+    ///
+    /// This is useful for E2E tests to prevent heap exhaustion.
+    /// WARNING: Invalidates all previously allocated values!
+    pub const fn reset_heap(&mut self) {
+        self.htop = self.heap;
     }
 
     /// Check if at top level (no active call frames).

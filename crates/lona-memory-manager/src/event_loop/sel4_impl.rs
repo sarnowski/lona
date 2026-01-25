@@ -17,7 +17,7 @@ use lona_abi::layout::{
 };
 use lona_abi::types::RealmId;
 use sel4::Cap;
-use sel4::cap_type::{Endpoint, Reply, SchedContext, SchedControl, VSpace};
+use sel4::cap_type::{Endpoint, Reply, SchedContext, SchedControl, Tcb, VSpace};
 
 /// Maximum number of realms we can track.
 const MAX_REALMS: usize = 16;
@@ -51,6 +51,8 @@ pub struct RealmEntry {
     pub endpoint: Cap<Endpoint>,
     /// `SchedContext` capability (for budget replenishment on Timeout faults).
     pub sched_context: Cap<SchedContext>,
+    /// TCB capability (for suspending on fatal faults).
+    pub tcb: Cap<Tcb>,
     /// Scheduling budget in microseconds.
     pub budget_us: u64,
     /// Scheduling period in microseconds.
@@ -73,12 +75,14 @@ impl RealmEntry {
         vspace: Cap<VSpace>,
         endpoint: Cap<Endpoint>,
         sched_context: Cap<SchedContext>,
+        tcb: Cap<Tcb>,
     ) -> Self {
         Self {
             id,
             vspace,
             endpoint,
             sched_context,
+            tcb,
             budget_us: SCHED_BUDGET_US,
             period_us: SCHED_PERIOD_US,
             next_process_pool: PROCESS_POOL_BASE,
@@ -123,7 +127,7 @@ impl RealmEntry {
 /// - IPC requests (label=0): `AllocPages` for explicit memory allocation
 /// - VMFault (label=5): Lazy mapping for inherited regions only
 /// - Timeout (label=6): Budget replenishment + check for interrupted VMFault
-/// - Other faults: Log error, don't reply (thread stays blocked)
+/// - Other faults: Suspend thread, reply to clear Reply object (MCS requirement)
 pub struct EventLoop {
     /// Registered realms.
     realms: [Option<RealmEntry>; MAX_REALMS],
@@ -206,13 +210,21 @@ impl EventLoop {
     /// - IPC requests (label=0): Memory allocation via `AllocPages`
     /// - VMFault (label=5): Lazy mapping for inherited regions only
     /// - Timeout (label=6): Budget replenishment + inherited region check
-    /// - Other faults: Log and block thread
+    /// - Other faults: Suspend thread, reply to clear Reply object
+    ///
+    /// # MCS Reply Object Handling
+    ///
+    /// In seL4 MCS, the Reply object must be cleared before each new receive.
+    /// We always use `reply_recv` after the first receive. For fatal faults
+    /// where we don't want the thread to resume, we suspend the TCB first,
+    /// then reply (which clears the Reply object but the suspended thread
+    /// won't actually run).
     pub fn run(&mut self) -> ! {
         sel4::debug_println!("Event loop: starting (MCS-aware fault handling)");
 
-        // Get the endpoint from the first realm
-        let endpoint = match &self.realms[0] {
-            Some(realm) => realm.endpoint,
+        // Get the endpoint and TCB from the first realm
+        let (endpoint, tcb) = match &self.realms[0] {
+            Some(realm) => (realm.endpoint, realm.tcb),
             None => {
                 sel4::debug_println!("Event loop: no realms registered, suspending");
                 sel4::init_thread::suspend_self()
@@ -221,7 +233,8 @@ impl EventLoop {
         let endpoint_bits = endpoint.bits();
 
         // First receive (no reply needed for the first call)
-        let (mut msg_info, mut badge) = endpoint.recv(self.reply);
+        // Note: badge is unused but required by the API
+        let (mut msg_info, mut _badge) = endpoint.recv(self.reply);
 
         loop {
             let label = msg_info.label() as u64;
@@ -237,7 +250,7 @@ impl EventLoop {
             });
 
             // Dispatch based on message label
-            let (should_reply, reply_length) = match label {
+            let reply_length = match label {
                 0 => {
                     // Normal IPC request
                     let response = self.handle_message(endpoint_bits, mrs);
@@ -247,48 +260,94 @@ impl EventLoop {
                         buf.msg_regs_mut()[1] = response_mrs[1];
                         buf.msg_regs_mut()[2] = response_mrs[2];
                     });
-                    (true, 3)
+                    3
                 }
 
                 SEL4_FAULT_VM_FAULT => {
                     // VMFault - only handle inherited regions
-                    let should_reply = self.handle_vm_fault(endpoint_bits, mrs);
-                    (should_reply, 0)
+                    let handled = self.handle_vm_fault(endpoint_bits, mrs);
+                    if !handled {
+                        // Fatal fault - suspend TCB before replying
+                        self.suspend_faulting_thread(tcb, label, mrs);
+                    }
+                    0
                 }
 
                 SEL4_FAULT_TIMEOUT => {
                     // Timeout fault - replenish budget, check for interrupted VMFault
-                    let should_reply = self.handle_timeout_fault(endpoint_bits, mrs);
-                    (should_reply, 0)
+                    self.handle_timeout_fault(endpoint_bits, mrs);
+                    0
                 }
 
                 _ => {
                     // Other fault type (CapFault=1, UnknownSyscall=2, UserException=3, etc.)
-                    sel4::debug_println!(
-                        "Event loop: unhandled fault (label={}, badge={})",
-                        label,
-                        badge
-                    );
-                    sel4::debug_println!(
-                        "  Fault MRs: ip=0x{:x}, addr=0x{:x}, data=0x{:x}",
-                        mrs[0],
-                        mrs[1],
-                        mrs[2]
-                    );
-                    // Don't reply - thread stays blocked
-                    (false, 0)
+                    // Fatal fault - suspend TCB before replying
+                    self.suspend_faulting_thread(tcb, label, mrs);
+                    0
                 }
             };
 
-            // Reply (or not) and wait for next message
-            if should_reply {
-                let reply_info = sel4::MessageInfoBuilder::default()
-                    .length(reply_length)
-                    .build();
-                (msg_info, badge) = endpoint.reply_recv(reply_info, self.reply);
-            } else {
-                (msg_info, badge) = endpoint.recv(self.reply);
-            }
+            // Always reply_recv to clear the Reply object (MCS requirement)
+            let reply_info = sel4::MessageInfoBuilder::default()
+                .length(reply_length)
+                .build();
+            (msg_info, _badge) = endpoint.reply_recv(reply_info, self.reply);
+        }
+    }
+
+    /// Suspend a faulting thread before replying.
+    ///
+    /// In seL4 MCS, we must reply to clear the Reply object, but we don't
+    /// want fatal faults to resume execution. By suspending the TCB first,
+    /// the reply clears the Reply object but the thread remains blocked.
+    fn suspend_faulting_thread(&self, tcb: Cap<Tcb>, label: u64, mrs: [u64; 4]) {
+        // Decode fault type for better debugging
+        let fault_name = match label {
+            1 => "CapFault",
+            2 => "UnknownSyscall",
+            3 => "UserException",
+            4 => "DebugException",
+            5 => "VMFault",
+            6 => "Timeout",
+            _ => "Unknown",
+        };
+        sel4::debug_println!(
+            "Event loop: fatal fault label={} ({}) - suspending thread",
+            label,
+            fault_name
+        );
+        sel4::debug_println!(
+            "  MR0=0x{:x}, MR1=0x{:x}, MR2=0x{:x}, MR3=0x{:x}",
+            mrs[0],
+            mrs[1],
+            mrs[2],
+            mrs[3]
+        );
+        // For UserException on x86_64: MR0=IP, MR1=SP, MR2=FLAGS, MR3=Exception#
+        if label == 3 {
+            let exception_num = mrs[3];
+            let exception_name = match exception_num {
+                0 => "Division by zero",
+                3 => "Breakpoint (int3)",
+                4 => "Overflow",
+                5 => "Bound range exceeded",
+                6 => "Invalid opcode (ud2)",
+                7 => "Device not available",
+                8 => "Double fault",
+                10 => "Invalid TSS",
+                11 => "Segment not present",
+                12 => "Stack-segment fault",
+                13 => "General protection fault",
+                14 => "Page fault",
+                _ => "Unknown x86 exception",
+            };
+            sel4::debug_println!("  x86 Exception #{}: {}", exception_num, exception_name);
+        }
+
+        // Suspend the TCB so it won't run after we reply
+        if let Err(e) = tcb.tcb_suspend() {
+            sel4::debug_println!("Event loop: failed to suspend TCB: {:?}", e);
+            // Continue anyway - the thread may run but will fault again
         }
     }
 
@@ -500,7 +559,7 @@ impl EventLoop {
     /// 2. Check if MR1 contains an inherited region address (interrupted VMFault)
     /// 3. If so, map the page (idempotent - safe even if already mapped)
     /// 4. Reply to resume the thread
-    fn handle_timeout_fault(&mut self, endpoint_bits: u64, mrs: [u64; 4]) -> bool {
+    fn handle_timeout_fault(&mut self, endpoint_bits: u64, mrs: [u64; 4]) {
         // MR0 = IP, MR1 = fault address (if interrupted VMFault), MR2 = data
         let ip = mrs[0];
         let possible_fault_addr = mrs[1];
@@ -514,7 +573,7 @@ impl EventLoop {
         // Find the realm
         let Some(realm) = self.find_realm_by_endpoint(endpoint_bits) else {
             sel4::debug_println!("Event loop: Timeout fault from unknown realm");
-            return false;
+            return;
         };
 
         // CRITICAL: Replenish budget before replying.
@@ -542,7 +601,7 @@ impl EventLoop {
 
             // Re-find realm (we need vspace)
             let Some(realm) = self.find_realm_by_endpoint(endpoint_bits) else {
-                return true; // Reply anyway - budget was replenished
+                return; // Reply anyway - budget was replenished
             };
             let vspace = realm.vspace;
 
@@ -566,8 +625,6 @@ impl EventLoop {
                 }
             }
         }
-
-        // Always reply to resume the thread with replenished budget
-        true
+        // Always reply to resume the thread with replenished budget (caller handles this)
     }
 }

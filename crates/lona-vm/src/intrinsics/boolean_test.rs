@@ -11,35 +11,35 @@ use crate::value::Value;
 
 #[test]
 fn not_basic() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    proc.x_regs[1] = Value::bool(true);
-    call_intrinsic(id::NOT, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(false));
+    x_regs[1] = Value::bool(true);
+    call_intrinsic(id::NOT, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::bool(false));
 
-    proc.x_regs[1] = Value::bool(false);
-    call_intrinsic(id::NOT, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(true));
+    x_regs[1] = Value::bool(false);
+    call_intrinsic(id::NOT, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::bool(true));
 }
 
 #[test]
 fn not_nil() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    proc.x_regs[1] = Value::nil();
-    call_intrinsic(id::NOT, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(true)); // nil is falsy
+    x_regs[1] = Value::nil();
+    call_intrinsic(id::NOT, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::bool(true)); // nil is falsy
 }
 
 #[test]
 fn not_int() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    proc.x_regs[1] = Value::int(0);
-    call_intrinsic(id::NOT, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(false)); // 0 is truthy (not nil/false)
+    x_regs[1] = Value::int(0);
+    call_intrinsic(id::NOT, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::bool(false)); // 0 is truthy (not nil/false)
 
-    proc.x_regs[1] = Value::int(42);
-    call_intrinsic(id::NOT, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(false));
+    x_regs[1] = Value::int(42);
+    call_intrinsic(id::NOT, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::bool(false));
 }

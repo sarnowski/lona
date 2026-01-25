@@ -201,6 +201,13 @@ make verify
 
 This is the ONE command to verify changes work. No other command counts.
 
+**CRITICAL: Direct `cargo` commands are FORBIDDEN and will ALWAYS be denied.**
+
+- Do NOT run `cargo check`, `cargo build`, `cargo test`, `cargo clippy`, or any other cargo command directly
+- ALL compilation, testing, and verification MUST go through `make verify`
+- The Makefile handles Docker containerization, cross-compilation, and proper build flags
+- Direct cargo commands bypass the build system and will fail or produce incorrect results
+
 ### Development REPL
 
 | Tool | Purpose |
@@ -216,6 +223,8 @@ Both support `arch` parameter: `aarch64` (default) or `x86_64`.
 |-------|---------|
 | **Claude** | `Task(subagent_type="reviewer", run_in_background=true, prompt="...")` |
 | **Gemini** | `Bash(run_in_background=true, timeout=600000, command='gemini -m gemini-3-pro-preview "..."')` |
-| **Codex** | `Bash(run_in_background=true, timeout=600000, command='codex exec -m gpt-5.2 -c model_reasoning_effort=medium -c hide_agent_reasoning=true -s read-only "..."')` |
+| **Codex** | `Bash(run_in_background=true, timeout=600000, command='codex exec -m gpt-5.2 -c model_reasoning_effort=medium -s read-only "..." 2>/dev/null')` |
 
 **Run all three IN PARALLEL** (single message, multiple tool calls). For Codex code reviews, use `-m gpt-5.2-codex`. Don't use any other models than shown here.
+
+**Codex output:** By default, `codex exec` streams progress to stderr and only the final message to stdout. The `2>/dev/null` suppresses progress spam while preserving the final response. Adjust `model_reasoning_effort` to `low` or `high` as needed.

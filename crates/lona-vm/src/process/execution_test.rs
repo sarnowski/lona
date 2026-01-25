@@ -8,7 +8,6 @@
 use super::allocation_test::setup;
 use super::*;
 use crate::bytecode::{Chunk, encode_abx, op};
-use crate::value::Value;
 
 #[test]
 fn process_set_chunk() {
@@ -30,13 +29,11 @@ fn process_reset() {
 
     // Modify state
     proc.ip = 100;
-    proc.x_regs[0] = Value::int(42);
     proc.status = ProcessStatus::Running;
 
     // Reset
     proc.reset();
 
     assert_eq!(proc.ip, 0);
-    assert_eq!(proc.x_regs[0], Value::Nil);
     assert_eq!(proc.status, ProcessStatus::Ready);
 }

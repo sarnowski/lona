@@ -22,16 +22,44 @@ Metadata is attached using the `^` reader macro:
 (def ^:private ^%{:doc "Internal counter"} *counter* 0)
 ```
 
+Shorthand expansion:
+
+```clojure
+;; @todo
+(def ^:private secret 42)
+(:private (meta #'secret))  ; => true
+
+(def ^%{:doc "Documented" :added "1.0"} api-fn (fn* [] :ok))
+(:doc (meta #'api-fn))      ; => "Documented"
+(:added (meta #'api-fn))    ; => "1.0"
+```
+
+Keyword shorthand expands to map:
+
+```clojure
+;; @todo ^:keyword expands to ^%{:keyword true}
+(def ^:dynamic ^:private dyn-var 1)
+(:dynamic (meta #'dyn-var))   ; => true
+(:private (meta #'dyn-var))   ; => true
+```
+
 ---
 
 ## Accessing Metadata
 
 ```clojure
-(meta #'pi)
-; → %{:doc "The ratio of circumference to diameter"
-;     :added "1.0"
-;     :name pi
-;     :ns #namespace[lona.core]}
+;; @todo
+(def ^%{:doc "A documented value"} documented-var 42)
+(map? (meta #'documented-var))       ; => true
+(:doc (meta #'documented-var))       ; => "A documented value"
+(symbol? (:name (meta #'documented-var)))  ; => true
+```
+
+meta returns nil for values without metadata:
+
+```clojure
+(meta 42)    ; => nil
+(meta "hi")  ; => nil
 ```
 
 ---
@@ -78,6 +106,18 @@ These keys are added automatically by the compiler:
 | `:file` | string | Source file path. |
 | `:line` | integer | Line number in source file. |
 
+```clojure
+;; @todo
+(def compiler-test 42)
+(symbol? (:name (meta #'compiler-test)))  ; => true
+(= (:name (meta #'compiler-test)) 'compiler-test)  ; => true
+(namespace? (:ns (meta #'compiler-test)))  ; => true
+(or (nil? (:file (meta #'compiler-test)))
+    (string? (:file (meta #'compiler-test))))  ; => true
+(or (nil? (:line (meta #'compiler-test)))
+    (integer? (:line (meta #'compiler-test))))  ; => true
+```
+
 ---
 
 ## Native Intrinsics
@@ -98,6 +138,12 @@ The `:native` metadata connects a var to a VM intrinsic function:
 3. If not found, an error is raised at load time
 
 **Validation:** Declaring a native that doesn't exist in the VM is a load-time error. This ensures the Lonala source and VM implementation stay synchronized.
+
+```clojure
+;; @todo
+;; Defining a native that doesn't exist is a load-time error
+(def ^:native nonexistent-intrinsic)  ; => ERROR :unknown-intrinsic
+```
 
 ### Special Forms
 
@@ -189,6 +235,11 @@ The `:process-bound` metadata creates per-process bindings:
 - `*ns*` — current namespace (each process can be in different namespace)
 - Dynamic context that shouldn't leak between processes
 
+```clojure
+;; Process-bound vars have independent values per process
+(namespace? *ns*)  ; => true
+```
+
 ---
 
 ## Private Vars
@@ -205,6 +256,22 @@ The `:private` metadata marks implementation details:
 - Not included when using `(refer 'namespace)`
 - Still accessible via fully-qualified name: `my.ns/parse-options`
 - Signals intent, not enforcement
+
+```clojure
+;; @todo
+(def ns (create-ns 'private.test))
+(intern ns (with-meta 'helper %{:private true}) (fn* [] :internal))
+;; helper is not referred by (refer 'private.test)
+;; but private.test/helper still works
+
+;; Private vars are excluded from refer
+(def test-ns (create-ns 'refer.test))
+(intern test-ns (with-meta 'public-fn %{}) (fn* [] :public))
+(intern test-ns (with-meta 'private-fn %{:private true}) (fn* [] :private))
+;; After (refer 'refer.test), public-fn is accessible but private-fn is not
+(refer 'refer.test)
+(fn? public-fn)  ; => true
+```
 
 ---
 
@@ -240,12 +307,26 @@ The `:arglists` key documents function signatures:
 Metadata does not affect equality:
 
 ```clojure
-(= (with-meta 'foo {:a 1})
-   (with-meta 'foo {:b 2}))
-; → true
+(= (with-meta 'foo %{:a 1})
+   (with-meta 'foo %{:b 2}))  ; => true
+
+(= (with-meta [1 2 3] %{:x 1})
+   (with-meta [1 2 3] %{:y 2}))  ; => true  @todo
+
+(= (with-meta 'foo %{:a 1})
+   'foo)  ; => true
 ```
 
 Two values differing only in metadata are equal. This allows metadata to annotate without changing semantics.
+
+with-meta preserves value, attaches metadata:
+
+```clojure
+;; @todo
+(def s (with-meta 'bar %{:tag :special}))
+(= s 'bar)           ; => true
+(:tag (meta s))      ; => :special
+```
 
 ---
 

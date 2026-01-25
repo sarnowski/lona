@@ -11,6 +11,7 @@
 //! - Control flow: `JUMP`, `JUMP_IF_FALSE`
 
 use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, op};
+use crate::intrinsics::XRegs;
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::value::Value;
@@ -19,10 +20,10 @@ use crate::vm::{RunResult, RuntimeError};
 /// Execute a type test instruction.
 ///
 /// Jump to fail label if the value does not match the expected type.
-pub const fn execute_type_test(proc: &mut Process, instr: u32, opcode: u8) -> u32 {
+pub const fn execute_type_test(x_regs: &XRegs, proc: &mut Process, instr: u32, opcode: u8) -> u32 {
     let reg = decode_a(instr) as usize;
     let fail_label = decode_bx(instr) as usize;
-    let val = proc.x_regs[reg];
+    let val = x_regs[reg];
 
     let matches = match opcode {
         op::IS_NIL => val.is_nil(),
@@ -44,6 +45,7 @@ pub const fn execute_type_test(proc: &mut Process, instr: u32, opcode: u8) -> u3
 
 /// Execute a structure test instruction.
 pub fn execute_structure_test<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     mem: &M,
     instr: u32,
@@ -52,7 +54,7 @@ pub fn execute_structure_test<M: MemorySpace>(
     let reg = decode_a(instr) as usize;
     let expected_len = decode_b(instr) as usize;
     let fail_label = decode_c(instr) as usize;
-    let val = proc.x_regs[reg];
+    let val = x_regs[reg];
 
     match opcode {
         op::TEST_ARITY => {
@@ -92,7 +94,8 @@ pub fn execute_structure_test<M: MemorySpace>(
 
 /// Execute an element extraction instruction.
 pub fn execute_element_extraction<M: MemorySpace>(
-    proc: &mut Process,
+    x_regs: &mut XRegs,
+    proc: &Process,
     mem: &M,
     instr: u32,
     opcode: u8,
@@ -100,7 +103,7 @@ pub fn execute_element_extraction<M: MemorySpace>(
     let dest = decode_a(instr) as usize;
     let src_reg = decode_b(instr) as usize;
     let index = decode_c(instr) as usize;
-    let src_val = proc.x_regs[src_reg];
+    let src_val = x_regs[src_reg];
 
     let elem = match opcode {
         op::GET_TUPLE_ELEM => proc.read_tuple_element(mem, src_val, index),
@@ -108,7 +111,7 @@ pub fn execute_element_extraction<M: MemorySpace>(
         _ => None,
     };
 
-    proc.x_regs[dest] = elem.ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
+    x_regs[dest] = elem.ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
     Ok(1)
 }
 
@@ -119,6 +122,7 @@ const MAX_SLICE_ELEMENTS: usize = 64;
 ///
 /// Creates a new tuple containing elements from index C to end of source tuple.
 pub fn execute_tuple_slice<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     instr: u32,
@@ -126,7 +130,7 @@ pub fn execute_tuple_slice<M: MemorySpace>(
     let dest = decode_a(instr) as usize;
     let src_reg = decode_b(instr) as usize;
     let start_index = decode_c(instr) as usize;
-    let src_val = proc.x_regs[src_reg];
+    let src_val = x_regs[src_reg];
 
     let len = proc
         .read_tuple_len(mem, src_val)
@@ -141,7 +145,7 @@ pub fn execute_tuple_slice<M: MemorySpace>(
         let empty = proc
             .alloc_tuple(mem, &[])
             .ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
-        proc.x_regs[dest] = empty;
+        x_regs[dest] = empty;
         return Ok(1);
     }
 
@@ -158,7 +162,7 @@ pub fn execute_tuple_slice<M: MemorySpace>(
         .alloc_tuple(mem, &elements[..slice_len])
         .ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
 
-    proc.x_regs[dest] = new_tuple;
+    x_regs[dest] = new_tuple;
     Ok(1)
 }
 
@@ -166,6 +170,7 @@ pub fn execute_tuple_slice<M: MemorySpace>(
 ///
 /// Handles type tests, structure tests, element extraction, equality, and control flow.
 pub fn execute<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &M,
     instr: u32,
@@ -180,16 +185,16 @@ pub fn execute<M: MemorySpace>(
         | op::IS_VECTOR
         | op::IS_MAP
         | op::IS_KEYWORD
-        | op::IS_STRING => Ok(execute_type_test(proc, instr, opcode)),
+        | op::IS_STRING => Ok(execute_type_test(x_regs, proc, instr, opcode)),
 
         // Structure test instructions
         op::TEST_ARITY | op::TEST_VEC_LEN | op::TEST_ARITY_GE => {
-            Ok(execute_structure_test(proc, mem, instr, opcode))
+            Ok(execute_structure_test(x_regs, proc, mem, instr, opcode))
         }
 
         // Element extraction instructions
         op::GET_TUPLE_ELEM | op::GET_VEC_ELEM => {
-            execute_element_extraction(proc, mem, instr, opcode)
+            execute_element_extraction(x_regs, proc, mem, instr, opcode)
         }
 
         // Equality test
@@ -197,7 +202,7 @@ pub fn execute<M: MemorySpace>(
             let reg_a = decode_a(instr) as usize;
             let reg_b = decode_b(instr) as usize;
             let fail_label = decode_c(instr) as usize;
-            if proc.x_regs[reg_a] != proc.x_regs[reg_b] {
+            if x_regs[reg_a] != x_regs[reg_b] {
                 proc.ip = fail_label;
             }
             Ok(1)
@@ -211,7 +216,7 @@ pub fn execute<M: MemorySpace>(
         op::JUMP_IF_FALSE => {
             let reg = decode_a(instr) as usize;
             let target = decode_bx(instr) as usize;
-            let val = proc.x_regs[reg];
+            let val = x_regs[reg];
             // Falsy: nil or false
             if val.is_nil() || matches!(val, Value::Bool(false)) {
                 proc.ip = target;
@@ -222,7 +227,7 @@ pub fn execute<M: MemorySpace>(
         // Badmatch error
         op::BADMATCH => {
             let reg = decode_a(instr) as usize;
-            let value = proc.x_regs[reg];
+            let value = x_regs[reg];
             Err(RunResult::Error(RuntimeError::Badmatch { value }))
         }
 

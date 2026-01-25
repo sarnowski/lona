@@ -22,7 +22,7 @@ fn setup() -> Option<(Process, Realm, MockVSpace)> {
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
     let realm_base = base.add(128 * 1024);
     let mut realm = Realm::new(realm_base, 64 * 1024);
@@ -40,7 +40,7 @@ fn parse_pattern(
     realm: &mut Realm,
     mem: &mut MockVSpace,
 ) -> Pattern {
-    let expr = read(src, proc, mem)
+    let expr = read(src, proc, realm, mem)
         .expect("parse error")
         .expect("empty input");
     let compiler = Compiler::new(proc, mem, realm);
@@ -453,7 +453,7 @@ fn parse_pattern_err(
     realm: &mut Realm,
     mem: &mut MockVSpace,
 ) -> Result<Pattern, crate::compiler::CompileError> {
-    let expr = read(src, proc, mem)
+    let expr = read(src, proc, realm, mem)
         .expect("parse error")
         .expect("empty input");
     let compiler = Compiler::new(proc, mem, realm);

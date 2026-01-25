@@ -9,22 +9,23 @@ use super::{eval, setup};
 use crate::Vaddr;
 use crate::bytecode::{Chunk, encode_abc, encode_abx, op};
 use crate::platform::MockVSpace;
-use crate::process::Process;
+use crate::process::{Process, WorkerId};
 use crate::realm::{Realm, bootstrap};
+use crate::scheduler::Worker;
 use crate::value::Value;
 use crate::vm::{RunResult, RuntimeError, Vm};
 
 // --- Helper functions ---
 
-/// Create a test environment (process, realm, memory).
-fn create_test_env() -> (Process, Realm, MockVSpace) {
+/// Create a test environment (worker, process, realm, memory).
+fn create_test_env() -> (Worker, Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
     let mut mem = MockVSpace::new(256 * 1024, base);
     let young_base = base;
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
     let realm_base = base.add(128 * 1024);
     let mut realm = Realm::new(realm_base, 64 * 1024);
@@ -32,24 +33,25 @@ fn create_test_env() -> (Process, Realm, MockVSpace) {
     let result = bootstrap(&mut realm, &mut mem).unwrap();
     proc.bootstrap(result.ns_var, result.core_ns);
 
-    (proc, realm, mem)
+    let worker = Worker::new(WorkerId(0));
+    (worker, proc, realm, mem)
 }
 
 /// Create a test environment with a frame already allocated.
-fn create_test_env_with_frame() -> (Process, Realm, MockVSpace) {
-    let (mut proc, realm, mut mem) = create_test_env();
+fn create_test_env_with_frame() -> (Worker, Process, Realm, MockVSpace) {
+    let (worker, mut proc, realm, mut mem) = create_test_env();
 
     // Allocate a frame for the test
     proc.allocate_frame(&mut mem, 0, Vaddr::new(0)).unwrap();
 
-    (proc, realm, mem)
+    (worker, proc, realm, mem)
 }
 
 // --- ALLOCATE_ZERO tests ---
 
 #[test]
 fn allocate_zero_creates_y_registers() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     // ALLOCATE_ZERO 3, 0
     // HALT
@@ -60,7 +62,7 @@ fn allocate_zero_creates_y_registers() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    let result = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(result, RunResult::Completed(_)));
 
     // Verify Y registers exist and are nil
@@ -72,7 +74,7 @@ fn allocate_zero_creates_y_registers() {
 
 #[test]
 fn allocate_creates_y_registers_uninitialized() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     // ALLOCATE 2, 0 (uninitialized)
     // HALT
@@ -83,7 +85,7 @@ fn allocate_creates_y_registers_uninitialized() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    let result = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(result, RunResult::Completed(_)));
 
     // Y registers exist (values are undefined, but we can access them)
@@ -96,7 +98,7 @@ fn allocate_creates_y_registers_uninitialized() {
 
 #[test]
 fn move_xy_saves_x_to_y() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     // ALLOCATE_ZERO 1, 0
     // LOADINT X0, 42
@@ -111,14 +113,14 @@ fn move_xy_saves_x_to_y() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    Vm::run(&mut proc, &mut mem, &mut realm);
+    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
 
     assert_eq!(proc.get_y(&mem, 0), Some(Value::int(42)));
 }
 
 #[test]
 fn move_yx_restores_y_to_x() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     // ALLOCATE_ZERO 1, 0
     // LOADINT X0, 42
@@ -137,15 +139,15 @@ fn move_yx_restores_y_to_x() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    Vm::run(&mut proc, &mut mem, &mut realm);
+    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
 
-    assert_eq!(proc.x_regs[0], Value::int(999)); // clobbered
-    assert_eq!(proc.x_regs[1], Value::int(42)); // restored from Y
+    assert_eq!(worker.x_regs[0], Value::int(999)); // clobbered
+    assert_eq!(worker.x_regs[1], Value::int(42)); // restored from Y
 }
 
 #[test]
 fn y_register_preserves_multiple_values() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     // Allocate 3 Y registers, store different values, verify they're preserved
     let mut chunk = Chunk::new();
@@ -169,18 +171,18 @@ fn y_register_preserves_multiple_values() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    Vm::run(&mut proc, &mut mem, &mut realm);
+    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
 
-    assert_eq!(proc.x_regs[3], Value::int(10));
-    assert_eq!(proc.x_regs[4], Value::int(20));
-    assert_eq!(proc.x_regs[5], Value::int(30));
+    assert_eq!(worker.x_regs[3], Value::int(10));
+    assert_eq!(worker.x_regs[4], Value::int(20));
+    assert_eq!(worker.x_regs[5], Value::int(30));
 }
 
 // --- DEALLOCATE tests ---
 
 #[test]
 fn deallocate_releases_y_registers() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abc(op::ALLOCATE_ZERO, 2, 0, 0));
@@ -190,7 +192,7 @@ fn deallocate_releases_y_registers() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    let result = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(result, RunResult::Completed(_)));
 
     // Y registers should be released
@@ -201,7 +203,7 @@ fn deallocate_releases_y_registers() {
 
 #[test]
 fn move_xy_out_of_bounds_error() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     // ALLOCATE_ZERO 2
     // MOVE_XY Y5, X0   ; Y5 is out of bounds (only 0,1 allocated)
@@ -213,7 +215,7 @@ fn move_xy_out_of_bounds_error() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    let result = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(
         result,
         RunResult::Error(RuntimeError::YRegisterOutOfBounds {
@@ -225,7 +227,7 @@ fn move_xy_out_of_bounds_error() {
 
 #[test]
 fn move_yx_out_of_bounds_error() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     // ALLOCATE_ZERO 1
     // MOVE_YX X0, Y3   ; Y3 is out of bounds (only 0 allocated)
@@ -237,7 +239,7 @@ fn move_yx_out_of_bounds_error() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    let result = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(
         result,
         RunResult::Error(RuntimeError::YRegisterOutOfBounds {
@@ -249,7 +251,7 @@ fn move_yx_out_of_bounds_error() {
 
 #[test]
 fn deallocate_mismatch_error() {
-    let (mut proc, mut realm, mut mem) = create_test_env_with_frame();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env_with_frame();
 
     // ALLOCATE_ZERO 3
     // DEALLOCATE 2   ; Mismatch: allocated 3, deallocating 2
@@ -261,7 +263,7 @@ fn deallocate_mismatch_error() {
     proc.set_chunk(chunk);
     proc.reset_reductions();
 
-    let result = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(
         result,
         RunResult::Error(RuntimeError::FrameMismatch {

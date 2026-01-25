@@ -76,6 +76,8 @@ nav:
       - Data Types: lonala/data-types.md
       # Var metadata: documentation, native intrinsics, macros, process-local bindings
       - Metadata: lonala/metadata.md
+      # How to write testable examples in specification documents
+      - Specification Tests: lonala/spec-tests.md
       # Core intrinsics: namespaces, vars, arithmetic, collections, predicates
       - lona.core: lonala/lona.core.md
       # Process intrinsics: spawn, message passing, linking, monitoring, realms

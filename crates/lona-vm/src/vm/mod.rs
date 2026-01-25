@@ -22,11 +22,12 @@ use crate::bytecode::{
     Chunk, decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op,
 };
 use crate::intrinsics::{
-    self, CoreCollectionError, IntrinsicError, core_get, core_nth, intrinsic_cost,
+    self, CoreCollectionError, IntrinsicError, XRegs, core_get, core_nth, intrinsic_cost,
 };
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::Realm;
+use crate::scheduler::Worker;
 use crate::value::{HeapCompiledFn, Value};
 
 /// Maximum number of elements in a tuple literal.
@@ -37,6 +38,7 @@ const MAX_MAP_PAIRS: usize = 64;
 
 /// Build a tuple from registers and store in target register.
 fn build_tuple<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     target: usize,
@@ -45,18 +47,19 @@ fn build_tuple<M: MemorySpace>(
 ) -> Result<(), RuntimeError> {
     let elem_count = count.min(MAX_TUPLE_ELEMENTS);
     let mut elements = [Value::Nil; MAX_TUPLE_ELEMENTS];
-    elements[..elem_count].copy_from_slice(&proc.x_regs[start_reg..start_reg + elem_count]);
+    elements[..elem_count].copy_from_slice(&x_regs[start_reg..start_reg + elem_count]);
 
     let tuple = proc
         .alloc_tuple(mem, &elements[..elem_count])
         .ok_or(RuntimeError::OutOfMemory)?;
 
-    proc.x_regs[target] = tuple;
+    x_regs[target] = tuple;
     Ok(())
 }
 
 /// Build a vector from registers and store in target register.
 fn build_vector<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     target: usize,
@@ -65,13 +68,13 @@ fn build_vector<M: MemorySpace>(
 ) -> Result<(), RuntimeError> {
     let elem_count = count.min(MAX_TUPLE_ELEMENTS);
     let mut elements = [Value::Nil; MAX_TUPLE_ELEMENTS];
-    elements[..elem_count].copy_from_slice(&proc.x_regs[start_reg..start_reg + elem_count]);
+    elements[..elem_count].copy_from_slice(&x_regs[start_reg..start_reg + elem_count]);
 
     let vector = proc
         .alloc_vector(mem, &elements[..elem_count])
         .ok_or(RuntimeError::OutOfMemory)?;
 
-    proc.x_regs[target] = vector;
+    x_regs[target] = vector;
     Ok(())
 }
 
@@ -83,6 +86,7 @@ fn build_vector<M: MemorySpace>(
 /// For variadic functions, extra arguments are collected into a tuple
 /// and placed in the rest parameter register (X(arity+1)).
 fn prepare_user_fn<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     fn_addr: Vaddr,
@@ -107,15 +111,14 @@ fn prepare_user_fn<M: MemorySpace>(
         let rest_count = (argc - header.arity) as usize;
         let mut rest_elements = [Value::Nil; MAX_TUPLE_ELEMENTS];
         let rest_count = rest_count.min(MAX_TUPLE_ELEMENTS);
-        rest_elements[..rest_count]
-            .copy_from_slice(&proc.x_regs[rest_start..rest_start + rest_count]);
+        rest_elements[..rest_count].copy_from_slice(&x_regs[rest_start..rest_start + rest_count]);
 
         let rest_tuple = proc
             .alloc_tuple(mem, &rest_elements[..rest_count])
             .ok_or(RuntimeError::OutOfMemory)?;
 
         // Place rest tuple in X(arity+1)
-        proc.x_regs[header.arity as usize + 1] = rest_tuple;
+        x_regs[header.arity as usize + 1] = rest_tuple;
     } else {
         // Non-variadic: must have exactly `arity` args
         if argc != header.arity {
@@ -155,6 +158,7 @@ fn prepare_user_fn<M: MemorySpace>(
 /// This does NOT push a call frame - the caller must do that.
 /// Returns the function address and chunk for the closure's underlying function.
 fn prepare_closure<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     closure_addr: Vaddr,
@@ -168,10 +172,10 @@ fn prepare_closure<M: MemorySpace>(
 
     for i in 0..closure.captures_len as usize {
         let capture_addr = captures_offset.add((i * core::mem::size_of::<Value>()) as u64);
-        proc.x_regs[captures_base + i] = mem.read(capture_addr);
+        x_regs[captures_base + i] = mem.read(capture_addr);
     }
 
-    let chunk = prepare_user_fn(proc, mem, closure.function, argc)?;
+    let chunk = prepare_user_fn(x_regs, proc, mem, closure.function, argc)?;
     Ok((closure.function, chunk))
 }
 
@@ -197,6 +201,7 @@ fn check_callable_arity(argc: u8) -> Result<(), RuntimeError> {
 
 /// Call a keyword as a function: `(:key map [default])`.
 fn call_keyword<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     key: Value,
@@ -204,12 +209,8 @@ fn call_keyword<M: MemorySpace>(
 ) -> Result<Value, RuntimeError> {
     check_callable_arity(argc)?;
 
-    let map_val = proc.x_regs[1];
-    let default = if argc >= 2 {
-        proc.x_regs[2]
-    } else {
-        Value::Nil
-    };
+    let map_val = x_regs[1];
+    let default = if argc >= 2 { x_regs[2] } else { Value::Nil };
 
     core_get(proc, mem, map_val, key, default).map_err(|e| match e {
         CoreCollectionError::NotAMap => RuntimeError::CallableTypeError {
@@ -223,6 +224,7 @@ fn call_keyword<M: MemorySpace>(
 
 /// Call a map as a function: `(map key [default])`.
 fn call_map<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     map_val: Value,
@@ -230,12 +232,8 @@ fn call_map<M: MemorySpace>(
 ) -> Result<Value, RuntimeError> {
     check_callable_arity(argc)?;
 
-    let key = proc.x_regs[1];
-    let default = if argc >= 2 {
-        proc.x_regs[2]
-    } else {
-        Value::Nil
-    };
+    let key = x_regs[1];
+    let default = if argc >= 2 { x_regs[2] } else { Value::Nil };
 
     // Note: NotAMap shouldn't happen here since we already know it's a map,
     // but we handle it for completeness.
@@ -251,6 +249,7 @@ fn call_map<M: MemorySpace>(
 
 /// Call a tuple as a function: `(tuple idx [default])`.
 fn call_tuple<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     tuple_val: Value,
@@ -258,12 +257,8 @@ fn call_tuple<M: MemorySpace>(
 ) -> Result<Value, RuntimeError> {
     check_callable_arity(argc)?;
 
-    let idx = proc.x_regs[1];
-    let default = if argc >= 2 {
-        Some(proc.x_regs[2])
-    } else {
-        None
-    };
+    let idx = x_regs[1];
+    let default = if argc >= 2 { Some(x_regs[2]) } else { None };
 
     // Note: NotATuple shouldn't happen here since we already know it's a tuple,
     // but we handle it for completeness.
@@ -298,22 +293,23 @@ fn call_tuple<M: MemorySpace>(
 /// - `Map(_)`: `(map key [default])` → `(get map key [default])`
 /// - `Tuple(_)`: `(tuple idx [default])` → `(nth tuple idx [default])`
 fn handle_call<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
     fn_reg: usize,
     argc: u8,
 ) -> Result<u32, RuntimeError> {
-    let fn_val = proc.x_regs[fn_reg];
+    let fn_val = x_regs[fn_reg];
 
     match fn_val {
         Value::NativeFn(id) => {
-            intrinsics::call_intrinsic(id as u8, argc, proc, mem, realm)?;
+            intrinsics::call_intrinsic(id as u8, argc, x_regs, proc, mem, realm)?;
             Ok(intrinsic_cost(id as u8))
         }
 
         Value::CompiledFn(fn_addr) => {
-            let callee_chunk = prepare_user_fn(proc, mem, fn_addr, argc)?;
+            let callee_chunk = prepare_user_fn(x_regs, proc, mem, fn_addr, argc)?;
 
             // Ensure caller's chunk is on heap (for REPL case)
             if !proc.ensure_chunk_on_heap(mem) {
@@ -334,7 +330,7 @@ fn handle_call<M: MemorySpace>(
         }
 
         Value::Closure(closure_addr) => {
-            let (fn_addr, callee_chunk) = prepare_closure(proc, mem, closure_addr, argc)?;
+            let (fn_addr, callee_chunk) = prepare_closure(x_regs, proc, mem, closure_addr, argc)?;
 
             // Ensure caller's chunk is on heap (for REPL case)
             if !proc.ensure_chunk_on_heap(mem) {
@@ -355,17 +351,17 @@ fn handle_call<M: MemorySpace>(
         }
 
         Value::Keyword(_) => {
-            proc.x_regs[0] = call_keyword(proc, mem, fn_val, argc)?;
+            x_regs[0] = call_keyword(x_regs, proc, mem, fn_val, argc)?;
             Ok(2)
         }
 
         Value::Map(_) => {
-            proc.x_regs[0] = call_map(proc, mem, fn_val, argc)?;
+            x_regs[0] = call_map(x_regs, proc, mem, fn_val, argc)?;
             Ok(2)
         }
 
         Value::Tuple(_) => {
-            proc.x_regs[0] = call_tuple(proc, mem, fn_val, argc)?;
+            x_regs[0] = call_tuple(x_regs, proc, mem, fn_val, argc)?;
             Ok(2)
         }
 
@@ -377,6 +373,7 @@ fn handle_call<M: MemorySpace>(
 
 /// Build a closure from a compiled function and captures tuple.
 fn build_closure<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     target: usize,
@@ -384,7 +381,7 @@ fn build_closure<M: MemorySpace>(
     captures_reg: usize,
 ) -> Result<(), RuntimeError> {
     // Get function address
-    let fn_val = proc.x_regs[fn_reg];
+    let fn_val = x_regs[fn_reg];
     let Value::CompiledFn(fn_addr) = fn_val else {
         return Err(RuntimeError::NotCallable {
             type_name: fn_val.type_name(),
@@ -392,7 +389,7 @@ fn build_closure<M: MemorySpace>(
     };
 
     // Get captures tuple
-    let captures_val = proc.x_regs[captures_reg];
+    let captures_val = x_regs[captures_reg];
     let captures_len = if captures_val.is_nil() {
         0
     } else {
@@ -417,12 +414,13 @@ fn build_closure<M: MemorySpace>(
         .alloc_closure(mem, fn_addr, &captures[..captures_len])
         .ok_or(RuntimeError::OutOfMemory)?;
 
-    proc.x_regs[target] = closure;
+    x_regs[target] = closure;
     Ok(())
 }
 
 /// Build a map from key-value pairs in registers and store in target register.
 fn build_map<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     target: usize,
@@ -438,7 +436,7 @@ fn build_map<M: MemorySpace>(
         let val_reg = start_reg + i * 2 + 1;
 
         // Build [key value] tuple
-        let kv_elements = [proc.x_regs[key_reg], proc.x_regs[val_reg]];
+        let kv_elements = [x_regs[key_reg], x_regs[val_reg]];
         let kv_tuple = proc
             .alloc_tuple(mem, &kv_elements)
             .ok_or(RuntimeError::OutOfMemory)?;
@@ -453,7 +451,7 @@ fn build_map<M: MemorySpace>(
         .alloc_map(mem, entries)
         .ok_or(RuntimeError::OutOfMemory)?;
 
-    proc.x_regs[target] = map;
+    x_regs[target] = map;
     Ok(())
 }
 
@@ -578,7 +576,11 @@ impl RunResult {
 }
 
 /// Handle RETURN instruction: deallocate frame and restore caller context.
-fn handle_return<M: MemorySpace>(proc: &mut Process, mem: &M) -> Result<u32, RunResult> {
+fn handle_return<M: MemorySpace>(
+    x_regs: &XRegs,
+    proc: &mut Process,
+    mem: &M,
+) -> Result<u32, RunResult> {
     match proc.deallocate_frame(mem) {
         Some((return_ip, chunk_addr)) => {
             if !proc.load_chunk_from(mem, chunk_addr) {
@@ -587,19 +589,19 @@ fn handle_return<M: MemorySpace>(proc: &mut Process, mem: &M) -> Result<u32, Run
             proc.ip = return_ip;
             Ok(1)
         }
-        None => Err(RunResult::Completed(proc.x_regs[0])),
+        None => Err(RunResult::Completed(x_regs[0])),
     }
 }
 
 /// Execute a load instruction.
 const fn execute_load_instruction(
-    proc: &mut Process,
+    x_regs: &mut XRegs,
     instr: u32,
     opcode: u8,
     constant_value: Option<Value>,
 ) -> u32 {
     let a = decode_a(instr) as usize;
-    proc.x_regs[a] = match opcode {
+    x_regs[a] = match opcode {
         op::LOADNIL => Value::Nil,
         op::LOADBOOL => Value::bool(decode_bx(instr) != 0),
         op::LOADINT => Value::int(decode_sbx(instr) as i64),
@@ -607,7 +609,7 @@ const fn execute_load_instruction(
             Some(v) => v,
             None => return 1,
         },
-        op::MOVE => proc.x_regs[decode_b(instr) as usize],
+        op::MOVE => x_regs[decode_b(instr) as usize],
         _ => return 1,
     };
     1
@@ -615,6 +617,7 @@ const fn execute_load_instruction(
 
 /// Execute a collection build instruction.
 fn execute_build_instruction<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     instr: u32,
@@ -626,19 +629,19 @@ fn execute_build_instruction<M: MemorySpace>(
 
     match opcode {
         op::BUILD_TUPLE => {
-            build_tuple(proc, mem, a, b, c)?;
+            build_tuple(x_regs, proc, mem, a, b, c)?;
             Ok(1 + (c / 8) as u32)
         }
         op::BUILD_VECTOR => {
-            build_vector(proc, mem, a, b, c)?;
+            build_vector(x_regs, proc, mem, a, b, c)?;
             Ok(1 + (c / 8) as u32)
         }
         op::BUILD_MAP => {
-            build_map(proc, mem, a, b, c)?;
+            build_map(x_regs, proc, mem, a, b, c)?;
             Ok(1 + (c / 4) as u32)
         }
         op::BUILD_CLOSURE => {
-            build_closure(proc, mem, a, b, c)?;
+            build_closure(x_regs, proc, mem, a, b, c)?;
             Ok(2)
         }
         _ => Ok(1),
@@ -649,6 +652,7 @@ fn execute_build_instruction<M: MemorySpace>(
 ///
 /// Returns `Ok(cost)` for successful execution, or `Err` for errors.
 fn execute_y_register_instruction<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     instr: u32,
@@ -682,7 +686,7 @@ fn execute_y_register_instruction<M: MemorySpace>(
         op::MOVE_XY => {
             let y_idx = decode_a(instr) as usize;
             let x_idx = decode_b(instr) as usize;
-            let value = proc.x_regs[x_idx];
+            let value = x_regs[x_idx];
             if !proc.set_y(mem, y_idx, value) {
                 return Err(RunResult::Error(RuntimeError::YRegisterOutOfBounds {
                     index: y_idx,
@@ -696,7 +700,7 @@ fn execute_y_register_instruction<M: MemorySpace>(
             let y_idx = decode_b(instr) as usize;
             match proc.get_y(mem, y_idx) {
                 Some(value) => {
-                    proc.x_regs[x_idx] = value;
+                    x_regs[x_idx] = value;
                     Ok(1)
                 }
                 None => Err(RunResult::Error(RuntimeError::YRegisterOutOfBounds {
@@ -713,6 +717,7 @@ fn execute_y_register_instruction<M: MemorySpace>(
 ///
 /// Returns `Ok(cost)` to continue execution, or `Err(result)` to terminate.
 fn execute_instruction<M: MemorySpace>(
+    x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
@@ -723,17 +728,18 @@ fn execute_instruction<M: MemorySpace>(
     match opcode {
         // Load and move instructions
         op::LOADNIL | op::LOADBOOL | op::LOADINT | op::LOADK | op::MOVE => Ok(
-            execute_load_instruction(proc, instr, opcode, constant_value),
+            execute_load_instruction(x_regs, instr, opcode, constant_value),
         ),
 
         op::INTRINSIC => {
             let id = decode_a(instr);
-            intrinsics::call_intrinsic(id, decode_b(instr) as u8, proc, mem, realm)
+            intrinsics::call_intrinsic(id, decode_b(instr) as u8, x_regs, proc, mem, realm)
                 .map_err(|e| RunResult::Error(e.into()))?;
             Ok(intrinsic_cost(id))
         }
 
         op::CALL => handle_call(
+            x_regs,
             proc,
             mem,
             realm,
@@ -742,17 +748,17 @@ fn execute_instruction<M: MemorySpace>(
         )
         .map_err(RunResult::Error),
 
-        op::RETURN => handle_return(proc, mem),
-        op::HALT => Err(RunResult::Completed(proc.x_regs[0])),
+        op::RETURN => handle_return(x_regs, proc, mem),
+        op::HALT => Err(RunResult::Completed(x_regs[0])),
 
         // Build instructions
         op::BUILD_TUPLE | op::BUILD_VECTOR | op::BUILD_MAP | op::BUILD_CLOSURE => {
-            execute_build_instruction(proc, mem, instr, opcode).map_err(RunResult::Error)
+            execute_build_instruction(x_regs, proc, mem, instr, opcode).map_err(RunResult::Error)
         }
 
         // Y register instructions
         op::ALLOCATE | op::ALLOCATE_ZERO | op::DEALLOCATE | op::MOVE_XY | op::MOVE_YX => {
-            execute_y_register_instruction(proc, mem, instr, opcode)
+            execute_y_register_instruction(x_regs, proc, mem, instr, opcode)
         }
 
         // Pattern matching instructions (read-only)
@@ -772,10 +778,10 @@ fn execute_instruction<M: MemorySpace>(
         | op::IS_EQ
         | op::JUMP
         | op::JUMP_IF_FALSE
-        | op::BADMATCH => pattern::execute(proc, mem, instr, opcode),
+        | op::BADMATCH => pattern::execute(x_regs, proc, mem, instr, opcode),
 
         // Pattern matching instructions (allocating)
-        op::TUPLE_SLICE => pattern::execute_tuple_slice(proc, mem, instr),
+        op::TUPLE_SLICE => pattern::execute_tuple_slice(x_regs, proc, mem, instr),
 
         _ => Err(RunResult::Error(RuntimeError::InvalidOpcode(opcode))),
     }
@@ -783,14 +789,15 @@ fn execute_instruction<M: MemorySpace>(
 
 /// Stateless bytecode virtual machine.
 ///
-/// The VM is a namespace for execution functions. All state lives in `Process`.
+/// The VM is a namespace for execution functions. All state lives in `Process`
+/// (heap, IP, call stack) and `Worker` (X registers).
 pub struct Vm;
 
 impl Vm {
     /// Run bytecode until completion, yield, or error.
     ///
     /// The process must have a chunk set via `Process::set_chunk`.
-    /// Execution state (ip, `x_regs`, call stack) is read from and written to the process.
+    /// Execution state is split between Process (ip, call stack) and Worker (`x_regs`).
     ///
     /// This implementation is non-recursive: function calls use the Process's call stack
     /// instead of Rust stack recursion, enabling the VM to yield and resume at any call depth.
@@ -799,7 +806,12 @@ impl Vm {
     /// - `RunResult::Completed(value)` when execution finishes (HALT or top-level RETURN)
     /// - `RunResult::Yielded` when the reduction budget is exhausted (can be resumed)
     /// - `RunResult::Error(e)` when a runtime error occurs
-    pub fn run<M: MemorySpace>(proc: &mut Process, mem: &mut M, realm: &mut Realm) -> RunResult {
+    pub fn run<M: MemorySpace>(
+        worker: &mut Worker,
+        proc: &mut Process,
+        mem: &mut M,
+        realm: &mut Realm,
+    ) -> RunResult {
         loop {
             // Check reduction budget
             if proc.should_yield() {
@@ -831,7 +843,15 @@ impl Vm {
             };
 
             // Execute instruction
-            match execute_instruction(proc, mem, realm, instr, opcode, constant_value) {
+            match execute_instruction(
+                &mut worker.x_regs,
+                proc,
+                mem,
+                realm,
+                instr,
+                opcode,
+                constant_value,
+            ) {
                 Ok(cost) => {
                     proc.consume_reductions(cost);
                 }
@@ -854,6 +874,7 @@ impl Vm {
 ///
 /// Returns an error if execution fails.
 pub fn execute<M: MemorySpace>(
+    worker: &mut Worker,
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
@@ -862,7 +883,7 @@ pub fn execute<M: MemorySpace>(
     proc.reset_reductions();
 
     loop {
-        match Vm::run(proc, mem, realm) {
+        match Vm::run(worker, proc, mem, realm) {
             RunResult::Completed(value) => return Ok(value),
             RunResult::Yielded => {
                 // Single-threaded execution: just continue with fresh budget

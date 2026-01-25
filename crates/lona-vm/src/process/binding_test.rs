@@ -17,7 +17,7 @@ fn create_test_process() -> (Process, MockVSpace) {
     let old_base = Vaddr::new(0x1001_0000);
     let old_size = 12 * 1024; // 12KB
 
-    let process = Process::new(1, young_base, young_size, old_base, old_size);
+    let process = Process::new(young_base, young_size, old_base, old_size);
 
     // Create memory large enough for both heaps
     let total_size = (old_base.as_u64() - young_base.as_u64()) as usize + old_size;

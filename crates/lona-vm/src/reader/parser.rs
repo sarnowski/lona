@@ -8,6 +8,7 @@
 use super::lexer::{LexError, Lexer, Token};
 use crate::platform::MemorySpace;
 use crate::process::Process;
+use crate::realm::Realm;
 use crate::value::Value;
 use core::option::Option::{self, None, Some};
 use core::result::Result::{self, Err, Ok};
@@ -130,6 +131,9 @@ impl<'a> Parser<'a> {
     ///
     /// Returns `None` if at end of input.
     ///
+    /// Symbols and keywords are interned in the Realm (persistent, shared).
+    /// Other heap allocations (strings, pairs, tuples, etc.) go on the process heap.
+    ///
     /// # Errors
     ///
     /// Returns `ReadError` if the input contains invalid syntax or if
@@ -137,6 +141,7 @@ impl<'a> Parser<'a> {
     pub fn read<M: MemorySpace>(
         &mut self,
         proc: &mut Process,
+        realm: &mut Realm,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
         let token = match self.peek()? {
@@ -157,22 +162,24 @@ impl<'a> Parser<'a> {
                 Ok(Some(value))
             }
             Token::Symbol(s) => {
-                let value = proc
-                    .alloc_symbol(mem, s.as_str())
+                let value = realm
+                    .intern_symbol(mem, s.as_str())
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(value))
             }
             Token::Keyword(s) => {
-                let value = proc
-                    .alloc_keyword(mem, s.as_str())
+                let value = realm
+                    .intern_keyword(mem, s.as_str())
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(value))
             }
             Token::Quote => {
                 // 'expr => (quote expr)
-                let expr = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
-                let quote_sym = proc
-                    .alloc_symbol(mem, "quote")
+                let expr = self
+                    .read(proc, realm, mem)?
+                    .ok_or(ParseError::UnexpectedEof)?;
+                let quote_sym = realm
+                    .intern_symbol(mem, "quote")
                     .ok_or(ParseError::OutOfMemory)?;
                 // Build (quote expr) = Pair(quote, Pair(expr, nil))
                 let inner = proc
@@ -186,9 +193,11 @@ impl<'a> Parser<'a> {
             Token::VarQuote => {
                 // #'expr => (var expr)
                 // var is a special form that returns the var object itself
-                let expr = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
-                let var_sym = proc
-                    .alloc_symbol(mem, "var")
+                let expr = self
+                    .read(proc, realm, mem)?
+                    .ok_or(ParseError::UnexpectedEof)?;
+                let var_sym = realm
+                    .intern_symbol(mem, "var")
                     .ok_or(ParseError::OutOfMemory)?;
                 // Build (var expr) = Pair(var, Pair(expr, nil))
                 let inner = proc
@@ -199,20 +208,21 @@ impl<'a> Parser<'a> {
                     .ok_or(ParseError::OutOfMemory)?;
                 Ok(Some(outer))
             }
-            Token::LParen => self.read_list(proc, mem),
+            Token::LParen => self.read_list(proc, realm, mem),
             Token::RParen => Err(ParseError::UnmatchedRParen.into()),
-            Token::LBracket => self.read_tuple(proc, mem),
+            Token::LBracket => self.read_tuple(proc, realm, mem),
             Token::RBracket => Err(ParseError::UnmatchedRBracket.into()),
-            Token::LBrace => self.read_vector(proc, mem),
-            Token::MapStart => self.read_map(proc, mem),
+            Token::LBrace => self.read_vector(proc, realm, mem),
+            Token::MapStart => self.read_map(proc, realm, mem),
             Token::RBrace => Err(ParseError::UnmatchedRBrace.into()),
-            Token::Caret => self.read_with_metadata(proc, mem),
+            Token::Caret => self.read_with_metadata(proc, realm, mem),
         }
     }
 
     fn read_list<M: MemorySpace>(
         &mut self,
         proc: &mut Process,
+        realm: &mut Realm,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
         // Collect elements on stack before building cons list
@@ -230,7 +240,9 @@ impl<'a> Parser<'a> {
                     if count >= elements.len() {
                         return Err(ParseError::ListTooLong.into());
                     }
-                    let elem = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                    let elem = self
+                        .read(proc, realm, mem)?
+                        .ok_or(ParseError::UnexpectedEof)?;
                     elements[count] = elem;
                     count += 1;
                 }
@@ -251,6 +263,7 @@ impl<'a> Parser<'a> {
     fn read_tuple<M: MemorySpace>(
         &mut self,
         proc: &mut Process,
+        realm: &mut Realm,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
         // Collect elements on stack before building tuple
@@ -268,7 +281,9 @@ impl<'a> Parser<'a> {
                     if count >= elements.len() {
                         return Err(ParseError::TupleTooLong.into());
                     }
-                    let elem = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                    let elem = self
+                        .read(proc, realm, mem)?
+                        .ok_or(ParseError::UnexpectedEof)?;
                     elements[count] = elem;
                     count += 1;
                 }
@@ -286,6 +301,7 @@ impl<'a> Parser<'a> {
     fn read_vector<M: MemorySpace>(
         &mut self,
         proc: &mut Process,
+        realm: &mut Realm,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
         // Collect elements on stack before building vector
@@ -303,7 +319,9 @@ impl<'a> Parser<'a> {
                     if count >= elements.len() {
                         return Err(ParseError::VectorTooLong.into());
                     }
-                    let elem = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                    let elem = self
+                        .read(proc, realm, mem)?
+                        .ok_or(ParseError::UnexpectedEof)?;
                     elements[count] = elem;
                     count += 1;
                 }
@@ -321,6 +339,7 @@ impl<'a> Parser<'a> {
     fn read_map<M: MemorySpace>(
         &mut self,
         proc: &mut Process,
+        realm: &mut Realm,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
         // Collect key-value pairs on stack before building map
@@ -339,7 +358,9 @@ impl<'a> Parser<'a> {
                     if count >= elements.len() {
                         return Err(ParseError::MapTooLong.into());
                     }
-                    let elem = self.read(proc, mem)?.ok_or(ParseError::UnexpectedEof)?;
+                    let elem = self
+                        .read(proc, realm, mem)?
+                        .ok_or(ParseError::UnexpectedEof)?;
                     elements[count] = elem;
                     count += 1;
                 }
@@ -382,6 +403,7 @@ impl<'a> Parser<'a> {
     fn read_with_metadata<M: MemorySpace>(
         &mut self,
         proc: &mut Process,
+        realm: &mut Realm,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
         // Collect all metadata maps/keywords before the form
@@ -390,7 +412,7 @@ impl<'a> Parser<'a> {
         let mut meta_count = 0;
 
         // Read the first metadata token (we already consumed the ^)
-        let first_meta = self.read_metadata_value(proc, mem)?;
+        let first_meta = self.read_metadata_value(proc, realm, mem)?;
         add_metadata_entries(&first_meta, &mut meta_entries, &mut meta_count, proc, mem)?;
 
         // Check for additional metadata prefixes
@@ -398,7 +420,7 @@ impl<'a> Parser<'a> {
             match self.peek()? {
                 Some(Token::Caret) => {
                     self.advance(); // consume ^
-                    let next_meta = self.read_metadata_value(proc, mem)?;
+                    let next_meta = self.read_metadata_value(proc, realm, mem)?;
                     add_metadata_entries(
                         &next_meta,
                         &mut meta_entries,
@@ -414,7 +436,7 @@ impl<'a> Parser<'a> {
 
         // Read the actual form
         let form = self
-            .read(proc, mem)?
+            .read(proc, realm, mem)?
             .ok_or(ParseError::MissingFormAfterMetadata)?;
 
         // Build the merged metadata map
@@ -435,11 +457,12 @@ impl<'a> Parser<'a> {
             .alloc_map(mem, entries)
             .ok_or(ParseError::OutOfMemory)?;
 
-        // Store the metadata for the form
-        // For now, we attach metadata in the process's metadata table
+        // Store the metadata for the form in the realm's metadata table
         // The actual form is returned; the caller (or later phases) can retrieve meta
         if let (Value::Map(map_addr), Some(addr)) = (meta_map, get_heap_addr(form)) {
-            proc.set_metadata(addr, map_addr);
+            realm
+                .set_metadata(addr, map_addr)
+                .ok_or(ParseError::OutOfMemory)?;
         }
 
         Ok(Some(form))
@@ -449,18 +472,19 @@ impl<'a> Parser<'a> {
     fn read_metadata_value<M: MemorySpace>(
         &mut self,
         proc: &mut Process,
+        realm: &mut Realm,
         mem: &mut M,
     ) -> Result<Value, ReadError> {
         match self.peek()? {
             None => Err(ParseError::MissingFormAfterMetadata.into()),
             Some(Token::MapStart) => {
                 self.advance();
-                let map = self.read_map(proc, mem)?;
+                let map = self.read_map(proc, realm, mem)?;
                 map.ok_or_else(|| ParseError::MissingFormAfterMetadata.into())
             }
             Some(Token::Keyword(_)) => {
                 // ^:keyword is shorthand for ^%{:keyword true}
-                let kw = self.read(proc, mem)?;
+                let kw = self.read(proc, realm, mem)?;
                 kw.ok_or_else(|| ParseError::MissingFormAfterMetadata.into())
             }
             Some(_) => Err(ParseError::InvalidMetadata.into()),
@@ -481,16 +505,19 @@ impl<'a> Parser<'a> {
 
 /// Read a single expression from a string.
 ///
+/// Symbols and keywords are interned in the Realm (persistent, shared).
+///
 /// # Errors
 ///
 /// Returns an error if the input contains invalid syntax.
 pub fn read<M: MemorySpace>(
     input: &str,
     proc: &mut Process,
+    realm: &mut Realm,
     mem: &mut M,
 ) -> Result<Option<Value>, ReadError> {
     let mut parser = Parser::new(input);
-    parser.read(proc, mem)
+    parser.read(proc, realm, mem)
 }
 
 /// Add entries from a metadata value (map or keyword) to the entries array.

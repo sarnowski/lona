@@ -21,6 +21,7 @@ use core::result::Result::{self, Err, Ok};
 use crate::platform::MemorySpace;
 use crate::platform::lmm::lmm_request_pages;
 use crate::process::Process;
+use crate::realm::Realm;
 use crate::uart::Uart;
 use lona_abi::ipc::IpcRegionType;
 
@@ -35,6 +36,7 @@ use lona_abi::ipc::IpcRegionType;
 /// This is the ONLY supported way to allocate ProcessPool memory.
 pub fn test_explicit_ipc_allocation<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -105,6 +107,7 @@ pub fn test_explicit_ipc_allocation<M: MemorySpace, U: Uart>(
 /// at realm creation to avoid MCS timing issues with fault handling.
 pub fn test_premapped_stack<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -153,6 +156,7 @@ pub fn test_premapped_stack<M: MemorySpace, U: Uart>(
 /// for memory allocation.
 pub fn test_interleaved_explicit_allocation<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {

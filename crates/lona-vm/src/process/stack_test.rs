@@ -74,7 +74,7 @@ fn stack_pop_partial() {
 fn heap_stack_collision() {
     let base = Vaddr::new(0x1_0000);
     let mem = MockVSpace::new(256, base);
-    let mut proc = Process::new(1, base, 100, base.add(100), 50);
+    let mut proc = Process::new(base, 100, base.add(100), 50);
 
     // Allocate most of the heap
     proc.alloc(40, 1).unwrap();

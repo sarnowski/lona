@@ -10,7 +10,6 @@ use super::*;
 /// Create a test process with default heap configuration.
 fn create_test_process() -> Process {
     Process::new(
-        1,
         Vaddr::new(0x1000),
         INITIAL_YOUNG_HEAP_SIZE,
         Vaddr::new(0x10000),

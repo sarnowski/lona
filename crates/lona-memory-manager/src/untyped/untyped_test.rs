@@ -69,17 +69,13 @@ fn allocator_allocate() {
     let mut alloc = UntypedAllocator::new();
     alloc.add(make_desc(10, 0x10000, 14)); // 16 KB
 
-    let mut slots = SlotAllocator::new(100, 200);
-
     // Allocate a 4 KB frame
-    let (ut_slot, dest_slot, paddr) = alloc.allocate(12, &mut slots, false).unwrap();
+    let (ut_slot, paddr) = alloc.allocate(12, false).unwrap();
     assert_eq!(ut_slot, 10);
-    assert_eq!(dest_slot, 100);
     assert_eq!(paddr, 0x10000);
 
     // Allocate another
-    let (_, dest_slot, paddr) = alloc.allocate(12, &mut slots, false).unwrap();
-    assert_eq!(dest_slot, 101);
+    let (_, paddr) = alloc.allocate(12, false).unwrap();
     assert_eq!(paddr, 0x11000);
 }
 
@@ -91,8 +87,7 @@ fn allocator_total_free() {
 
     assert_eq!(alloc.total_free(), 16384 + 4096);
 
-    let mut slots = SlotAllocator::new(0, 100);
-    let _ = alloc.allocate(12, &mut slots, false);
+    let _ = alloc.allocate(12, false);
 
     assert_eq!(alloc.total_free(), 12288 + 4096);
 }
@@ -108,8 +103,7 @@ fn allocator_prefers_larger() {
     alloc.sort_by_size();
 
     // Allocation should come from larger untyped first
-    let mut slots = SlotAllocator::new(0, 100);
-    let (ut_slot, _, paddr) = alloc.allocate(12, &mut slots, false).unwrap();
+    let (ut_slot, paddr) = alloc.allocate(12, false).unwrap();
     assert_eq!(ut_slot, 1); // From the 1 MB untyped
     assert_eq!(paddr, 0x10000);
 }
@@ -130,14 +124,12 @@ fn allocator_device_memory() {
         watermark: 0,
     });
 
-    let mut slots = SlotAllocator::new(0, 100);
-
     // Regular allocation should use non-device
-    let (ut_slot, _, _) = alloc.allocate(12, &mut slots, false).unwrap();
+    let (ut_slot, _) = alloc.allocate(12, false).unwrap();
     assert_eq!(ut_slot, 0);
 
     // Device allocation should use device
-    let (ut_slot, _, paddr) = alloc.allocate(12, &mut slots, true).unwrap();
+    let (ut_slot, paddr) = alloc.allocate(12, true).unwrap();
     assert_eq!(ut_slot, 1);
     assert_eq!(paddr, 0x1_0000_0000);
 }

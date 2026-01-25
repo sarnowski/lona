@@ -15,6 +15,12 @@ Create process in current realm.
 (spawn f opts)  ; → pid
 ```
 
+```clojure
+;; @todo
+(def p (spawn (fn* [] :ok)))
+(pid? p)  ; => true
+```
+
 **Options:**
 
 | Key | Type | Default | Description |
@@ -23,6 +29,18 @@ Create process in current realm.
 | `:max-heap-size` | integer | nil | Maximum heap (nil = unlimited) |
 | `:priority` | 0-255 | 100 | Scheduling priority |
 | `:name` | symbol | nil | Register with name |
+
+```clojure
+;; @todo
+;; Spawn with priority option
+(def p (spawn (fn* [] (sleep 1000)) %{:priority 50}))
+(pid? p)  ; => true
+(= (:priority (process-info p)) 50)  ; => true
+
+;; Spawn with name auto-registers
+(def p2 (spawn (fn* [] (sleep 1000)) %{:name 'named-process}))
+(= (whereis 'named-process) p2)  ; => true
+```
 
 ### `spawn-link`
 
@@ -33,6 +51,12 @@ Create linked process. Bidirectional crash notification.
 (spawn-link f opts)  ; → pid
 ```
 
+```clojure
+;; @todo
+(def p (spawn-link (fn* [] :ok)))
+(pid? p)  ; => true
+```
+
 ### `spawn-monitor`
 
 Create monitored process. Unidirectional notification.
@@ -40,6 +64,14 @@ Create monitored process. Unidirectional notification.
 ```clojure
 (spawn-monitor f)       ; → [pid monitor-ref]
 (spawn-monitor f opts)  ; → [pid monitor-ref]
+```
+
+```clojure
+;; @todo
+(def result (spawn-monitor (fn* [] :ok)))
+(tuple? result)        ; => true
+(pid? (first result))  ; => true
+(ref? (nth result 1))  ; => true
 ```
 
 ---
@@ -60,6 +92,14 @@ Arguments are passed to `f` when the process starts. If the last argument is a m
 with spawn options (`:min-heap-size`, `:priority`), it is used as options, not passed
 to `f`.
 
+```clojure
+;; @todo
+(def child-realm (realm-create %{:name 'spawn-in-test}))
+(def p (spawn-in child-realm my-worker))
+(pid? p)  ; => true
+(realm-terminate child-realm)
+```
+
 ### `spawn-link-in`
 
 Create linked process in descendant realm.
@@ -69,6 +109,14 @@ Create linked process in descendant realm.
 (spawn-link-in realm-id f opts)  ; → pid
 ```
 
+```clojure
+;; @todo
+(def child-realm (realm-create %{:name 'spawn-link-test}))
+(def p (spawn-link-in child-realm my-worker))
+(pid? p)  ; => true
+(realm-terminate child-realm)
+```
+
 ### `spawn-monitor-in`
 
 Create monitored process in descendant realm.
@@ -76,6 +124,16 @@ Create monitored process in descendant realm.
 ```clojure
 (spawn-monitor-in realm-id f)       ; → [pid monitor-ref]
 (spawn-monitor-in realm-id f opts)  ; → [pid monitor-ref]
+```
+
+```clojure
+;; @todo
+(def child-realm (realm-create %{:name 'spawn-monitor-test}))
+(def result (spawn-monitor-in child-realm my-worker))
+(tuple? result)        ; => true
+(pid? (first result))  ; => true
+(ref? (nth result 1))  ; => true
+(realm-terminate child-realm)
 ```
 
 ### Cross-Realm Function Execution
@@ -127,7 +185,10 @@ using the same serialization as inter-realm messages.
 Current process PID.
 
 ```clojure
-(self)  ; → pid
+;; @todo
+(pid? (self))              ; => true
+(= (self) (self))          ; => true
+(pid-realm (self))         ; => (self-realm)
 ```
 
 ### `self-realm`
@@ -135,7 +196,8 @@ Current process PID.
 Current realm ID.
 
 ```clojure
-(self-realm)  ; → realm-id
+;; @todo
+(realm-id? (self-realm))   ; => true
 ```
 
 ### `alive?`
@@ -143,7 +205,13 @@ Current realm ID.
 Check if process exists.
 
 ```clojure
-(alive? pid)  ; → boolean
+;; @todo
+(alive? (self))            ; => true
+
+;; Dead process returns false
+(def p (spawn (fn* [] :done)))
+(sleep 10)
+(alive? p)                 ; => false
 ```
 
 ### `process-info`
@@ -151,7 +219,15 @@ Check if process exists.
 Get process information.
 
 ```clojure
-(process-info pid)  ; → map or nil
+;; @todo
+(def info (process-info (self)))
+(map? info)                   ; => true
+(contains? info :status)      ; => true
+(contains? info :heap-size)   ; => true
+(contains? info :mailbox-len) ; => true
+(contains? info :priority)    ; => true
+(contains? info :links)       ; => true
+(contains? info :monitors)    ; => true
 ```
 
 Returns map with `:status`, `:heap-size`, `:mailbox-len`, `:priority`, `:links`, `:monitors`.
@@ -168,6 +244,11 @@ Send message asynchronously.
 (send pid message)  ; → :ok
 ```
 
+```clojure
+;; @todo
+(send (self) :hello)  ; => :ok
+```
+
 - Intra-realm: deep copy, ~100-500 ns
 - Inter-realm: seL4 IPC, ~1-10 µs
 - Order preserved between same sender-receiver pair
@@ -181,12 +262,29 @@ Send message and wait for acknowledgment.
 (send-sync pid message timeout-ms)   ; → :ok or :timeout
 ```
 
+```clojure
+;; @todo
+;; send-sync with zero timeout returns :timeout if not acknowledged
+(send-sync (self) :msg 0)  ; => :timeout
+```
+
 ### `send-named`
 
 Send to registered name.
 
 ```clojure
 (send-named name message)  ; → :ok or :not-found
+```
+
+```clojure
+;; @todo
+(send-named 'nonexistent :msg)  ; => :not-found
+
+;; Success case: send to registered name
+(register 'send-named-test)
+(send-named 'send-named-test :hello)  ; => :ok
+(receive msg msg :after 100 :timeout)  ; => :hello
+(unregister 'send-named-test)
 ```
 
 ### `receive`
@@ -229,6 +327,43 @@ construct (not a simple macro) for efficient single-pass pattern matching.
 
   :after 5000
     (handle-timeout))
+```
+
+Timeout returns immediately if mailbox empty:
+
+```clojure
+;; @todo
+(receive :after 0 :timeout)  ; => :timeout
+```
+
+Receive with pattern matching:
+
+```clojure
+;; @todo
+(send (self) [:ok 42])
+(receive [:ok val] val :after 100 :timeout)  ; => 42
+```
+
+Selective receive (non-matching messages remain):
+
+```clojure
+;; @todo
+(send (self) :a)
+(send (self) [:b 1])
+(receive [:b x] x :after 100 :timeout)  ; => 1
+(receive :a :got-a :after 100 :timeout)  ; => :got-a
+```
+
+Message ordering preserved:
+
+```clojure
+;; @todo
+(send (self) 1)
+(send (self) 2)
+(send (self) 3)
+(receive x x :after 100 :timeout)  ; => 1
+(receive x x :after 100 :timeout)  ; => 2
+(receive x x :after 100 :timeout)  ; => 3
 ```
 
 ### Message Value Types
@@ -278,12 +413,25 @@ Create bidirectional link.
 (link pid)  ; → :ok
 ```
 
+```clojure
+;; @todo
+(def p (spawn (fn* [] (sleep 1000))))
+(link p)  ; => :ok
+```
+
 ### `unlink`
 
 Remove link.
 
 ```clojure
 (unlink pid)  ; → :ok
+```
+
+```clojure
+;; @todo
+(def p (spawn (fn* [] (sleep 1000))))
+(link p)
+(unlink p)  ; => :ok
 ```
 
 ### `trap-exit`
@@ -293,6 +441,23 @@ Enable/disable exit signal trapping.
 ```clojure
 (trap-exit true)   ; Receive [:EXIT pid reason] as messages
 (trap-exit false)  ; Propagate crashes (default)
+```
+
+```clojure
+;; @todo
+(trap-exit true)   ; => :ok
+(trap-exit false)  ; => :ok
+```
+
+With trap-exit, linked process exits become messages:
+
+```clojure
+;; @todo
+(trap-exit true)
+(def p (spawn-link (fn* [] (exit :test-exit))))
+(receive
+  [:EXIT pid reason] [pid reason]
+  :after 1000 :timeout)  ; => [p :test-exit]
 ```
 
 ### Exit Signals
@@ -317,6 +482,13 @@ Start monitoring process.
 (monitor pid)  ; → monitor-ref
 ```
 
+```clojure
+;; @todo
+(def p (spawn (fn* [] (sleep 1000))))
+(def mref (monitor p))
+(ref? mref)  ; => true
+```
+
 ### `demonitor`
 
 Stop monitoring.
@@ -325,12 +497,26 @@ Stop monitoring.
 (demonitor monitor-ref)  ; → :ok
 ```
 
+```clojure
+;; @todo
+(def p (spawn (fn* [] (sleep 1000))))
+(def mref (monitor p))
+(demonitor mref)  ; => :ok
+```
+
 ### Monitor Messages
 
 When monitored process exits:
 
 ```clojure
 [:DOWN monitor-ref pid reason]
+```
+
+```clojure
+;; @todo
+(def p (spawn (fn* [] :done)))
+(def mref (monitor p))
+(receive [:DOWN mref _ reason] reason :after 1000 :timeout)  ; => :normal
 ```
 
 ---
@@ -407,12 +593,26 @@ Register process with name.
 (register name pid)   ; Register specific process
 ```
 
+```clojure
+;; @todo
+(register 'my-test-process)
+(pid? (whereis 'my-test-process))  ; => true
+(= (whereis 'my-test-process) (self))  ; => true
+```
+
 ### `unregister`
 
 Remove registration.
 
 ```clojure
 (unregister name)  ; → :ok
+```
+
+```clojure
+;; @todo
+(register 'to-unregister)
+(unregister 'to-unregister)  ; => :ok
+(whereis 'to-unregister)     ; => nil
 ```
 
 ### `whereis`
@@ -423,7 +623,21 @@ Hierarchical name lookup.
 (whereis name)  ; → pid or nil
 ```
 
+```clojure
+;; @todo
+(whereis 'nonexistent)  ; => nil
+```
+
 Searches: current realm → parent → grandparent → root.
+
+```clojure
+;; @todo
+;; whereis finds registered process
+(def p (spawn (fn* [] (sleep 1000))))
+(register 'whereis-test p)
+(= (whereis 'whereis-test) p)  ; => true
+(unregister 'whereis-test)
+```
 
 ### `whereis-local`
 
@@ -431,6 +645,11 @@ Local realm lookup only.
 
 ```clojure
 (whereis-local name)  ; → pid or nil
+```
+
+```clojure
+;; @todo
+(whereis-local 'nonexistent)  ; => nil
 ```
 
 ---
@@ -443,6 +662,12 @@ Create child realm.
 
 ```clojure
 (realm-create opts)  ; → realm-id
+```
+
+```clojure
+;; @todo
+(def r (realm-create %{:name 'test-child}))
+(realm-id? r)  ; => true
 ```
 
 **Options:**
@@ -477,6 +702,12 @@ Terminate child realm.
 
 Terminates all processes and child realms, reclaims resources.
 
+```clojure
+;; @todo
+(def r (realm-create %{:name 'to-terminate}))
+(realm-terminate r)  ; => :ok
+```
+
 ### `realm-info`
 
 Get realm information.
@@ -487,6 +718,15 @@ Get realm information.
 
 Returns: `:name`, `:status`, `:parent`, `:children`, `:policy`, `:resource-usage`, `:process-count`.
 
+```clojure
+;; @todo
+(def info (realm-info (self-realm)))
+(map? info)                  ; => true
+(contains? info :name)       ; => true
+(contains? info :status)     ; => true
+(contains? info :process-count) ; => true
+```
+
 ### `parent-realm`
 
 Get parent realm ID.
@@ -495,12 +735,23 @@ Get parent realm ID.
 (parent-realm)  ; → realm-id or nil
 ```
 
+```clojure
+;; @todo
+;; parent-realm returns realm-id or nil (if root)
+(or (nil? (parent-realm)) (realm-id? (parent-realm)))  ; => true
+```
+
 ### `child-realms`
 
 Get child realm IDs.
 
 ```clojure
 (child-realms)  ; → #{realm-id ...}
+```
+
+```clojure
+;; @todo
+(set? (child-realms))  ; => true
 ```
 
 ---
@@ -515,6 +766,12 @@ Create shared memory region.
 (make-shared-region size name)  ; → region
 ```
 
+```clojure
+;; @todo
+(def r (make-shared-region 4096 'test-region))
+(region? r)  ; => true
+```
+
 ### `share-region`
 
 Grant region access to child realm.
@@ -525,12 +782,29 @@ Grant region access to child realm.
 
 Access: `:read-only` or `:read-write`
 
+```clojure
+;; @todo
+(def r (make-shared-region 4096 'share-test))
+(def child (realm-create %{:name 'share-child}))
+(share-region r child :read-only)  ; => :ok
+(realm-terminate child)
+```
+
 ### `unshare-region`
 
 Revoke region access.
 
 ```clojure
 (unshare-region region realm-id)  ; → :ok
+```
+
+```clojure
+;; @todo
+(def r (make-shared-region 4096 'unshare-test))
+(def child (realm-create %{:name 'unshare-child}))
+(share-region r child :read-write)
+(unshare-region r child)  ; => :ok
+(realm-terminate child)
 ```
 
 ### `get-shared-region`
@@ -541,6 +815,11 @@ Get region shared with this realm.
 (get-shared-region name)  ; → region or nil
 ```
 
+```clojure
+;; @todo
+(get-shared-region 'nonexistent)  ; => nil
+```
+
 ### `region-size`
 
 Get region size.
@@ -549,12 +828,24 @@ Get region size.
 (region-size region)  ; → integer
 ```
 
+```clojure
+;; @todo
+(def r (make-shared-region 4096 'size-test))
+(region-size r)  ; => 4096
+```
+
 ### `region-name`
 
 Get region name.
 
 ```clojure
 (region-name region)  ; → symbol
+```
+
+```clojure
+;; @todo
+(def r (make-shared-region 4096 'name-test))
+(region-name r)  ; => name-test
 ```
 
 ---
@@ -574,6 +865,12 @@ in the realm's CSpace. The VM runtime's allocator is notified and can use these 
 subsequent allocations. Application code does not interact with the capabilities
 directly — use `lona.kernel` for low-level capability manipulation.
 
+```clojure
+;; @todo
+(def result (request-memory 4096))
+(or (= result :ok) (tuple? result))  ; => true
+```
+
 ### `return-memory`
 
 Return memory to parent realm.
@@ -583,6 +880,11 @@ Return memory to parent realm.
 ```
 
 The VM runtime releases Untyped capabilities back to the parent.
+
+```clojure
+;; @todo
+(return-memory 4096)  ; => :ok
+```
 
 ### `memory-pressure-handler`
 
@@ -594,6 +896,11 @@ Register pressure callback.
 
 Callback receives: `:low`, `:critical`, or `:normal`.
 
+```clojure
+;; @todo
+(memory-pressure-handler (fn* [level] level))  ; => :ok
+```
+
 ---
 
 ## Notifications
@@ -604,6 +911,12 @@ Create notification object.
 
 ```clojure
 (make-notification)  ; → notification
+```
+
+```clojure
+;; @todo
+(def n (make-notification))
+(notification? n)  ; => true
 ```
 
 Used with `lona.kernel` signal/wait/poll operations.

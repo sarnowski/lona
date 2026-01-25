@@ -1,0 +1,6 @@
+# Cargo configuration for Lona project
+# Enables unstable features required for custom seL4 targets
+
+[build]
+# Pass -Zunstable-options to rustc for custom target support
+rustflags = ["-Zunstable-options"]

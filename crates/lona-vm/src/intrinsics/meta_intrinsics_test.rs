@@ -11,18 +11,19 @@ use crate::platform::MockVSpace;
 use crate::process::Process;
 use crate::realm::Realm;
 
-/// Create a test environment with process, memory, and realm.
-fn setup() -> (Process, MockVSpace, Realm) {
+/// Create a test environment with `x_regs`, process, memory, and realm.
+fn setup() -> (XRegs, Process, MockVSpace, Realm) {
     let base = Vaddr::new(0x1_0000);
     let mem = MockVSpace::new(256 * 1024, base);
     let young_base = base;
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let proc = Process::new(young_base, young_size, old_base, old_size);
     let realm_base = base.add(128 * 1024);
     let realm = Realm::new(realm_base, 64 * 1024);
-    (proc, mem, realm)
+    let x_regs = [Value::Nil; X_REG_COUNT];
+    (x_regs, proc, mem, realm)
 }
 
 // --- Namespace intrinsics ---
@@ -38,95 +39,150 @@ fn lookup_namespace_intrinsics() {
 
 #[test]
 fn is_namespace_true() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     let name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
     let ns = proc.alloc_namespace(&mut mem, name).unwrap();
 
-    proc.x_regs[1] = ns;
-    call_intrinsic(id::IS_NAMESPACE, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(true));
+    x_regs[1] = ns;
+    call_intrinsic(
+        id::IS_NAMESPACE,
+        1,
+        &mut x_regs,
+        &mut proc,
+        &mut mem,
+        &mut realm,
+    )
+    .unwrap();
+    assert_eq!(x_regs[0], Value::bool(true));
 }
 
 #[test]
 fn is_namespace_false() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    proc.x_regs[1] = Value::int(42);
-    call_intrinsic(id::IS_NAMESPACE, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(false));
+    x_regs[1] = Value::int(42);
+    call_intrinsic(
+        id::IS_NAMESPACE,
+        1,
+        &mut x_regs,
+        &mut proc,
+        &mut mem,
+        &mut realm,
+    )
+    .unwrap();
+    assert_eq!(x_regs[0], Value::bool(false));
 
-    proc.x_regs[1] = Value::nil();
-    call_intrinsic(id::IS_NAMESPACE, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(false));
+    x_regs[1] = Value::nil();
+    call_intrinsic(
+        id::IS_NAMESPACE,
+        1,
+        &mut x_regs,
+        &mut proc,
+        &mut mem,
+        &mut realm,
+    )
+    .unwrap();
+    assert_eq!(x_regs[0], Value::bool(false));
 
     let sym = proc.alloc_symbol(&mut mem, "foo").unwrap();
-    proc.x_regs[1] = sym;
-    call_intrinsic(id::IS_NAMESPACE, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(false));
+    x_regs[1] = sym;
+    call_intrinsic(
+        id::IS_NAMESPACE,
+        1,
+        &mut x_regs,
+        &mut proc,
+        &mut mem,
+        &mut realm,
+    )
+    .unwrap();
+    assert_eq!(x_regs[0], Value::bool(false));
 }
 
 #[test]
 fn create_ns_basic() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     let name = proc.alloc_symbol(&mut mem, "my.app").unwrap();
-    proc.x_regs[1] = name;
+    x_regs[1] = name;
 
-    call_intrinsic(id::CREATE_NS, 1, &mut proc, &mut mem, &mut realm).unwrap();
+    call_intrinsic(
+        id::CREATE_NS,
+        1,
+        &mut x_regs,
+        &mut proc,
+        &mut mem,
+        &mut realm,
+    )
+    .unwrap();
 
-    let result = proc.x_regs[0];
+    let result = x_regs[0];
     assert!(result.is_namespace());
 }
 
 #[test]
 fn create_ns_type_error() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     // Try to create namespace with non-symbol
-    proc.x_regs[1] = Value::int(42);
-    let result = call_intrinsic(id::CREATE_NS, 1, &mut proc, &mut mem, &mut realm);
+    x_regs[1] = Value::int(42);
+    let result = call_intrinsic(
+        id::CREATE_NS,
+        1,
+        &mut x_regs,
+        &mut proc,
+        &mut mem,
+        &mut realm,
+    );
     assert!(result.is_err());
 }
 
 #[test]
 fn find_ns_exists() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     // First create the namespace
     let name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
-    proc.x_regs[1] = name;
-    call_intrinsic(id::CREATE_NS, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    let created_ns = proc.x_regs[0];
+    x_regs[1] = name;
+    call_intrinsic(
+        id::CREATE_NS,
+        1,
+        &mut x_regs,
+        &mut proc,
+        &mut mem,
+        &mut realm,
+    )
+    .unwrap();
+    let created_ns = x_regs[0];
 
     // Now find it
-    proc.x_regs[1] = name;
-    call_intrinsic(id::FIND_NS, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], created_ns);
+    x_regs[1] = name;
+    call_intrinsic(id::FIND_NS, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], created_ns);
 }
 
 #[test]
 fn find_ns_not_exists() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     let name = proc.alloc_symbol(&mut mem, "nonexistent").unwrap();
-    proc.x_regs[1] = name;
+    x_regs[1] = name;
 
-    call_intrinsic(id::FIND_NS, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::nil());
+    call_intrinsic(id::FIND_NS, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::nil());
 }
 
 #[test]
 fn ns_name_basic() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     let name = proc.alloc_symbol(&mut mem, "lona.core").unwrap();
     let ns = proc.alloc_namespace(&mut mem, name).unwrap();
 
-    proc.x_regs[1] = ns;
-    call_intrinsic(id::NS_NAME, 1, &mut proc, &mut mem, &mut realm).unwrap();
+    x_regs[1] = ns;
+    call_intrinsic(id::NS_NAME, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
 
-    let result = proc.x_regs[0];
+    let result = x_regs[0];
     assert!(result.is_symbol());
 
     let name_str = proc.read_string(&mem, result).unwrap();
@@ -135,33 +191,33 @@ fn ns_name_basic() {
 
 #[test]
 fn ns_name_type_error() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    proc.x_regs[1] = Value::int(42);
-    let result = call_intrinsic(id::NS_NAME, 1, &mut proc, &mut mem, &mut realm);
+    x_regs[1] = Value::int(42);
+    let result = call_intrinsic(id::NS_NAME, 1, &mut x_regs, &mut proc, &mut mem, &mut realm);
     assert!(result.is_err());
 }
 
 #[test]
 fn ns_map_basic() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     let name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
     let ns = proc.alloc_namespace(&mut mem, name).unwrap();
 
-    proc.x_regs[1] = ns;
-    call_intrinsic(id::NS_MAP, 1, &mut proc, &mut mem, &mut realm).unwrap();
+    x_regs[1] = ns;
+    call_intrinsic(id::NS_MAP, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
 
-    let result = proc.x_regs[0];
+    let result = x_regs[0];
     assert!(result.is_map());
 }
 
 #[test]
 fn ns_map_type_error() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    proc.x_regs[1] = Value::nil();
-    let result = call_intrinsic(id::NS_MAP, 1, &mut proc, &mut mem, &mut realm);
+    x_regs[1] = Value::nil();
+    let result = call_intrinsic(id::NS_MAP, 1, &mut x_regs, &mut proc, &mut mem, &mut realm);
     assert!(result.is_err());
 }
 
@@ -176,7 +232,7 @@ fn lookup_var_intrinsics() {
 
 #[test]
 fn is_var_true() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     // Create namespace
     let ns_name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
@@ -184,35 +240,35 @@ fn is_var_true() {
 
     // Intern a var
     let var_name = proc.alloc_symbol(&mut mem, "x").unwrap();
-    proc.x_regs[1] = ns;
-    proc.x_regs[2] = var_name;
-    proc.x_regs[3] = Value::int(42);
-    call_intrinsic(id::INTERN, 3, &mut proc, &mut mem, &mut realm).unwrap();
+    x_regs[1] = ns;
+    x_regs[2] = var_name;
+    x_regs[3] = Value::int(42);
+    call_intrinsic(id::INTERN, 3, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
 
-    let var = proc.x_regs[0];
+    let var = x_regs[0];
 
     // Check is_var
-    proc.x_regs[1] = var;
-    call_intrinsic(id::IS_VAR, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(true));
+    x_regs[1] = var;
+    call_intrinsic(id::IS_VAR, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::bool(true));
 }
 
 #[test]
 fn is_var_false() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    proc.x_regs[1] = Value::int(42);
-    call_intrinsic(id::IS_VAR, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(false));
+    x_regs[1] = Value::int(42);
+    call_intrinsic(id::IS_VAR, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::bool(false));
 
-    proc.x_regs[1] = Value::nil();
-    call_intrinsic(id::IS_VAR, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::bool(false));
+    x_regs[1] = Value::nil();
+    call_intrinsic(id::IS_VAR, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::bool(false));
 }
 
 #[test]
 fn intern_basic() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     // Create namespace
     let ns_name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
@@ -220,12 +276,12 @@ fn intern_basic() {
 
     // Intern a var
     let var_name = proc.alloc_symbol(&mut mem, "x").unwrap();
-    proc.x_regs[1] = ns;
-    proc.x_regs[2] = var_name;
-    proc.x_regs[3] = Value::int(42);
-    call_intrinsic(id::INTERN, 3, &mut proc, &mut mem, &mut realm).unwrap();
+    x_regs[1] = ns;
+    x_regs[2] = var_name;
+    x_regs[3] = Value::int(42);
+    call_intrinsic(id::INTERN, 3, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
 
-    let var = proc.x_regs[0];
+    let var = x_regs[0];
     assert!(var.is_var());
 
     // Get the var content
@@ -235,35 +291,35 @@ fn intern_basic() {
 
 #[test]
 fn intern_type_error_namespace() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     let var_name = proc.alloc_symbol(&mut mem, "x").unwrap();
-    proc.x_regs[1] = Value::int(42); // Not a namespace
-    proc.x_regs[2] = var_name;
-    proc.x_regs[3] = Value::int(100);
+    x_regs[1] = Value::int(42); // Not a namespace
+    x_regs[2] = var_name;
+    x_regs[3] = Value::int(100);
 
-    let result = call_intrinsic(id::INTERN, 3, &mut proc, &mut mem, &mut realm);
+    let result = call_intrinsic(id::INTERN, 3, &mut x_regs, &mut proc, &mut mem, &mut realm);
     assert!(result.is_err());
 }
 
 #[test]
 fn intern_type_error_symbol() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     let ns_name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
     let ns = proc.alloc_namespace(&mut mem, ns_name).unwrap();
 
-    proc.x_regs[1] = ns;
-    proc.x_regs[2] = Value::int(42); // Not a symbol
-    proc.x_regs[3] = Value::int(100);
+    x_regs[1] = ns;
+    x_regs[2] = Value::int(42); // Not a symbol
+    x_regs[3] = Value::int(100);
 
-    let result = call_intrinsic(id::INTERN, 3, &mut proc, &mut mem, &mut realm);
+    let result = call_intrinsic(id::INTERN, 3, &mut x_regs, &mut proc, &mut mem, &mut realm);
     assert!(result.is_err());
 }
 
 #[test]
 fn var_get_basic() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     // Create namespace
     let ns_name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
@@ -271,31 +327,31 @@ fn var_get_basic() {
 
     // Intern a var with value 42
     let var_name = proc.alloc_symbol(&mut mem, "x").unwrap();
-    proc.x_regs[1] = ns;
-    proc.x_regs[2] = var_name;
-    proc.x_regs[3] = Value::int(42);
-    call_intrinsic(id::INTERN, 3, &mut proc, &mut mem, &mut realm).unwrap();
+    x_regs[1] = ns;
+    x_regs[2] = var_name;
+    x_regs[3] = Value::int(42);
+    call_intrinsic(id::INTERN, 3, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
 
-    let var = proc.x_regs[0];
+    let var = x_regs[0];
 
     // Get the var's value
-    proc.x_regs[1] = var;
-    call_intrinsic(id::VAR_GET, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::int(42));
+    x_regs[1] = var;
+    call_intrinsic(id::VAR_GET, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::int(42));
 }
 
 #[test]
 fn var_get_type_error() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
-    proc.x_regs[1] = Value::int(42); // Not a var
-    let result = call_intrinsic(id::VAR_GET, 1, &mut proc, &mut mem, &mut realm);
+    x_regs[1] = Value::int(42); // Not a var
+    let result = call_intrinsic(id::VAR_GET, 1, &mut x_regs, &mut proc, &mut mem, &mut realm);
     assert!(result.is_err());
 }
 
 #[test]
 fn var_get_unbound() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     // Create namespace
     let ns_name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
@@ -303,22 +359,22 @@ fn var_get_unbound() {
 
     // Intern a var with unbound value
     let var_name = proc.alloc_symbol(&mut mem, "x").unwrap();
-    proc.x_regs[1] = ns;
-    proc.x_regs[2] = var_name;
-    proc.x_regs[3] = Value::Unbound;
-    call_intrinsic(id::INTERN, 3, &mut proc, &mut mem, &mut realm).unwrap();
+    x_regs[1] = ns;
+    x_regs[2] = var_name;
+    x_regs[3] = Value::Unbound;
+    call_intrinsic(id::INTERN, 3, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
 
-    let var = proc.x_regs[0];
+    let var = x_regs[0];
 
     // Get the var's value (should error because unbound)
-    proc.x_regs[1] = var;
-    let result = call_intrinsic(id::VAR_GET, 1, &mut proc, &mut mem, &mut realm);
+    x_regs[1] = var;
+    let result = call_intrinsic(id::VAR_GET, 1, &mut x_regs, &mut proc, &mut mem, &mut realm);
     assert!(result.is_err());
 }
 
 #[test]
 fn intern_update_var() {
-    let (mut proc, mut mem, mut realm) = setup();
+    let (mut x_regs, mut proc, mut mem, mut realm) = setup();
 
     // Create namespace
     let ns_name = proc.alloc_symbol(&mut mem, "test.ns").unwrap();
@@ -326,26 +382,26 @@ fn intern_update_var() {
 
     // Intern a var with value 42
     let var_name = proc.alloc_symbol(&mut mem, "x").unwrap();
-    proc.x_regs[1] = ns;
-    proc.x_regs[2] = var_name;
-    proc.x_regs[3] = Value::int(42);
-    call_intrinsic(id::INTERN, 3, &mut proc, &mut mem, &mut realm).unwrap();
+    x_regs[1] = ns;
+    x_regs[2] = var_name;
+    x_regs[3] = Value::int(42);
+    call_intrinsic(id::INTERN, 3, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
 
-    let var1 = proc.x_regs[0];
+    let var1 = x_regs[0];
 
     // Intern same var with new value 100
-    proc.x_regs[1] = ns;
-    proc.x_regs[2] = var_name;
-    proc.x_regs[3] = Value::int(100);
-    call_intrinsic(id::INTERN, 3, &mut proc, &mut mem, &mut realm).unwrap();
+    x_regs[1] = ns;
+    x_regs[2] = var_name;
+    x_regs[3] = Value::int(100);
+    call_intrinsic(id::INTERN, 3, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
 
-    let var2 = proc.x_regs[0];
+    let var2 = x_regs[0];
 
     // Both should be the same var (same address)
     assert_eq!(var1, var2);
 
     // Get the var's value - should be updated to 100
-    proc.x_regs[1] = var2;
-    call_intrinsic(id::VAR_GET, 1, &mut proc, &mut mem, &mut realm).unwrap();
-    assert_eq!(proc.x_regs[0], Value::int(100));
+    x_regs[1] = var2;
+    call_intrinsic(id::VAR_GET, 1, &mut x_regs, &mut proc, &mut mem, &mut realm).unwrap();
+    assert_eq!(x_regs[0], Value::int(100));
 }

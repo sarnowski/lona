@@ -23,7 +23,7 @@ fn setup() -> (Process, Realm, MockVSpace) {
     // 0x2000-0x3000: Process old heap
     // 0x4000-0x8000: Realm code region
     let mem = MockVSpace::new(0x10000, Vaddr::new(0x1000));
-    let proc = Process::new(1, Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
+    let proc = Process::new(Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
     let realm = Realm::new(Vaddr::new(0x4000), 0x4000);
     (proc, realm, mem)
 }
@@ -466,7 +466,7 @@ fn test_deep_copy_shared_structure() {
 fn test_deep_copy_oom() {
     // Create a very small realm that will run out of memory
     let mem = MockVSpace::new(0x10000, Vaddr::new(0x1000));
-    let proc = Process::new(1, Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
+    let proc = Process::new(Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
     // Realm with only 8 bytes - definitely too small for any heap allocation
     // HeapString header alone is 8 bytes, plus we need alignment
     let mut realm = Realm::new(Vaddr::new(0x4000), 8);
@@ -490,7 +490,7 @@ fn test_deep_copy_oom() {
 fn test_deep_copy_large_nested_structure_oom() {
     // Create a realm with limited space
     let mem = MockVSpace::new(0x10000, Vaddr::new(0x1000));
-    let proc = Process::new(1, Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
+    let proc = Process::new(Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
     // Realm with 256 bytes - enough for a few small allocations but not a large structure
     let mut realm = Realm::new(Vaddr::new(0x4000), 256);
     let mut mem = mem;

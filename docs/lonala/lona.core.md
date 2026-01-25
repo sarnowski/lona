@@ -12,10 +12,7 @@ Process-local var holding current namespace. Each process has its own `*ns*` val
 inherited from the parent at spawn time.
 
 ```clojure
-*ns*  ; → current namespace
-
-;; Change namespace for current process
-(def *ns* (find-ns 'my.namespace))
+(namespace? *ns*)  ; => true
 ```
 
 ### `create-ns`
@@ -23,7 +20,9 @@ inherited from the parent at spawn time.
 Create a namespace.
 
 ```clojure
-(create-ns sym)  ; → namespace
+(def ns (create-ns 'test.namespace))
+(namespace? ns)              ; => true
+(= (ns-name ns) 'test.namespace)  ; => true
 ```
 
 ### `find-ns`
@@ -31,7 +30,8 @@ Create a namespace.
 Find namespace by symbol.
 
 ```clojure
-(find-ns sym)  ; → namespace or nil
+(namespace? (find-ns 'lona.core))  ; => true
+(find-ns 'nonexistent.ns)          ; => nil
 ```
 
 ### `ns-name`
@@ -39,7 +39,8 @@ Find namespace by symbol.
 Get namespace's symbol name.
 
 ```clojure
-(ns-name ns)  ; → symbol
+(symbol? (ns-name (find-ns 'lona.core)))  ; => true
+(= (ns-name (find-ns 'lona.core)) 'lona.core)  ; => true
 ```
 
 ### `ns-map`
@@ -47,7 +48,7 @@ Get namespace's symbol name.
 Get namespace's var bindings.
 
 ```clojure
-(ns-map ns)  ; → map of symbol → var
+(map? (ns-map (find-ns 'lona.core)))  ; => true
 ```
 
 ### `intern`
@@ -55,8 +56,10 @@ Get namespace's var bindings.
 Intern a var in namespace.
 
 ```clojure
-(intern ns sym)        ; → var
-(intern ns sym val)    ; → var (with initial value)
+(def ns (create-ns 'intern.test))
+(def v (intern ns 'x 42))
+(var? v)       ; => true
+(var-get v)    ; => 42
 ```
 
 ### `refer`
@@ -67,6 +70,13 @@ Add var references from another namespace.
 (refer ns)  ; → nil
 ```
 
+```clojure
+;; @todo
+(def test-ns (create-ns 'refer.example))
+(intern test-ns 'example-fn (fn* [] :example))
+(refer 'refer.example)  ; => nil
+```
+
 ### `alias`
 
 Create namespace alias.
@@ -75,15 +85,21 @@ Create namespace alias.
 (alias alias-sym ns-sym)  ; → nil
 ```
 
+```clojure
+;; @todo
+(alias 'core 'lona.core)  ; => nil
+;; Now lona.core/+ can be referred to as core/+
+```
+
 ### `var`
 
 Get var object by name. The `var` special form looks up a var by symbol name
 and returns the var object (not its value).
 
 ```clojure
-(var sym)   ; returns var object for sym
-#'sym       ; reader syntax, equivalent to (var sym)
-#'ns/sym    ; qualified var lookup
+(def x 42)
+(var? #'x)      ; => true
+(var? (var x))  ; => true
 ```
 
 Note: `var` is a special form - the symbol argument is not evaluated.
@@ -93,7 +109,8 @@ Note: `var` is a special form - the symbol argument is not evaluated.
 Get value of var.
 
 ```clojure
-(var-get v)  ; → value
+(def y 100)
+(var-get #'y)  ; => 100
 ```
 
 ### `meta`
@@ -101,7 +118,10 @@ Get value of var.
 Get metadata of object.
 
 ```clojure
-(meta obj)  ; → map or nil
+(def ^%{:doc "A value"} z 1)
+(map? (meta #'z))        ; => true
+(:doc (meta #'z))        ; => "A value"
+(meta 42)                ; => nil
 ```
 
 ### `with-meta`
@@ -109,7 +129,8 @@ Get metadata of object.
 Return object with new metadata.
 
 ```clojure
-(with-meta obj meta-map)  ; → obj with metadata
+(def s (with-meta 'foo %{:tag :special}))
+(:tag (meta s))  ; => :special
 ```
 
 ---
@@ -121,7 +142,11 @@ Return object with new metadata.
 Evaluate form.
 
 ```clojure
-(eval form)  ; → result
+;; @todo
+(eval '(+ 1 2))       ; => 3
+(eval '[1 2 3])       ; => [1 2 3]
+(def a 10)
+(eval 'a)             ; => 10
 ```
 
 ### `read-string`
@@ -129,7 +154,14 @@ Evaluate form.
 Parse string to form.
 
 ```clojure
-(read-string s)  ; → form
+;; @todo
+(read-string "42")         ; => 42
+(read-string "(+ 1 2)")    ; => (+ 1 2)
+(list? (read-string "(+ 1 2)"))  ; => true
+(read-string ":keyword")   ; => :keyword
+(read-string "[1 2 3]")    ; => [1 2 3]
+(read-string "(")          ; => ERROR :unexpected-eof
+(read-string ")")          ; => ERROR :unmatched-delimiter
 ```
 
 ### `macroexpand`
@@ -140,6 +172,12 @@ Fully expand macros in form.
 (macroexpand form)  ; → expanded form
 ```
 
+```clojure
+;; @todo
+;; macroexpand fully expands nested macros
+(list? (macroexpand '(when true :ok)))  ; => true
+```
+
 ### `macroexpand-1`
 
 Expand macros once.
@@ -148,13 +186,21 @@ Expand macros once.
 (macroexpand-1 form)  ; → expanded form
 ```
 
+```clojure
+;; @todo
+;; macroexpand-1 only expands the outermost macro once
+(list? (macroexpand-1 '(when true :ok)))  ; => true
+```
+
 ### `gensym`
 
 Generate unique symbol.
 
 ```clojure
-(gensym)         ; → symbol
-(gensym prefix)  ; → symbol with prefix
+;; @todo
+(symbol? (gensym))           ; => true
+(symbol? (gensym "prefix"))  ; => true
+(= (gensym) (gensym))        ; => false
 ```
 
 ### `load-file`
@@ -163,6 +209,12 @@ Load and evaluate file.
 
 ```clojure
 (load-file path)  ; → last value
+```
+
+```clojure
+;; @todo
+;; load-file returns error for non-existent file
+(load-file "/nonexistent/path.lona")  ; => ERROR :file-not-found
 ```
 
 ---
@@ -177,6 +229,13 @@ Addition.
 (+ a b ...)  ; → sum
 ```
 
+```clojure
+(+)          ; => 0   @todo
+(+ 1)        ; => 1   @todo
+(+ 1 2)      ; => 3
+(+ 1 2 3 4)  ; => 10  @todo
+```
+
 ### `-`
 
 Subtraction.
@@ -184,6 +243,12 @@ Subtraction.
 ```clojure
 (- a)        ; → negation
 (- a b ...)  ; → difference
+```
+
+```clojure
+(- 5)        ; => -5  @todo
+(- 10 3)     ; => 7
+(- 10 3 2)   ; => 5   @todo
 ```
 
 ### `*`
@@ -194,12 +259,30 @@ Multiplication.
 (* a b ...)  ; → product
 ```
 
+```clojure
+(*)          ; => 1   @todo
+(* 3)        ; => 3   @todo
+(* 2 3)      ; => 6
+(* 2 3 4)    ; => 24  @todo
+```
+
 ### `/`
 
 Division.
 
 ```clojure
 (/ a b ...)  ; → quotient
+```
+
+```clojure
+(/ 10 2)     ; => 5
+(/ 20 2 5)   ; => 2   @todo
+```
+
+Division by zero:
+
+```clojure
+(/ 1 0)      ; => ERROR :division-by-zero
 ```
 
 ### `mod`
@@ -210,12 +293,26 @@ Modulus (sign follows divisor).
 (mod a b)  ; → remainder
 ```
 
+```clojure
+(mod 10 3)   ; => 1
+(mod -10 3)  ; => 2
+(mod 10 -3)  ; => -2
+(mod 10 0)   ; => ERROR :division-by-zero
+```
+
 ### `quot`
 
 Integer quotient (truncates toward zero).
 
 ```clojure
 (quot a b)  ; → integer
+```
+
+```clojure
+;; @todo
+(quot 10 3)  ; => 3
+(quot -10 3) ; => -3
+(quot 10 0)  ; => ERROR :division-by-zero
 ```
 
 ### `rem`
@@ -226,12 +323,22 @@ Remainder (sign follows dividend).
 (rem a b)  ; → remainder
 ```
 
+```clojure
+;; @todo
+(rem 10 3)   ; => 1
+(rem -10 3)  ; => -1
+(rem 10 0)   ; => ERROR :division-by-zero
+```
+
 ### `checked-add`
 
 Addition with overflow check.
 
 ```clojure
-(checked-add a b)  ; → [:ok result] or [:error :overflow]
+;; @todo
+(checked-add 1u8 2u8)      ; => [:ok 3u8]
+(checked-add 255u8 1u8)    ; => [:error :overflow]
+(checked-add 100i8 100i8)  ; => [:error :overflow]
 ```
 
 ### `saturating-add`
@@ -239,7 +346,10 @@ Addition with overflow check.
 Addition clamped to type bounds.
 
 ```clojure
-(saturating-add a b)  ; → result (clamped)
+;; @todo
+(saturating-add 250u8 10u8)   ; => 255u8
+(saturating-add 120i8 20i8)   ; => 127i8
+(saturating-add -120i8 -20i8) ; => -128i8
 ```
 
 ---
@@ -251,7 +361,10 @@ Addition clamped to type bounds.
 Get numerator of ratio.
 
 ```clojure
-(numerator r)  ; → integer
+;; @todo
+(numerator 22/7)   ; => 22
+(numerator 1/3)    ; => 1
+(numerator 6/4)    ; => 3   ; auto-reduced to 3/2
 ```
 
 ### `denominator`
@@ -259,7 +372,10 @@ Get numerator of ratio.
 Get denominator of ratio.
 
 ```clojure
-(denominator r)  ; → integer
+;; @todo
+(denominator 22/7)  ; => 7
+(denominator 1/3)   ; => 3
+(denominator 6/4)   ; => 2   ; auto-reduced to 3/2
 ```
 
 ---
@@ -271,7 +387,14 @@ Get denominator of ratio.
 Equality (value-based).
 
 ```clojure
-(= a b ...)  ; → boolean
+(= 1 1)           ; => true
+(= 1 2)           ; => false
+(= 1 1 1)         ; => true
+(= 1 1 2)         ; => false  @todo
+(= :a :a)         ; => true
+(= [1 2] [1 2])   ; => true
+(= [1 2] [1 3])   ; => false
+(= %{:a 1} %{:a 1})  ; => true
 ```
 
 ### `<`
@@ -279,7 +402,11 @@ Equality (value-based).
 Less than.
 
 ```clojure
-(< a b ...)  ; → boolean
+(< 1 2)       ; => true
+(< 2 1)       ; => false
+(< 1 1)       ; => false
+(< 1 2 3)     ; => true
+(< 1 3 2)     ; => false  @todo
 ```
 
 ### `>`
@@ -287,7 +414,11 @@ Less than.
 Greater than.
 
 ```clojure
-(> a b ...)  ; → boolean
+(> 2 1)       ; => true
+(> 1 2)       ; => false
+(> 1 1)       ; => false
+(> 3 2 1)     ; => true
+(> 3 1 2)     ; => false  @todo
 ```
 
 ### `<=`
@@ -295,7 +426,10 @@ Greater than.
 Less than or equal.
 
 ```clojure
-(<= a b ...)  ; → boolean
+(<= 1 2)      ; => true
+(<= 1 1)      ; => true
+(<= 2 1)      ; => false
+(<= 1 2 2 3)  ; => true
 ```
 
 ### `>=`
@@ -303,7 +437,10 @@ Less than or equal.
 Greater than or equal.
 
 ```clojure
-(>= a b ...)  ; → boolean
+(>= 2 1)      ; => true
+(>= 1 1)      ; => true
+(>= 1 2)      ; => false
+(>= 3 2 2 1)  ; => true
 ```
 
 ### `not=`
@@ -311,7 +448,11 @@ Greater than or equal.
 Not equal.
 
 ```clojure
-(not= a b ...)  ; → boolean
+;; @todo
+(not= 1 2)       ; => true
+(not= 1 1)       ; => false
+(not= 1 2 3)     ; => true
+(not= 1 1 1)     ; => false
 ```
 
 ### `identical?`
@@ -319,7 +460,10 @@ Not equal.
 Reference identity.
 
 ```clojure
-(identical? a b)  ; → boolean
+(def x [1 2 3])
+(identical? x x)          ; => true
+(identical? [1 2 3] [1 2 3])  ; => false
+(identical? :a :a)        ; => true
 ```
 
 ---
@@ -331,7 +475,12 @@ Reference identity.
 Logical negation.
 
 ```clojure
-(not x)  ; → boolean
+(not true)   ; => false
+(not false)  ; => true
+(not nil)    ; => true
+(not 0)      ; => false
+(not "")     ; => false
+(not '())    ; => false  @todo
 ```
 
 ---
@@ -343,7 +492,10 @@ Logical negation.
 Add element to front of list.
 
 ```clojure
-(prepend list elem)  ; → list
+;; @todo
+(prepend '(2 3) 1)    ; => (1 2 3)
+(prepend '() 1)       ; => (1)
+(prepend nil 1)       ; => (1)
 ```
 
 ### `append`
@@ -351,7 +503,11 @@ Add element to front of list.
 Add element to end of vector or tuple.
 
 ```clojure
-(append coll elem)  ; → coll
+;; @todo
+(append {1 2} 3)      ; => {1 2 3}
+(append {} 1)         ; => {1}
+(append [1 2] 3)      ; => [1 2 3]
+(append [] 1)         ; => [1]
 ```
 
 ### `put`
@@ -359,7 +515,9 @@ Add element to end of vector or tuple.
 Associate key-value in map.
 
 ```clojure
-(put map key val)  ; → map
+(put %{:a 1} :b 2)        ; => %{:a 1 :b 2}  @todo
+(put %{:a 1} :a 99)       ; => %{:a 99}  @todo
+(put %{} :x 1)            ; => %{:x 1}
 ```
 
 ### `set-add`
@@ -367,7 +525,10 @@ Associate key-value in map.
 Add element to set.
 
 ```clojure
-(set-add set elem)  ; → set
+;; @todo
+(set-add #{1 2} 3)    ; => #{1 2 3}
+(set-add #{1 2} 2)    ; => #{1 2}
+(set-add #{} 1)       ; => #{1}
 ```
 
 ### `dissoc`
@@ -375,7 +536,10 @@ Add element to set.
 Remove key from map.
 
 ```clojure
-(dissoc map key)  ; → map
+;; @todo
+(dissoc %{:a 1 :b 2} :a)  ; => %{:b 2}
+(dissoc %{:a 1} :b)       ; => %{:a 1}
+(dissoc %{} :a)           ; => %{}
 ```
 
 ### `set-remove`
@@ -383,7 +547,10 @@ Remove key from map.
 Remove element from set.
 
 ```clojure
-(set-remove set elem)  ; → set
+;; @todo
+(set-remove #{1 2 3} 2)   ; => #{1 3}
+(set-remove #{1 2} 3)     ; => #{1 2}
+(set-remove #{} 1)        ; => #{}
 ```
 
 ### `count`
@@ -391,7 +558,14 @@ Remove element from set.
 Number of elements.
 
 ```clojure
-(count coll)  ; → integer
+(count '(1 2 3))      ; => 3
+(count [1 2 3])       ; => 3
+(count {1 2 3})       ; => 3
+(count %{:a 1 :b 2})  ; => 2
+(count #{1 2 3})      ; => 3  @todo
+(count "hello")       ; => 5
+(count '())           ; => 0
+(count nil)           ; => 0
 ```
 
 ### `nth`
@@ -399,8 +573,13 @@ Number of elements.
 Get element by index.
 
 ```clojure
-(nth coll idx)            ; → element (or error)
-(nth coll idx not-found)  ; → element or not-found
+(nth [1 2 3] 0)           ; => 1
+(nth [1 2 3] 2)           ; => 3
+(nth {10 20 30} 1)        ; => 20  @todo
+(nth [1 2 3] 10 :missing) ; => :missing
+(nth '(a b c) 1)          ; => b  @todo
+(nth [1 2 3] -1)          ; => nil  @todo
+(nth [1 2 3] 100)         ; => nil  @todo
 ```
 
 ### `get`
@@ -408,8 +587,10 @@ Get element by index.
 Get value by key.
 
 ```clojure
-(get coll key)            ; → value or nil
-(get coll key not-found)  ; → value or not-found
+(get %{:a 1 :b 2} :a)         ; => 1
+(get %{:a 1} :b)              ; => nil
+(get %{:a 1} :b :default)     ; => :default
+(get %{:a nil} :a :default)   ; => nil
 ```
 
 ### `keys`
@@ -417,7 +598,9 @@ Get value by key.
 Get map keys.
 
 ```clojure
-(keys map)  ; → list of keys
+(list? (keys %{:a 1 :b 2}))   ; => true  @todo
+(count (keys %{:a 1 :b 2}))   ; => 2
+(keys %{})                    ; => ()  @todo
 ```
 
 ### `vals`
@@ -425,7 +608,9 @@ Get map keys.
 Get map values.
 
 ```clojure
-(vals map)  ; → list of values
+(list? (vals %{:a 1 :b 2}))   ; => true  @todo
+(count (vals %{:a 1 :b 2}))   ; => 2
+(vals %{})                    ; => ()  @todo
 ```
 
 ### `contains?`
@@ -433,10 +618,22 @@ Get map values.
 Check if map contains key.
 
 ```clojure
-(contains? map key)  ; → true if key exists, false otherwise
+;; @todo
+(contains? %{:a 1 :b 2} :a)   ; => true
+(contains? %{:a 1 :b 2} :c)   ; => false
+(contains? %{:a nil} :a)      ; => true
+(contains? %{} :a)            ; => false
 ```
 
 Note: Unlike Clojure's `contains?`, this only works on maps (not vectors/sets with indices).
+
+```clojure
+;; @todo
+;; contains? only works on maps - error on other types
+(contains? [1 2 3] 0)    ; => ERROR :type-error
+(contains? #{1 2 3} 1)   ; => ERROR :type-error
+(contains? "abc" 0)      ; => ERROR :type-error
+```
 
 ---
 
@@ -451,15 +648,12 @@ once and work on all collections.
 First element of any collection.
 
 ```clojure
-(first coll)  ; → element or nil
-
-(first '(1 2 3))      ; → 1
-(first [1 2 3])       ; → 1 (tuple)
-(first {1 2 3})       ; → 1 (vector)
-(first %{:a 1 :b 2})  ; → [:a 1] (key-value tuple)
-(first #{3 1 2})      ; → <some element> (order unspecified)
-(first nil)           ; → nil
-(first '())           ; → nil
+(first '(1 2 3))      ; => 1
+(first [1 2 3])       ; => 1
+(first {1 2 3})       ; => 1
+(first nil)           ; => nil
+(first '())           ; => nil
+(first [])            ; => nil
 ```
 
 ### `rest`
@@ -467,14 +661,13 @@ First element of any collection.
 Remaining elements after first. **Always returns a list**, regardless of input type.
 
 ```clojure
-(rest coll)  ; → list (empty list if coll has 0-1 elements)
-
-(rest '(1 2 3))      ; → (2 3)
-(rest [1 2 3])       ; → (2 3) - list, not tuple
-(rest {1 2 3})       ; → (2 3) - list, not vector
-(rest %{:a 1 :b 2})  ; → ([:b 2]) - list of tuples
-(rest '(1))          ; → ()
-(rest nil)           ; → ()
+(rest '(1 2 3))  ; => (2 3)
+(rest [1 2 3])   ; => (2 3)
+(rest {1 2 3})   ; => (2 3)
+(rest '(1))      ; => ()  @todo
+(rest '())       ; => ()  @todo
+(rest nil)       ; => ()  @todo
+(list? (rest [1 2 3]))  ; => true  @todo
 ```
 
 ### `empty?`
@@ -482,12 +675,16 @@ Remaining elements after first. **Always returns a list**, regardless of input t
 True if collection has no elements.
 
 ```clojure
-(empty? coll)  ; → boolean
-
-(empty? '())   ; → true
-(empty? nil)   ; → true
-(empty? [])    ; → true
-(empty? '(1))  ; → false
+(empty? '())       ; => true
+(empty? nil)       ; => true
+(empty? [])        ; => true
+(empty? {})        ; => true
+(empty? %{})       ; => true
+(empty? #{})       ; => true  @todo
+(empty? '(1))      ; => false
+(empty? [1])       ; => false
+(empty? "")        ; => true  @todo
+(empty? "a")       ; => false  @todo
 ```
 
 ---
@@ -495,38 +692,44 @@ True if collection has no elements.
 ## Type Predicates
 
 ```clojure
-(nil? x)          ; → boolean
-(boolean? x)      ; → boolean
-(true? x)         ; → boolean
-(false? x)        ; → boolean
-(number? x)       ; → boolean
-(integer? x)      ; → boolean
-(float? x)        ; → boolean
-(ratio? x)        ; → boolean
-(string? x)       ; → boolean
-(char? x)         ; → boolean
-(symbol? x)       ; → boolean
-(keyword? x)      ; → boolean
-(fn? x)           ; → boolean
-(var? x)          ; → boolean
-(list? x)         ; → boolean
-(tuple? x)        ; → boolean
-(vector? x)       ; → boolean
-(map? x)          ; → boolean
-(set? x)          ; → boolean
-(binary? x)       ; → boolean
-(bytebuf? x)      ; → boolean
-(paddr? x)        ; → boolean
-(vaddr? x)        ; → boolean
-(realm-id? x)     ; → boolean
-(pid? x)          ; → boolean
-(ref? x)          ; → boolean
-(cap? x)          ; → boolean
-(msg-info? x)     ; → boolean
-(notification? x) ; → boolean
-(region? x)       ; → boolean
-(dma-buffer? x)   ; → boolean
-(ring? x)         ; → boolean
+(nil? nil)        ; => true
+(nil? false)      ; => false
+(boolean? true)   ; => true  @todo
+(boolean? false)  ; => true  @todo
+(boolean? nil)    ; => false  @todo
+(true? true)      ; => true  @todo
+(true? false)     ; => false  @todo
+(false? false)    ; => true  @todo
+(false? true)     ; => false  @todo
+(number? 42)      ; => true  @todo
+(number? 3.14)    ; => true  @todo
+(number? 22/7)    ; => true  @todo
+(integer? 42)     ; => true
+(integer? 3.14)   ; => false  @todo
+(float? 3.14)     ; => true  @todo
+(float? 42)       ; => false  @todo
+(ratio? 22/7)     ; => true  @todo
+(ratio? 1)        ; => false  @todo
+(string? "hi")    ; => true
+(string? :hi)     ; => false
+(char? \a)        ; => true  @todo
+(char? "a")       ; => false  @todo
+(symbol? 'foo)    ; => true
+(symbol? :foo)    ; => false
+(keyword? :foo)   ; => true
+(keyword? 'foo)   ; => false
+(fn? +)           ; => true
+(fn? 42)          ; => false
+(list? '(1 2))    ; => true  @todo
+(list? [1 2])     ; => false  @todo
+(tuple? [1 2])    ; => true
+(tuple? {1 2})    ; => false
+(vector? {1 2})   ; => true
+(vector? [1 2])   ; => false
+(map? %{:a 1})    ; => true
+(map? #{1 2})     ; => false  @todo
+(set? #{1 2})     ; => true  @todo
+(set? %{:a 1})    ; => false  @todo
 ```
 
 ### `type`
@@ -534,7 +737,21 @@ True if collection has no elements.
 Get type keyword.
 
 ```clojure
-(type x)  ; → :nil :boolean :integer :string :list :tuple :map ...
+;; @todo
+(type nil)        ; => :nil
+(type true)       ; => :boolean
+(type 42)         ; => :integer
+(type 3.14)       ; => :float
+(type 22/7)       ; => :ratio
+(type "hi")       ; => :string
+(type \a)         ; => :char
+(type 'foo)       ; => :symbol
+(type :foo)       ; => :keyword
+(type '(1 2))     ; => :list
+(type [1 2])      ; => :tuple
+(type {1 2})      ; => :vector
+(type %{:a 1})    ; => :map
+(type #{1 2})     ; => :set
 ```
 
 ---
@@ -544,20 +761,34 @@ Get type keyword.
 Fixed-width integer conversion:
 
 ```clojure
-(u8 x)   ; → u8
-(u16 x)  ; → u16
-(u32 x)  ; → u32
-(u64 x)  ; → u64
-(i8 x)   ; → i8
-(i16 x)  ; → i16
-(i32 x)  ; → i32
-(i64 x)  ; → i64
+;; @todo
+(u8 42)          ; => 42u8
+(u16 1000)       ; => 1000u16
+(u32 100000)     ; => 100000u32
+(u64 42)         ; => 42u64
+(i8 -50)         ; => -50i8
+(i16 -1000)      ; => -1000i16
+(i32 -100000)    ; => -100000i32
+(i64 -42)        ; => -42i64
+```
+
+Overflow wrapping:
+
+```clojure
+;; @todo
+(u8 256)         ; => 0u8
+(u8 -1)          ; => 255u8
+(i8 128)         ; => -128i8
+(i8 -129)        ; => 127i8
 ```
 
 Character conversion:
 
 ```clojure
-(char x)  ; → character (from integer code point)
+;; @todo
+(char 65)        ; => \A
+(char 97)        ; => \a
+(char 10)        ; => \newline
 ```
 
 ---
@@ -569,7 +800,14 @@ Character conversion:
 Concatenate to string.
 
 ```clojure
-(str a b ...)  ; → string
+(str)              ; => ""
+(str "a")          ; => "a"
+(str "a" "b")      ; => "ab"
+(str "a" "b" "c")  ; => "abc"
+(str 1 2 3)        ; => "123"
+(str :a)           ; => ":a"
+(str nil)          ; => ""  @todo
+(str "hi " nil " there")  ; => "hi  there"  @todo
 ```
 
 ### `subs`
@@ -577,8 +815,13 @@ Concatenate to string.
 Substring.
 
 ```clojure
-(subs s start)      ; → substring from start
-(subs s start end)  ; → substring from start to end
+;; @todo
+(subs "hello" 0)      ; => "hello"
+(subs "hello" 1)      ; => "ello"
+(subs "hello" 2)      ; => "llo"
+(subs "hello" 0 2)    ; => "he"
+(subs "hello" 1 4)    ; => "ell"
+(subs "hello" 5)      ; => ""
 ```
 
 ### `symbol`
@@ -586,8 +829,10 @@ Substring.
 Create symbol.
 
 ```clojure
-(symbol name)       ; → symbol
-(symbol ns name)    ; → qualified symbol
+;; @todo
+(symbol "foo")           ; => foo
+(symbol "my.ns" "bar")   ; => my.ns/bar
+(symbol? (symbol "x"))   ; => true
 ```
 
 ### `keyword`
@@ -595,8 +840,9 @@ Create symbol.
 Create keyword.
 
 ```clojure
-(keyword name)      ; → keyword
-(keyword ns name)   ; → qualified keyword
+(keyword "foo")          ; => :foo
+(keyword "my.ns" "bar")  ; => :my.ns/bar  @todo
+(keyword? (keyword "x")) ; => true
 ```
 
 ### `name`
@@ -604,7 +850,10 @@ Create keyword.
 Get name part of symbol/keyword.
 
 ```clojure
-(name sym-or-kw)  ; → string
+(name :foo)           ; => "foo"
+(name :my.ns/bar)     ; => "bar"
+(name 'foo)           ; => "foo"
+(name 'my.ns/bar)     ; => "bar"
 ```
 
 ### `namespace`
@@ -612,7 +861,10 @@ Get name part of symbol/keyword.
 Get namespace part of symbol/keyword.
 
 ```clojure
-(namespace sym-or-kw)  ; → string or nil
+(namespace :foo)         ; => nil
+(namespace :my.ns/bar)   ; => "my.ns"
+(namespace 'foo)         ; => nil
+(namespace 'my.ns/bar)   ; => "my.ns"
 ```
 
 ---
@@ -641,7 +893,9 @@ Crashed processes are restarted by supervisors. Don't catch crashes — let them
 Create unique reference (for request/response correlation).
 
 ```clojure
-(make-ref)  ; → ref
+;; @todo
+(ref? (make-ref))         ; => true
+(= (make-ref) (make-ref)) ; => false
 ```
 
 ---
@@ -653,8 +907,12 @@ Create unique reference (for request/response correlation).
 Apply function to args.
 
 ```clojure
-(apply f args)           ; → result
-(apply f a b ... args)   ; → result
+;; @todo
+(apply + '(1 2 3))        ; => 6
+(apply + 1 2 '(3 4))      ; => 10
+(apply str '("a" "b" "c")) ; => "abc"
+(apply * [2 3 4])         ; => 24
+(apply 42 '(1 2))         ; => ERROR :badarg
 ```
 
 ---
@@ -664,66 +922,80 @@ Apply function to args.
 ### Basic
 
 ```clojure
-(bit-and a b ...)   ; Bitwise AND
-(bit-or a b ...)    ; Bitwise OR
-(bit-xor a b ...)   ; Bitwise XOR
-(bit-not a)         ; Bitwise NOT
+;; @todo
+(bit-and 0b1100 0b1010)    ; => 8       ; 0b1000
+(bit-and 0xFF 0x0F)        ; => 15
+(bit-or 0b1100 0b1010)     ; => 14      ; 0b1110
+(bit-or 0 1 2 4)           ; => 7
+(bit-xor 0b1100 0b1010)    ; => 6       ; 0b0110
+(bit-not 0u8)              ; => 255u8
 ```
 
 ### Shifts
 
 ```clojure
-(bit-shl a n)   ; Shift left
-(bit-shr a n)   ; Logical shift right (zero-fill)
-(bit-sar a n)   ; Arithmetic shift right (sign-extend)
+;; @todo
+(bit-shl 1 4)              ; => 16
+(bit-shl 0b0001 3)         ; => 8
+(bit-shr 16 2)             ; => 4
+(bit-shr 0b1000 3)         ; => 1
+(bit-sar -8i32 2)          ; => -2i32
 ```
 
 ### Rotations
 
 ```clojure
-(bit-rol a n width)   ; Rotate left
-(bit-ror a n width)   ; Rotate right
+;; @todo
+(bit-rol 0b10000001u8 1 8)  ; => 3u8     ; 0b00000011
+(bit-ror 0b10000001u8 1 8)  ; => 192u8   ; 0b11000000
 ```
 
 ### Single-Bit
 
 ```clojure
-(bit-test a n)    ; Test if bit n is set
-(bit-set a n)     ; Set bit n
-(bit-clear a n)   ; Clear bit n
-(bit-flip a n)    ; Toggle bit n
+;; @todo
+(bit-test 0b1010 1)        ; => true
+(bit-test 0b1010 2)        ; => false
+(bit-set 0b1000 0)         ; => 9       ; 0b1001
+(bit-clear 0b1111 1)       ; => 13      ; 0b1101
+(bit-flip 0b1010 1)        ; => 8       ; 0b1000
+(bit-flip 0b1010 0)        ; => 11      ; 0b1011
 ```
 
 ### Bit Fields
 
 ```clojure
-(bit-field a start len)           ; Extract bits [start, start+len)
-(bit-field-set a start len val)   ; Insert val into bit field
+;; @todo
+(bit-field 0xABCD 4 8)           ; => 0xBC
+(bit-field-set 0 4 8 0xFF)       ; => 0xFF0
 ```
 
 ### Bit Counting
 
 ```clojure
-(bit-count a)        ; Population count (number of 1 bits)
-(leading-zeros a)    ; Count leading zeros
-(trailing-zeros a)   ; Count trailing zeros
-(leading-ones a)     ; Count leading ones
-(trailing-ones a)    ; Count trailing ones
+;; @todo
+(bit-count 0b1010)         ; => 2
+(bit-count 0b11111111)     ; => 8
+(bit-count 0)              ; => 0
+(leading-zeros 1u8)        ; => 7
+(trailing-zeros 8u8)       ; => 3
 ```
 
 ### Byte Order
 
 ```clojure
-(byte-reverse16 a)   ; Reverse bytes in u16
-(byte-reverse32 a)   ; Reverse bytes in u32
-(byte-reverse64 a)   ; Reverse bytes in u64
+;; @todo
+(byte-reverse16 0x1234u16)     ; => 0x3412u16
+(byte-reverse32 0x12345678u32) ; => 0x78563412u32
 ```
 
 ### Masks
 
 ```clojure
-(mask-bits n)           ; Mask with n low bits set
-(mask-range start end)  ; Mask for bits [start, end)
+;; @todo
+(mask-bits 4)              ; => 15      ; 0b1111
+(mask-bits 8)              ; => 255
+(mask-range 4 8)           ; => 240     ; 0b11110000
 ```
 
 ---
@@ -735,7 +1007,9 @@ Apply function to args.
 Create binary from byte sequence.
 
 ```clojure
-(binary bytes)  ; → binary
+;; @todo
+(def b (binary '(72 101 108 108 111)))
+(binary? b)            ; => true
 ```
 
 ### `binary-size`
@@ -743,7 +1017,10 @@ Create binary from byte sequence.
 Size in bytes.
 
 ```clojure
-(binary-size bin)  ; → u64
+;; @todo
+(binary-size #bytes"Hello")    ; => 5
+(binary-size #bytes[])         ; => 0
+(binary-size #bytes[1 2 3])    ; => 3
 ```
 
 ### `binary-ref`
@@ -751,7 +1028,12 @@ Size in bytes.
 Get byte at offset.
 
 ```clojure
-(binary-ref bin offset)  ; → u8
+;; @todo
+(binary-ref #bytes[10 20 30] 0)  ; => 10
+(binary-ref #bytes[10 20 30] 1)  ; => 20
+(binary-ref #bytes[10 20 30] 2)  ; => 30
+(binary-ref #bytes[10 20 30] 3)  ; => ERROR :out-of-bounds
+(binary-ref #bytes[10 20 30] -1) ; => ERROR :out-of-bounds
 ```
 
 ### `binary-slice`
@@ -759,7 +1041,11 @@ Get byte at offset.
 Extract slice.
 
 ```clojure
-(binary-slice bin start len)  ; → binary
+;; @todo
+(binary-slice #bytes[1 2 3 4 5] 1 3)  ; => #bytes[2 3 4]
+(binary-slice #bytes[1 2 3 4 5] 0 2)  ; => #bytes[1 2]
+(binary-slice #bytes[1 2 3] 0 0)      ; => #bytes[]
+(binary-slice #bytes[1 2 3] 0 10)     ; => ERROR :out-of-bounds
 ```
 
 ### `binary-concat`
@@ -767,7 +1053,9 @@ Extract slice.
 Concatenate binaries.
 
 ```clojure
-(binary-concat bin1 bin2)  ; → binary
+;; @todo
+(binary-concat #bytes[1 2] #bytes[3 4])  ; => #bytes[1 2 3 4]
+(binary-concat #bytes[] #bytes[1])       ; => #bytes[1]
 ```
 
 ### `binary->string`
@@ -775,8 +1063,11 @@ Concatenate binaries.
 Decode to string.
 
 ```clojure
-(binary->string bin)            ; → string (UTF-8)
-(binary->string bin encoding)   ; → string
+;; @todo
+(binary->string #bytes"Hello")           ; => "Hello"
+(binary->string #bytes[72 105])          ; => "Hi"
+(binary->string #bytes[72 105] :utf-8)   ; => "Hi"
+(binary->string #bytes[0xFF 0xFE] :utf-8) ; => ERROR :invalid-utf8
 ```
 
 Encodings: `:utf-8` (default), `:ascii`, `:latin1`
@@ -786,8 +1077,10 @@ Encodings: `:utf-8` (default), `:ascii`, `:latin1`
 Encode string.
 
 ```clojure
-(string->binary s)            ; → binary (UTF-8)
-(string->binary s encoding)   ; → binary
+;; @todo
+(string->binary "Hi")          ; => #bytes[72 105]
+(string->binary "Hi" :utf-8)   ; => #bytes[72 105]
+(binary? (string->binary "x")) ; => true
 ```
 
 Encodings: `:utf-8` (default), `:ascii`, `:latin1`
@@ -801,7 +1094,11 @@ Encodings: `:utf-8` (default), `:ascii`, `:latin1`
 Allocate zeroed buffer.
 
 ```clojure
-(bytebuf-alloc size)  ; → bytebuf
+;; @todo
+(def buf (bytebuf-alloc 16))
+(bytebuf? buf)             ; => true
+(bytebuf-size buf)         ; => 16
+(bytebuf-read8 buf 0)      ; => 0
 ```
 
 ### `bytebuf-alloc-unsafe`
@@ -809,7 +1106,10 @@ Allocate zeroed buffer.
 Allocate uninitialized buffer.
 
 ```clojure
-(bytebuf-alloc-unsafe size)  ; → bytebuf
+;; @todo
+(def buf (bytebuf-alloc-unsafe 16))
+(bytebuf? buf)             ; => true
+(bytebuf-size buf)         ; => 16
 ```
 
 ### `bytebuf-size`
@@ -817,7 +1117,9 @@ Allocate uninitialized buffer.
 Buffer size.
 
 ```clojure
-(bytebuf-size buf)  ; → u64
+;; @todo
+(bytebuf-size (bytebuf-alloc 64))  ; => 64
+(bytebuf-size (bytebuf-alloc 0))   ; => 0
 ```
 
 ### `bytebuf->binary`
@@ -825,8 +1127,13 @@ Buffer size.
 Convert to immutable binary.
 
 ```clojure
-(bytebuf->binary buf)                 ; → binary
-(bytebuf->binary buf offset len)      ; → binary (slice)
+;; @todo
+(def buf (bytebuf-alloc 4))
+(bytebuf-write8! buf 0 1)
+(bytebuf-write8! buf 1 2)
+(binary? (bytebuf->binary buf))       ; => true
+(binary-size (bytebuf->binary buf))   ; => 4
+(bytebuf->binary buf 0 2)             ; => #bytes[1 2]
 ```
 
 ### Read Operations
@@ -834,38 +1141,42 @@ Convert to immutable binary.
 Native endianness:
 
 ```clojure
-(bytebuf-read8 buf offset)    ; → u8
-(bytebuf-read16 buf offset)   ; → u16
-(bytebuf-read32 buf offset)   ; → u32
-(bytebuf-read64 buf offset)   ; → u64
+;; @todo
+(def buf (bytebuf-alloc 8))
+(bytebuf-write8! buf 0 42)
+(bytebuf-read8 buf 0)      ; => 42
+(bytebuf-read8 buf 1)      ; => 0
 ```
 
 Little-endian:
 
 ```clojure
-(bytebuf-read16-le buf offset)   ; → u16
-(bytebuf-read32-le buf offset)   ; → u32
-(bytebuf-read64-le buf offset)   ; → u64
+;; @todo
+(def buf (bytebuf-alloc 8))
+(bytebuf-write16-le! buf 0 0x1234u16)
+(bytebuf-read16-le buf 0)  ; => 0x1234u16
+(bytebuf-read8 buf 0)      ; => 0x34
+(bytebuf-read8 buf 1)      ; => 0x12
 ```
 
 Big-endian:
 
 ```clojure
-(bytebuf-read16-be buf offset)   ; → u16
-(bytebuf-read32-be buf offset)   ; → u32
-(bytebuf-read64-be buf offset)   ; → u64
+;; @todo
+(def buf (bytebuf-alloc 8))
+(bytebuf-write16-be! buf 0 0x1234u16)
+(bytebuf-read16-be buf 0)  ; => 0x1234u16
+(bytebuf-read8 buf 0)      ; => 0x12
+(bytebuf-read8 buf 1)      ; => 0x34
 ```
 
 Signed:
 
 ```clojure
-(bytebuf-read-i8 buf offset)       ; → i8
-(bytebuf-read-i16-le buf offset)   ; → i16
-(bytebuf-read-i16-be buf offset)   ; → i16
-(bytebuf-read-i32-le buf offset)   ; → i32
-(bytebuf-read-i32-be buf offset)   ; → i32
-(bytebuf-read-i64-le buf offset)   ; → i64
-(bytebuf-read-i64-be buf offset)   ; → i64
+;; @todo
+(def buf (bytebuf-alloc 8))
+(bytebuf-write8! buf 0 255)
+(bytebuf-read-i8 buf 0)    ; => -1i8
 ```
 
 ### Write Operations
@@ -873,33 +1184,45 @@ Signed:
 Native endianness:
 
 ```clojure
-(bytebuf-write8! buf offset val)    ; → :ok
-(bytebuf-write16! buf offset val)   ; → :ok
-(bytebuf-write32! buf offset val)   ; → :ok
-(bytebuf-write64! buf offset val)   ; → :ok
+;; @todo
+(def buf (bytebuf-alloc 8))
+(bytebuf-write8! buf 0 42)     ; => :ok
+(bytebuf-write16! buf 2 1000)  ; => :ok
+(bytebuf-write32! buf 4 99999) ; => :ok
 ```
 
 Little-endian:
 
 ```clojure
-(bytebuf-write16-le! buf offset val)   ; → :ok
-(bytebuf-write32-le! buf offset val)   ; → :ok
-(bytebuf-write64-le! buf offset val)   ; → :ok
+;; @todo
+(def buf (bytebuf-alloc 8))
+(bytebuf-write16-le! buf 0 0xABCDu16)  ; => :ok
+(bytebuf-write32-le! buf 2 0x12345678u32)  ; => :ok
 ```
 
 Big-endian:
 
 ```clojure
-(bytebuf-write16-be! buf offset val)   ; → :ok
-(bytebuf-write32-be! buf offset val)   ; → :ok
-(bytebuf-write64-be! buf offset val)   ; → :ok
+;; @todo
+(def buf (bytebuf-alloc 8))
+(bytebuf-write16-be! buf 0 0xABCDu16)  ; => :ok
+(bytebuf-write32-be! buf 2 0x12345678u32)  ; => :ok
 ```
 
 ### Bulk Operations
 
 ```clojure
-(bytebuf-copy! dst dst-off src src-off len)   ; → :ok
-(bytebuf-fill! buf offset len val)            ; → :ok
+;; @todo
+(def src (bytebuf-alloc 4))
+(def dst (bytebuf-alloc 4))
+(bytebuf-write8! src 0 1)
+(bytebuf-write8! src 1 2)
+(bytebuf-copy! dst 0 src 0 2)  ; => :ok
+(bytebuf-read8 dst 0)          ; => 1
+(bytebuf-read8 dst 1)          ; => 2
+
+(bytebuf-fill! dst 0 4 0xFF)   ; => :ok
+(bytebuf-read8 dst 0)          ; => 255
 ```
 
 ---
@@ -907,20 +1230,20 @@ Big-endian:
 ## Endianness
 
 ```clojure
-(native-endian)        ; → :little or :big
+;; @todo
+(keyword? (native-endian))  ; => true
+;; Result is :little or :big depending on platform
+```
 
-(native->be16 val)     ; Convert native to big-endian
-(native->be32 val)
-(native->be64 val)
-(native->le16 val)     ; Convert native to little-endian
-(native->le32 val)
-(native->le64 val)
-(be->native16 val)     ; Convert big-endian to native
-(be->native32 val)
-(be->native64 val)
-(le->native16 val)     ; Convert little-endian to native
-(le->native32 val)
-(le->native64 val)
+Endian conversion:
+
+```clojure
+;; @todo
+;; On little-endian system:
+(native->be16 0x1234u16)   ; => 0x3412u16
+(be->native16 0x3412u16)   ; => 0x1234u16
+(native->le16 0x1234u16)   ; => 0x1234u16
+(le->native16 0x1234u16)   ; => 0x1234u16
 ```
 
 ---
@@ -930,29 +1253,47 @@ Big-endian:
 ### Physical Address
 
 ```clojure
-(paddr val)                      ; Create paddr from u64
-(paddr+ addr offset)             ; Add offset → paddr
-(paddr- addr1 addr2)             ; Difference → u64
-(paddr->u64 addr)                ; Extract as u64
-(paddr-align addr alignment)     ; Round up
-(paddr-align-down addr alignment); Round down
-(paddr-aligned? addr alignment)  ; Check alignment
-(paddr= addr1 addr2)             ; Equality
-(paddr< addr1 addr2)             ; Less than
+;; @todo
+(def p (paddr 0x1000u64))
+(paddr? p)                     ; => true
+(paddr->u64 p)                 ; => 0x1000u64
+(paddr->u64 (paddr+ p 0x100u64))  ; => 0x1100u64
+(paddr- (paddr 0x2000u64) (paddr 0x1000u64))  ; => 0x1000u64
+(paddr= p p)                   ; => true
+(paddr< p (paddr 0x2000u64))   ; => true
+```
+
+Alignment:
+
+```clojure
+;; @todo
+(paddr->u64 (paddr-align (paddr 0x1001u64) 0x1000u64))  ; => 0x2000u64
+(paddr->u64 (paddr-align-down (paddr 0x1FFFu64) 0x1000u64))  ; => 0x1000u64
+(paddr-aligned? (paddr 0x1000u64) 0x1000u64)  ; => true
+(paddr-aligned? (paddr 0x1001u64) 0x1000u64)  ; => false
 ```
 
 ### Virtual Address
 
 ```clojure
-(vaddr val)                      ; Create vaddr from u64
-(vaddr+ addr offset)             ; Add offset → vaddr
-(vaddr- addr1 addr2)             ; Difference → u64
-(vaddr->u64 addr)                ; Extract as u64
-(vaddr-align addr alignment)     ; Round up
-(vaddr-align-down addr alignment); Round down
-(vaddr-aligned? addr alignment)  ; Check alignment
-(vaddr= addr1 addr2)             ; Equality
-(vaddr< addr1 addr2)             ; Less than
+;; @todo
+(def v (vaddr 0x4000u64))
+(vaddr? v)                     ; => true
+(vaddr->u64 v)                 ; => 0x4000u64
+(vaddr->u64 (vaddr+ v 0x100u64))  ; => 0x4100u64
+(vaddr- (vaddr 0x5000u64) (vaddr 0x4000u64))  ; => 0x1000u64
+(vaddr= v v)                   ; => true
+(vaddr< v (vaddr 0x5000u64))   ; => true
+```
+
+Alignment:
+
+```clojure
+;; @todo
+(vaddr->u64 (vaddr-align (vaddr 0x1001u64) 0x1000u64))  ; => 0x2000u64
+(vaddr->u64 (vaddr-align-down (vaddr 0x1FFFu64) 0x1000u64))  ; => 0x1000u64
+(vaddr-aligned? (vaddr 0x1000u64) 0x1000u64)  ; => true
+(vaddr-aligned? (vaddr 0x1001u64) 0x1000u64)  ; => false
 ```
 
 ---
@@ -960,10 +1301,12 @@ Big-endian:
 ## PID
 
 ```clojure
-(pid realm-id local-id)   ; Create PID
-(pid-realm p)             ; Get realm ID
-(pid-local p)             ; Get local ID
-(pid= p1 p2)              ; Equality
+;; @todo
+(def my-pid (self))
+(pid? my-pid)              ; => true
+(realm-id? (pid-realm my-pid))  ; => true
+(integer? (pid-local my-pid))   ; => true
+(pid= my-pid my-pid)       ; => true
 ```
 
 ---
@@ -973,6 +1316,9 @@ Big-endian:
 ### Type Predicates
 
 ```clojure
+;; Capability predicates return boolean
+;; (Low-level kernel operations typically create these)
+(cap? x)  ; → boolean (generic capability check)
 (tcb-cap? x)
 (endpoint-cap? x)
 (notification-cap? x)
@@ -988,9 +1334,16 @@ Big-endian:
 ### Inspection
 
 ```clojure
-(cap-type cap)              ; → :tcb :endpoint :frame ...
-(cap-rights cap)            ; → #{:read :write :grant ...}
-(cap-has-right? cap right)  ; → boolean
+;; @todo
+;; cap-type returns type keyword
+;; (cap-type tcb)  ; => :tcb
+;; (cap-type frame)  ; => :frame
+
+;; cap-rights returns set of rights
+;; (set? (cap-rights cap))  ; => true
+
+;; cap-has-right? checks specific right
+;; (cap-has-right? cap :read)  ; => true or false
 ```
 
 ---
@@ -998,10 +1351,12 @@ Big-endian:
 ## Message Info
 
 ```clojure
-(msg-info label length caps)   ; Create msg-info
-(msg-info-label mi)            ; Get label
-(msg-info-length mi)           ; Get length
-(msg-info-caps mi)             ; Get caps count
+;; @todo
+(def mi (msg-info 100 4 2))
+(msg-info? mi)         ; => true
+(msg-info-label mi)    ; => 100
+(msg-info-length mi)   ; => 4
+(msg-info-caps mi)     ; => 2
 ```
 
 ---

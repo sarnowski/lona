@@ -2,6 +2,9 @@
 /target/
 /images/
 
+# Generated code (from scripts/extract_spec_tests.py)
+/crates/lona-vm/src/e2e/spec_data.rs
+
 # Exported images from Docker volume
 /dist/
 

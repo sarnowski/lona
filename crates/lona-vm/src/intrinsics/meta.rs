@@ -8,7 +8,7 @@ use crate::process::Process;
 use crate::realm::{Realm, VisitedTracker, deep_copy_to_realm};
 use crate::value::{HeapMap, HeapTuple, Pair, Value, VarContent, VarSlot};
 
-use super::IntrinsicError;
+use super::{IntrinsicError, XRegs};
 
 // --- Metadata intrinsics ---
 
@@ -16,47 +16,25 @@ use super::IntrinsicError;
 ///
 /// `(meta obj)` - returns metadata map or nil
 ///
-/// For vars (realm objects), checks the realm's metadata table.
-/// For process-heap objects, checks the process's metadata table.
-pub fn intrinsic_meta<M: MemorySpace>(proc: &Process, realm: &Realm, _mem: &M) -> Value {
-    let obj = proc.x_regs[1];
-
-    // Get the heap address of the object
-    let addr = match obj {
-        Value::String(addr)
-        | Value::Pair(addr)
-        | Value::Symbol(addr)
-        | Value::Keyword(addr)
-        | Value::Tuple(addr)
-        | Value::Vector(addr)
-        | Value::Map(addr)
-        | Value::Namespace(addr)
-        | Value::CompiledFn(addr)
-        | Value::Closure(addr) => addr,
-        // Vars are realm objects - check realm metadata table
-        Value::Var(addr) => {
-            return realm.get_metadata(addr).map_or(Value::Nil, Value::map);
-        }
-        // Immediates don't have metadata
-        Value::Nil | Value::Bool(_) | Value::Int(_) | Value::NativeFn(_) | Value::Unbound => {
-            return Value::Nil;
-        }
-    };
-
-    // Look up in process metadata table for non-var objects
-    proc.get_metadata(addr).map_or(Value::Nil, Value::map)
+/// All metadata is stored in the realm's metadata table.
+pub fn intrinsic_meta<M: MemorySpace>(x_regs: &XRegs, realm: &Realm, _mem: &M) -> Value {
+    let obj = x_regs[1];
+    realm.get_metadata_value(obj)
 }
 
 /// Attach metadata to an object.
 ///
 /// `(with-meta obj m)` - returns obj with metadata attached
+///
+/// All metadata is stored in the realm's metadata table.
 pub fn intrinsic_with_meta<M: MemorySpace>(
-    proc: &mut Process,
+    x_regs: &XRegs,
+    realm: &mut Realm,
     _mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let obj = proc.x_regs[1];
-    let meta = proc.x_regs[2];
+    let obj = x_regs[1];
+    let meta = x_regs[2];
 
     // Metadata must be a map (or nil to clear)
     let meta_addr = match meta {
@@ -97,8 +75,10 @@ pub fn intrinsic_with_meta<M: MemorySpace>(
         }
     };
 
-    // Store in process metadata table
-    proc.set_metadata(obj_addr, meta_addr);
+    // Store in realm metadata table
+    realm
+        .set_metadata(obj_addr, meta_addr)
+        .ok_or(IntrinsicError::OutOfMemory)?;
 
     // Return the same object (metadata doesn't change the value)
     Ok(obj)
@@ -109,19 +89,22 @@ pub fn intrinsic_with_meta<M: MemorySpace>(
 /// Check if value is a namespace.
 ///
 /// `(namespace? x)` - returns true if x is a namespace
-pub const fn intrinsic_is_namespace(proc: &Process) -> Value {
-    Value::bool(proc.x_regs[1].is_namespace())
+pub const fn intrinsic_is_namespace(x_regs: &XRegs) -> Value {
+    Value::bool(x_regs[1].is_namespace())
 }
 
 /// Create a namespace.
 ///
 /// `(create-ns sym)` - creates or returns existing namespace with given name
+///
+/// Namespaces are stored in the realm's namespace registry.
 pub fn intrinsic_create_ns<M: MemorySpace>(
-    proc: &mut Process,
+    x_regs: &XRegs,
+    realm: &mut Realm,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let name = proc.x_regs[1];
+    let name = x_regs[1];
 
     // Name must be a symbol
     let Value::Symbol(_) = name else {
@@ -132,20 +115,19 @@ pub fn intrinsic_create_ns<M: MemorySpace>(
         });
     };
 
-    // Create or find existing namespace
-    proc.get_or_create_namespace(mem, name)
+    // Create or find existing namespace in realm
+    realm
+        .get_or_create_namespace(mem, name)
         .ok_or(IntrinsicError::OutOfMemory)
 }
 
 /// Find a namespace by name.
 ///
 /// `(find-ns sym)` - returns namespace or nil if not found
-pub fn intrinsic_find_ns<M: MemorySpace>(
-    proc: &Process,
-    mem: &M,
-    id: u8,
-) -> Result<Value, IntrinsicError> {
-    let name = proc.x_regs[1];
+///
+/// Looks up namespace in the realm's namespace registry.
+pub fn intrinsic_find_ns(x_regs: &XRegs, realm: &Realm, id: u8) -> Result<Value, IntrinsicError> {
+    let name = x_regs[1];
 
     // Name must be a symbol
     let Value::Symbol(_) = name else {
@@ -156,19 +138,20 @@ pub fn intrinsic_find_ns<M: MemorySpace>(
         });
     };
 
-    // Find namespace, return nil if not found
-    Ok(proc.find_namespace(mem, name).unwrap_or(Value::Nil))
+    // Find namespace in realm, return nil if not found
+    Ok(realm.find_namespace(name).unwrap_or(Value::Nil))
 }
 
 /// Get namespace name.
 ///
 /// `(ns-name ns)` - returns the namespace's name symbol
 pub fn intrinsic_ns_name<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let ns_val = proc.x_regs[1];
+    let ns_val = x_regs[1];
 
     // Must be a namespace
     let ns = proc
@@ -186,11 +169,12 @@ pub fn intrinsic_ns_name<M: MemorySpace>(
 ///
 /// `(ns-map ns)` - returns the namespace's symbol->var mappings
 pub fn intrinsic_ns_map<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let ns_val = proc.x_regs[1];
+    let ns_val = x_regs[1];
 
     // Must be a namespace
     let ns = proc
@@ -209,8 +193,8 @@ pub fn intrinsic_ns_map<M: MemorySpace>(
 /// Check if value is callable (function, closure, or native function).
 ///
 /// `(fn? x)` - returns true if x is any callable type
-pub const fn intrinsic_is_fn(proc: &Process) -> Value {
-    Value::bool(proc.x_regs[1].is_fn())
+pub const fn intrinsic_is_fn(x_regs: &XRegs) -> Value {
+    Value::bool(x_regs[1].is_fn())
 }
 
 // --- Var intrinsics ---
@@ -218,21 +202,22 @@ pub const fn intrinsic_is_fn(proc: &Process) -> Value {
 /// Check if value is a var.
 ///
 /// `(var? x)` - returns true if x is a var
-pub const fn intrinsic_is_var(proc: &Process) -> Value {
-    Value::bool(proc.x_regs[1].is_var())
+pub const fn intrinsic_is_var(x_regs: &XRegs) -> Value {
+    Value::bool(x_regs[1].is_var())
 }
 
 /// Intern a symbol in a namespace, creating or updating a var.
 ///
 /// `(intern ns sym val)` - creates var in namespace with given value
 pub fn intrinsic_intern<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let ns = proc.x_regs[1];
-    let name = proc.x_regs[2];
-    let value = proc.x_regs[3];
+    let ns = x_regs[1];
+    let name = x_regs[2];
+    let value = x_regs[3];
 
     // First arg must be a namespace
     if !ns.is_namespace() {
@@ -261,11 +246,12 @@ pub fn intrinsic_intern<M: MemorySpace>(
 ///
 /// `(var-get var)` - returns the var's current value
 pub fn intrinsic_var_get<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &Process,
     mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let var = proc.x_regs[1];
+    let var = x_regs[1];
 
     // Must be a var
     if !var.is_var() {
@@ -299,13 +285,14 @@ pub fn intrinsic_var_get<M: MemorySpace>(
 /// It deep copies the value from the process heap to the realm's code region,
 /// then atomically updates the var's root binding.
 pub fn intrinsic_def_root<M: MemorySpace>(
-    proc: &Process,
+    x_regs: &XRegs,
+    _proc: &Process,
     realm: &mut Realm,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let var = proc.x_regs[1];
-    let value = proc.x_regs[2];
+    let var = x_regs[1];
+    let value = x_regs[2];
 
     // Must be a var
     if !var.is_var() {
@@ -336,12 +323,13 @@ pub fn intrinsic_def_root<M: MemorySpace>(
 /// This intrinsic is used by the `def` special form for process-bound vars.
 /// It sets the process-local binding without copying to the realm.
 pub fn intrinsic_def_binding<M: MemorySpace>(
+    x_regs: &XRegs,
     proc: &mut Process,
     _mem: &M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let var = proc.x_regs[1];
-    let value = proc.x_regs[2];
+    let var = x_regs[1];
+    let value = x_regs[2];
 
     // Extract var slot address
     let Value::Var(var_id) = var else {
@@ -368,13 +356,14 @@ pub fn intrinsic_def_binding<M: MemorySpace>(
 /// adds compiler keys (`:name` and `:ns`), then stores the mapping in the realm's
 /// metadata table.
 pub fn intrinsic_def_meta<M: MemorySpace>(
-    proc: &Process,
+    x_regs: &XRegs,
+    _proc: &Process,
     realm: &mut Realm,
     mem: &mut M,
     id: u8,
 ) -> Result<Value, IntrinsicError> {
-    let var = proc.x_regs[1];
-    let meta = proc.x_regs[2];
+    let var = x_regs[1];
+    let meta = x_regs[2];
 
     // First arg must be a var
     let Value::Var(var_addr) = var else {

@@ -15,8 +15,9 @@
 use crate::Vaddr;
 use crate::bytecode::{Chunk, encode_abc, encode_abx, op};
 use crate::platform::MockVSpace;
-use crate::process::Process;
+use crate::process::{Process, WorkerId};
 use crate::realm::{Realm, bootstrap};
+use crate::scheduler::Worker;
 use crate::value::Value;
 use crate::vm::{RunResult, Vm};
 
@@ -24,15 +25,15 @@ use crate::vm::{RunResult, Vm};
 // Helper functions
 // =============================================================================
 
-/// Create a test environment (process, realm, memory).
-fn create_test_env() -> (Process, Realm, MockVSpace) {
+/// Create a test environment (worker, process, realm, memory).
+fn create_test_env() -> (Worker, Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
     let mut mem = MockVSpace::new(256 * 1024, base);
     let young_base = base;
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
     let realm_base = base.add(128 * 1024);
     let mut realm = Realm::new(realm_base, 64 * 1024);
@@ -40,11 +41,13 @@ fn create_test_env() -> (Process, Realm, MockVSpace) {
     let result = bootstrap(&mut realm, &mut mem).unwrap();
     proc.bootstrap(result.ns_var, result.core_ns);
 
-    (proc, realm, mem)
+    let worker = Worker::new(WorkerId(0));
+    (worker, proc, realm, mem)
 }
 
 /// Run a chunk and return the result.
 fn run_chunk(
+    worker: &mut Worker,
     proc: &mut Process,
     mem: &mut MockVSpace,
     realm: &mut Realm,
@@ -52,7 +55,7 @@ fn run_chunk(
 ) -> RunResult {
     proc.set_chunk(chunk);
     proc.reset_reductions();
-    Vm::run(proc, mem, realm)
+    Vm::run(worker, proc, mem, realm)
 }
 
 // =============================================================================
@@ -61,7 +64,7 @@ fn run_chunk(
 
 #[test]
 fn is_nil_matches_nil() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // X0 = nil
     // IS_NIL X0, fail (if NOT nil, jump to fail)
@@ -77,13 +80,13 @@ fn is_nil_matches_nil() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: X0 = 0 (fail)
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_nil_rejects_integer() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // X0 = 42
     // IS_NIL X0, fail (if NOT nil, jump to fail)
@@ -99,13 +102,13 @@ fn is_nil_rejects_integer() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: X0 = 0 (fail)
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
 #[test]
 fn is_nil_rejects_false() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // X0 = false
     // IS_NIL X0, fail
@@ -117,7 +120,7 @@ fn is_nil_rejects_false() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -127,7 +130,7 @@ fn is_nil_rejects_false() {
 
 #[test]
 fn is_bool_matches_true() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADBOOL, 0, 1)); // 0: X0 = true
@@ -137,13 +140,13 @@ fn is_bool_matches_true() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_bool_matches_false() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADBOOL, 0, 0)); // 0: X0 = false
@@ -153,13 +156,13 @@ fn is_bool_matches_false() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_bool_rejects_nil() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADNIL, 0, 0)); // 0: X0 = nil
@@ -169,7 +172,7 @@ fn is_bool_rejects_nil() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -179,7 +182,7 @@ fn is_bool_rejects_nil() {
 
 #[test]
 fn is_int_matches_integer() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42
@@ -189,13 +192,13 @@ fn is_int_matches_integer() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_int_rejects_bool() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADBOOL, 0, 1)); // 0: X0 = true
@@ -205,7 +208,7 @@ fn is_int_rejects_bool() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -215,7 +218,7 @@ fn is_int_rejects_bool() {
 
 #[test]
 fn is_tuple_matches_tuple() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // Build a tuple first
     let mut chunk = Chunk::new();
@@ -229,13 +232,13 @@ fn is_tuple_matches_tuple() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 7: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 8: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_tuple_rejects_vector() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // Build a vector
     let mut chunk = Chunk::new();
@@ -247,13 +250,13 @@ fn is_tuple_rejects_vector() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 5: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
 #[test]
 fn is_tuple_rejects_integer() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42
@@ -263,7 +266,7 @@ fn is_tuple_rejects_integer() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -273,7 +276,7 @@ fn is_tuple_rejects_integer() {
 
 #[test]
 fn is_vector_matches_vector() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 1)); // 0: X1 = 1
@@ -284,13 +287,13 @@ fn is_vector_matches_vector() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 5: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_vector_rejects_tuple() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 1)); // 0: X1 = 1
@@ -301,7 +304,7 @@ fn is_vector_rejects_tuple() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 5: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -311,12 +314,12 @@ fn is_vector_rejects_tuple() {
 
 #[test]
 fn is_map_matches_map() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // Allocate a keyword for the map key
     let keyword = proc.alloc_keyword(&mut mem, "key").unwrap();
-    proc.x_regs[1] = keyword;
-    proc.x_regs[2] = Value::int(42);
+    worker.x_regs[1] = keyword;
+    worker.x_regs[2] = Value::int(42);
 
     let mut chunk = Chunk::new();
     // Note: X1 and X2 are already set by test setup
@@ -328,13 +331,13 @@ fn is_map_matches_map() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 5: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_map_rejects_tuple() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 1)); // 0: X1 = 1
@@ -345,7 +348,7 @@ fn is_map_rejects_tuple() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 5: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -355,11 +358,11 @@ fn is_map_rejects_tuple() {
 
 #[test]
 fn is_keyword_matches_keyword() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // Allocate a keyword
     let keyword = proc.alloc_keyword(&mut mem, "test").unwrap();
-    proc.x_regs[0] = keyword;
+    worker.x_regs[0] = keyword;
 
     let mut chunk = Chunk::new();
     // X0 already contains keyword
@@ -370,17 +373,17 @@ fn is_keyword_matches_keyword() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_keyword_rejects_symbol() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // Allocate a symbol
     let symbol = proc.alloc_symbol(&mut mem, "test").unwrap();
-    proc.x_regs[0] = symbol;
+    worker.x_regs[0] = symbol;
 
     let mut chunk = Chunk::new();
     // X0 already contains symbol
@@ -391,7 +394,7 @@ fn is_keyword_rejects_symbol() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -401,11 +404,11 @@ fn is_keyword_rejects_symbol() {
 
 #[test]
 fn is_string_matches_string() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // Allocate a string
     let string = proc.alloc_string(&mut mem, "hello").unwrap();
-    proc.x_regs[0] = string;
+    worker.x_regs[0] = string;
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::IS_STRING, 0, 4)); // 0: if NOT string, jump to 4
@@ -415,13 +418,13 @@ fn is_string_matches_string() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_string_rejects_integer() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42
@@ -431,7 +434,7 @@ fn is_string_rejects_integer() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -441,7 +444,7 @@ fn is_string_rejects_integer() {
 
 #[test]
 fn test_arity_matches_correct_size() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 1)); // 0: X1 = 1
@@ -455,13 +458,13 @@ fn test_arity_matches_correct_size() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 8: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 9: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn test_arity_rejects_wrong_size() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 1)); // 0: X1 = 1
@@ -474,13 +477,13 @@ fn test_arity_rejects_wrong_size() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 7: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 8: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
 #[test]
 fn test_arity_rejects_non_tuple() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42
@@ -491,7 +494,7 @@ fn test_arity_rejects_non_tuple() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 5: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -501,7 +504,7 @@ fn test_arity_rejects_non_tuple() {
 
 #[test]
 fn test_vec_len_matches_correct_size() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 1)); // 0: X1 = 1
@@ -514,13 +517,13 @@ fn test_vec_len_matches_correct_size() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 7: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 8: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn test_vec_len_rejects_wrong_size() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 1)); // 0: X1 = 1
@@ -532,7 +535,7 @@ fn test_vec_len_rejects_wrong_size() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 6: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
@@ -542,7 +545,7 @@ fn test_vec_len_rejects_wrong_size() {
 
 #[test]
 fn get_tuple_elem_extracts_first() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 10)); // 0: X1 = 10
@@ -553,13 +556,13 @@ fn get_tuple_elem_extracts_first() {
     chunk.emit(encode_abc(op::MOVE, 0, 4, 0)); // 5: X0 = X4
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(10))));
 }
 
 #[test]
 fn get_tuple_elem_extracts_middle() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 10)); // 0: X1 = 10
@@ -570,13 +573,13 @@ fn get_tuple_elem_extracts_middle() {
     chunk.emit(encode_abc(op::MOVE, 0, 4, 0)); // 5: X0 = X4
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(20))));
 }
 
 #[test]
 fn get_tuple_elem_extracts_last() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 10)); // 0: X1 = 10
@@ -587,7 +590,7 @@ fn get_tuple_elem_extracts_last() {
     chunk.emit(encode_abc(op::MOVE, 0, 4, 0)); // 5: X0 = X4
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(30))));
 }
 
@@ -597,7 +600,7 @@ fn get_tuple_elem_extracts_last() {
 
 #[test]
 fn get_vec_elem_extracts_first() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 100)); // 0: X1 = 100
@@ -607,13 +610,13 @@ fn get_vec_elem_extracts_first() {
     chunk.emit(encode_abc(op::MOVE, 0, 3, 0)); // 4: X0 = X3
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(100))));
 }
 
 #[test]
 fn get_vec_elem_extracts_last() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 1, 100)); // 0: X1 = 100
@@ -623,7 +626,7 @@ fn get_vec_elem_extracts_last() {
     chunk.emit(encode_abc(op::MOVE, 0, 3, 0)); // 4: X0 = X3
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(200))));
 }
 
@@ -633,7 +636,7 @@ fn get_vec_elem_extracts_last() {
 
 #[test]
 fn is_eq_matches_equal_integers() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42
@@ -645,13 +648,13 @@ fn is_eq_matches_equal_integers() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 6: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_eq_rejects_different_integers() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42
@@ -663,13 +666,13 @@ fn is_eq_rejects_different_integers() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 6: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
 #[test]
 fn is_eq_matches_nil() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADNIL, 0, 0)); // 0: X0 = nil
@@ -681,13 +684,13 @@ fn is_eq_matches_nil() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 6: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn is_eq_rejects_different_types() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42 (int)
@@ -699,19 +702,19 @@ fn is_eq_rejects_different_types() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 6: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
 #[test]
 fn is_eq_matches_same_keywords() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
-    // Allocate the same keyword twice (interned, so same address)
-    let kw1 = proc.alloc_keyword(&mut mem, "test").unwrap();
-    let kw2 = proc.alloc_keyword(&mut mem, "test").unwrap();
-    proc.x_regs[0] = kw1;
-    proc.x_regs[1] = kw2;
+    // Allocate the same keyword twice (interned at realm level, so same address)
+    let kw1 = realm.intern_keyword(&mut mem, "test").unwrap();
+    let kw2 = realm.intern_keyword(&mut mem, "test").unwrap();
+    worker.x_regs[0] = kw1;
+    worker.x_regs[1] = kw2;
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abc(op::IS_EQ, 0, 1, 4)); // 0: if X0 != X1, jump to 4
@@ -721,7 +724,7 @@ fn is_eq_matches_same_keywords() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
@@ -731,7 +734,7 @@ fn is_eq_matches_same_keywords() {
 
 #[test]
 fn jump_unconditional() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::JUMP, 0, 3)); // 0: jump to 3
@@ -740,13 +743,13 @@ fn jump_unconditional() {
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 3: X0 = 42
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 4: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(42))));
 }
 
 #[test]
 fn jump_forward_to_end() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42
@@ -755,7 +758,7 @@ fn jump_forward_to_end() {
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 3: should be skipped
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 4: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(42))));
 }
 
@@ -765,7 +768,7 @@ fn jump_forward_to_end() {
 
 #[test]
 fn jump_if_false_on_nil() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADNIL, 0, 0)); // 0: X0 = nil
@@ -775,13 +778,13 @@ fn jump_if_false_on_nil() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: X0 = 0 (jumped here)
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
 #[test]
 fn jump_if_false_on_false() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADBOOL, 0, 0)); // 0: X0 = false
@@ -791,13 +794,13 @@ fn jump_if_false_on_false() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: X0 = 0 (jumped here)
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(0))));
 }
 
 #[test]
 fn jump_if_false_not_taken_on_true() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADBOOL, 0, 1)); // 0: X0 = true
@@ -807,13 +810,13 @@ fn jump_if_false_not_taken_on_true() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: not reached
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn jump_if_false_not_taken_on_integer() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // 0: X0 = 42 (truthy)
@@ -823,14 +826,14 @@ fn jump_if_false_not_taken_on_integer() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: not reached
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
 #[test]
 fn jump_if_false_not_taken_on_zero() {
     // Zero is truthy in Lonala (only nil and false are falsy)
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 0: X0 = 0 (truthy!)
@@ -840,7 +843,7 @@ fn jump_if_false_not_taken_on_zero() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 4: not reached
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 5: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
@@ -852,7 +855,7 @@ fn jump_if_false_not_taken_on_zero() {
 fn pattern_match_literal_integer() {
     // Simulate: (match 42 42 :yes _ :no)
     // Should return 1 (representing :yes)
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     // Setup: value to match
@@ -869,7 +872,7 @@ fn pattern_match_literal_integer() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 6: return 0
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
@@ -877,7 +880,7 @@ fn pattern_match_literal_integer() {
 fn pattern_match_falls_through_to_wildcard() {
     // Simulate: (match 99 42 :no _ :yes)
     // Value 99 doesn't match 42, falls through to wildcard
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     // Setup: value to match
@@ -894,7 +897,7 @@ fn pattern_match_falls_through_to_wildcard() {
     chunk.emit(encode_abx(op::LOADINT, 0, 1)); // 6: success (wildcard matched)
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 7: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(1))));
 }
 
@@ -902,7 +905,7 @@ fn pattern_match_falls_through_to_wildcard() {
 fn pattern_match_tuple_destructure() {
     // Simulate: (match [1 2 3] [a b c] (+ a c))
     // Returns a + c = 1 + 3 = 4
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     // Setup: build tuple [1, 2, 3] in X0
@@ -934,7 +937,7 @@ fn pattern_match_tuple_destructure() {
     chunk.emit(encode_abx(op::LOADINT, 0, 0)); // 14: fail
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 15: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(4))));
 }
 
@@ -945,7 +948,7 @@ fn pattern_match_tuple_destructure() {
 #[test]
 fn tuple_slice_from_middle() {
     // TUPLE_SLICE [1 2 3] starting at index 1 -> [2 3]
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     // Build tuple [1, 2, 3] in X0
@@ -961,14 +964,14 @@ fn tuple_slice_from_middle() {
     chunk.emit(encode_abc(op::GET_TUPLE_ELEM, 0, 4, 0)); // 5: X0 = X4[0]
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // 6: halt
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(2))));
 }
 
 #[test]
 fn tuple_slice_from_end() {
     // TUPLE_SLICE [1 2 3] starting at index 2 -> [3]
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     // Build tuple [1, 2, 3] in X0
@@ -984,14 +987,14 @@ fn tuple_slice_from_end() {
     chunk.emit(encode_abc(op::GET_TUPLE_ELEM, 0, 4, 0));
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     assert!(matches!(result, RunResult::Completed(Value::Int(3))));
 }
 
 #[test]
 fn tuple_slice_empty_result() {
     // TUPLE_SLICE [1 2 3] starting at index 3 -> []
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     // Build tuple [1, 2, 3] in X0
@@ -1007,7 +1010,7 @@ fn tuple_slice_empty_result() {
     chunk.emit(encode_abc(op::MOVE, 0, 4, 0));
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     // Should be an empty tuple
     if let RunResult::Completed(val) = result {
         assert!(val.is_tuple());
@@ -1021,7 +1024,7 @@ fn tuple_slice_empty_result() {
 #[test]
 fn tuple_slice_full_copy() {
     // TUPLE_SLICE [1 2 3] starting at index 0 -> [1 2 3]
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     // Build tuple [1, 2, 3] in X0
@@ -1037,7 +1040,7 @@ fn tuple_slice_full_copy() {
     chunk.emit(encode_abc(op::MOVE, 0, 4, 0));
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     if let RunResult::Completed(val) = result {
         assert!(val.is_tuple());
         let len = proc.read_tuple_len(&mem, val).unwrap();
@@ -1056,7 +1059,7 @@ fn tuple_slice_full_copy() {
 #[test]
 fn tuple_slice_beyond_length() {
     // TUPLE_SLICE [1 2 3] starting at index 5 -> []
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let mut chunk = Chunk::new();
     // Build tuple [1, 2, 3] in X0
@@ -1072,7 +1075,7 @@ fn tuple_slice_beyond_length() {
     chunk.emit(encode_abc(op::MOVE, 0, 4, 0));
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    let result = run_chunk(&mut proc, &mut mem, &mut realm, chunk);
+    let result = run_chunk(&mut worker, &mut proc, &mut mem, &mut realm, chunk);
     if let RunResult::Completed(val) = result {
         assert!(val.is_tuple());
         let len = proc.read_tuple_len(&mem, val).unwrap();

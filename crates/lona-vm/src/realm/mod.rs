@@ -126,6 +126,9 @@ impl Realm {
     /// Allocate bytes from the code region (append-only, grows up).
     ///
     /// Returns `None` if the code region is full.
+    ///
+    /// Callers must request appropriate alignment for the type being allocated.
+    /// For `Value` types, use 8-byte alignment. For strings, 4-byte is sufficient.
     pub const fn alloc(&mut self, size: usize, align: usize) -> Option<Vaddr> {
         if size == 0 {
             return Some(self.code_top);
@@ -178,7 +181,8 @@ impl Realm {
             if header.len as usize == name.len() {
                 let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
                 let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
+                // Use byte-by-byte comparison to avoid SIMD alignment issues on x86_64
+                if bytes_eq(bytes, name.as_bytes()) {
                     // Found existing interned symbol
                     return Some(Value::symbol(addr));
                 }
@@ -224,7 +228,7 @@ impl Realm {
             if header.len as usize == name.len() {
                 let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
                 let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
+                if bytes_eq(bytes, name.as_bytes()) {
                     return Some(Value::symbol(addr));
                 }
             }
@@ -248,7 +252,7 @@ impl Realm {
             if header.len as usize == name.len() {
                 let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
                 let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
+                if bytes_eq(bytes, name.as_bytes()) {
                     // Found existing interned keyword
                     return Some(Value::keyword(addr));
                 }
@@ -294,7 +298,7 @@ impl Realm {
             if header.len as usize == name.len() {
                 let data_addr = addr.add(HeapString::HEADER_SIZE as u64);
                 let bytes = mem.slice(data_addr, header.len as usize);
-                if bytes == name.as_bytes() {
+                if bytes_eq(bytes, name.as_bytes()) {
                     return Some(Value::keyword(addr));
                 }
             }
@@ -561,4 +565,46 @@ impl Realm {
         }
         None
     }
+
+    /// Get metadata for a value.
+    ///
+    /// Returns the metadata Value (usually a map) if the value has metadata,
+    /// `Value::Nil` otherwise.
+    #[must_use]
+    pub fn get_metadata_value(&self, value: Value) -> Value {
+        // Extract address from heap-allocated values (immediate values cannot have metadata)
+        let (Value::Symbol(obj_addr)
+        | Value::Keyword(obj_addr)
+        | Value::String(obj_addr)
+        | Value::Tuple(obj_addr)
+        | Value::Vector(obj_addr)
+        | Value::Map(obj_addr)
+        | Value::Pair(obj_addr)
+        | Value::CompiledFn(obj_addr)
+        | Value::Closure(obj_addr)
+        | Value::Var(obj_addr)
+        | Value::Namespace(obj_addr)) = value
+        else {
+            return Value::Nil;
+        };
+
+        self.get_metadata(obj_addr).map_or(Value::Nil, Value::map)
+    }
+}
+
+/// Compare two byte slices byte-by-byte.
+///
+/// This avoids SIMD-optimized comparisons that may have alignment requirements
+/// not met in the seL4 environment (static data may not be properly aligned
+/// for SIMD operations on `x86_64`).
+fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    for i in 0..a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+    }
+    true
 }

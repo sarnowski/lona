@@ -188,12 +188,54 @@ pub struct Sel4VSpace;
 #[cfg(not(any(test, feature = "std")))]
 impl MemorySpace for Sel4VSpace {
     fn read<T: Copy>(&self, vaddr: Vaddr) -> T {
-        // SAFETY: Caller ensures vaddr is valid and mapped
+        let addr = vaddr.as_u64();
+        let align = core::mem::align_of::<T>() as u64;
+        let size = core::mem::size_of::<T>();
+
+        // Diagnostic assertion: catch misalignment before Rust's precondition check
+        if addr == 0 {
+            sel4::debug_println!(
+                "DIAGNOSTIC: Null pointer in read<{}>",
+                core::any::type_name::<T>()
+            );
+        }
+        if addr % align != 0 {
+            sel4::debug_println!(
+                "DIAGNOSTIC: Misaligned read<{}> at {:#x} (need {}-byte alignment, size={})",
+                core::any::type_name::<T>(),
+                addr,
+                align,
+                size
+            );
+        }
+
+        // SAFETY: Caller ensures vaddr is valid, mapped, and properly aligned.
         unsafe { vaddr.as_ptr::<T>().read() }
     }
 
     fn write<T>(&mut self, vaddr: Vaddr, value: T) {
-        // SAFETY: Caller ensures vaddr is valid and mapped
+        let addr = vaddr.as_u64();
+        let align = core::mem::align_of::<T>() as u64;
+        let size = core::mem::size_of::<T>();
+
+        // Diagnostic assertion: catch misalignment before Rust's precondition check
+        if addr == 0 {
+            sel4::debug_println!(
+                "DIAGNOSTIC: Null pointer in write<{}>",
+                core::any::type_name::<T>()
+            );
+        }
+        if addr % align != 0 {
+            sel4::debug_println!(
+                "DIAGNOSTIC: Misaligned write<{}> at {:#x} (need {}-byte alignment, size={})",
+                core::any::type_name::<T>(),
+                addr,
+                align,
+                size
+            );
+        }
+
+        // SAFETY: Caller ensures vaddr is valid, mapped, and properly aligned.
         unsafe {
             vaddr.as_mut_ptr::<T>().write(value);
         }
@@ -217,7 +259,8 @@ impl MemorySpace for Sel4VSpace {
     }
 
     fn read_u64_acquire(&self, vaddr: Vaddr) -> u64 {
-        // SAFETY: Caller ensures vaddr is valid, mapped, and properly aligned for u64
+        // SAFETY: Caller ensures vaddr is valid, mapped, and 8-byte aligned.
+        // Uses AtomicU64 for proper Acquire semantics.
         unsafe {
             let atomic = &*(vaddr.as_ptr::<u64>() as *const core::sync::atomic::AtomicU64);
             atomic.load(core::sync::atomic::Ordering::Acquire)
@@ -225,8 +268,9 @@ impl MemorySpace for Sel4VSpace {
     }
 
     fn write_u64_release(&self, vaddr: Vaddr, value: u64) {
-        // SAFETY: Caller ensures vaddr is valid, mapped, and properly aligned for u64
-        // Note: Takes &self because atomic operations don't require &mut
+        // SAFETY: Caller ensures vaddr is valid, mapped, and 8-byte aligned.
+        // Uses AtomicU64 for proper Release semantics.
+        // Note: Takes &self because atomic operations are inherently thread-safe.
         unsafe {
             let atomic = &*(vaddr.as_ptr::<u64>() as *const core::sync::atomic::AtomicU64);
             atomic.store(value, core::sync::atomic::Ordering::Release);

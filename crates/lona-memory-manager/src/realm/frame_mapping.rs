@@ -110,8 +110,8 @@ fn allocate_frame(
     #[cfg(target_arch = "x86_64")]
     let blueprint = ObjectBlueprint::Arch(sel4::ObjectBlueprintArch::_4k);
 
-    let (ut_slot, _, _) = untypeds
-        .allocate(12, slots, false) // 4KB = 2^12
+    let (ut_slot, _) = untypeds
+        .allocate(12, false) // 4KB = 2^12
         .ok_or(RealmError::OutOfMemory)?;
 
     // ut_slot is an absolute slot number, use `Cap::from_bits` directly

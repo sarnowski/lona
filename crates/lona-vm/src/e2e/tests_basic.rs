@@ -17,6 +17,7 @@ use core::result::Result::{self, Err, Ok};
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::reader::read;
+use crate::realm::Realm;
 use crate::types::{Paddr, Vaddr};
 use crate::uart::Uart;
 use crate::value::print_value;
@@ -24,6 +25,7 @@ use crate::value::print_value;
 /// Test that VM initialization succeeds.
 pub fn test_vm_init<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -34,6 +36,7 @@ pub fn test_vm_init<M: MemorySpace, U: Uart>(
 /// Test that serial output works.
 pub fn test_serial_output<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -46,6 +49,7 @@ pub fn test_serial_output<M: MemorySpace, U: Uart>(
 /// Test memory type newtype wrappers.
 pub fn test_memory_types<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -75,6 +79,7 @@ pub fn test_memory_types<M: MemorySpace, U: Uart>(
 /// Test address type operations.
 pub fn test_address_types<M: MemorySpace, U: Uart>(
     _proc: &mut Process,
+    _realm: &mut Realm,
     _mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
@@ -114,6 +119,9 @@ pub fn test_address_types<M: MemorySpace, U: Uart>(
 const OUTPUT_BUFFER_SIZE: usize = 256;
 
 /// A simple buffer that implements Uart for capturing output.
+///
+/// Uses 16-byte alignment to satisfy x86_64 SIMD requirements for string comparison.
+#[repr(C, align(16))]
 pub struct OutputBuffer {
     data: [u8; OUTPUT_BUFFER_SIZE],
     len: usize,
@@ -163,11 +171,12 @@ impl Uart for OutputBuffer {
 /// Expected output: `(quote (1 2 3))`
 pub fn test_read_quoted_list<M: MemorySpace, U: Uart>(
     proc: &mut Process,
+    realm: &mut Realm,
     mem: &mut M,
     _uart: &mut U,
 ) -> Result<(), &'static str> {
     // Read the input using the same function as the REPL
-    let value = match read("'(1 2 3)", proc, mem) {
+    let value = match read("'(1 2 3)", proc, realm, mem) {
         Ok(Some(v)) => v,
         Ok(None) => return Err("read returned None"),
         Err(_) => return Err("read failed"),

@@ -21,9 +21,10 @@ use super::*;
 use crate::Vaddr;
 use crate::compiler::compile;
 use crate::platform::MockVSpace;
-use crate::process::Process;
+use crate::process::{Process, WorkerId};
 use crate::reader::read;
 use crate::realm::{Realm, bootstrap};
+use crate::scheduler::Worker;
 
 /// Create a test environment with bootstrapped realm and process.
 ///
@@ -35,7 +36,7 @@ pub fn setup() -> Option<(Process, Realm, MockVSpace)> {
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
     // Create realm at a higher address
     let realm_base = base.add(128 * 1024);
@@ -57,13 +58,15 @@ pub fn eval(
     realm: &mut Realm,
     mem: &mut MockVSpace,
 ) -> Result<Value, RuntimeError> {
-    let expr = read(src, proc, mem)
+    let expr = read(src, proc, realm, mem)
         .ok()
         .flatten()
         .ok_or(RuntimeError::NoCode)?;
     let chunk = compile(expr, proc, mem, realm).map_err(|_| RuntimeError::NoCode)?;
     proc.set_chunk(chunk);
-    let result = execute(proc, mem, realm);
+    let mut worker = Worker::new(WorkerId(0));
+    let result = execute(&mut worker, proc, mem, realm);
+    worker.reset_x_regs();
     proc.reset();
     result
 }

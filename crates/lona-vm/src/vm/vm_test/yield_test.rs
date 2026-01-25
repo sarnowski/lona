@@ -9,22 +9,23 @@ use super::{eval, setup};
 use crate::Vaddr;
 use crate::bytecode::{Chunk, encode_abc, encode_abx, op};
 use crate::platform::MockVSpace;
-use crate::process::{MAX_REDUCTIONS, Process};
+use crate::process::{MAX_REDUCTIONS, Process, WorkerId};
 use crate::realm::{Realm, bootstrap};
+use crate::scheduler::Worker;
 use crate::value::Value;
 use crate::vm::{RunResult, Vm};
 
 // --- Helper functions ---
 
-/// Create a test environment (process, realm, memory).
-fn create_test_env() -> (Process, Realm, MockVSpace) {
+/// Create a test environment (worker, process, realm, memory).
+fn create_test_env() -> (Worker, Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
     let mut mem = MockVSpace::new(256 * 1024, base);
     let young_base = base;
     let young_size = 64 * 1024;
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
-    let mut proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let mut proc = Process::new(young_base, young_size, old_base, old_size);
 
     let realm_base = base.add(128 * 1024);
     let mut realm = Realm::new(realm_base, 64 * 1024);
@@ -32,7 +33,8 @@ fn create_test_env() -> (Process, Realm, MockVSpace) {
     let result = bootstrap(&mut realm, &mut mem).unwrap();
     proc.bootstrap(result.ns_var, result.core_ns);
 
-    (proc, realm, mem)
+    let worker = Worker::new(WorkerId(0));
+    (worker, proc, realm, mem)
 }
 
 /// Create a simple chunk with LOADINT instructions followed by HALT.
@@ -49,33 +51,33 @@ fn create_loadint_chunk(count: usize) -> Chunk {
 
 #[test]
 fn vm_yields_when_budget_exhausted() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // 10 LOADINT instructions + HALT
     let chunk = create_loadint_chunk(10);
     proc.set_chunk(chunk);
     proc.reductions = 5; // Budget for only 5 instructions
 
-    let result = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(result, RunResult::Yielded));
     assert_eq!(proc.ip, 5); // Should have executed 5 instructions
 }
 
 #[test]
 fn vm_completes_with_sufficient_budget() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let chunk = create_loadint_chunk(5);
     proc.set_chunk(chunk);
     proc.reductions = 100;
 
-    let result = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(result, RunResult::Completed(_)));
 }
 
 #[test]
 fn vm_resumes_correctly() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // 6 LOADINT + HALT
     // Note: HALT returns X0, so we put the final result in X0
@@ -92,29 +94,29 @@ fn vm_resumes_correctly() {
     proc.reductions = 3; // First run: execute 3 instructions
 
     // First run - should yield after 3 instructions
-    let result1 = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result1 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(result1, RunResult::Yielded));
-    assert_eq!(proc.x_regs[1], Value::int(1));
-    assert_eq!(proc.x_regs[2], Value::int(2));
-    assert_eq!(proc.x_regs[3], Value::int(3));
-    assert_eq!(proc.x_regs[4], Value::Nil); // Not yet executed
+    assert_eq!(worker.x_regs[1], Value::int(1));
+    assert_eq!(worker.x_regs[2], Value::int(2));
+    assert_eq!(worker.x_regs[3], Value::int(3));
+    assert_eq!(worker.x_regs[4], Value::Nil); // Not yet executed
 
     // Resume with more budget
     proc.reductions = 100;
-    let result2 = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result2 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     assert!(matches!(result2, RunResult::Completed(v) if v == Value::int(42)));
 }
 
 #[test]
 fn reductions_are_consumed() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let chunk = create_loadint_chunk(3);
     proc.set_chunk(chunk);
     proc.reductions = 100;
     proc.total_reductions = 0;
 
-    let _ = Vm::run(&mut proc, &mut mem, &mut realm);
+    let _ = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
 
     // 3 LOADINT (cost 1 each) + 1 HALT (cost 0, returns before consuming)
     // So 3 reductions should be consumed
@@ -126,7 +128,7 @@ fn reductions_are_consumed() {
 
 #[test]
 fn stack_frame_allocate_deallocate() {
-    let (mut proc, _, mut mem) = create_test_env();
+    let (mut _worker, mut proc, _, mut mem) = create_test_env();
 
     // Set up initial chunk and allocate it on heap
     let chunk = create_loadint_chunk(1);
@@ -155,7 +157,7 @@ fn stack_frame_allocate_deallocate() {
 
 #[test]
 fn stack_frame_overflow_detection() {
-    let (mut proc, _, mut mem) = create_test_env();
+    let (mut _worker, mut proc, _, mut mem) = create_test_env();
 
     // Allocate frames until stack overflow
     let mut frame_count = 0;
@@ -175,7 +177,7 @@ fn stack_frame_overflow_detection() {
 
 #[test]
 fn deallocate_at_top_level_returns_none() {
-    let (mut proc, _, mem) = create_test_env();
+    let (mut _worker, mut proc, _, mem) = create_test_env();
     assert!(proc.at_top_level());
     assert!(proc.deallocate_frame(&mem).is_none());
 }
@@ -185,9 +187,10 @@ fn deallocate_at_top_level_returns_none() {
 #[test]
 fn yield_during_simple_function_call() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let mut worker = Worker::new(WorkerId(0));
 
     // Compile a function call that will yield
-    let result = crate::reader::read("((fn* [x] (+ x 1)) 5)", &mut proc, &mut mem)
+    let result = crate::reader::read("((fn* [x] (+ x 1)) 5)", &mut proc, &mut realm, &mut mem)
         .ok()
         .flatten()
         .unwrap();
@@ -197,13 +200,13 @@ fn yield_during_simple_function_call() {
     // Very small budget to force yield inside function
     proc.reductions = 2;
 
-    let result1 = Vm::run(&mut proc, &mut mem, &mut realm);
+    let result1 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
     // May yield or complete depending on exact instruction count
     match result1 {
         RunResult::Yielded => {
             // Resume and complete
             proc.reductions = 100;
-            let result2 = Vm::run(&mut proc, &mut mem, &mut realm);
+            let result2 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
             assert!(matches!(result2, RunResult::Completed(v) if v == Value::int(6)));
         }
         RunResult::Completed(v) => {
@@ -216,6 +219,7 @@ fn yield_during_simple_function_call() {
 #[test]
 fn yield_and_resume_nested_calls() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let mut worker = Worker::new(WorkerId(0));
 
     // Test yield and resume with nested function calls
     // Define several functions and call them in a chain
@@ -250,7 +254,7 @@ fn yield_and_resume_nested_calls() {
     proc.reset();
 
     // Compile (add4 10) - should return 14
-    let expr = crate::reader::read("(add4 10)", &mut proc, &mut mem)
+    let expr = crate::reader::read("(add4 10)", &mut proc, &mut realm, &mut mem)
         .ok()
         .flatten()
         .unwrap();
@@ -262,7 +266,7 @@ fn yield_and_resume_nested_calls() {
     let mut yield_count = 0;
 
     loop {
-        match Vm::run(&mut proc, &mut mem, &mut realm) {
+        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
             RunResult::Completed(v) => {
                 assert_eq!(v, Value::int(14));
                 break;
@@ -295,6 +299,7 @@ fn run_result_methods() {
 #[test]
 fn execute_handles_yielding_transparently() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
+    // Note: eval() creates its own Worker internally
 
     // The execute() function should handle yielding internally
     // and always run to completion
@@ -305,7 +310,7 @@ fn execute_handles_yielding_transparently() {
 
 #[test]
 fn reset_reductions_sets_max() {
-    let (mut proc, _, _) = create_test_env();
+    let (mut _worker, mut proc, _, _) = create_test_env();
     proc.reductions = 0;
     proc.reset_reductions();
     assert_eq!(proc.reductions, MAX_REDUCTIONS);
@@ -327,7 +332,7 @@ const STRESS_BUDGET_PER_SLICE: u32 = 100;
 /// 2. The VM eventually completes with the correct result
 #[test]
 fn stress_many_yields() {
-    let (mut proc, mut realm, mut mem) = create_test_env();
+    let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     // Create a chunk with 1000 LOADINT instructions to simulate a long computation.
     // Each LOADINT costs 1 reduction, so with budget=100 we should yield ~10 times.
@@ -345,7 +350,7 @@ fn stress_many_yields() {
     let mut yield_count = 0;
 
     loop {
-        match Vm::run(&mut proc, &mut mem, &mut realm) {
+        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
             RunResult::Completed(v) => {
                 // Final value should be the last iteration (999)
                 assert_eq!(v, Value::int(999));
@@ -381,6 +386,7 @@ fn stress_many_yields() {
 #[allow(clippy::too_many_lines)]
 fn stress_recursive_with_yields() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let mut worker = Worker::new(WorkerId(0));
 
     // Create a chain of 10 add functions to simulate deep nesting.
     // Each function adds its number and calls the next one.
@@ -458,7 +464,7 @@ fn stress_recursive_with_yields() {
     proc.reset();
 
     // Compile (a1 0) - result should be 0 + 1 + 2 + ... + 10 = 55
-    let expr = crate::reader::read("(a1 0)", &mut proc, &mut mem)
+    let expr = crate::reader::read("(a1 0)", &mut proc, &mut realm, &mut mem)
         .ok()
         .flatten()
         .unwrap();
@@ -470,7 +476,7 @@ fn stress_recursive_with_yields() {
     let mut yield_count = 0;
 
     loop {
-        match Vm::run(&mut proc, &mut mem, &mut realm) {
+        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
             RunResult::Completed(v) => {
                 // sum(1..10) = 55
                 assert_eq!(v, Value::int(55));
@@ -503,6 +509,7 @@ fn stress_recursive_with_yields() {
 #[test]
 fn stress_deep_call_chain_yield_resume() {
     let (mut proc, mut realm, mut mem) = setup().unwrap();
+    let mut worker = Worker::new(WorkerId(0));
 
     // Define a chain of 5 functions that each call the next
     eval(
@@ -544,7 +551,7 @@ fn stress_deep_call_chain_yield_resume() {
     proc.reset();
 
     // Compile (f1 0) - result should be 0 + 1 + 2 + 3 + 4 + 5 = 15
-    let expr = crate::reader::read("(f1 0)", &mut proc, &mut mem)
+    let expr = crate::reader::read("(f1 0)", &mut proc, &mut realm, &mut mem)
         .ok()
         .flatten()
         .unwrap();
@@ -556,7 +563,7 @@ fn stress_deep_call_chain_yield_resume() {
     let mut yield_count = 0;
 
     loop {
-        match Vm::run(&mut proc, &mut mem, &mut realm) {
+        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
             RunResult::Completed(v) => {
                 assert_eq!(v, Value::int(15));
                 break;

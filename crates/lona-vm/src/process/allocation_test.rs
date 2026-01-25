@@ -20,7 +20,7 @@ pub(super) fn setup() -> (Process, MockVSpace) {
     let old_base = base.add(young_size as u64);
     let old_size = 16 * 1024;
 
-    let proc = Process::new(1, young_base, young_size, old_base, old_size);
+    let proc = Process::new(young_base, young_size, old_base, old_size);
     (proc, mem)
 }
 
@@ -28,7 +28,7 @@ pub(super) fn setup() -> (Process, MockVSpace) {
 fn process_initial_state() {
     let (proc, _mem) = setup();
 
-    assert_eq!(proc.pid, 1);
+    assert!(proc.pid.is_null());
     assert_eq!(proc.status, ProcessStatus::Ready);
     assert_eq!(proc.ip, 0);
     assert!(proc.chunk.is_none());
@@ -101,7 +101,7 @@ fn alloc_multiple() {
 fn alloc_oom() {
     let base = Vaddr::new(0x1_0000);
     let mem = MockVSpace::new(256, base);
-    let mut proc = Process::new(1, base, 100, base.add(100), 50);
+    let mut proc = Process::new(base, 100, base.add(100), 50);
 
     // First allocation should succeed
     let addr1 = proc.alloc(50, 1);

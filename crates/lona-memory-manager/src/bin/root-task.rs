@@ -16,7 +16,7 @@ use lona_memory_manager::realm;
 use lona_memory_manager::slots::SlotAllocator;
 use lona_memory_manager::untyped::UntypedAllocator;
 use sel4::Cap;
-use sel4::cap_type::{Endpoint, SchedContext, SchedControl, VSpace};
+use sel4::cap_type::{Endpoint, SchedContext, SchedControl, Tcb, VSpace};
 use sel4_root_task::root_task;
 
 /// Entry point for the Lona Memory Manager.
@@ -80,10 +80,11 @@ fn main(bootinfo: &sel4::BootInfoPtr) -> ! {
     let vspace: Cap<VSpace> = Cap::from_bits(init_realm.vspace_slot as u64);
     let endpoint: Cap<Endpoint> = Cap::from_bits(init_realm.endpoint_slot as u64);
     let sched_context: Cap<SchedContext> = Cap::from_bits(init_realm.sched_context_slot as u64);
+    let tcb: Cap<Tcb> = Cap::from_bits(init_realm.tcb_slot as u64);
 
     // Calculate initial process pool address (after INIT_HEAP_SIZE already mapped)
     let init_heap_pages = (INIT_HEAP_SIZE / PAGE_SIZE) as u64;
-    let mut realm_entry = RealmEntry::new(init_realm.id, vspace, endpoint, sched_context);
+    let mut realm_entry = RealmEntry::new(init_realm.id, vspace, endpoint, sched_context, tcb);
     realm_entry.next_process_pool = PROCESS_POOL_BASE + init_heap_pages * PAGE_SIZE;
 
     if let Err(e) = event_loop.register_realm(realm_entry) {

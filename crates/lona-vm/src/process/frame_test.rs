@@ -277,7 +277,7 @@ fn stack_overflow_detection() {
     let base = Vaddr::new(0x1_0000);
     let mut mem = MockVSpace::new(4096, base);
     // Very small heap/stack region
-    let mut proc = Process::new(1, base, 512, base.add(512), 256);
+    let mut proc = Process::new(base, 512, base.add(512), 256);
 
     // Fill the stack by allocating frames
     let mut count = 0;
@@ -299,7 +299,7 @@ fn y_register_overflow_detection() {
     let base = Vaddr::new(0x1_0000);
     let mut mem = MockVSpace::new(4096, base);
     // Small heap/stack region
-    let mut proc = Process::new(1, base, 512, base.add(512), 256);
+    let mut proc = Process::new(base, 512, base.add(512), 256);
 
     proc.allocate_frame(&mut mem, 0, Vaddr::new(0)).unwrap();
 

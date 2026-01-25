@@ -13,8 +13,11 @@ use crate::compiler::{self, CompileError};
 use crate::intrinsics::IntrinsicError;
 use crate::platform::MemorySpace;
 use crate::process::Process;
+#[cfg(test)]
+use crate::process::WorkerId;
 use crate::reader::{ReadError, read};
 use crate::realm::Realm;
+use crate::scheduler::Worker;
 use crate::uart::{Uart, UartExt};
 use crate::value::print_value;
 use crate::vm::{self, RuntimeError};
@@ -27,11 +30,13 @@ const LINE_BUFFER_SIZE: usize = 256;
 /// This function never returns under normal operation.
 ///
 /// # Arguments
+/// * `worker` - Worker providing X registers for execution
 /// * `proc` - Process for execution (should be bootstrapped)
 /// * `mem` - Memory space
 /// * `realm` - Realm (should be bootstrapped, mutable for `def`)
 /// * `uart` - UART for I/O
 pub fn run<M: MemorySpace, U: Uart>(
+    worker: &mut Worker,
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
@@ -58,7 +63,7 @@ pub fn run<M: MemorySpace, U: Uart>(
         };
 
         // Parse
-        let expr = match read(line, proc, mem) {
+        let expr = match read(line, proc, realm, mem) {
             Ok(Some(v)) => v,
             Ok(None) => continue, // Empty input
             Err(e) => {
@@ -82,12 +87,13 @@ pub fn run<M: MemorySpace, U: Uart>(
 
         // Set chunk and execute
         proc.set_chunk(chunk);
-        let result = match vm::execute(proc, mem, realm) {
+        let result = match vm::execute(worker, proc, mem, realm) {
             Ok(v) => v,
             Err(e) => {
                 uart.write_str("Error: ");
                 print_runtime_error(&e, uart);
                 uart.write_byte(b'\n');
+                worker.reset_x_regs();
                 proc.reset();
                 continue;
             }
@@ -98,6 +104,7 @@ pub fn run<M: MemorySpace, U: Uart>(
         uart.write_byte(b'\n');
 
         // Reset for next expression
+        worker.reset_x_regs();
         proc.reset();
     }
 }
@@ -364,6 +371,8 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
 ) {
     let mut line_buf = [0u8; LINE_BUFFER_SIZE];
 
+    let mut worker = Worker::new(WorkerId(0));
+
     for _ in 0..max_iterations {
         uart.write_str("lona> ");
 
@@ -379,7 +388,7 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
         };
 
         // Parse
-        let expr = match read(line, proc, mem) {
+        let expr = match read(line, proc, realm, mem) {
             Ok(Some(v)) => v,
             Ok(None) => continue,
             Err(e) => {
@@ -403,12 +412,13 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
 
         // Set chunk and execute
         proc.set_chunk(chunk);
-        let result = match vm::execute(proc, mem, realm) {
+        let result = match vm::execute(&mut worker, proc, mem, realm) {
             Ok(v) => v,
             Err(e) => {
                 uart.write_str("Error: ");
                 print_runtime_error(&e, uart);
                 uart.write_byte(b'\n');
+                worker.reset_x_regs();
                 proc.reset();
                 continue;
             }
@@ -419,6 +429,7 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
         uart.write_byte(b'\n');
 
         // Reset for next expression
+        worker.reset_x_regs();
         proc.reset();
     }
 }

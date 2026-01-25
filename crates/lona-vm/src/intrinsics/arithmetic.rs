@@ -7,40 +7,40 @@ use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::value::Value;
 
-use super::{IntrinsicError, expect_int};
+use super::{IntrinsicError, XRegs, expect_int};
 
 // --- Arithmetic intrinsics ---
 
-pub fn intrinsic_add(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_add(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     Ok(Value::int(a.wrapping_add(b)))
 }
 
-pub fn intrinsic_sub(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_sub(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     Ok(Value::int(a.wrapping_sub(b)))
 }
 
-pub fn intrinsic_mul(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_mul(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     Ok(Value::int(a.wrapping_mul(b)))
 }
 
-pub fn intrinsic_div(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_div(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     if b == 0 {
         return Err(IntrinsicError::DivisionByZero);
     }
     Ok(Value::int(a.wrapping_div(b)))
 }
 
-pub fn intrinsic_mod(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_mod(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     if b == 0 {
         return Err(IntrinsicError::DivisionByZero);
     }
@@ -57,9 +57,9 @@ pub fn intrinsic_mod(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
 
 // --- Comparison intrinsics ---
 
-pub fn intrinsic_eq<M: MemorySpace>(proc: &Process, mem: &M) -> Value {
-    let a = proc.x_regs[1];
-    let b = proc.x_regs[2];
+pub fn intrinsic_eq<M: MemorySpace>(x_regs: &XRegs, proc: &Process, mem: &M) -> Value {
+    let a = x_regs[1];
+    let b = x_regs[2];
     Value::bool(values_equal(a, b, proc, mem))
 }
 
@@ -67,9 +67,9 @@ pub fn intrinsic_eq<M: MemorySpace>(proc: &Process, mem: &M) -> Value {
 ///
 /// Returns true if two values are the exact same object (same address for
 /// heap-allocated values, same value for immediates).
-pub const fn intrinsic_identical(proc: &Process) -> Value {
-    let a = proc.x_regs[1];
-    let b = proc.x_regs[2];
+pub const fn intrinsic_identical(x_regs: &XRegs) -> Value {
+    let a = x_regs[1];
+    let b = x_regs[2];
     Value::bool(values_identical(a, b))
 }
 
@@ -332,33 +332,33 @@ fn maps_equal<M: MemorySpace>(
     true
 }
 
-pub fn intrinsic_lt(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_lt(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     Ok(Value::bool(a < b))
 }
 
-pub fn intrinsic_gt(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_gt(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     Ok(Value::bool(a > b))
 }
 
-pub fn intrinsic_le(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_le(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     Ok(Value::bool(a <= b))
 }
 
-pub fn intrinsic_ge(proc: &Process, id: u8) -> Result<Value, IntrinsicError> {
-    let a = expect_int(proc, 1, id, 0)?;
-    let b = expect_int(proc, 2, id, 1)?;
+pub fn intrinsic_ge(x_regs: &XRegs, id: u8) -> Result<Value, IntrinsicError> {
+    let a = expect_int(x_regs, 1, id, 0)?;
+    let b = expect_int(x_regs, 2, id, 1)?;
     Ok(Value::bool(a >= b))
 }
 
 // --- Boolean intrinsic ---
 
-pub const fn intrinsic_not(proc: &Process) -> Value {
+pub const fn intrinsic_not(x_regs: &XRegs) -> Value {
     // (not x) returns true if x is falsy (nil or false), false otherwise
-    Value::bool(!proc.x_regs[1].is_truthy())
+    Value::bool(!x_regs[1].is_truthy())
 }
