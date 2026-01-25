@@ -4,7 +4,7 @@
 //! Heap-allocated value types.
 //!
 //! This module contains the header structures for heap-allocated Lonala values:
-//! strings, pairs (cons cells), tuples, and maps.
+//! strings, pairs (linked list nodes), tuples, and maps.
 
 use super::Value;
 

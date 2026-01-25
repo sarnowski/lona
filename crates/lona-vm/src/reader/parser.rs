@@ -16,7 +16,7 @@ use core::result::Result::{self, Err, Ok};
 /// Maximum number of elements in a list literal.
 ///
 /// This limit exists because we collect list elements on the stack before
-/// building the cons list. A future optimization could build the list
+/// building the linked list. A future optimization could build the list
 /// incrementally to remove this limit.
 const MAX_LIST_ELEMENTS: usize = 64;
 
@@ -225,7 +225,7 @@ impl<'a> Parser<'a> {
         realm: &mut Realm,
         mem: &mut M,
     ) -> Result<Option<Value>, ReadError> {
-        // Collect elements on stack before building cons list
+        // Collect elements on stack before building linked list
         let mut elements = [Value::nil(); MAX_LIST_ELEMENTS];
         let mut count = 0;
 

@@ -244,6 +244,8 @@ Bash(run_in_background=true, timeout=600000, command='codex exec -m <MODEL> -c m
 - `2>/dev/null` suppresses progress spam while preserving the final response
 - Adjust `model_reasoning_effort` to `low` or `high` as needed for deeper/faster analysis
 
+**Codex is SLOW:** Codex can take up to 20 minutes to complete a review. You will likely hit timeouts multiple times when waiting for Codex. Do NOT kill the agent - keep calling `TaskOutput` until Codex finishes. Be patient.
+
 ### 2.3 The Review Prompt
 
 The reviewer agent has full review criteria in its instructions. Your prompt should contain:
@@ -286,7 +288,7 @@ Use `TaskOutput` to collect results:
 TaskOutput(task_id="<agent_id>", block=true, timeout=300000)
 ```
 
-**If timeout:** Call `TaskOutput` again with the same `task_id`. Repeat until complete (typically 2-3 calls for Codex).
+**If timeout:** Call `TaskOutput` again with the same `task_id`. Repeat until complete. **Codex is especially slow** and can take up to 20 minutes - expect 5+ timeout retries. Do NOT kill the Codex agent; keep retrying `TaskOutput` until it finishes.
 
 **If agent fails:** Note the failure, consider re-launching once. If still failing, proceed with successful agents and document which failed.
 

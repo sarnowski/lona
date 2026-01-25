@@ -56,8 +56,12 @@ nav:
       - System Architecture: architecture/system-architecture.md
       # VSpace layout, inherited regions, vars, code compilation
       - Realm Memory Layout: architecture/realm-memory-layout.md
+      # Tagged words, immediate values, heap object headers, memory layout
+      - Term Representation: architecture/term-representation.md
       # Processes, scheduling, message passing, GC
       - Process Model: architecture/process-model.md
+      # Per-process generational copying GC, heap management, large binaries
+      - Garbage Collection: architecture/garbage-collection.md
       # Driver isolation, zero-copy I/O, DMA, interrupts
       - Device Drivers: architecture/device-drivers.md
       # Inter-realm communication through named services

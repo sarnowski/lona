@@ -99,7 +99,7 @@ The 4-bit tag space supports up to 16 primary types:
 | `0x2` | Int | Small integer (immediate, 60-bit signed) |
 | `0x3` | String | UTF-8 string (pointer to heap) |
 | `0x4` | Symbol | Interned symbol (pointer to heap) |
-| `0x5` | Pair | Cons cell for lists (pointer to heap) |
+| `0x5` | Pair | Linked list pair with head and rest (pointer to heap) |
 | `0x6` | Keyword | Interned keyword (pointer to heap) |
 | `0x7` | Tuple | Fixed-size tuple (pointer to heap) |
 | `0x8` | Map | Association list map (pointer to heap) |
@@ -779,7 +779,7 @@ PROCESS MEMORY MODEL
 │  Young Heap (stack + young objects, single contiguous block)        │
 │  ┌─────────────────────────────────────────────────────────────┐    │
 │  │  STACK (grows down)    │  FREE  │  YOUNG HEAP (grows up)    │    │
-│  │  [Frame2][Frame1][F0]◄─┼────────┼─►[string][tuple][cons]    │    │
+│  │  [Frame2][Frame1][F0]◄─┼────────┼─►[string][tuple][pair]    │    │
 │  │          stop          │        │        htop               │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │  Out of memory when htop >= stop → triggers Minor GC                │

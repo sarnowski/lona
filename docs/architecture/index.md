@@ -249,7 +249,9 @@ Processes within a realm share an address space. A bug or exploit in one process
 | [Memory Fundamentals](memory-fundamentals.md) | Physical memory, MMU, address translation, and seL4's memory model |
 | [System Architecture](system-architecture.md) | Lona Memory Manager, realms, threads, bootstrapping, IPC, and resource management |
 | [Realm Memory Layout](realm-memory-layout.md) | Address space structure, inherited regions, vars, and code compilation |
-| [Process Model](process-model.md) | Processes, scheduling, message passing, and garbage collection |
+| [Term Representation](term-representation.md) | Tagged words, immediate values, heap object headers, and memory layout |
+| [Process Model](process-model.md) | Processes, scheduling, message passing, and memory layout |
+| [Garbage Collection](garbage-collection.md) | Per-process generational GC, heap growth, large binaries, and differences from BEAM |
 | [Device Drivers](device-drivers.md) | Driver isolation, zero-copy I/O, DMA, and interrupt handling |
 
 ---

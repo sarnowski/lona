@@ -275,7 +275,7 @@ Young Heap (stack + young objects):
     │   STACK                      FREE                 YOUNG HEAP   │
     │   (grows down)              SPACE                 (grows up)   │
     │                                                                │
-    │   [frame1][frame0]◄─stop           htop─►[tuple][cons][string] │
+    │   [frame1][frame0]◄─stop           htop─►[tuple][pair][string] │
     │                                                                │
     └────────────────────────────────────────────────────────────────┘
     Out of memory when htop >= stop → triggers Minor GC
@@ -345,7 +345,7 @@ PROCESS TABLE ENTRY
 
 Young heap contains: stack frames, recently allocated objects
 Old heap contains: promoted objects (survived Minor GC)
-Both contain: cons cells, tuples, vectors, maps, closures,
+Both contain: pairs (linked list nodes), tuples, vectors, maps, closures,
               small binaries (<64 bytes), refs to large binaries
 ```
 
@@ -761,7 +761,7 @@ The LMM logs the error and does NOT reply - the thread stays blocked (effectivel
 Within the realm's allocated pages, the VM manages per-process allocation:
 
 ```
-Process needs memory (e.g., (cons 1 2)):
+Process needs memory (e.g., (prepend '() 1)):
 ────────────────────────────────────────────────────────────────────────
 
 1. Runtime checks process heap
