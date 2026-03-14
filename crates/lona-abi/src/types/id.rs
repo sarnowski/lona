@@ -115,8 +115,8 @@ impl fmt::Display for ProcessId {
 /// execute Lonala processes. A realm may have multiple workers for parallel
 /// execution on multiple CPUs.
 ///
-/// Worker IDs are small integers (0-255) representing the worker's index
-/// within its realm.
+/// Worker IDs are small integers (0 to MAX_WORKERS-1) representing the
+/// worker's index within its realm.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(transparent)]
 pub struct WorkerId(u16);
@@ -126,7 +126,10 @@ impl WorkerId {
     pub const FIRST: Self = Self(0);
 
     /// Maximum number of workers per realm.
-    pub const MAX_WORKERS: u16 = 256;
+    ///
+    /// With 1MB stacks, each worker slot is 1MB + 4KB IPC + 8KB guards
+    /// = 1,060,864 bytes. 247 slots = 262,033,408 bytes, fitting in 256MB.
+    pub const MAX_WORKERS: u16 = 247;
 
     /// Creates a new worker ID.
     ///

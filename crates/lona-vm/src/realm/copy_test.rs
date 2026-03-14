@@ -13,19 +13,26 @@
 use crate::Vaddr;
 use crate::platform::{MemorySpace, MockVSpace};
 use crate::process::Process;
+use crate::process::pool::ProcessPool;
 use crate::realm::{Realm, VisitedTracker, deep_copy_term_to_realm};
 use crate::term::Term;
 use crate::term::heap::{HeapPair, HeapString, HeapTuple};
 
+/// Check if an address is within the realm's code region.
+fn is_in_realm_code_region(realm: &Realm, addr: Vaddr) -> bool {
+    addr.as_u64() >= realm.code_base.as_u64() && addr.as_u64() < realm.code_end.as_u64()
+}
+
 /// Create a test setup with process, realm, and memory.
 fn setup() -> (Process, Realm, MockVSpace) {
-    // Memory layout:
-    // 0x1000-0x2000: Process young heap
-    // 0x2000-0x3000: Process old heap
-    // 0x4000-0x8000: Realm code region
-    let mem = MockVSpace::new(0x10000, Vaddr::new(0x1000));
-    let proc = Process::new(Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
-    let realm = Realm::new(Vaddr::new(0x4000), 0x4000);
+    let base = Vaddr::new(0x1000);
+    // MockVSpace must cover the full pool size (256KB) used by new_for_test
+    let mem = MockVSpace::new(256 * 1024, base);
+    let mut realm = Realm::new_for_test(base).unwrap();
+
+    let (young_base, old_base) = realm.allocate_process_memory(0x1000, 0x1000).unwrap();
+    let proc = Process::new(young_base, 0x1000, old_base, 0x1000);
+
     (proc, realm, mem)
 }
 
@@ -104,8 +111,7 @@ fn test_deep_copy_string() {
     assert_eq!(src_bytes, b"hello");
 
     // Destination should be in realm region
-    assert!(dst_addr.as_u64() >= 0x4000);
-    assert!(dst_addr.as_u64() < 0x8000);
+    assert!(is_in_realm_code_region(&realm, dst_addr));
 }
 
 #[test]
@@ -174,7 +180,7 @@ fn test_deep_copy_pair() {
     assert_eq!(src_pair.tail, dst_pair.tail);
 
     // Destination should be in realm region
-    assert!(dst_addr.as_u64() >= 0x4000);
+    assert!(is_in_realm_code_region(&realm, dst_addr));
 }
 
 #[test]
@@ -209,9 +215,9 @@ fn test_deep_copy_nested_pair() {
     assert!(p3.tail.is_nil());
 
     // All pair addresses should be in realm region
-    assert!(p1_addr.as_u64() >= 0x4000);
-    assert!(p2_addr.as_u64() >= 0x4000);
-    assert!(p3_addr.as_u64() >= 0x4000);
+    assert!(is_in_realm_code_region(&realm, p1_addr));
+    assert!(is_in_realm_code_region(&realm, p2_addr));
+    assert!(is_in_realm_code_region(&realm, p3_addr));
 }
 
 #[test]
@@ -247,7 +253,7 @@ fn test_deep_copy_tuple() {
     }
 
     // Destination should be in realm region
-    assert!(dst_addr.as_u64() >= 0x4000);
+    assert!(is_in_realm_code_region(&realm, dst_addr));
 }
 
 #[test]
@@ -274,7 +280,7 @@ fn test_deep_copy_tuple_with_nested_values() {
     let str_addr = copied_str.to_vaddr();
 
     // String should be in realm region
-    assert!(str_addr.as_u64() >= 0x4000);
+    assert!(is_in_realm_code_region(&realm, str_addr));
 }
 
 #[test]
@@ -316,19 +322,24 @@ fn test_deep_copy_shared_structure() {
 
     // And it should be in realm region
     let str_addr = p1.head.to_vaddr();
-    assert!(str_addr.as_u64() >= 0x4000);
+    assert!(is_in_realm_code_region(&realm, str_addr));
 }
 
 #[test]
 fn test_deep_copy_oom() {
     // Create a very small realm that will run out of memory
-    let mem = MockVSpace::new(0x10000, Vaddr::new(0x1000));
-    let proc = Process::new(Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000);
-    // Realm with only 8 bytes - definitely too small for any heap allocation
+    let base = Vaddr::new(0x1000);
+    let mut mem = MockVSpace::new(0x10000, base);
+
+    // Allocate process heap from the beginning of the pool
+    let mut proc = Process::new(base, 0x1000, base.add(0x1000), 0x1000);
+
+    // Create a realm with only 8 bytes - definitely too small for any heap allocation
     // HeapString header alone is 8 bytes, plus we need alignment
-    let mut realm = Realm::new(Vaddr::new(0x4000), 8);
-    let mut mem = mem;
-    let mut proc = proc;
+    let mut pool = ProcessPool::new(base.add(0x4000), 256); // Small pool
+    let code_base = pool.allocate(8, 8).unwrap();
+    let mut realm = Realm::new(pool, code_base, 8); // Tiny code region
+
     let mut visited = VisitedTracker::new();
 
     // Allocate a string on process heap - needs header (8 bytes) + content

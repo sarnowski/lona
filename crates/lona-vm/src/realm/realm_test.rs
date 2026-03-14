@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::platform::MockVSpace;
+use crate::process::pool::ProcessPool;
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::heap::HeapVar;
@@ -23,10 +24,9 @@ fn is_term_namespace(mem: &MockVSpace, term: Term) -> bool {
 
 /// Create a test realm with a 64KB code region.
 fn create_test_realm() -> (Realm, MockVSpace) {
-    let code_base = Vaddr::new(0x1000_0000);
-    let code_size = 64 * 1024; // 64KB
-    let realm = Realm::new(code_base, code_size);
-    let mem = MockVSpace::new(code_size, code_base);
+    let base = Vaddr::new(0x1000_0000);
+    let mem = MockVSpace::new(128 * 1024, base);
+    let realm = Realm::new_for_test(base).unwrap();
     (realm, mem)
 }
 
@@ -80,9 +80,12 @@ fn test_realm_alloc_zero_size() {
 
 #[test]
 fn test_realm_alloc_oom() {
-    let code_base = Vaddr::new(0x1000_0000);
+    // Create a realm with a very small code region to test OOM
+    let base = Vaddr::new(0x1000_0000);
     let code_size = 256; // Very small region
-    let mut realm = Realm::new(code_base, code_size);
+    let mut pool = ProcessPool::new(base, 4096); // Small pool just for code region
+    let code_base = pool.allocate(code_size, 8).unwrap();
+    let mut realm = Realm::new(pool, code_base, code_size);
 
     // First allocation should succeed
     assert!(realm.alloc(100, 8).is_some());

@@ -256,7 +256,9 @@ fn eval_and_capture<M: MemorySpace>(
     };
 
     // Execute
-    proc.set_chunk(chunk);
+    if !proc.write_chunk_to_heap(mem, &chunk) {
+        return Err(EvalError::Runtime(":out-of-memory"));
+    }
     let result = match vm::execute(worker, proc, mem, realm) {
         Ok(v) => v,
         Err(e) => {
@@ -321,7 +323,9 @@ fn eval_expr<M: MemorySpace>(
     };
 
     // Execute
-    proc.set_chunk(chunk);
+    if !proc.write_chunk_to_heap(mem, &chunk) {
+        return Err(());
+    }
     match vm::execute(worker, proc, mem, realm) {
         Ok(_) => Ok(()),
         Err(_) => {

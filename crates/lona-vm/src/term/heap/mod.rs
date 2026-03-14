@@ -625,6 +625,77 @@ impl HeapFun {
         self.fn_arity
     }
 
+    /// Read the `code_len` field from a `HeapFun` at the given address.
+    ///
+    /// `base_addr` must point to a fully initialized `HeapFun` in mapped memory.
+    #[inline]
+    #[must_use]
+    pub fn read_code_len<M: crate::platform::MemorySpace>(mem: &M, base_addr: crate::Vaddr) -> u16 {
+        mem.read(crate::Vaddr::new(base_addr.as_u64() + 12))
+    }
+
+    /// Read the `const_count` field from a `HeapFun` at the given address.
+    ///
+    /// `base_addr` must point to a fully initialized `HeapFun` in mapped memory.
+    #[inline]
+    #[must_use]
+    pub fn read_const_count<M: crate::platform::MemorySpace>(
+        mem: &M,
+        base_addr: crate::Vaddr,
+    ) -> u16 {
+        mem.read(crate::Vaddr::new(base_addr.as_u64() + 14))
+    }
+
+    /// Read an instruction at the given index from a `HeapFun`'s bytecode.
+    ///
+    /// Instructions start at `base_addr + PREFIX_SIZE` and are 4 bytes each.
+    /// `base_addr` must point to a fully initialized `HeapFun` in mapped memory,
+    /// and `ip` must be less than `instruction_count`.
+    #[inline]
+    #[must_use]
+    pub fn read_instruction<M: crate::platform::MemorySpace>(
+        mem: &M,
+        base_addr: crate::Vaddr,
+        ip: usize,
+    ) -> u32 {
+        let instr_addr =
+            crate::Vaddr::new(base_addr.as_u64() + Self::PREFIX_SIZE as u64 + (ip as u64) * 4);
+        mem.read(instr_addr)
+    }
+
+    /// Read a constant at the given index from a `HeapFun`'s constant pool.
+    ///
+    /// Constants follow the bytecode at an 8-byte aligned offset.
+    /// `base_addr` must point to a fully initialized `HeapFun` in mapped memory,
+    /// and `index` must be less than `const_count`.
+    #[inline]
+    #[must_use]
+    pub fn read_constant<M: crate::platform::MemorySpace>(
+        mem: &M,
+        base_addr: crate::Vaddr,
+        code_len: u16,
+        index: usize,
+    ) -> Term {
+        let constants_offset = Self::constants_offset(code_len as usize);
+        let const_addr =
+            crate::Vaddr::new(base_addr.as_u64() + constants_offset as u64 + (index as u64) * 8);
+        mem.read(const_addr)
+    }
+
+    /// Read the number of bytecode instructions in a `HeapFun`.
+    ///
+    /// `code_len` is stored in bytes; instructions are 4 bytes each.
+    /// `base_addr` must point to a fully initialized `HeapFun` in mapped memory.
+    #[inline]
+    #[must_use]
+    pub fn instruction_count<M: crate::platform::MemorySpace>(
+        mem: &M,
+        base_addr: crate::Vaddr,
+    ) -> usize {
+        let code_len = Self::read_code_len(mem, base_addr);
+        code_len as usize / 4
+    }
+
     /// Check if this function is variadic.
     #[inline]
     #[must_use]
@@ -986,6 +1057,68 @@ const _: () = assert!(core::mem::size_of::<HeapPair>() == 16);
 impl HeapPair {
     /// Size of a pair in bytes.
     pub const SIZE: usize = 16;
+}
+
+// ============================================================================
+// ProcBin (Process Binary Reference)
+// ============================================================================
+
+/// Process-local reference to a reference-counted binary in the realm binary heap.
+///
+/// Layout: header (8 bytes) + `binary_addr` (8 bytes) + offset (4 bytes) + size (4 bytes)
+///
+/// Large binaries (>= 64 bytes) are stored in the realm's binary heap with
+/// reference counting. Each process that references a binary has a `HeapProcBin`
+/// on its heap that tracks the reference.
+///
+/// The MSO list tracks all `HeapProcBin` objects so GC can decrement refcounts
+/// when they become unreachable.
+#[repr(C)]
+pub struct HeapProcBin {
+    /// Header with object tag PROCBIN.
+    pub header: Header,
+    /// Address of the `RefcBinary` in the realm binary heap.
+    pub binary_addr: crate::Vaddr,
+    /// Offset into the binary (for sub-binary views).
+    pub offset: u32,
+    /// Size of this reference (may be less than full binary for sub-binaries).
+    pub size: u32,
+}
+
+// Compile-time assertion that HeapProcBin is 24 bytes
+const _: () = assert!(core::mem::size_of::<HeapProcBin>() == 24);
+
+impl HeapProcBin {
+    /// Size of a `ProcBin` in bytes.
+    pub const SIZE: usize = 24;
+
+    /// Create a header for a `ProcBin`.
+    #[inline]
+    #[must_use]
+    pub const fn make_header() -> Header {
+        Header::procbin()
+    }
+
+    /// Get the binary address in the realm binary heap.
+    #[inline]
+    #[must_use]
+    pub const fn binary_addr(&self) -> crate::Vaddr {
+        self.binary_addr
+    }
+
+    /// Get the offset into the binary.
+    #[inline]
+    #[must_use]
+    pub const fn offset(&self) -> u32 {
+        self.offset
+    }
+
+    /// Get the size of this reference.
+    #[inline]
+    #[must_use]
+    pub const fn size(&self) -> u32 {
+        self.size
+    }
 }
 
 // ============================================================================

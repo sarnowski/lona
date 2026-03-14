@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 Tobias Sarnowski
 
-//! Tests for execution state (chunks, reset).
+//! Tests for execution state (`chunk_addr`, `write_chunk_to_heap`, reset).
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -10,16 +10,15 @@ use super::*;
 use crate::bytecode::{Chunk, encode_abx, op};
 
 #[test]
-fn process_set_chunk() {
-    let (mut proc, _mem) = setup();
+fn process_write_chunk_to_heap() {
+    let (mut proc, mut mem) = setup();
 
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::LOADINT, 0, 42));
     chunk.emit(encode_abx(op::HALT, 0, 0));
 
-    proc.set_chunk(chunk);
-
-    assert!(proc.chunk.is_some());
+    assert!(proc.write_chunk_to_heap(&mut mem, &chunk));
+    assert!(proc.chunk_addr.is_some());
     assert_eq!(proc.ip, 0);
 }
 
@@ -38,27 +37,30 @@ fn process_reset() {
     assert_eq!(proc.status, ProcessStatus::Ready);
 }
 
-/// Regression test: `set_chunk()` must clear `chunk_addr` to prevent stale heap references.
+/// Regression test: `write_chunk_to_heap()` must set `chunk_addr` to the new chunk.
 ///
-/// Before the fix, consecutive function calls in spec tests would fail with
-/// `:ip-out-of-bounds` because `ensure_chunk_on_heap()` would skip saving the new
-/// chunk when a stale `chunk_addr` remained from a previous call.
+/// Ensures that writing a new chunk replaces any stale `chunk_addr` and resets IP.
 #[test]
-fn regression_set_chunk_clears_chunk_addr() {
-    let (mut proc, _mem) = setup();
+fn regression_write_chunk_replaces_chunk_addr() {
+    let (mut proc, mut mem) = setup();
 
     // Simulate a heap-saved chunk address from a previous function call
     proc.chunk_addr = Some(crate::Vaddr::new(0x1234_5678));
 
-    // Set a new chunk (as happens when entering a new function)
+    // Write a new chunk (as happens when entering a new function)
     let mut chunk = Chunk::new();
     chunk.emit(encode_abx(op::HALT, 0, 0));
-    proc.set_chunk(chunk);
+    assert!(proc.write_chunk_to_heap(&mut mem, &chunk));
 
-    // Verify chunk_addr was cleared - this is critical for correct function call behavior
+    // Verify chunk_addr was updated to the new chunk, not the stale one
+    assert_ne!(
+        proc.chunk_addr,
+        Some(crate::Vaddr::new(0x1234_5678)),
+        "write_chunk_to_heap() must replace stale chunk_addr"
+    );
     assert!(
-        proc.chunk_addr.is_none(),
-        "set_chunk() must clear chunk_addr to prevent stale heap references"
+        proc.chunk_addr.is_some(),
+        "chunk_addr must be set after write_chunk_to_heap"
     );
     assert_eq!(proc.ip, 0, "IP should be reset to start of new chunk");
 }

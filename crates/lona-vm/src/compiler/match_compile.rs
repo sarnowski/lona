@@ -303,7 +303,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
 
         // Patch all labels
         for i in 0..labels.count {
-            labels.patch_all(i, &mut self.chunk.code);
+            labels.patch_all(i, self.chunk.code_mut());
         }
 
         Ok(next_temp)

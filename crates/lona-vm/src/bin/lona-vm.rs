@@ -134,7 +134,7 @@ pub extern "C" fn _start(
     heap_size: u64,
     flags: u64,
 ) -> ! {
-    // Worker ID is passed as u64 but is guaranteed to fit in u16 (max 256 workers)
+    // Worker ID is passed as u64 but is guaranteed to fit in u16 (max MAX_WORKERS per realm)
     let worker_id = (worker_id & 0xFFFF) as u16;
 
     let boot_flags = BootFlags::new(flags);
@@ -153,22 +153,21 @@ pub extern "C" fn _start(
         );
     }
 
-    // Create process pool from boot-allocated heap memory
-    let mut pool = ProcessPool::new(Vaddr::new(heap_start), heap_size as usize);
-
-    // Allocate realm code region (16KB for vars, functions, etc.)
+    // Create process pool from boot-allocated heap memory and allocate code region
     const REALM_CODE_SIZE: usize = 16 * 1024;
-    let realm_base = pool
+    let mut pool = ProcessPool::new(Vaddr::new(heap_start), heap_size as usize);
+    let code_base = pool
         .allocate(REALM_CODE_SIZE, 8)
         .expect("failed to allocate realm code region");
 
-    // Create realm with code region (Box to avoid stack overflow - Realm is ~60KB)
-    let mut realm = Box::new(Realm::new(realm_base, REALM_CODE_SIZE));
+    // Box::new(Realm::new(...)) benefits from NRVO since Realm::new is infallible.
+    // Realm is ~60KB, so heap allocation avoids stack overflow.
+    let mut realm = Box::new(Realm::new(pool, code_base, REALM_CODE_SIZE));
 
     // Allocate memory for REPL process (young heap + old heap)
     // Uses growth-enabled allocation that requests more pages from LMM if needed
-    let (young_base, old_base) = pool
-        .allocate_process_memory_with_growth(INITIAL_YOUNG_HEAP_SIZE, INITIAL_OLD_HEAP_SIZE)
+    let (young_base, old_base) = realm
+        .allocate_process_memory(INITIAL_YOUNG_HEAP_SIZE, INITIAL_OLD_HEAP_SIZE)
         .expect("failed to allocate REPL process memory");
 
     // Create REPL process with BEAM-style memory layout

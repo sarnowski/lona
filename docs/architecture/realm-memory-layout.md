@@ -391,7 +391,7 @@ Worker 0 (TCB 0):
 ┌─────────────────────────────────────────────────────────────────────┐
 │  IPC buffer (4 KB, required by seL4)                                │
 │  Guard page                                                         │
-│  Native stack (~256 KB)                                             │
+│  Native stack (1 MB)                                                │
 │    - Used by Lona VM Rust code                                      │
 │    - Interpreter call frames                                        │
 │    - NOT Lonala process stacks (those are in process region)        │

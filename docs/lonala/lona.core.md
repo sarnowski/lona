@@ -619,7 +619,6 @@ Get map values.
 Check if map contains key.
 
 ```clojure
-;; @todo
 (contains? %{:a 1 :b 2} :a)   ; => true
 (contains? %{:a 1 :b 2} :c)   ; => false
 (contains? %{:a nil} :a)      ; => true
@@ -629,11 +628,14 @@ Check if map contains key.
 Note: Unlike Clojure's `contains?`, this only works on maps (not vectors/sets with indices).
 
 ```clojure
-;; @todo
 ;; contains? only works on maps - error on other types
 (contains? [1 2 3] 0)    ; => ERROR :type-error
-(contains? #{1 2 3} 1)   ; => ERROR :type-error
 (contains? "abc" 0)      ; => ERROR :type-error
+```
+
+```clojure
+;; @todo - set literal syntax not yet implemented
+(contains? #{1 2 3} 1)   ; => ERROR :type-error
 ```
 
 ---

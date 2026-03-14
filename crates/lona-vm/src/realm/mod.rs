@@ -30,6 +30,7 @@ pub use copy::{VisitedTracker, deep_copy_term_to_realm};
 
 use crate::Vaddr;
 use crate::platform::MemorySpace;
+use crate::process::pool::ProcessPool;
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::heap::{HeapKeyword, HeapNamespace, HeapPair, HeapSymbol, HeapTuple, HeapVar};
@@ -54,11 +55,16 @@ pub const MAX_METADATA_ENTRIES: usize = 2000;
 /// A realm represents shared state across processes.
 ///
 /// The realm owns:
+/// - A memory pool for process heap allocations
 /// - A code region for persistent allocations (vars, functions)
 /// - A namespace registry mapping symbols to namespace addresses
 /// - A metadata table mapping object addresses to metadata maps
 #[repr(C)]
 pub struct Realm {
+    // Memory pool for process allocations (and heap growth during GC)
+    /// The memory pool for allocating process heaps.
+    pool: ProcessPool,
+
     // Code region (grows up from base)
     /// Base address of the code region.
     pub code_base: Vaddr,
@@ -95,16 +101,23 @@ pub struct Realm {
 }
 
 impl Realm {
-    /// Create a new realm with the given code region.
+    /// Create a new realm with a pre-allocated code region.
+    ///
+    /// The caller must allocate the code region from the pool before calling
+    /// this constructor. This separation keeps construction infallible, enabling
+    /// NRVO when used with `Box::new(Realm::new(...))` and avoiding ~180KB of
+    /// stack usage from `Option<Realm>` in debug builds.
     ///
     /// # Arguments
-    /// * `code_base` - Base address of the code region
+    /// * `pool` - The memory pool for process allocations (after code region allocation)
+    /// * `code_base` - Base address of the pre-allocated code region
     /// * `code_size` - Size of the code region in bytes
     #[must_use]
-    pub const fn new(code_base: Vaddr, code_size: usize) -> Self {
+    pub const fn new(pool: ProcessPool, code_base: Vaddr, code_size: usize) -> Self {
         let code_end = Vaddr::new(code_base.as_u64() + code_size as u64);
 
         Self {
+            pool,
             code_base,
             code_end,
             code_top: code_base,
@@ -122,6 +135,26 @@ impl Realm {
             metadata_values: [Vaddr::new(0); MAX_METADATA_ENTRIES],
             metadata_len: 0,
         }
+    }
+
+    /// Get a mutable reference to the memory pool.
+    ///
+    /// Used by GC to allocate new heap regions during growth.
+    #[must_use]
+    pub const fn pool_mut(&mut self) -> &mut ProcessPool {
+        &mut self.pool
+    }
+
+    /// Allocate memory for a process's heaps.
+    ///
+    /// Returns `(young_base, old_base)` or `None` if insufficient space.
+    pub fn allocate_process_memory(
+        &mut self,
+        young_size: usize,
+        old_size: usize,
+    ) -> Option<(Vaddr, Vaddr)> {
+        self.pool
+            .allocate_process_memory_with_growth(young_size, old_size)
     }
 
     // --- Code Region Allocator ---
@@ -647,4 +680,29 @@ fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
         }
     }
     true
+}
+
+// ============================================================================
+// Test Helpers
+// ============================================================================
+
+#[cfg(test)]
+impl Realm {
+    /// Create a realm for testing with a mock memory pool.
+    ///
+    /// The pool is created from the provided base address with 256KB of space.
+    /// This is enough for most tests.
+    ///
+    /// # Returns
+    ///
+    /// `Some(Realm)` if creation succeeded, `None` if the pool couldn't
+    /// allocate the code region (should never happen with the default sizes).
+    #[must_use]
+    pub fn new_for_test(pool_base: Vaddr) -> Option<Self> {
+        const TEST_POOL_SIZE: usize = 256 * 1024;
+        const TEST_CODE_SIZE: usize = 64 * 1024;
+        let mut pool = ProcessPool::new(pool_base, TEST_POOL_SIZE);
+        let code_base = pool.allocate(TEST_CODE_SIZE, 8)?;
+        Some(Self::new(pool, code_base, TEST_CODE_SIZE))
+    }
 }

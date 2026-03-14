@@ -85,8 +85,19 @@ pub fn run<M: MemorySpace, U: Uart>(
             }
         };
 
-        // Set chunk and execute
-        proc.set_chunk(chunk);
+        // Serialize chunk to heap (try GC on failure)
+        if !proc.write_chunk_to_heap(mem, &chunk) {
+            let _ = crate::gc::minor_gc(proc, worker, mem);
+            if !proc.write_chunk_to_heap(mem, &chunk) {
+                let _ = crate::gc::major_gc(proc, worker, realm.pool_mut(), mem);
+                if !proc.write_chunk_to_heap(mem, &chunk) {
+                    uart.write_line("Error: out of memory");
+                    worker.reset_x_regs();
+                    proc.reset();
+                    continue;
+                }
+            }
+        }
         let result = match vm::execute(worker, proc, mem, realm) {
             Ok(v) => v,
             Err(e) => {
@@ -410,8 +421,19 @@ pub fn run_limited<M: MemorySpace, U: Uart>(
             }
         };
 
-        // Set chunk and execute
-        proc.set_chunk(chunk);
+        // Serialize chunk to heap (try GC on failure)
+        if !proc.write_chunk_to_heap(mem, &chunk) {
+            let _ = crate::gc::minor_gc(proc, &mut worker, mem);
+            if !proc.write_chunk_to_heap(mem, &chunk) {
+                let _ = crate::gc::major_gc(proc, &mut worker, realm.pool_mut(), mem);
+                if !proc.write_chunk_to_heap(mem, &chunk) {
+                    uart.write_line("Error: out of memory");
+                    worker.reset_x_regs();
+                    proc.reset();
+                    continue;
+                }
+            }
+        }
         let result = match vm::execute(&mut worker, proc, mem, realm) {
             Ok(v) => v,
             Err(e) => {

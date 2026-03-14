@@ -14,15 +14,12 @@ use crate::term::Term;
 
 fn setup() -> (Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
-    let mem = MockVSpace::new(256 * 1024, base);
-    let young_base = base;
-    let young_size = 64 * 1024;
-    let old_base = base.add(young_size as u64);
-    let old_size = 16 * 1024;
-    let proc = Process::new(young_base, young_size, old_base, old_size);
-    // Create realm at a higher address for symbol/keyword interning
-    let realm_base = base.add(128 * 1024);
-    let realm = Realm::new(realm_base, 64 * 1024);
+    let mem = MockVSpace::new(512 * 1024, base);
+    let mut realm = Realm::new_for_test(base).unwrap();
+
+    let (young_base, old_base) = realm.allocate_process_memory(64 * 1024, 16 * 1024).unwrap();
+    let proc = Process::new(young_base, 64 * 1024, old_base, 16 * 1024);
+
     (proc, realm, mem)
 }
 

@@ -60,25 +60,23 @@ extern crate alloc;
 use alloc::collections::BTreeMap;
 
 use crate::Vaddr;
-use crate::bytecode::Chunk;
 use crate::term::Term;
 
 /// Number of X registers (temporaries).
 pub const X_REG_COUNT: usize = 256;
 
-/// Initial young heap size (48 KB).
+/// Initial young heap size (4 KB, 512 words).
 ///
-/// TODO: Reduce to ~2 KB once GC with heap growth is implemented.
-/// The spec calls for small initial heaps that grow via Fibonacci sequence,
-/// but currently process heaps are fixed-size. Without heap growth,
-/// complex operations exhaust the heap. See `docs/architecture/process-model.md`.
-pub const INITIAL_YOUNG_HEAP_SIZE: usize = 48 * 1024;
+/// GC handles growth automatically via the Fibonacci sequence in `gc/growth.rs`.
+/// The allocation path in `gc/alloc.rs` triggers minor GC, heap growth, and
+/// major GC as needed. See `docs/architecture/garbage-collection.md`.
+pub const INITIAL_YOUNG_HEAP_SIZE: usize = 4 * 1024;
 
-/// Initial old heap size (12 KB).
+/// Initial old heap size (1 KB, 128 words).
 ///
-/// TODO: Reduce to ~512 bytes once GC is implemented.
-/// Old heap holds promoted objects during generational GC.
-pub const INITIAL_OLD_HEAP_SIZE: usize = 12 * 1024;
+/// Old heap holds objects promoted during minor GC. Grows automatically
+/// when promotion fills it (triggers major GC or heap growth).
+pub const INITIAL_OLD_HEAP_SIZE: usize = 1024;
 
 /// Maximum reductions per time slice.
 ///
@@ -263,7 +261,7 @@ pub struct Process {
     /// Stack pointer (grows DOWN toward heap).
     pub stop: Vaddr,
 
-    // Old heap (for future GC)
+    // Old heap (for GC)
     /// Base of the old heap.
     pub old_heap: Vaddr,
     /// End of the old heap.
@@ -271,13 +269,28 @@ pub struct Process {
     /// Old heap allocation pointer.
     pub old_htop: Vaddr,
 
+    // GC configuration
+    /// Trigger major GC after this many minor GCs (0 = never auto-trigger).
+    pub fullsweep_after: u32,
+
+    // GC statistics
+    /// Number of minor GCs performed.
+    pub minor_gc_count: u64,
+    /// Number of major (fullsweep) GCs performed.
+    pub major_gc_count: u64,
+    /// Total bytes reclaimed by GC.
+    pub total_reclaimed: u64,
+    /// Minor GCs since last major GC (for `fullsweep_after` tracking).
+    pub minor_since_major: u32,
+
     // Execution state
     /// Instruction pointer (index into bytecode).
     pub ip: usize,
-    /// Current bytecode chunk being executed (cached copy for fast access).
-    pub chunk: Option<Chunk>,
-    /// Address of current chunk's `CompiledFn` on heap.
-    /// `None` for top-level REPL code that hasn't been heap-allocated yet.
+    /// Address of current `HeapFun` being executed.
+    ///
+    /// The VM reads bytecode and constants directly from this address
+    /// via `HeapFun::read_instruction` and `HeapFun::read_constant`,
+    /// avoiding per-call Vec allocation.
     pub chunk_addr: Option<Vaddr>,
 
     // Stack-based frame tracking
@@ -333,9 +346,15 @@ impl Process {
             old_heap: old_base,
             old_hend: old_end,
             old_htop: old_base,
+            // GC configuration (0 = never auto-trigger major GC)
+            fullsweep_after: 0,
+            // GC statistics
+            minor_gc_count: 0,
+            major_gc_count: 0,
+            total_reclaimed: 0,
+            minor_since_major: 0,
             // Execution state
             ip: 0,
-            chunk: None,
             chunk_addr: None,
             // Stack-based frame tracking
             frame_base: None,
@@ -414,14 +433,11 @@ impl Process {
         self.hend.as_u64().saturating_sub(self.stop.as_u64()) as usize
     }
 
-    /// Set the bytecode chunk to execute.
+    /// Set the `HeapFun` address to execute from.
     ///
-    /// This clears any previous heap-saved chunk address since the new chunk
-    /// supersedes it. When a function is called, the caller's chunk will be
-    /// saved to heap at that time.
-    pub fn set_chunk(&mut self, chunk: Chunk) {
-        self.chunk = Some(chunk);
-        self.chunk_addr = None; // Clear stale heap address
+    /// The VM reads bytecode and constants directly from this address.
+    pub const fn set_chunk_addr(&mut self, addr: Vaddr) {
+        self.chunk_addr = Some(addr);
         self.ip = 0;
     }
 
@@ -733,85 +749,31 @@ impl Process {
 
     // --- Chunk management methods ---
 
-    /// Ensure the current chunk is on the heap.
+    /// Serialize a compiled Chunk onto the process heap and set `chunk_addr`.
     ///
-    /// For REPL-compiled code that starts in `proc.chunk` without a heap address,
-    /// this copies the chunk to the heap and sets `chunk_addr`.
+    /// This is used by the REPL and compiler to convert a `Chunk` (with Vecs)
+    /// into a `HeapFun` on the process heap. After this call, the VM reads
+    /// bytecode directly from the heap address.
     ///
-    /// Returns `true` if the chunk is now on heap (or already was),
-    /// `false` if out of memory.
-    pub fn ensure_chunk_on_heap<M: crate::platform::MemorySpace>(&mut self, mem: &mut M) -> bool {
-        // If already on heap, nothing to do
-        if self.chunk_addr.is_some() {
-            return true;
-        }
-
-        // Get the current chunk - clone data to avoid borrow issues
-        let (code, constants) = match &self.chunk {
-            Some(c) => (c.code.clone(), c.constants.clone()),
-            None => return true, // No chunk, nothing to copy
-        };
-
-        // Allocate the chunk on heap
+    /// Returns `true` if successful, `false` if out of memory.
+    pub fn write_chunk_to_heap<M: crate::platform::MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        chunk: &crate::bytecode::Chunk,
+    ) -> bool {
         let Some(fn_term) = self.alloc_term_compiled_fn(
-            mem, 0,     // arity (not used for REPL code)
+            mem,
+            0,     // arity (not used for REPL/top-level code)
             false, // variadic
             0,     // num_locals
-            &code, &constants,
+            chunk.code(),
+            chunk.constants(),
         ) else {
             return false;
         };
 
-        // Set chunk_addr to the allocated function
         self.chunk_addr = Some(fn_term.to_vaddr());
-        true
-    }
-
-    /// Load a chunk from a heap address.
-    ///
-    /// Reads the `HeapFun` at the given address and creates a Chunk from it.
-    /// Returns `true` if successful, `false` if the address is invalid.
-    pub fn load_chunk_from<M: crate::platform::MemorySpace>(
-        &mut self,
-        mem: &M,
-        chunk_addr: Vaddr,
-    ) -> bool {
-        use crate::term::heap::HeapFun;
-
-        // Handle null address (top-level return)
-        if chunk_addr.is_null() {
-            self.chunk = None;
-            self.chunk_addr = None;
-            return true;
-        }
-
-        // Read function header
-        let header: HeapFun = mem.read(chunk_addr);
-
-        // Build chunk from function bytecode and constants
-        let mut chunk = crate::bytecode::Chunk::new();
-
-        // HeapFun stores bytecode as raw bytes, code_len is the total byte count
-        // Instructions are 4 bytes each (u32), so instruction count = code_len / 4
-        let code_addr = chunk_addr.add(HeapFun::PREFIX_SIZE as u64);
-        let instruction_count = header.code_len as usize / 4;
-        for i in 0..instruction_count {
-            let instr_addr = code_addr.add((i * 4) as u64);
-            let instr: u32 = mem.read(instr_addr);
-            chunk.emit(instr);
-        }
-
-        // Read constants (at aligned offset after bytecode)
-        let constants_offset = HeapFun::constants_offset(header.code_len as usize);
-        let constants_addr = chunk_addr.add(constants_offset as u64);
-        for i in 0..header.const_count as usize {
-            let const_addr = constants_addr.add((i * core::mem::size_of::<Term>()) as u64);
-            let constant: Term = mem.read(const_addr);
-            chunk.add_constant(constant);
-        }
-
-        self.chunk = Some(chunk);
-        self.chunk_addr = Some(chunk_addr);
+        self.ip = 0;
         true
     }
 

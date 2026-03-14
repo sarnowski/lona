@@ -31,7 +31,7 @@ fn process_initial_state() {
     assert!(proc.pid.is_null());
     assert_eq!(proc.status, ProcessStatus::Ready);
     assert_eq!(proc.ip, 0);
-    assert!(proc.chunk.is_none());
+    assert!(proc.chunk_addr.is_none());
 
     // Young heap should be empty initially
     assert_eq!(proc.htop, proc.heap);

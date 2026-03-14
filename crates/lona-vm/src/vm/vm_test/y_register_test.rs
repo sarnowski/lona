@@ -25,16 +25,13 @@ fn int(n: i64) -> Term {
 /// Create a test environment (worker, process, realm, memory).
 fn create_test_env() -> (Worker, Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
-    // Increased sizes to accommodate larger function allocations after alignment fix
     let mut mem = MockVSpace::new(512 * 1024, base);
-    let young_base = base;
-    let young_size = 128 * 1024;
-    let old_base = base.add(young_size as u64);
-    let old_size = 32 * 1024;
-    let mut proc = Process::new(young_base, young_size, old_base, old_size);
+    let mut realm = Realm::new_for_test(base).unwrap();
 
-    let realm_base = base.add((young_size + old_size) as u64 + 64 * 1024);
-    let mut realm = Realm::new(realm_base, 96 * 1024);
+    let (young_base, old_base) = realm
+        .allocate_process_memory(128 * 1024, 32 * 1024)
+        .unwrap();
+    let mut proc = Process::new(young_base, 128 * 1024, old_base, 32 * 1024);
 
     let result = bootstrap(&mut realm, &mut mem).unwrap();
     proc.bootstrap(result.ns_var, result.core_ns);
@@ -65,7 +62,10 @@ fn allocate_zero_creates_y_registers() {
     chunk.emit(encode_abc(op::ALLOCATE_ZERO, 3, 0, 0));
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -88,7 +88,10 @@ fn allocate_creates_y_registers_uninitialized() {
     chunk.emit(encode_abc(op::ALLOCATE, 2, 0, 0));
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -116,7 +119,10 @@ fn move_xy_saves_x_to_y() {
     chunk.emit(encode_abc(op::MOVE_XY, 0, 0, 0)); // Y(0) := X(0)
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -142,7 +148,10 @@ fn move_yx_restores_y_to_x() {
     chunk.emit(encode_abc(op::MOVE_YX, 1, 0, 0)); // X(1) := Y(0)
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -174,7 +183,10 @@ fn y_register_preserves_multiple_values() {
 
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -195,7 +207,10 @@ fn deallocate_releases_y_registers() {
     chunk.emit(encode_abc(op::DEALLOCATE, 2, 0, 0));
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -218,7 +233,10 @@ fn move_xy_out_of_bounds_error() {
     chunk.emit(encode_abc(op::MOVE_XY, 5, 0, 0)); // Out of bounds!
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -242,7 +260,10 @@ fn move_yx_out_of_bounds_error() {
     chunk.emit(encode_abc(op::MOVE_YX, 0, 3, 0)); // Out of bounds!
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -266,7 +287,10 @@ fn deallocate_mismatch_error() {
     chunk.emit(encode_abc(op::DEALLOCATE, 2, 0, 0)); // Mismatch!
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reset_reductions();
 
     let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);

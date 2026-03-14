@@ -230,7 +230,24 @@ Get process information.
 (contains? info :monitors)    ; => true
 ```
 
-Returns map with `:status`, `:heap-size`, `:mailbox-len`, `:priority`, `:links`, `:monitors`.
+Returns map with:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `:status` | keyword | Process status (`:running`, `:waiting`, etc.) |
+| `:heap-size` | integer | Current young heap size in bytes |
+| `:heap-used` | integer | Young heap bytes in use |
+| `:old-heap-size` | integer | Current old heap size in bytes |
+| `:old-heap-used` | integer | Old heap bytes in use |
+| `:stack-size` | integer | Current stack size in bytes |
+| `:minor-gc-count` | integer | Number of minor GCs performed |
+| `:major-gc-count` | integer | Number of major GCs performed |
+| `:total-reclaimed` | integer | Total bytes reclaimed by GC |
+| `:mailbox-len` | integer | Messages in mailbox |
+| `:priority` | integer | Scheduling priority (0-255) |
+| `:links` | set | PIDs of linked processes |
+| `:monitors` | set | Monitor references |
+| `:reductions` | integer | Total reductions executed |
 
 ---
 

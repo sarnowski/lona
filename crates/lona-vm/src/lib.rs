@@ -27,6 +27,7 @@ extern crate alloc;
 
 pub mod bytecode;
 pub mod compiler;
+pub mod gc;
 pub mod intrinsics;
 pub mod loader;
 pub mod platform;

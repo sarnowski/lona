@@ -6,6 +6,7 @@
 mod arithmetic_test;
 mod callable_test;
 mod function_test;
+mod gc_integration_test;
 mod integration_test;
 mod keyword_test;
 mod literal_test;
@@ -32,21 +33,13 @@ use crate::term::Term;
 /// Returns `None` if bootstrap fails (should not happen in tests).
 pub fn setup() -> Option<(Process, Realm, MockVSpace)> {
     let base = Vaddr::new(0x1_0000);
-    // Increased from 256KB to 512KB to accommodate larger function allocations
-    // after alignment fix for constants in HeapFun
     let mut mem = MockVSpace::new(512 * 1024, base);
-    let young_base = base;
-    // Increased from 64KB to 128KB for tests with multiple function definitions
-    let young_size = 128 * 1024;
-    let old_base = base.add(young_size as u64);
-    let old_size = 32 * 1024;
-    let mut proc = Process::new(young_base, young_size, old_base, old_size);
+    let mut realm = Realm::new_for_test(base)?;
 
-    // Create realm at a higher address (past young + old heaps)
-    let realm_base = base.add((young_size + old_size) as u64 + 64 * 1024);
-    let mut realm = Realm::new(realm_base, 96 * 1024);
+    // Increased heap sizes for tests with multiple function definitions
+    let (young_base, old_base) = realm.allocate_process_memory(128 * 1024, 32 * 1024)?;
+    let mut proc = Process::new(young_base, 128 * 1024, old_base, 32 * 1024);
 
-    // Bootstrap realm and process
     let result = bootstrap(&mut realm, &mut mem)?;
     proc.bootstrap(result.ns_var, result.core_ns);
 
@@ -67,7 +60,9 @@ pub fn eval(
         .flatten()
         .ok_or(RuntimeError::NoCode)?;
     let chunk = compile(expr, proc, mem, realm).map_err(|_| RuntimeError::NoCode)?;
-    proc.set_chunk(chunk);
+    if !proc.write_chunk_to_heap(mem, &chunk) {
+        return Err(RuntimeError::OutOfMemory);
+    }
     let mut worker = Worker::new(WorkerId(0));
     let result = execute(&mut worker, proc, mem, realm);
     worker.reset_x_regs();

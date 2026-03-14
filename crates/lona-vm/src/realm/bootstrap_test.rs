@@ -21,9 +21,9 @@ use crate::term::tag::object;
 
 /// Create a test setup with realm and memory.
 fn setup() -> (Realm, MockVSpace) {
-    // Memory: 0x1000-0x10000 for realm code region (60KB should be enough)
-    let mem = MockVSpace::new(0x10000, Vaddr::new(0x1000));
-    let realm = Realm::new(Vaddr::new(0x1000), 0xF000);
+    let base = Vaddr::new(0x1000);
+    let mem = MockVSpace::new(0x10000, base);
+    let realm = Realm::new_for_test(base).unwrap();
     (realm, mem)
 }
 

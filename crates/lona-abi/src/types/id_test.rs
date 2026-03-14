@@ -24,6 +24,6 @@ fn process_id_constants() {
 #[test]
 fn worker_id_bounds() {
     assert!(WorkerId::new(0).is_some());
-    assert!(WorkerId::new(255).is_some());
-    assert!(WorkerId::new(256).is_none());
+    assert!(WorkerId::new(WorkerId::MAX_WORKERS - 1).is_some());
+    assert!(WorkerId::new(WorkerId::MAX_WORKERS).is_none());
 }

@@ -13,7 +13,7 @@ use std::fmt::Write;
 pub fn disassemble(chunk: &Chunk) -> std::string::String {
     let mut out = std::string::String::new();
 
-    for (i, &instr) in chunk.code.iter().enumerate() {
+    for (i, &instr) in chunk.code().iter().enumerate() {
         let opcode = decode_opcode(instr);
         let a = decode_a(instr);
         let bx = decode_bx(instr);
@@ -70,9 +70,9 @@ pub fn disassemble(chunk: &Chunk) -> std::string::String {
         }
     }
 
-    if !chunk.constants.is_empty() {
+    if !chunk.constants().is_empty() {
         let _ = writeln!(out, "\nConstants:");
-        for (i, c) in chunk.constants.iter().enumerate() {
+        for (i, c) in chunk.constants().iter().enumerate() {
             let _ = writeln!(out, "  K{i}: {c:?}");
         }
     }

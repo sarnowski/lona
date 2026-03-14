@@ -58,7 +58,7 @@ pub const NULL_GUARD_SIZE: u64 = PAGE_SIZE;
 ///
 /// Contains native stacks for Lona VM workers (TCBs). Each worker slot:
 /// - Guard page (4 KB)
-/// - Stack (256 KB, grows down from top)
+/// - Stack (1 MB, grows down from top)
 /// - Guard page (4 KB)
 /// - IPC buffer (4 KB, required by seL4)
 pub const WORKER_STACKS_BASE: u64 = 0x0000_0000_1000_0000;
@@ -66,8 +66,12 @@ pub const WORKER_STACKS_BASE: u64 = 0x0000_0000_1000_0000;
 /// Size of the worker stacks region (256 MB).
 pub const WORKER_STACKS_SIZE: u64 = 256 * MB;
 
-/// Stack size per worker (256 KB).
-pub const WORKER_STACK_SIZE: u64 = 256 * KB;
+/// Stack size per worker (1 MB).
+///
+/// Matches BEAM's default scheduler thread stack. The Realm struct is ~60KB,
+/// and `Option` wrapping in debug builds can triple stack usage. 1MB provides
+/// comfortable headroom as the codebase grows.
+pub const WORKER_STACK_SIZE: u64 = MB;
 
 /// IPC buffer size per worker (4 KB, required by seL4).
 pub const WORKER_IPC_BUFFER_SIZE: u64 = PAGE_SIZE;
@@ -344,7 +348,7 @@ pub const fn ancestor_binary_base(ancestor_level: u8) -> u64 {
 ///
 /// # Arguments
 ///
-/// * `worker_index` - Worker index within the realm (0-255)
+/// * `worker_index` - Worker index within the realm (0 to MAX_WORKERS-1)
 #[inline]
 #[must_use]
 pub const fn worker_stack_base(worker_index: u16) -> u64 {
@@ -355,7 +359,7 @@ pub const fn worker_stack_base(worker_index: u16) -> u64 {
 ///
 /// # Arguments
 ///
-/// * `worker_index` - Worker index within the realm (0-255)
+/// * `worker_index` - Worker index within the realm (0 to MAX_WORKERS-1)
 #[inline]
 #[must_use]
 pub const fn worker_ipc_buffer(worker_index: u16) -> u64 {
@@ -393,6 +397,10 @@ const _: () = {
     assert!(REALM_BINARY_BASE + REALM_BINARY_SIZE <= PROCESS_POOL_BASE);
     assert!(PROCESS_POOL_BASE + PROCESS_POOL_SIZE <= MMIO_BASE);
     assert!(MAX_ANCESTORS >= 12); // Support at least 12 ancestors
+
+    // Verify all worker slots fit within the worker stacks region.
+    // Uses MAX_WORKERS from WorkerId (imported via lona-abi types).
+    assert!(crate::types::WorkerId::MAX_WORKERS as u64 * WORKER_SLOT_SIZE <= WORKER_STACKS_SIZE);
 };
 
 #[cfg(test)]

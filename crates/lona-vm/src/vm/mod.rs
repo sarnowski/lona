@@ -18,9 +18,8 @@ mod vm_test;
 mod pattern;
 
 use crate::Vaddr;
-use crate::bytecode::{
-    Chunk, decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op,
-};
+use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op};
+use crate::gc;
 use crate::intrinsics::{self, IntrinsicError, XRegs, intrinsic_cost};
 use crate::platform::MemorySpace;
 use crate::process::Process;
@@ -79,9 +78,9 @@ fn build_vector<M: MemorySpace>(
     Ok(())
 }
 
-/// Prepare a user-defined function call (validate arity, build chunk).
+/// Validate arity and set up variadic args for a user-defined function call.
 ///
-/// This does NOT push a call frame - the caller must do that.
+/// This does NOT push a call frame — the caller must do that.
 /// Arguments should already be in X1..X(argc).
 ///
 /// For variadic functions, extra arguments are collected into a tuple
@@ -92,7 +91,7 @@ fn prepare_user_fn<M: MemorySpace>(
     mem: &mut M,
     fn_addr: Vaddr,
     argc: u8,
-) -> Result<Chunk, RuntimeError> {
+) -> Result<(), RuntimeError> {
     // Read function header
     let header: HeapFun = mem.read(fn_addr);
     let fn_arity = header.fn_arity;
@@ -133,42 +132,20 @@ fn prepare_user_fn<M: MemorySpace>(
         }
     }
 
-    // Build chunk from function bytecode and constants
-    let mut chunk = Chunk::new();
-
-    // HeapFun stores bytecode as raw bytes, code_len is the total byte count
-    // Instructions are 4 bytes each (u32), so instruction count = code_len / 4
-    let code_addr = fn_addr.add(HeapFun::PREFIX_SIZE as u64);
-    let instruction_count = header.code_len as usize / 4;
-    for i in 0..instruction_count {
-        let instr_addr = code_addr.add((i * 4) as u64);
-        let instr: u32 = mem.read(instr_addr);
-        chunk.emit(instr);
-    }
-
-    // Read constants (at aligned offset after bytecode)
-    let constants_offset = HeapFun::constants_offset(header.code_len as usize);
-    let constants_addr = fn_addr.add(constants_offset as u64);
-    for i in 0..header.const_count as usize {
-        let const_addr = constants_addr.add((i * core::mem::size_of::<Term>()) as u64);
-        let constant: Term = mem.read(const_addr);
-        chunk.add_constant(constant);
-    }
-
-    Ok(chunk)
+    Ok(())
 }
 
-/// Prepare a closure call (load captures, validate arity, build chunk).
+/// Prepare a closure call (load captures, validate arity).
 ///
-/// This does NOT push a call frame - the caller must do that.
-/// Returns the function address and chunk for the closure's underlying function.
+/// This does NOT push a call frame — the caller must do that.
+/// Returns the function address for the closure's underlying function.
 fn prepare_closure<M: MemorySpace>(
     x_regs: &mut XRegs,
     proc: &mut Process,
     mem: &mut M,
     closure_addr: Vaddr,
     argc: u8,
-) -> Result<(Vaddr, Chunk), RuntimeError> {
+) -> Result<Vaddr, RuntimeError> {
     let closure: HeapClosure = mem.read(closure_addr);
     let capture_count = closure.capture_count();
 
@@ -183,8 +160,8 @@ fn prepare_closure<M: MemorySpace>(
 
     // Extract function address from the closure's function Term
     let fn_addr = closure.function.to_vaddr();
-    let chunk = prepare_user_fn(x_regs, proc, mem, fn_addr, argc)?;
-    Ok((fn_addr, chunk))
+    prepare_user_fn(x_regs, proc, mem, fn_addr, argc)?;
+    Ok(fn_addr)
 }
 
 /// Maximum number of captured variables in a closure.
@@ -427,12 +404,7 @@ fn handle_call<M: MemorySpace>(
 
         match header.object_tag() {
             object::FUN => {
-                let callee_chunk = prepare_user_fn(x_regs, proc, mem, fn_addr, argc)?;
-
-                // Ensure caller's chunk is on heap (for REPL case)
-                if !proc.ensure_chunk_on_heap(mem) {
-                    return Err(RuntimeError::OutOfMemory);
-                }
+                prepare_user_fn(x_regs, proc, mem, fn_addr, argc)?;
 
                 // Create stack frame for callee
                 let return_ip = proc.ip;
@@ -440,20 +412,14 @@ fn handle_call<M: MemorySpace>(
                 proc.allocate_frame(mem, return_ip, caller_chunk_addr)
                     .map_err(|_| RuntimeError::StackOverflow)?;
 
-                // Set up callee's execution context
-                proc.chunk = Some(callee_chunk);
+                // Set up callee's execution context (direct read from HeapFun)
                 proc.chunk_addr = Some(fn_addr);
                 proc.ip = 0;
                 return Ok(1);
             }
 
             object::CLOSURE => {
-                let (fn_addr, callee_chunk) = prepare_closure(x_regs, proc, mem, fn_addr, argc)?;
-
-                // Ensure caller's chunk is on heap (for REPL case)
-                if !proc.ensure_chunk_on_heap(mem) {
-                    return Err(RuntimeError::OutOfMemory);
-                }
+                let fn_addr = prepare_closure(x_regs, proc, mem, fn_addr, argc)?;
 
                 // Create stack frame for callee
                 let return_ip = proc.ip;
@@ -461,8 +427,7 @@ fn handle_call<M: MemorySpace>(
                 proc.allocate_frame(mem, return_ip, caller_chunk_addr)
                     .map_err(|_| RuntimeError::StackOverflow)?;
 
-                // Set up callee's execution context
-                proc.chunk = Some(callee_chunk);
+                // Set up callee's execution context (direct read from HeapFun)
                 proc.chunk_addr = Some(fn_addr);
                 proc.ip = 0;
                 return Ok(1);
@@ -661,6 +626,18 @@ pub enum RuntimeError {
     },
 }
 
+impl RuntimeError {
+    /// Returns true if this error represents an out-of-memory condition,
+    /// regardless of whether it originated from the VM or an intrinsic.
+    #[must_use]
+    pub const fn is_oom(&self) -> bool {
+        matches!(
+            self,
+            Self::OutOfMemory | Self::Intrinsic(IntrinsicError::OutOfMemory)
+        )
+    }
+}
+
 impl From<IntrinsicError> for RuntimeError {
     fn from(e: IntrinsicError) -> Self {
         Self::Intrinsic(e)
@@ -700,15 +677,18 @@ impl RunResult {
 }
 
 /// Handle RETURN instruction: deallocate frame and restore caller context.
-fn handle_return<M: MemorySpace>(
+fn handle_return(
     x_regs: &XRegs,
     proc: &mut Process,
-    mem: &M,
+    mem: &impl MemorySpace,
 ) -> Result<u32, RunResult> {
     match proc.deallocate_frame(mem) {
         Some((return_ip, chunk_addr)) => {
-            if !proc.load_chunk_from(mem, chunk_addr) {
-                return Err(RunResult::Error(RuntimeError::NoCode));
+            // Restore caller's chunk_addr directly — no Vec allocation
+            if chunk_addr.is_null() {
+                proc.chunk_addr = None;
+            } else {
+                proc.chunk_addr = Some(chunk_addr);
             }
             proc.ip = return_ip;
             Ok(1)
@@ -916,6 +896,135 @@ fn execute_instruction<M: MemorySpace>(
     }
 }
 
+/// Attempt GC recovery after an OOM error.
+///
+/// Tries the following sequence:
+/// 1. Minor GC
+/// 2. If still insufficient space: grow young heap
+/// 3. If grow failed: major GC
+/// 4. If still insufficient: grow young heap again
+///
+/// GC updates `chunk_addr` via root tracking, so no reload is needed.
+///
+/// Returns `true` if recovery succeeded and free space is available.
+fn handle_oom_with_gc<M: MemorySpace>(
+    proc: &mut Process,
+    worker: &mut Worker,
+    realm: &mut Realm,
+    mem: &mut M,
+) -> bool {
+    // Step 1: Try minor GC
+    if let Ok(stats) = gc::minor_gc(proc, worker, mem) {
+        if proc.free_space() > 0 {
+            return true;
+        }
+        // If minor GC reclaimed nothing, everything is live — skip to heap growth
+        if stats.reclaimed_bytes == 0 {
+            return try_grow_heap(proc, worker, realm, mem);
+        }
+    }
+
+    // Step 2: Try major GC (minor GC reclaimed something but not enough)
+    if gc::major_gc(proc, worker, realm.pool_mut(), mem).is_ok() && proc.free_space() > 0 {
+        return true;
+    }
+
+    // Step 3: Last resort - grow the heap
+    try_grow_heap(proc, worker, realm, mem)
+}
+
+/// Try growing the young heap as a last resort after GC.
+fn try_grow_heap<M: MemorySpace>(
+    proc: &mut Process,
+    worker: &mut Worker,
+    realm: &mut Realm,
+    mem: &mut M,
+) -> bool {
+    let required = proc.heap_used().saturating_mul(2).max(1024);
+    if gc::grow_young_heap_with_gc(proc, worker, realm.pool_mut(), mem, required).is_ok()
+        && proc.free_space() > 0
+    {
+        return true;
+    }
+    false
+}
+
+/// Saturating conversion from `u64` to `i64` (clamps at `i64::MAX`).
+fn u64_to_i64(v: u64) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+
+/// Saturating conversion from `usize` to `i64` (clamps at `i64::MAX`).
+fn usize_to_i64(v: usize) -> i64 {
+    i64::try_from(v).unwrap_or(i64::MAX)
+}
+
+/// Build a process-info map from the current process state.
+///
+/// Returns a map containing process statistics as specified in
+/// `docs/lonala/lona.process.md`. Returns `None` on OOM.
+fn build_process_info<M: MemorySpace>(
+    proc: &mut Process,
+    realm: &mut Realm,
+    mem: &mut M,
+) -> Option<Term> {
+    // Intern all the keyword keys we need
+    let k_status = realm.intern_keyword(mem, "status")?;
+    let k_heap_size = realm.intern_keyword(mem, "heap-size")?;
+    let k_heap_used = realm.intern_keyword(mem, "heap-used")?;
+    let k_old_heap_size = realm.intern_keyword(mem, "old-heap-size")?;
+    let k_old_heap_used = realm.intern_keyword(mem, "old-heap-used")?;
+    let k_stack_size = realm.intern_keyword(mem, "stack-size")?;
+    let k_minor_gc_count = realm.intern_keyword(mem, "minor-gc-count")?;
+    let k_major_gc_count = realm.intern_keyword(mem, "major-gc-count")?;
+    let k_total_reclaimed = realm.intern_keyword(mem, "total-reclaimed")?;
+    let k_reductions = realm.intern_keyword(mem, "reductions")?;
+
+    // Build value terms — sizes and counters are clamped to i64::MAX (cannot be negative)
+    let v_status = realm.intern_keyword(mem, "running")?;
+    let young_size = proc.hend.as_u64().saturating_sub(proc.heap.as_u64());
+    let v_heap_size = Term::small_int(u64_to_i64(young_size))?;
+    let v_heap_used = Term::small_int(usize_to_i64(proc.heap_used()))?;
+    let old_size = proc
+        .old_hend
+        .as_u64()
+        .saturating_sub(proc.old_heap.as_u64());
+    let v_old_heap_size = Term::small_int(u64_to_i64(old_size))?;
+    let old_used = proc
+        .old_htop
+        .as_u64()
+        .saturating_sub(proc.old_heap.as_u64());
+    let v_old_heap_used = Term::small_int(u64_to_i64(old_used))?;
+    let v_stack_size = Term::small_int(usize_to_i64(proc.stack_used()))?;
+    let v_minor_gc = Term::small_int(u64_to_i64(proc.minor_gc_count))?;
+    let v_major_gc = Term::small_int(u64_to_i64(proc.major_gc_count))?;
+    let v_total_reclaimed = Term::small_int(u64_to_i64(proc.total_reclaimed))?;
+    let v_reductions = Term::small_int(u64_to_i64(proc.total_reductions))?;
+
+    // Build entries list (key-value pairs as tuples in a list)
+    // Build from back to front to get correct order
+    let pairs: [(Term, Term); 10] = [
+        (k_status, v_status),
+        (k_heap_size, v_heap_size),
+        (k_heap_used, v_heap_used),
+        (k_old_heap_size, v_old_heap_size),
+        (k_old_heap_used, v_old_heap_used),
+        (k_stack_size, v_stack_size),
+        (k_minor_gc_count, v_minor_gc),
+        (k_major_gc_count, v_major_gc),
+        (k_total_reclaimed, v_total_reclaimed),
+        (k_reductions, v_reductions),
+    ];
+
+    let mut entries = Term::NIL;
+    for &(key, val) in pairs.iter().rev() {
+        let kv = proc.alloc_term_tuple(mem, &<[Term; 2]>::from((key, val)))?;
+        entries = proc.alloc_term_pair(mem, kv, entries)?;
+    }
+
+    proc.alloc_term_map(mem, entries, pairs.len())
+}
+
 /// Stateless bytecode virtual machine.
 ///
 /// The VM is a namespace for execution functions. All state lives in `Process`
@@ -925,7 +1034,7 @@ pub struct Vm;
 impl Vm {
     /// Run bytecode until completion, yield, or error.
     ///
-    /// The process must have a chunk set via `Process::set_chunk`.
+    /// The process must have `chunk_addr` set (pointing to a `HeapFun` on the heap).
     /// Execution state is split between Process (ip, call stack) and Worker (`x_regs`).
     ///
     /// This implementation is non-recursive: function calls use the Process's call stack
@@ -941,35 +1050,76 @@ impl Vm {
         mem: &mut M,
         realm: &mut Realm,
     ) -> RunResult {
+        // Track whether the last instruction already triggered a GC retry.
+        // This prevents infinite retry loops when GC frees some bytes but not
+        // enough for the allocation that failed.
+        let mut gc_retry_pending = false;
+
         loop {
             // Check reduction budget
             if proc.should_yield() {
                 return RunResult::Yielded;
             }
 
-            // Get current chunk
-            let Some(chunk) = proc.chunk.as_ref() else {
+            // Get current chunk address
+            let Some(chunk_addr) = proc.chunk_addr else {
                 return RunResult::Error(RuntimeError::NoCode);
             };
 
-            // Bounds check and fetch
-            if proc.ip >= chunk.code.len() {
+            // Bounds check and fetch instruction directly from HeapFun
+            let instr_count = HeapFun::instruction_count(mem, chunk_addr);
+            if proc.ip >= instr_count {
                 return RunResult::Error(RuntimeError::IpOutOfBounds);
             }
-            let instr = chunk.code[proc.ip];
+            let instr = HeapFun::read_instruction(mem, chunk_addr, proc.ip);
             proc.ip += 1;
 
             // Decode and pre-fetch constant for LOADK
             let opcode = decode_opcode(instr);
             let constant_term = if opcode == op::LOADK {
                 let bx = decode_bx(instr);
-                match chunk.constants.get(bx as usize).copied() {
-                    Some(term) => Some(term),
-                    None => return RunResult::Error(RuntimeError::ConstantOutOfBounds(bx)),
+                let const_count = HeapFun::read_const_count(mem, chunk_addr);
+                if bx >= u32::from(const_count) {
+                    return RunResult::Error(RuntimeError::ConstantOutOfBounds(bx));
                 }
+                let code_len = HeapFun::read_code_len(mem, chunk_addr);
+                Some(HeapFun::read_constant(
+                    mem,
+                    chunk_addr,
+                    code_len,
+                    bx as usize,
+                ))
             } else {
                 None
             };
+
+            // Intercept garbage-collect and process-info intrinsics before dispatch.
+            // These need Worker/Realm access that execute_instruction doesn't have.
+            if opcode == op::INTRINSIC {
+                let id = decode_a(instr);
+                if id == intrinsics::id::GARBAGE_COLLECT {
+                    let argc = decode_b(instr) as u8;
+                    let is_full = argc >= 1 && worker.x_regs[1].is_keyword();
+                    if is_full {
+                        let _ = gc::major_gc(proc, worker, realm.pool_mut(), mem);
+                    } else {
+                        let _ = gc::minor_gc(proc, worker, mem);
+                    }
+                    worker.x_regs[0] = realm.intern_keyword(mem, "ok").unwrap_or(Term::TRUE);
+                    proc.consume_reductions(intrinsic_cost(id));
+                    gc_retry_pending = false;
+                    continue;
+                }
+                if id == intrinsics::id::PROCESS_INFO {
+                    if let Some(map) = build_process_info(proc, realm, mem) {
+                        worker.x_regs[0] = map;
+                        proc.consume_reductions(intrinsic_cost(id));
+                        gc_retry_pending = false;
+                        continue;
+                    }
+                    // OOM building the map - fall through to OOM handling
+                }
+            }
 
             // Execute instruction
             match execute_instruction(
@@ -983,6 +1133,16 @@ impl Vm {
             ) {
                 Ok(cost) => {
                     proc.consume_reductions(cost);
+                    gc_retry_pending = false;
+                }
+                Err(RunResult::Error(e)) if e.is_oom() => {
+                    if !gc_retry_pending && handle_oom_with_gc(proc, worker, realm, mem) {
+                        // Rewind IP to retry the failed instruction (once)
+                        proc.ip -= 1;
+                        gc_retry_pending = true;
+                        continue;
+                    }
+                    return RunResult::Error(RuntimeError::OutOfMemory);
                 }
                 Err(result) => return result,
             }
@@ -992,7 +1152,7 @@ impl Vm {
 
 /// Convenience function to execute a process's bytecode to completion.
 ///
-/// The process must have a chunk set via `Process::set_chunk`.
+/// The process must have `chunk_addr` set (pointing to a `HeapFun` on the heap).
 /// Automatically handles yielding by resetting the reduction budget and resuming.
 ///
 /// Use this when you want to run a computation to completion without worrying

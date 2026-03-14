@@ -17,15 +17,11 @@ use crate::term::Term;
 /// Create a test environment with bootstrapped realm and process.
 fn setup() -> Option<(Process, Realm, MockVSpace)> {
     let base = Vaddr::new(0x1_0000);
-    let mut mem = MockVSpace::new(256 * 1024, base);
-    let young_base = base;
-    let young_size = 64 * 1024;
-    let old_base = base.add(young_size as u64);
-    let old_size = 16 * 1024;
-    let mut proc = Process::new(young_base, young_size, old_base, old_size);
+    let mut mem = MockVSpace::new(512 * 1024, base);
+    let mut realm = Realm::new_for_test(base).unwrap();
 
-    let realm_base = base.add(128 * 1024);
-    let mut realm = Realm::new(realm_base, 64 * 1024);
+    let (young_base, old_base) = realm.allocate_process_memory(64 * 1024, 16 * 1024)?;
+    let mut proc = Process::new(young_base, 64 * 1024, old_base, 16 * 1024);
 
     let result = bootstrap(&mut realm, &mut mem)?;
     proc.bootstrap(result.ns_var, result.core_ns);

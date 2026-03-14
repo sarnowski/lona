@@ -206,6 +206,7 @@ $(MARKER_X86_64_KERNEL): $(MARKER_SEL4_SRC)
 			-DKernelSel4Arch=x86_64 \
 			-DKernelMaxNumNodes=64 \
 			-DKernelIsMCS=ON \
+			-DKernelRootCNodeSizeBits=14 \
 			-DKernelVerificationBuild=OFF \
 			-DKernelDebugBuild=OFF \
 			-DKernelPrinting=ON \
@@ -235,6 +236,7 @@ $(MARKER_AARCH64_KERNEL): $(MARKER_SEL4_SRC)
 			-DKernelSel4Arch=aarch64 \
 			-DKernelMaxNumNodes=4 \
 			-DKernelIsMCS=ON \
+			-DKernelRootCNodeSizeBits=14 \
 			-DKernelArmHypervisorSupport=ON \
 			-DKernelVerificationBuild=OFF \
 			-DKernelDebugBuild=OFF \

@@ -136,6 +136,21 @@ impl ProcessPool {
         self.allocate_process_memory(young_size, old_size)
     }
 
+    /// Allocate a contiguous region, requesting more pages from LMM if needed.
+    ///
+    /// Like `allocate`, but tries to grow the pool via IPC when space is insufficient.
+    pub fn allocate_with_growth(&mut self, size: usize, align: usize) -> Option<Vaddr> {
+        if let result @ Some(_) = self.allocate(size, align) {
+            return result;
+        }
+
+        if !self.try_grow(size) {
+            return None;
+        }
+
+        self.allocate(size, align)
+    }
+
     /// Try to grow the pool by requesting pages from the LMM.
     ///
     /// Returns `true` if growth succeeded, `false` otherwise.

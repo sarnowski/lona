@@ -88,10 +88,10 @@ fn chunk_add_constant() {
     let idx2 = chunk.add_constant(Term::bool(true)).unwrap();
     assert_eq!(idx2, 2);
 
-    assert_eq!(chunk.constants.len(), 3);
-    assert_eq!(chunk.constants[0], Term::small_int(42).unwrap());
-    assert_eq!(chunk.constants[1], Term::NIL);
-    assert_eq!(chunk.constants[2], Term::bool(true));
+    assert_eq!(chunk.constants().len(), 3);
+    assert_eq!(chunk.constants()[0], Term::small_int(42).unwrap());
+    assert_eq!(chunk.constants()[1], Term::NIL);
+    assert_eq!(chunk.constants()[2], Term::bool(true));
 }
 
 #[test]
@@ -103,9 +103,9 @@ fn chunk_emit() {
     chunk.emit(encode_abx(op::HALT, 0, 0));
 
     assert_eq!(chunk.code_len(), 3);
-    assert_eq!(decode_opcode(chunk.code[0]), op::LOADINT);
-    assert_eq!(decode_opcode(chunk.code[1]), op::INTRINSIC);
-    assert_eq!(decode_opcode(chunk.code[2]), op::HALT);
+    assert_eq!(decode_opcode(chunk.code()[0]), op::LOADINT);
+    assert_eq!(decode_opcode(chunk.code()[1]), op::INTRINSIC);
+    assert_eq!(decode_opcode(chunk.code()[2]), op::HALT);
 }
 
 #[test]

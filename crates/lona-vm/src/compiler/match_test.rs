@@ -38,15 +38,11 @@ fn int(n: i64) -> Term {
 /// Create a test environment with bootstrapped realm and process.
 fn setup() -> (Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
-    let mut mem = MockVSpace::new(256 * 1024, base);
-    let young_base = base;
-    let young_size = 64 * 1024;
-    let old_base = base.add(young_size as u64);
-    let old_size = 16 * 1024;
-    let mut proc = Process::new(young_base, young_size, old_base, old_size);
+    let mut mem = MockVSpace::new(512 * 1024, base);
+    let mut realm = Realm::new_for_test(base).unwrap();
 
-    let realm_base = base.add(128 * 1024);
-    let mut realm = Realm::new(realm_base, 64 * 1024);
+    let (young_base, old_base) = realm.allocate_process_memory(64 * 1024, 16 * 1024).unwrap();
+    let mut proc = Process::new(young_base, 64 * 1024, old_base, 16 * 1024);
 
     let result = bootstrap(&mut realm, &mut mem).unwrap();
     proc.bootstrap(result.ns_var, result.core_ns);
@@ -60,7 +56,10 @@ fn eval(src: &str, proc: &mut Process, realm: &mut Realm, mem: &mut MockVSpace) 
         .expect("read error")
         .expect("empty input");
     let chunk = compile(expr, proc, mem, realm).expect("compile error");
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     let mut worker = Worker::new(WorkerId(0));
     execute(&mut worker, proc, mem, realm).expect("runtime error")
 }
@@ -670,7 +669,10 @@ fn regression_match_no_clause_raises_badmatch() {
     .expect("read error")
     .expect("empty input");
     let chunk = compile(expr, &mut proc, &mut mem, &mut realm).expect("compile error");
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     let mut worker = Worker::new(WorkerId(0));
     let result = execute(&mut worker, &mut proc, &mut mem, &mut realm);
 

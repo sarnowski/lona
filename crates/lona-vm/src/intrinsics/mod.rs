@@ -168,61 +168,71 @@ pub mod id {
     pub const IDENTICAL: u8 = 46;
     /// Map contains key: `(contains? m k)` -> is key in map?
     pub const CONTAINS: u8 = 47;
+    /// Garbage collect: `(garbage-collect)` or `(garbage-collect :full)`.
+    ///
+    /// Handled directly in `Vm::run` (needs Worker/Realm access).
+    pub const GARBAGE_COLLECT: u8 = 48;
+    /// Process info: `(process-info)` -> map of process statistics.
+    ///
+    /// Handled directly in `Vm::run` (needs direct process access).
+    pub const PROCESS_INFO: u8 = 49;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 48;
+pub const INTRINSIC_COUNT: usize = 50;
 
 /// Intrinsic name lookup table.
 const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
-    "+",           // 0: ADD
-    "-",           // 1: SUB
-    "*",           // 2: MUL
-    "/",           // 3: DIV
-    "mod",         // 4: MOD
-    "=",           // 5: EQ
-    "<",           // 6: LT
-    ">",           // 7: GT
-    "<=",          // 8: LE
-    ">=",          // 9: GE
-    "not",         // 10: NOT
-    "nil?",        // 11: IS_NIL
-    "integer?",    // 12: IS_INT
-    "string?",     // 13: IS_STR
-    "str",         // 14: STR
-    "keyword?",    // 15: IS_KEYWORD
-    "keyword",     // 16: KEYWORD
-    "name",        // 17: NAME
-    "namespace",   // 18: NAMESPACE
-    "tuple?",      // 19: IS_TUPLE
-    "nth",         // 20: NTH
-    "count",       // 21: COUNT
-    "symbol?",     // 22: IS_SYMBOL
-    "map?",        // 23: IS_MAP
-    "get",         // 24: GET
-    "put",         // 25: PUT
-    "keys",        // 26: KEYS
-    "vals",        // 27: VALS
-    "meta",        // 28: META
-    "with-meta",   // 29: WITH_META
-    "namespace?",  // 30: IS_NAMESPACE
-    "create-ns",   // 31: CREATE_NS
-    "find-ns",     // 32: FIND_NS
-    "ns-name",     // 33: NS_NAME
-    "ns-map",      // 34: NS_MAP
-    "fn?",         // 35: IS_FN
-    "var?",        // 36: IS_VAR
-    "intern",      // 37: INTERN
-    "var-get",     // 38: VAR_GET
-    "def-root",    // 39: DEF_ROOT
-    "def-binding", // 40: DEF_BINDING
-    "def-meta",    // 41: DEF_META
-    "vector?",     // 42: IS_VECTOR
-    "first",       // 43: FIRST
-    "rest",        // 44: REST
-    "empty?",      // 45: IS_EMPTY
-    "identical?",  // 46: IDENTICAL
-    "contains?",   // 47: CONTAINS
+    "+",               // 0: ADD
+    "-",               // 1: SUB
+    "*",               // 2: MUL
+    "/",               // 3: DIV
+    "mod",             // 4: MOD
+    "=",               // 5: EQ
+    "<",               // 6: LT
+    ">",               // 7: GT
+    "<=",              // 8: LE
+    ">=",              // 9: GE
+    "not",             // 10: NOT
+    "nil?",            // 11: IS_NIL
+    "integer?",        // 12: IS_INT
+    "string?",         // 13: IS_STR
+    "str",             // 14: STR
+    "keyword?",        // 15: IS_KEYWORD
+    "keyword",         // 16: KEYWORD
+    "name",            // 17: NAME
+    "namespace",       // 18: NAMESPACE
+    "tuple?",          // 19: IS_TUPLE
+    "nth",             // 20: NTH
+    "count",           // 21: COUNT
+    "symbol?",         // 22: IS_SYMBOL
+    "map?",            // 23: IS_MAP
+    "get",             // 24: GET
+    "put",             // 25: PUT
+    "keys",            // 26: KEYS
+    "vals",            // 27: VALS
+    "meta",            // 28: META
+    "with-meta",       // 29: WITH_META
+    "namespace?",      // 30: IS_NAMESPACE
+    "create-ns",       // 31: CREATE_NS
+    "find-ns",         // 32: FIND_NS
+    "ns-name",         // 33: NS_NAME
+    "ns-map",          // 34: NS_MAP
+    "fn?",             // 35: IS_FN
+    "var?",            // 36: IS_VAR
+    "intern",          // 37: INTERN
+    "var-get",         // 38: VAR_GET
+    "def-root",        // 39: DEF_ROOT
+    "def-binding",     // 40: DEF_BINDING
+    "def-meta",        // 41: DEF_META
+    "vector?",         // 42: IS_VECTOR
+    "first",           // 43: FIRST
+    "rest",            // 44: REST
+    "empty?",          // 45: IS_EMPTY
+    "identical?",      // 46: IDENTICAL
+    "contains?",       // 47: CONTAINS
+    "garbage-collect", // 48: GARBAGE_COLLECT
+    "process-info",    // 49: PROCESS_INFO
 ];
 
 /// Look up an intrinsic ID by name.
@@ -299,7 +309,7 @@ pub const fn intrinsic_cost(id: u8) -> u32 {
         | id::META
         | id::WITH_META => 3,
 
-        // Namespace and var operations: cost 10
+        // Namespace/var operations, GC, and process info: cost 10
         id::CREATE_NS
         | id::FIND_NS
         | id::NS_NAME
@@ -308,7 +318,9 @@ pub const fn intrinsic_cost(id: u8) -> u32 {
         | id::VAR_GET
         | id::DEF_ROOT
         | id::DEF_BINDING
-        | id::DEF_META => 10,
+        | id::DEF_META
+        | id::GARBAGE_COLLECT
+        | id::PROCESS_INFO => 10,
 
         // Unknown and PUT: default cost 5
         _ => 5,
@@ -432,6 +444,10 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::DEF_ROOT => intrinsic_def_root(x_regs, proc, realm, mem, intrinsic_id)?,
         id::DEF_BINDING => intrinsic_def_binding(x_regs, proc, mem, intrinsic_id)?,
         id::DEF_META => intrinsic_def_meta(x_regs, proc, realm, mem, intrinsic_id)?,
+
+        // GARBAGE_COLLECT and PROCESS_INFO are handled directly in Vm::run
+        // before reaching this dispatch. If we get here, return a no-op.
+        id::GARBAGE_COLLECT | id::PROCESS_INFO => return Ok(()),
 
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };

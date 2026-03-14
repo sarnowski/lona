@@ -25,16 +25,13 @@ fn int(n: i64) -> Term {
 /// Create a test environment (worker, process, realm, memory).
 fn create_test_env() -> (Worker, Process, Realm, MockVSpace) {
     let base = Vaddr::new(0x1_0000);
-    // Increased sizes to accommodate larger function allocations after alignment fix
     let mut mem = MockVSpace::new(512 * 1024, base);
-    let young_base = base;
-    let young_size = 128 * 1024;
-    let old_base = base.add(young_size as u64);
-    let old_size = 32 * 1024;
-    let mut proc = Process::new(young_base, young_size, old_base, old_size);
+    let mut realm = Realm::new_for_test(base).unwrap();
 
-    let realm_base = base.add((young_size + old_size) as u64 + 64 * 1024);
-    let mut realm = Realm::new(realm_base, 96 * 1024);
+    let (young_base, old_base) = realm
+        .allocate_process_memory(128 * 1024, 32 * 1024)
+        .unwrap();
+    let mut proc = Process::new(young_base, 128 * 1024, old_base, 32 * 1024);
 
     let result = bootstrap(&mut realm, &mut mem).unwrap();
     proc.bootstrap(result.ns_var, result.core_ns);
@@ -61,7 +58,10 @@ fn vm_yields_when_budget_exhausted() {
 
     // 10 LOADINT instructions + HALT
     let chunk = create_loadint_chunk(10);
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reductions = 5; // Budget for only 5 instructions
 
     let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -74,7 +74,10 @@ fn vm_completes_with_sufficient_budget() {
     let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let chunk = create_loadint_chunk(5);
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reductions = 100;
 
     let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
@@ -96,7 +99,10 @@ fn vm_resumes_correctly() {
     chunk.emit(encode_abx(op::LOADINT, 0, 42)); // X0 = 42 (return value)
     chunk.emit(encode_abc(op::HALT, 0, 0, 0)); // Return X0
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reductions = 3; // First run: execute 3 instructions
 
     // First run - should yield after 3 instructions
@@ -118,7 +124,10 @@ fn reductions_are_consumed() {
     let (mut worker, mut proc, mut realm, mut mem) = create_test_env();
 
     let chunk = create_loadint_chunk(3);
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.reductions = 100;
     proc.total_reductions = 0;
 
@@ -138,9 +147,11 @@ fn stack_frame_allocate_deallocate() {
 
     // Set up initial chunk and allocate it on heap
     let chunk = create_loadint_chunk(1);
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
     proc.ip = 42;
-    proc.ensure_chunk_on_heap(&mut mem);
     let original_chunk_addr = proc.chunk_addr.unwrap();
 
     // Allocate frame
@@ -149,8 +160,11 @@ fn stack_frame_allocate_deallocate() {
     assert_eq!(proc.call_depth(), 1);
 
     // Set callee state
-    proc.chunk = Some(create_loadint_chunk(1));
-    proc.ip = 0;
+    let callee_chunk = create_loadint_chunk(1);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &callee_chunk),
+        "out of memory writing callee chunk to heap"
+    );
 
     // Deallocate frame
     let result = proc.deallocate_frame(&mem);
@@ -201,7 +215,10 @@ fn yield_during_simple_function_call() {
         .flatten()
         .unwrap();
     let chunk = crate::compiler::compile(result, &mut proc, &mut mem, &mut realm).unwrap();
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
 
     // Very small budget to force yield inside function
     proc.reductions = 2;
@@ -265,7 +282,10 @@ fn yield_and_resume_nested_calls() {
         .flatten()
         .unwrap();
     let chunk = crate::compiler::compile(expr, &mut proc, &mut mem, &mut realm).unwrap();
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
 
     // Small budget to force multiple yields
     proc.reductions = 3;
@@ -349,7 +369,10 @@ fn stress_many_yields() {
     }
     chunk.emit(encode_abc(op::HALT, 0, 0, 0));
 
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
 
     // Small budget to force many yields - reset to this value each time
     proc.reductions = STRESS_BUDGET_PER_SLICE;
@@ -475,7 +498,10 @@ fn stress_recursive_with_yields() {
         .flatten()
         .unwrap();
     let chunk = crate::compiler::compile(expr, &mut proc, &mut mem, &mut realm).unwrap();
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
 
     // Very small budget to force yields during the deep call chain
     proc.reductions = 3;
@@ -562,7 +588,10 @@ fn stress_deep_call_chain_yield_resume() {
         .flatten()
         .unwrap();
     let chunk = crate::compiler::compile(expr, &mut proc, &mut mem, &mut realm).unwrap();
-    proc.set_chunk(chunk);
+    assert!(
+        proc.write_chunk_to_heap(&mut mem, &chunk),
+        "out of memory writing chunk to heap"
+    );
 
     // Very small budget to force yields during nested calls
     proc.reductions = 2;

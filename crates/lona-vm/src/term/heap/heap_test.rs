@@ -6,6 +6,8 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use super::*;
+use crate::Vaddr;
+use crate::platform::{MemorySpace, MockVSpace};
 use crate::term::tag::object;
 
 // ============================================================================
@@ -565,4 +567,105 @@ fn object_sizes_match_header_calculation() {
             "Bignum size mismatch for limbs={limbs}"
         );
     }
+}
+
+// ============================================================================
+// HeapFun Direct-Read Tests
+// ============================================================================
+
+/// Write a `HeapFun` into a `MockVSpace` at `base` with the given bytecode and constants.
+fn write_test_fun(
+    mem: &mut MockVSpace,
+    base: Vaddr,
+    fn_arity: u8,
+    variadic: bool,
+    locals: u8,
+    code: &[u32],
+    constants: &[Term],
+) {
+    let code_bytes = code.len() * 4;
+    let header = HeapFun::make_header(code_bytes, constants.len());
+    let fun = HeapFun {
+        header,
+        fn_arity,
+        variadic: u8::from(variadic),
+        locals,
+        _pad: 0,
+        code_len: code_bytes as u16,
+        const_count: constants.len() as u16,
+    };
+    mem.write(base, fun);
+
+    // Write bytecode
+    let code_addr = Vaddr::new(base.as_u64() + HeapFun::PREFIX_SIZE as u64);
+    for (i, &instr) in code.iter().enumerate() {
+        mem.write(Vaddr::new(code_addr.as_u64() + (i * 4) as u64), instr);
+    }
+
+    // Write constants at aligned offset
+    let constants_offset = HeapFun::constants_offset(code_bytes);
+    let const_addr = Vaddr::new(base.as_u64() + constants_offset as u64);
+    for (i, &c) in constants.iter().enumerate() {
+        mem.write(Vaddr::new(const_addr.as_u64() + (i * 8) as u64), c);
+    }
+}
+
+#[test]
+fn heapfun_read_code_len() {
+    let base = Vaddr::new(0x1000);
+    let mut mem = MockVSpace::new(4096, base);
+    let code = [0x1234u32, 0x5678, 0xABCD];
+    write_test_fun(&mut mem, base, 0, false, 0, &code, &[]);
+
+    let code_len = HeapFun::read_code_len(&mem, base);
+    assert_eq!(code_len, 12); // 3 instructions * 4 bytes
+}
+
+#[test]
+fn heapfun_read_const_count() {
+    let base = Vaddr::new(0x1000);
+    let mut mem = MockVSpace::new(4096, base);
+    let constants = [Term::small_int(42).unwrap(), Term::NIL];
+    write_test_fun(&mut mem, base, 0, false, 0, &[0u32], &constants);
+
+    let const_count = HeapFun::read_const_count(&mem, base);
+    assert_eq!(const_count, 2);
+}
+
+#[test]
+fn heapfun_read_instruction_returns_correct_values() {
+    let base = Vaddr::new(0x1000);
+    let mut mem = MockVSpace::new(4096, base);
+    let code = [0xAAAA_BBBBu32, 0xCCCC_DDDD, 0x1111_2222];
+    write_test_fun(&mut mem, base, 0, false, 0, &code, &[]);
+
+    assert_eq!(HeapFun::read_instruction(&mem, base, 0), 0xAAAA_BBBB);
+    assert_eq!(HeapFun::read_instruction(&mem, base, 1), 0xCCCC_DDDD);
+    assert_eq!(HeapFun::read_instruction(&mem, base, 2), 0x1111_2222);
+}
+
+#[test]
+fn heapfun_read_constant_returns_correct_values() {
+    let base = Vaddr::new(0x1000);
+    let mut mem = MockVSpace::new(4096, base);
+    let c0 = Term::small_int(42).unwrap();
+    let c1 = Term::TRUE;
+    let c2 = Term::NIL;
+    let code = [0u32; 2]; // 8 bytes of code
+    write_test_fun(&mut mem, base, 0, false, 0, &code, &[c0, c1, c2]);
+
+    let code_len = HeapFun::read_code_len(&mem, base);
+    assert_eq!(HeapFun::read_constant(&mem, base, code_len, 0), c0);
+    assert_eq!(HeapFun::read_constant(&mem, base, code_len, 1), c1);
+    assert_eq!(HeapFun::read_constant(&mem, base, code_len, 2), c2);
+}
+
+#[test]
+fn heapfun_instruction_count() {
+    let base = Vaddr::new(0x1000);
+    let mut mem = MockVSpace::new(4096, base);
+    let code = [0u32; 5]; // 5 instructions
+    write_test_fun(&mut mem, base, 0, false, 0, &code, &[]);
+
+    assert_eq!(HeapFun::instruction_count(&mem, base), 5);
 }

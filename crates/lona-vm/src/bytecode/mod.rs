@@ -15,12 +15,6 @@ mod bytecode_test;
 
 use crate::term::Term;
 
-#[cfg(any(test, feature = "std"))]
-use std::vec::Vec;
-
-#[cfg(not(any(test, feature = "std")))]
-use alloc::vec::Vec;
-
 /// Bytecode opcodes (6 bits, values 0-63).
 pub mod op {
     /// Load nil into register: `X(A) := nil`
@@ -345,15 +339,31 @@ pub const fn decode_sbx(instr: u32) -> i32 {
     }
 }
 
+/// Maximum number of instructions in a chunk.
+///
+/// 4096 instructions is sufficient for any single function body.
+/// Larger functions should be split into smaller helpers.
+pub const MAX_CODE_INSTRUCTIONS: usize = 4096;
+
+/// Maximum number of constants in a chunk.
+///
+/// 256 constants covers typical function constant pools.
+pub const MAX_CONSTANTS: usize = 256;
+
 /// A compiled bytecode chunk.
 ///
 /// Contains the instruction sequence and constant pool for a compiled expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Uses fixed-size arrays to avoid heap allocation (no Vec = no leak in bump allocator).
+#[derive(Clone)]
 pub struct Chunk {
-    /// The instruction sequence (fixed 32-bit instructions).
-    pub code: Vec<u32>,
-    /// Constant pool (strings, large integers, etc.).
-    pub constants: Vec<Term>,
+    /// The instruction buffer (fixed-size, only `code_len` entries are valid).
+    code_buf: [u32; MAX_CODE_INSTRUCTIONS],
+    /// The constant pool (fixed-size, only `const_count` entries are valid).
+    const_buf: [Term; MAX_CONSTANTS],
+    /// Number of valid instructions in `code_buf`.
+    code_len: usize,
+    /// Number of valid constants in `const_buf`.
+    const_count: usize,
 }
 
 impl Chunk {
@@ -361,34 +371,70 @@ impl Chunk {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            code: Vec::new(),
-            constants: Vec::new(),
+            code_buf: [0; MAX_CODE_INSTRUCTIONS],
+            const_buf: [Term::NIL; MAX_CONSTANTS],
+            code_len: 0,
+            const_count: 0,
         }
     }
 
     /// Emit an instruction to the code buffer.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the code buffer is full (`MAX_CODE_INSTRUCTIONS` reached).
     #[inline]
     pub fn emit(&mut self, instr: u32) {
-        self.code.push(instr);
+        assert!(
+            self.code_len < MAX_CODE_INSTRUCTIONS,
+            "code buffer overflow: max {MAX_CODE_INSTRUCTIONS} instructions"
+        );
+        self.code_buf[self.code_len] = instr;
+        self.code_len += 1;
     }
 
     /// Add a constant to the pool and return its index.
     ///
-    /// Returns `None` if the constant pool is full (max 262143 entries for 18-bit index).
-    pub fn add_constant(&mut self, term: Term) -> Option<u32> {
-        let index = self.constants.len();
-        if index > BX_MASK as usize {
+    /// Returns `None` if the constant pool is full.
+    pub const fn add_constant(&mut self, term: Term) -> Option<u32> {
+        if self.const_count >= MAX_CONSTANTS {
             return None;
         }
-        self.constants.push(term);
+        if self.const_count > BX_MASK as usize {
+            return None;
+        }
+        let index = self.const_count;
+        self.const_buf[index] = term;
+        self.const_count += 1;
         Some(index as u32)
     }
 
     /// Get the current code offset (number of instructions emitted).
     #[inline]
     #[must_use]
-    pub fn code_len(&self) -> usize {
-        self.code.len()
+    pub const fn code_len(&self) -> usize {
+        self.code_len
+    }
+
+    /// Get the instruction slice (only valid entries).
+    #[inline]
+    #[must_use]
+    pub fn code(&self) -> &[u32] {
+        &self.code_buf[..self.code_len]
+    }
+
+    /// Get the instruction slice mutably (only valid entries).
+    #[inline]
+    #[must_use]
+    pub fn code_mut(&mut self) -> &mut [u32] {
+        &mut self.code_buf[..self.code_len]
+    }
+
+    /// Get the constants slice (only valid entries).
+    #[inline]
+    #[must_use]
+    pub fn constants(&self) -> &[Term] {
+        &self.const_buf[..self.const_count]
     }
 }
 

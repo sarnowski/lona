@@ -143,8 +143,8 @@ impl<M: MemorySpace> Compiler<'_, M> {
                 arity,
                 variadic,
                 0, // no extra locals
-                &fn_chunk.code,
-                &fn_chunk.constants,
+                fn_chunk.code(),
+                fn_chunk.constants(),
             )
             .ok_or(CompileError::ConstantPoolFull)?;
 
