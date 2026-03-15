@@ -22,7 +22,7 @@ mod traits;
 pub use lmm::lmm_request_pages;
 #[cfg(any(test, feature = "std"))]
 pub use mock::MockVSpace;
-pub use traits::{CacheAttr, MapError, MemorySpace, PagePerms, Platform};
+pub use traits::{CacheAttr, MapError, MemorySpace, PagePerms, Platform, monotonic_ms};
 
 #[cfg(not(any(test, feature = "std")))]
 pub use traits::Sel4VSpace;

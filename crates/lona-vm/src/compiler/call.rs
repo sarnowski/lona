@@ -22,7 +22,7 @@ impl<M: MemorySpace> Compiler<'_, M> {
     /// Compile a list expression (special form, intrinsic call, or function call).
     ///
     /// Resolution order for symbols in call position:
-    /// 1. Special forms (hardcoded by name: def, fn*, quote, do, var, match)
+    /// 1. Special forms (hardcoded by name: def, fn*, quote, do, var, match, receive)
     /// 2. Local bindings (function parameters)
     /// 3. Namespace lookup via `*ns*`
     pub(super) fn compile_list(
@@ -68,6 +68,9 @@ impl<M: MemorySpace> Compiler<'_, M> {
             }
             if name == "match" {
                 return self.compile_match(rest, target, temp_base);
+            }
+            if name == "receive" {
+                return self.compile_receive(rest, target, temp_base);
             }
 
             // Check if it's a bound parameter (function value in local scope)

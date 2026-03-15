@@ -253,6 +253,12 @@ fn print_runtime_error<U: Uart>(e: &RuntimeError, uart: &mut U) {
         RuntimeError::ProcessLimitReached => {
             uart.write_str("process limit reached");
         }
+        RuntimeError::BadArgument { intrinsic, message } => {
+            uart.write_str("bad argument in ");
+            uart.write_str(intrinsic);
+            uart.write_str(": ");
+            uart.write_str(message);
+        }
     }
 }
 

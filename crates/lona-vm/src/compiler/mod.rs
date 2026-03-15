@@ -15,8 +15,9 @@
 mod call;
 mod collection;
 mod fn_compile;
-mod match_compile;
+pub(crate) mod match_compile;
 pub mod pattern;
+mod receive_compile;
 
 #[cfg(test)]
 mod compiler_test;
@@ -24,6 +25,8 @@ mod compiler_test;
 mod match_test;
 #[cfg(test)]
 mod pattern_test;
+#[cfg(test)]
+mod receive_test;
 
 #[cfg(any(test, feature = "std"))]
 mod disassemble;

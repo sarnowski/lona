@@ -6,10 +6,16 @@
 //! These intrinsics need access to Worker, Realm, or `Scheduler` that
 //! the normal `call_intrinsic` dispatch doesn't provide.
 
+extern crate alloc;
+
+use alloc::boxed::Box;
+
 use crate::gc;
 use crate::intrinsics;
 use crate::platform::MemorySpace;
 use crate::process::Process;
+use crate::process::deep_copy::{deep_copy_message_to_fragment, deep_copy_message_to_process};
+use crate::process::heap_fragment::HeapFragment;
 use crate::realm::Realm;
 use crate::scheduler::{ProcessTable, Scheduler, Worker};
 use crate::term::Term;
@@ -58,6 +64,7 @@ pub fn dispatch<M: MemorySpace>(
                 scheduler.map_or(Term::FALSE, |sched| handle_alive(worker, proc, mem, sched));
             Some(Ok(()))
         }
+        intrinsics::id::SEND => Some(handle_send(worker, proc, mem, realm, scheduler)),
         _ => None,
     }
 }
@@ -204,6 +211,194 @@ fn validate_spawnable_fun<M: MemorySpace>(mem: &M, fn_term: Term) -> Result<(), 
         });
     }
     Ok(())
+}
+
+/// Handle `send`: deliver a message to a process's mailbox.
+///
+/// Send paths:
+/// 1. Self-send: deep copy message to own heap, push to own mailbox
+/// 2. Direct copy: receiver is in table → deep copy to receiver's heap + mailbox
+/// 3. Fragment: receiver is taken → allocate fragment, deep copy, push to slot inbox
+/// 4. Dead PID: silently ignored (BEAM semantics), returns `:ok`
+fn handle_send<M: MemorySpace>(
+    worker: &mut Worker,
+    proc: &mut Process,
+    mem: &mut M,
+    realm: &mut Realm,
+    scheduler: Option<&Scheduler>,
+) -> Result<(), RunResult> {
+    let pid_term = worker.x_regs[1];
+    let message = worker.x_regs[2];
+
+    // Extract PID from term — first argument must be a PID
+    let Some((index, generation)) = proc.read_term_pid(mem, pid_term) else {
+        return Err(RunResult::Error(RuntimeError::BadArgument {
+            intrinsic: "send",
+            message: "first argument must be a PID",
+        }));
+    };
+    let target_pid = crate::process::ProcessId::new(index, generation);
+
+    // Self-send: copy to own heap and mailbox (works without scheduler).
+    // If heap is full, try GC then retry (BEAM guarantees send never fails
+    // due to heap exhaustion — only realm pool exhaustion is fatal).
+    if target_pid == proc.pid {
+        let mut copied = deep_copy_message_to_process(message, proc, mem);
+        if copied.is_none() {
+            // Heap full — try minor GC then retry
+            let _ = gc::minor_gc(proc, worker, mem);
+            copied = deep_copy_message_to_process(message, proc, mem);
+        }
+        let copied = copied.ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
+        proc.mailbox.push(copied);
+        worker.x_regs[0] = realm.intern_keyword(mem, "ok").unwrap_or(Term::TRUE);
+        return Ok(());
+    }
+
+    // Cross-process send requires scheduler for ProcessTable access.
+    // Without scheduler (e.g., REPL mode), cross-process delivery is not
+    // possible — message is silently dropped (BEAM fire-and-forget semantics).
+    let Some(scheduler) = scheduler else {
+        worker.x_regs[0] = realm.intern_keyword(mem, "ok").unwrap_or(Term::TRUE);
+        return Ok(());
+    };
+
+    // Try direct copy (receiver is in ProcessTable, not taken)
+    let delivered = scheduler.with_process_table_mut(|pt| {
+        if let Some(receiver) = pt.get_mut(target_pid) {
+            // Fast path: deep copy directly to receiver's heap
+            if let Some(copied) = deep_copy_message_to_process(message, receiver, mem) {
+                receiver.mailbox.push(copied);
+                // Wake receiver if it's waiting
+                let was_waiting = receiver.status == crate::process::ProcessStatus::Waiting;
+                if was_waiting {
+                    receiver.status = crate::process::ProcessStatus::Ready;
+                }
+                return SendResult::Delivered {
+                    wake_worker: if was_waiting {
+                        Some(receiver.worker_id.0 as usize)
+                    } else {
+                        None
+                    },
+                };
+            }
+            // Receiver's heap is full — fall back to fragment path
+            // (BEAM never fails send due to receiver heap exhaustion)
+            return SendResult::Taken;
+        }
+
+        if pt.is_taken(target_pid) {
+            return SendResult::Taken;
+        }
+
+        // PID not found — dead process, silently ignore
+        SendResult::Dead
+    });
+
+    match delivered {
+        SendResult::Delivered { wake_worker } => {
+            // If receiver was Waiting→Ready, enqueue it on its worker's run queue
+            if let Some(worker_idx) = wake_worker {
+                scheduler.enqueue_on(worker_idx, target_pid);
+            }
+        }
+        SendResult::Taken => {
+            // Fallback: allocate heap fragment (also used when direct copy OOM)
+            send_via_fragment(message, target_pid, mem, realm, scheduler)?;
+        }
+        SendResult::Dead => {
+            // Silently ignore (BEAM semantics)
+        }
+    }
+
+    worker.x_regs[0] = realm.intern_keyword(mem, "ok").unwrap_or(Term::TRUE);
+    Ok(())
+}
+
+/// Result of trying to deliver a message via the `ProcessTable`.
+enum SendResult {
+    /// Message delivered directly to receiver's heap and mailbox.
+    Delivered {
+        /// If receiver was Waiting, the worker index to enqueue it on.
+        wake_worker: Option<usize>,
+    },
+    /// Receiver is taken or heap-full (use fragment fallback).
+    Taken,
+    /// Receiver PID is dead/invalid.
+    Dead,
+}
+
+/// Minimum fragment size in bytes.
+///
+/// Large enough for a single heap object header plus one term. Ensures
+/// fragments can hold at least immediate-only messages without waste.
+const MIN_FRAGMENT_SIZE: usize = 64;
+
+/// Maximum retries when fragment is too small for the message.
+///
+/// Each retry doubles the fragment size. 4 retries covers up to 16x the
+/// initial estimate (64 bytes → 1024 bytes), sufficient for most nested
+/// structures. Pool memory from failed attempts is not freed (bump allocator).
+const MAX_FRAGMENT_RETRIES: usize = 4;
+
+/// Allocate a heap fragment and deliver message to taken process's slot inbox.
+///
+/// If the initial size estimate is too small, retries with doubled size
+/// up to `MAX_FRAGMENT_RETRIES` times before returning OOM.
+fn send_via_fragment<M: MemorySpace>(
+    message: Term,
+    target_pid: crate::process::ProcessId,
+    mem: &mut M,
+    realm: &mut Realm,
+    scheduler: &Scheduler,
+) -> Result<(), RunResult> {
+    let mut frag_size = estimate_copy_size(mem, message).max(MIN_FRAGMENT_SIZE);
+
+    for _ in 0..=MAX_FRAGMENT_RETRIES {
+        let frag_base = realm
+            .pool_mut()
+            .allocate(frag_size, 8)
+            .ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
+
+        let mut fragment = HeapFragment::new(frag_base, frag_size);
+
+        if let Some(copied) = deep_copy_message_to_fragment(message, &mut fragment, mem) {
+            fragment.set_message(copied);
+            scheduler.with_process_table_mut(|pt| {
+                pt.push_fragment(target_pid, Box::new(fragment));
+            });
+            return Ok(());
+        }
+
+        // Fragment too small — double and retry.
+        // Previous frag_base pool memory is not freed (bump allocator).
+        frag_size = frag_size.saturating_mul(2);
+    }
+
+    Err(RunResult::Error(RuntimeError::OutOfMemory))
+}
+
+/// Estimate the size needed to deep copy a term.
+///
+/// Returns a rough byte count. For immediates, returns 0.
+/// For heap objects, returns the object size plus some slack.
+fn estimate_copy_size<M: MemorySpace>(mem: &M, term: Term) -> usize {
+    if term.is_immediate() || term.is_nil() {
+        return 0;
+    }
+
+    if term.is_list() {
+        // Pair is 16 bytes; assume a short list
+        return 128;
+    }
+
+    if term.is_boxed() {
+        let header: Header = mem.read(term.to_vaddr());
+        // object_size includes header
+        return header.object_size().saturating_mul(2); // 2x for nested objects
+    }
+
+    64
 }
 
 /// Handle `alive?`: check if PID exists in process table.

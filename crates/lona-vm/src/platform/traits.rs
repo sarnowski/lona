@@ -296,3 +296,30 @@ impl MemorySpace for Sel4VSpace {
         }
     }
 }
+
+/// Get the current monotonic time in milliseconds.
+///
+/// Used by `receive` timeout handling. Uses a monotonic clock that
+/// cannot go backward (unlike wall-clock time).
+#[cfg(any(test, feature = "std"))]
+#[must_use]
+pub fn monotonic_ms() -> u64 {
+    use std::sync::OnceLock;
+    use std::time::Instant;
+
+    static START: OnceLock<Instant> = OnceLock::new();
+    let elapsed = START.get_or_init(Instant::now).elapsed();
+    // Elapsed milliseconds fit in u64 for any practical duration
+    u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Get the current monotonic time in milliseconds.
+///
+/// Placeholder for seL4 — returns 0. Real timer support comes in M2E.
+/// With this stub, `:after 0` works (immediate timeout), but `:after N`
+/// for N > 0 blocks forever (0 is never >= N).
+#[cfg(not(any(test, feature = "std")))]
+#[must_use]
+pub fn monotonic_ms() -> u64 {
+    0
+}

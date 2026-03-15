@@ -35,15 +35,24 @@
 //! For M2: Allocated but empty (no promotion without GC)
 //! ```
 
+pub mod deep_copy;
+pub mod heap_fragment;
+pub mod mailbox;
 pub mod pool;
 mod term_alloc;
 
 #[cfg(test)]
 mod allocation_test;
 #[cfg(test)]
+mod deep_copy_test;
+#[cfg(test)]
 mod execution_test;
 #[cfg(test)]
 mod frame_test;
+#[cfg(test)]
+mod heap_fragment_test;
+#[cfg(test)]
+mod mailbox_test;
 #[cfg(test)]
 mod pool_test;
 #[cfg(test)]
@@ -223,6 +232,8 @@ pub enum ProcessStatus {
     Completed = 2,
     /// Process encountered an error.
     Error = 3,
+    /// Process is blocked waiting for a message (`receive`).
+    Waiting = 4,
 }
 
 /// Stack overflow error.
@@ -347,6 +358,15 @@ pub struct Process {
     /// when the `HeapPid` is moved (treated as a GC root).
     pub pid_term: Option<Term>,
 
+    // Message passing
+    /// Incoming message queue for this process.
+    pub mailbox: mailbox::Mailbox,
+    /// Receive timeout deadline (absolute monotonic milliseconds).
+    ///
+    /// `None` means no timeout (block forever in `receive`).
+    /// `Some(deadline)` means timeout when `monotonic_ms() >= deadline`.
+    pub receive_deadline: Option<u64>,
+
     // Eval trampoline
     /// Stack of saved execution contexts for nested `eval` calls.
     pub eval_stack: [EvalFrame; MAX_EVAL_DEPTH],
@@ -410,6 +430,9 @@ impl Process {
             bindings: BTreeMap::new(),
             // Cached PID term
             pid_term: None,
+            // Message passing
+            mailbox: mailbox::Mailbox::new(),
+            receive_deadline: None,
             // Eval trampoline
             eval_stack: [EvalFrame::UNINIT; MAX_EVAL_DEPTH],
             eval_depth: 0,

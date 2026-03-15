@@ -201,10 +201,14 @@ pub mod id {
     ///
     /// Handled directly in `Vm::run` (uses eval trampoline).
     pub const EVAL: u8 = 55;
+    /// Send a message: `(send pid msg)` -> `:ok`.
+    ///
+    /// Handled directly in `Vm::run` (needs `ProcessTable` access for delivery).
+    pub const SEND: u8 = 56;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 56;
+pub const INTRINSIC_COUNT: usize = 57;
 
 /// Intrinsic name lookup table.
 ///
@@ -267,6 +271,7 @@ pub const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
     "pid?",            // 53: IS_PID
     "read-string",     // 54: READ_STRING
     "eval",            // 55: EVAL
+    "send",            // 56: SEND
 ];
 
 /// Look up an intrinsic ID by name.
@@ -360,7 +365,8 @@ pub const fn intrinsic_cost(id: u8) -> u32 {
         | id::SPAWN
         | id::ALIVE
         | id::READ_STRING
-        | id::EVAL => 10,
+        | id::EVAL
+        | id::SEND => 10,
 
         // Unknown and PUT: default cost 5
         _ => 5,
@@ -488,7 +494,9 @@ pub fn call_intrinsic<M: MemorySpace>(
         // These intrinsics are handled directly in Vm::run before reaching
         // this dispatch (they need Worker, ProcessTable, or eval trampoline).
         // If we get here, return a no-op.
-        id::GARBAGE_COLLECT | id::PROCESS_INFO | id::SPAWN | id::ALIVE | id::EVAL => return Ok(()),
+        id::GARBAGE_COLLECT | id::PROCESS_INFO | id::SPAWN | id::ALIVE | id::EVAL | id::SEND => {
+            return Ok(());
+        }
 
         // Regular process intrinsics
         id::SELF => {

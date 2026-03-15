@@ -235,6 +235,63 @@ pub mod op {
     ///
     /// Terminates the process with `RuntimeError::Badmatch`.
     pub const BADMATCH: u8 = 35;
+
+    // --- Receive Instructions ---
+
+    /// Peek mailbox at save position: `X(A) := mailbox.peek_from_save()`.
+    ///
+    /// Format: `RECV_PEEK A, Bx`
+    /// - A: destination register for peeked message
+    /// - Bx: jump target if no message at save position (wait label)
+    ///
+    /// If there is a message at the current save position, loads it into X(A)
+    /// and falls through to pattern matching. If past the end of the mailbox,
+    /// jumps to Bx (typically the `RECV_WAIT` instruction).
+    pub const RECV_PEEK: u8 = 36;
+
+    /// Advance mailbox save position and jump.
+    ///
+    /// Format: `RECV_NEXT _, Bx`
+    /// - Bx: jump target (back to `RECV_PEEK`)
+    ///
+    /// Called when no pattern clause matched the current message. Advances
+    /// the save position past the non-matching message and jumps back to
+    /// `RECV_PEEK` to try the next message.
+    pub const RECV_NEXT: u8 = 37;
+
+    /// Accept matched message: remove from mailbox at save position.
+    ///
+    /// Format: `RECV_ACCEPT`
+    ///
+    /// Called after a pattern clause matched and its body executed. Removes
+    /// the matched message from the mailbox and resets the save position to 0
+    /// (BEAM semantics: next receive scan starts from the head).
+    pub const RECV_ACCEPT: u8 = 38;
+
+    /// Wait for new messages or timeout.
+    ///
+    /// Format: `RECV_WAIT _, Bx`
+    /// - Bx: jump target when new messages arrive (back to `RECV_PEEK`)
+    ///
+    /// Executed after all mailbox messages have been scanned with no match.
+    /// Behavior:
+    /// 1. Drain fragment inbox into mailbox (for cross-worker messages)
+    /// 2. If new messages exist beyond save position → jump to Bx
+    /// 3. If timeout expired → fall through (to timeout body)
+    /// 4. If no timeout or not expired → set status=Waiting, return to scheduler
+    ///
+    /// When the process is woken by a `send`, it re-executes `RECV_WAIT`
+    /// (IP is decremented before returning Waiting).
+    pub const RECV_WAIT: u8 = 39;
+
+    /// Initialize receive timeout and reset save position.
+    ///
+    /// Format: `RECV_TIMEOUT_INIT A`
+    /// - A: register containing timeout in milliseconds
+    ///
+    /// Sets `process.receive_deadline = Some(now + X(A))` and resets the
+    /// mailbox save position to 0. Emitted only when `:after` clause is present.
+    pub const RECV_TIMEOUT_INIT: u8 = 40;
 }
 
 /// Bit widths for instruction fields.

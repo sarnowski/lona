@@ -291,6 +291,7 @@ fn eval_and_capture<M: MemorySpace>(
                 RuntimeError::Badmatch { .. } => ":badmatch",
                 RuntimeError::EvalError => ":eval-error",
                 RuntimeError::ProcessLimitReached => ":process-limit",
+                RuntimeError::BadArgument { .. } => ":bad-argument",
             };
             return Err(EvalError::Runtime(kind));
         }

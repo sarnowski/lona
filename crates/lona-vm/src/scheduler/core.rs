@@ -15,7 +15,7 @@
 use super::{ProcessTable, RunQueue, Worker};
 use crate::platform::MemorySpace;
 use crate::process::{
-    INITIAL_OLD_HEAP_SIZE, INITIAL_YOUNG_HEAP_SIZE, ProcessId, ProcessStatus, WorkerId,
+    INITIAL_OLD_HEAP_SIZE, INITIAL_YOUNG_HEAP_SIZE, Process, ProcessId, ProcessStatus, WorkerId,
 };
 use crate::realm::Realm;
 use crate::sync::{SpinMutex, SpinRwLock};
@@ -225,14 +225,11 @@ impl Scheduler {
         proc.reset_reductions();
         worker.current_pid = Some(pid);
 
-        // Acquire realm write lock for the duration of Vm::run.
-        // This is coarse-grained but correct — other workers block on realm
-        // access during this time. Fine-grained per-instruction locking can
-        // be added later if profiling shows contention.
-        let result = {
-            let mut realm_guard = realm.write();
-            Vm::run(worker, &mut proc, mem, &mut realm_guard, Some(self))
-        };
+        // Run the process in batches, releasing the realm lock between batches.
+        // This prevents other workers from spinning on the lock for the entire
+        // reduction budget (~500µs). Each batch holds the lock for at most
+        // REALM_LOCK_BATCH reductions (~25µs), keeping lock contention bounded.
+        let result = Self::run_batched(worker, &mut proc, mem, realm, self);
 
         worker.current_pid = None;
 
@@ -250,6 +247,22 @@ impl Scheduler {
                 }
                 TickResult::Continued(pid)
             }
+            RunResult::Waiting => {
+                // Process is blocked on `receive`. Put back in table but
+                // do NOT enqueue — `send` will wake it by setting status
+                // to Ready and enqueueing on the run queue.
+                //
+                // Invariant: a Waiting process is placed back in the
+                // ProcessTable (not Taken), so `send` can deep-copy
+                // directly to its heap. Fragments are for Taken processes;
+                // since we put_back here, the process is reachable directly.
+                proc.status = ProcessStatus::Waiting;
+                {
+                    let mut pt = self.process_table.lock();
+                    pt.put_back(pid, proc);
+                }
+                TickResult::Continued(pid)
+            }
             RunResult::Completed(value) => {
                 let mut pt = self.process_table.lock();
                 pt.free_taken_slot(pid);
@@ -259,6 +272,54 @@ impl Scheduler {
                 let mut pt = self.process_table.lock();
                 pt.free_taken_slot(pid);
                 TickResult::Error(pid, err)
+            }
+        }
+    }
+
+    /// Run a process in batches, releasing the realm lock between batches.
+    ///
+    /// Each batch executes up to `REALM_LOCK_BATCH` reductions with the realm
+    /// write lock held. Between batches, the lock is released to give other
+    /// workers a chance to acquire it. This bounds worst-case lock contention
+    /// to ~25µs per batch instead of ~500µs for the full time slice.
+    fn run_batched<M: MemorySpace>(
+        worker: &mut Worker,
+        proc: &mut Process,
+        mem: &mut M,
+        realm: &SpinRwLock<Realm>,
+        scheduler: &Self,
+    ) -> RunResult {
+        /// Maximum reductions per realm lock hold.
+        const REALM_LOCK_BATCH: u32 = 100;
+
+        loop {
+            let batch = proc.reductions.min(REALM_LOCK_BATCH);
+            if batch == 0 {
+                return RunResult::Yielded;
+            }
+
+            // Save the full budget and set a limited sub-budget
+            let saved = proc.reductions;
+            proc.reductions = batch;
+
+            let result = {
+                let mut realm_guard = realm.write();
+                Vm::run(worker, proc, mem, &mut realm_guard, Some(scheduler))
+            };
+            // Realm lock released here
+
+            match result {
+                RunResult::Yielded => {
+                    // Sub-budget exhausted — restore remaining outer budget
+                    let consumed = batch.saturating_sub(proc.reductions);
+                    proc.reductions = saved.saturating_sub(consumed);
+                    if proc.reductions == 0 {
+                        return RunResult::Yielded;
+                    }
+                    // Continue with next batch
+                }
+                // Terminal or blocking results pass through immediately
+                other => return other,
             }
         }
     }

@@ -25,11 +25,11 @@ use crate::term::Term;
 use super::pattern::Pattern;
 use super::{Binding, CompileError, Compiler, MAX_PARAMS, MAX_SYMBOL_NAME_LEN};
 
-/// Maximum number of match clauses.
-const MAX_CLAUSES: usize = 32;
+/// Maximum number of match/receive clauses.
+pub const MAX_CLAUSES: usize = 32;
 
-/// Maximum number of labels in a match expression.
-const MAX_LABELS: usize = 64;
+/// Maximum number of labels in a match/receive expression.
+pub const MAX_LABELS: usize = 64;
 
 /// Maximum patch sites per label.
 const MAX_PATCH_SITES: usize = 16;
@@ -77,17 +77,17 @@ impl Default for PendingLabel {
     }
 }
 
-/// Label manager for forward jumps in match compilation.
-struct LabelManager {
+/// Label manager for forward jumps in match/receive compilation.
+pub struct LabelManager {
     /// Pending labels.
     labels: [PendingLabel; MAX_LABELS],
     /// Number of labels allocated.
-    count: usize,
+    pub count: usize,
 }
 
 impl LabelManager {
     /// Create a new label manager.
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             labels: core::array::from_fn(|_| PendingLabel::default()),
             count: 0,
@@ -95,7 +95,7 @@ impl LabelManager {
     }
 
     /// Reserve a new label for forward reference.
-    fn reserve(&mut self) -> Option<usize> {
+    pub fn reserve(&mut self) -> Option<usize> {
         if self.count >= MAX_LABELS {
             return None;
         }
@@ -106,7 +106,7 @@ impl LabelManager {
     }
 
     /// Add a patch site for a label using `ABx` format (18-bit Bx field).
-    const fn add_patch_site_abx(&mut self, label_id: usize, instr_idx: usize) -> bool {
+    pub const fn add_patch_site_abx(&mut self, label_id: usize, instr_idx: usize) -> bool {
         self.add_patch_site_impl(label_id, instr_idx, PatchFormat::Abx)
     }
 
@@ -138,7 +138,7 @@ impl LabelManager {
     }
 
     /// Resolve a label to the current position.
-    const fn resolve(&mut self, label_id: usize, target: usize) {
+    pub const fn resolve(&mut self, label_id: usize, target: usize) {
         if label_id < self.count {
             self.labels[label_id].resolved = target;
             self.labels[label_id].is_resolved = true;
@@ -146,7 +146,7 @@ impl LabelManager {
     }
 
     /// Patch all instructions referencing a label.
-    fn patch_all(&self, label_id: usize, code: &mut [u32]) {
+    pub fn patch_all(&self, label_id: usize, code: &mut [u32]) {
         if label_id >= self.count {
             return;
         }
@@ -179,23 +179,23 @@ impl LabelManager {
 
 /// A binding created by pattern matching.
 #[derive(Clone, Copy)]
-struct PatternBinding {
+pub struct PatternBinding {
     /// Symbol name.
-    name: [u8; MAX_SYMBOL_NAME_LEN],
+    pub name: [u8; MAX_SYMBOL_NAME_LEN],
     /// Length of the name.
-    name_len: u8,
+    pub name_len: u8,
     /// X register where the value is currently stored.
-    source_reg: u8,
+    pub source_reg: u8,
 }
 
-/// A parsed match clause (pattern, optional guard, body).
-struct MatchClause {
+/// A parsed match/receive clause (pattern, optional guard, body).
+pub struct MatchClause {
     /// The pattern for this clause.
-    pattern: Pattern,
+    pub pattern: Pattern,
     /// Optional guard expression (`when` clause).
-    guard: Option<Term>,
+    pub guard: Option<Term>,
     /// Body expression.
-    body: Term,
+    pub body: Term,
 }
 
 /// Context for compiling a single match clause.
@@ -213,11 +213,11 @@ struct ClauseContext {
 }
 
 /// Context for emitting pattern tests.
-struct PatternContext {
+pub struct PatternContext {
     /// Label to jump to if pattern doesn't match.
-    fail_label: usize,
+    pub fail_label: usize,
     /// First available temp register.
-    temp_base: u8,
+    pub temp_base: u8,
 }
 
 impl<M: MemorySpace> Compiler<'_, M> {
@@ -337,8 +337,12 @@ impl<M: MemorySpace> Compiler<'_, M> {
         Ok((expr, clauses))
     }
 
-    /// Parse a single match clause from the argument list.
-    fn parse_single_clause(&self, current: &mut Term) -> Result<MatchClause, CompileError> {
+    /// Parse a single match/receive clause from the argument list.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CompileError::InvalidSyntax` if the clause is malformed.
+    pub fn parse_single_clause(&self, current: &mut Term) -> Result<MatchClause, CompileError> {
         // Get pattern
         let (pattern_term, rest1) = self
             .proc
@@ -468,7 +472,11 @@ impl<M: MemorySpace> Compiler<'_, M> {
     }
 
     /// Emit pattern tests, branching to `fail_label` on mismatch.
-    fn emit_pattern_tests(
+    ///
+    /// # Errors
+    ///
+    /// Returns `CompileError` if the pattern is too complex.
+    pub fn emit_pattern_tests(
         &mut self,
         pattern: &Pattern,
         value_reg: u8,
@@ -773,7 +781,14 @@ impl<M: MemorySpace> Compiler<'_, M> {
     }
 
     /// Add pattern bindings to the compiler's scope.
-    fn add_pattern_bindings(&mut self, bindings: &[PatternBinding]) -> Result<(), CompileError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns `CompileError::ExpressionTooComplex` if too many bindings.
+    pub fn add_pattern_bindings(
+        &mut self,
+        bindings: &[PatternBinding],
+    ) -> Result<(), CompileError> {
         for binding in bindings {
             if self.bindings_len >= MAX_PARAMS {
                 return Err(CompileError::ExpressionTooComplex);

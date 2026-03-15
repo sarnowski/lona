@@ -55,6 +55,11 @@ pub enum RootLocation {
         /// Index into the eval stack.
         eval_index: usize,
     },
+    /// Message in the process mailbox.
+    MailboxMessage {
+        /// Index into the mailbox message queue.
+        index: usize,
+    },
 }
 
 /// Iterator over all GC roots in a process.
@@ -206,6 +211,13 @@ where
             callback(RootLocation::ProcessBinding(var_addr), term);
         }
     }
+
+    // 7. Mailbox messages
+    for (index, &term) in process.mailbox.messages().iter().enumerate() {
+        if needs_tracing(term) {
+            callback(RootLocation::MailboxMessage { index }, term);
+        }
+    }
 }
 
 /// Update a root after GC has moved the object.
@@ -260,6 +272,7 @@ where
     }
 }
 
+/// Update a root after GC has moved the object.
 ///
 /// Note: For Y register roots, use `update_root_with_mem` instead.
 pub fn update_root(
@@ -293,6 +306,9 @@ pub fn update_root(
         }
         RootLocation::EvalChunkAddr { eval_index } => {
             process.eval_stack[*eval_index].saved_chunk_addr = Some(new_term.to_vaddr());
+        }
+        RootLocation::MailboxMessage { index } => {
+            process.mailbox.messages_mut()[*index] = new_term;
         }
     }
 }
@@ -333,6 +349,9 @@ pub fn update_root_with_mem<M: MemorySpace>(
         }
         RootLocation::EvalChunkAddr { eval_index } => {
             process.eval_stack[*eval_index].saved_chunk_addr = Some(new_term.to_vaddr());
+        }
+        RootLocation::MailboxMessage { index } => {
+            process.mailbox.messages_mut()[*index] = new_term;
         }
     }
 }

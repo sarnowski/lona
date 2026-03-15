@@ -235,6 +235,7 @@ fn yield_during_simple_function_call() {
         RunResult::Completed(v) => {
             assert_eq!(v, int(6));
         }
+        RunResult::Waiting => panic!("Unexpected Waiting"),
         RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
     }
 }
@@ -303,6 +304,7 @@ fn yield_and_resume_nested_calls() {
                 // Prevent infinite loop
                 assert!(yield_count <= 100, "Too many yields");
             }
+            RunResult::Waiting => panic!("Unexpected Waiting"),
             RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
         }
     }
@@ -395,6 +397,7 @@ fn stress_many_yields() {
                     "Too many yields - possible infinite loop"
                 );
             }
+            RunResult::Waiting => panic!("Unexpected Waiting"),
             RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
         }
     }
@@ -523,6 +526,7 @@ fn stress_recursive_with_yields() {
                     "Too many yields - possible infinite loop"
                 );
             }
+            RunResult::Waiting => panic!("Unexpected Waiting"),
             RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
         }
     }
@@ -608,6 +612,7 @@ fn stress_deep_call_chain_yield_resume() {
                 proc.reductions = 2; // Keep small budget
                 assert!(yield_count <= 100, "Too many yields");
             }
+            RunResult::Waiting => panic!("Unexpected Waiting"),
             RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
         }
     }

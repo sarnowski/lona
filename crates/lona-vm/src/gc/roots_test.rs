@@ -484,3 +484,71 @@ fn update_root_y_register() {
     let read_back: Term = mem.read(Vaddr::new(y_base.as_u64() + 8));
     assert_eq!(read_back, new_term);
 }
+
+// =============================================================================
+// Mailbox Message Root Tests
+// =============================================================================
+
+#[test]
+fn root_scan_finds_mailbox_messages() {
+    let (mut process, worker, mut mem) = setup();
+
+    // Allocate a heap object (tuple) and push it to the mailbox
+    let tuple = process
+        .alloc_term_tuple(&mut mem, &[Term::small_int(42).unwrap()])
+        .unwrap();
+    process.mailbox.push(tuple);
+
+    // Also push an immediate (should NOT appear as a root)
+    process.mailbox.push(Term::small_int(7).unwrap());
+
+    let mut mailbox_roots = Vec::new();
+    iterate_roots_with_mem(&process, &worker, &mem, |loc, term| {
+        if matches!(loc, RootLocation::MailboxMessage { .. }) {
+            mailbox_roots.push((loc, term));
+        }
+    });
+
+    // Only the tuple needs tracing (the small int is immediate)
+    assert_eq!(mailbox_roots.len(), 1);
+    assert_eq!(
+        mailbox_roots[0].0,
+        RootLocation::MailboxMessage { index: 0 }
+    );
+    assert_eq!(mailbox_roots[0].1, tuple);
+}
+
+#[test]
+fn root_scan_empty_mailbox_no_roots() {
+    let (process, worker, mem) = setup();
+
+    let mut mailbox_roots = Vec::new();
+    iterate_roots_with_mem(&process, &worker, &mem, |loc, _term| {
+        if matches!(loc, RootLocation::MailboxMessage { .. }) {
+            mailbox_roots.push(loc);
+        }
+    });
+
+    assert!(mailbox_roots.is_empty());
+}
+
+#[test]
+fn root_update_mailbox_message() {
+    let (mut process, mut worker, mut mem) = setup();
+
+    let original = process.alloc_term_tuple(&mut mem, &[Term::TRUE]).unwrap();
+    process.mailbox.push(original);
+
+    let new_term = process.alloc_term_tuple(&mut mem, &[Term::FALSE]).unwrap();
+
+    // Update the mailbox message root
+    update_root(
+        &mut process,
+        &mut worker,
+        &RootLocation::MailboxMessage { index: 0 },
+        new_term,
+    );
+
+    // Verify the mailbox was updated
+    assert_eq!(process.mailbox.messages()[0], new_term);
+}

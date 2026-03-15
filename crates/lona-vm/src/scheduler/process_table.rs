@@ -9,6 +9,7 @@
 
 extern crate alloc;
 
+use crate::process::heap_fragment::HeapFragment;
 use crate::process::{Process, ProcessId};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -26,6 +27,12 @@ struct Slot {
     next_free: u32,
     /// Whether this slot is allocated (true from `allocate` until `remove`/`free_taken_slot`).
     allocated: bool,
+    /// Inbox of heap fragments for messages sent while process was taken.
+    ///
+    /// When a process is taken (running on another worker), senders push
+    /// fragments here instead of writing to the process's mailbox directly.
+    /// The fragments are drained when the process is put back or during GC.
+    fragment_inbox: Option<Box<HeapFragment>>,
 }
 
 /// Fixed-size table for O(1) process lookup by PID.
@@ -56,6 +63,7 @@ impl ProcessTable {
                     u32::MAX // End of free list
                 },
                 allocated: false,
+                fragment_inbox: None,
             })
             .collect();
 
@@ -168,6 +176,8 @@ impl ProcessTable {
         // Increment generation for next reuse
         slot.generation = slot.generation.wrapping_add(1);
         slot.allocated = false;
+        // Drop any pending fragments to prevent leaking into reused slots
+        slot.fragment_inbox = None;
 
         // Add to free list
         slot.next_free = self.free_head;
@@ -248,6 +258,8 @@ impl ProcessTable {
         let slot = &mut self.slots[index];
         slot.generation = slot.generation.wrapping_add(1);
         slot.allocated = false;
+        // Drop any pending fragments to prevent leaking into reused slots
+        slot.fragment_inbox = None;
         slot.next_free = self.free_head;
         self.free_head = index as u32;
         self.count -= 1;
@@ -270,6 +282,53 @@ impl ProcessTable {
 
         let slot = &self.slots[index];
         slot.allocated && slot.generation == pid.generation() && slot.process.is_none()
+    }
+
+    /// Push a heap fragment to a process's inbox.
+    ///
+    /// Used for cross-worker message delivery when the process is taken.
+    /// The fragment is prepended to the slot's fragment linked list (LIFO).
+    ///
+    /// **Important:** Prepend means fragments are in reverse send order.
+    /// When draining the inbox into the process mailbox, the linked list
+    /// must be reversed to maintain FIFO delivery order (spec guarantee:
+    /// "order preserved between same sender-receiver pair").
+    ///
+    /// Silently ignored if the PID is invalid or the slot is not allocated.
+    pub fn push_fragment(&mut self, pid: ProcessId, mut fragment: Box<HeapFragment>) {
+        if pid.is_null() {
+            return;
+        }
+        let index = pid.index();
+        if index >= MAX_PROCESSES {
+            return;
+        }
+        let slot = &mut self.slots[index];
+        if slot.generation != pid.generation() || !slot.allocated {
+            return;
+        }
+        // Prepend to linked list
+        fragment.next = slot.fragment_inbox.take();
+        slot.fragment_inbox = Some(fragment);
+    }
+
+    /// Take all fragments from a process's inbox.
+    ///
+    /// Returns the head of the fragment linked list, or `None` if empty.
+    /// The slot's inbox is cleared.
+    pub fn take_fragments(&mut self, pid: ProcessId) -> Option<Box<HeapFragment>> {
+        if pid.is_null() {
+            return None;
+        }
+        let index = pid.index();
+        if index >= MAX_PROCESSES {
+            return None;
+        }
+        let slot = &mut self.slots[index];
+        if slot.generation != pid.generation() {
+            return None;
+        }
+        slot.fragment_inbox.take()
     }
 
     /// Number of active processes.

@@ -13,9 +13,12 @@
 //! See `docs/architecture/virtual-machine.md` for the full specification.
 
 #[cfg(test)]
+mod receive_test;
+#[cfg(test)]
 mod vm_test;
 
 mod pattern;
+mod receive;
 mod special_intrinsics;
 
 use crate::Vaddr;
@@ -636,6 +639,14 @@ pub enum RuntimeError {
     ///
     /// Distinct from `OutOfMemory` so GC retry is not triggered.
     ProcessLimitReached,
+
+    /// Bad argument to an intrinsic (wrong type or value).
+    BadArgument {
+        /// Which intrinsic was called.
+        intrinsic: &'static str,
+        /// Description of what was wrong.
+        message: &'static str,
+    },
 }
 
 impl RuntimeError {
@@ -668,6 +679,14 @@ pub enum RunResult {
     /// The process can be resumed later by calling `Vm::run` again.
     Yielded,
 
+    /// Process is blocked waiting for a message (`receive`).
+    ///
+    /// The scheduler should put the process back in the table with
+    /// `ProcessStatus::Waiting` but NOT re-enqueue it on the run queue.
+    /// The process is woken when `send` delivers a message and sets
+    /// its status to `Ready`.
+    Waiting,
+
     /// Process encountered a runtime error.
     Error(RuntimeError),
 }
@@ -681,10 +700,16 @@ impl RunResult {
         matches!(self, Self::Completed(_) | Self::Error(_))
     }
 
-    /// Returns true if execution can be resumed.
+    /// Returns true if process yielded due to reduction budget.
     #[must_use]
     pub const fn is_yielded(&self) -> bool {
         matches!(self, Self::Yielded)
+    }
+
+    /// Returns true if process is blocked waiting for a message.
+    #[must_use]
+    pub const fn is_waiting(&self) -> bool {
+        matches!(self, Self::Waiting)
     }
 }
 
@@ -1144,6 +1169,25 @@ impl Vm {
                 }
             }
 
+            // Receive opcodes need scheduler access for fragment draining and blocking.
+            if matches!(
+                opcode,
+                op::RECV_PEEK
+                    | op::RECV_NEXT
+                    | op::RECV_ACCEPT
+                    | op::RECV_WAIT
+                    | op::RECV_TIMEOUT_INIT
+            ) {
+                match receive::execute(&mut worker.x_regs, proc, mem, instr, opcode, scheduler) {
+                    Ok(cost) => {
+                        proc.consume_reductions(cost);
+                        gc_retry_pending = false;
+                        continue;
+                    }
+                    Err(result) => return result,
+                }
+            }
+
             // Execute instruction
             match execute_instruction(
                 &mut worker.x_regs,
@@ -1215,8 +1259,10 @@ pub fn execute_with_scheduler<M: MemorySpace>(
     loop {
         match Vm::run(worker, proc, mem, realm, scheduler) {
             RunResult::Completed(term) => return Ok(term),
-            RunResult::Yielded => {
-                // Single-threaded execution: just continue with fresh budget
+            RunResult::Yielded | RunResult::Waiting => {
+                // Single-threaded execution: just continue with fresh budget.
+                // Waiting is treated as Yielded here since there's no scheduler
+                // to wake the process — the caller is running in a tight loop.
                 proc.reset_reductions();
             }
             RunResult::Error(e) => return Err(e),

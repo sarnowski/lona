@@ -275,6 +275,24 @@ Send message asynchronously.
 ```clojure
 ;; @todo
 (send (self) :hello)  ; => :ok
+(send (self) [:ok 42])  ; => :ok
+```
+
+Raises error if `pid` is not a PID:
+
+```clojure
+;; @todo
+(send 42 :msg)        ; => ERROR: bad argument
+(send nil :msg)       ; => ERROR: bad argument
+(send "hello" :msg)   ; => ERROR: bad argument
+```
+
+Sending to a dead PID is silently ignored (BEAM semantics):
+
+```clojure
+;; @todo
+(let [p (spawn (fn* [] :done))]
+  (send p :after-death))  ; => :ok (no error, message dropped)
 ```
 
 - Intra-realm: deep copy, ~100-500 ns
@@ -360,7 +378,6 @@ construct (not a simple macro) for efficient single-pass pattern matching.
 Timeout returns immediately if mailbox empty:
 
 ```clojure
-;; @todo
 (receive :after 0 :timeout)  ; => :timeout
 ```
 

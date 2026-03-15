@@ -7,6 +7,7 @@
 
 use super::process_table::ProcessTable;
 use crate::Vaddr;
+use crate::process::heap_fragment::HeapFragment;
 use crate::process::{Process, ProcessId};
 
 /// Create a test process with default heap configuration.
@@ -288,4 +289,139 @@ fn process_table_free_list_reuse() {
     let (idx_new, gen_new) = table.allocate().unwrap();
     assert_eq!(idx_new, idx2);
     assert_eq!(gen_new, 1); // Generation incremented
+}
+
+// ============================================================================
+// Fragment Inbox Tests
+// ============================================================================
+
+/// Helper to create a fragment with a given base address and message.
+fn make_fragment(base: u64, msg: crate::term::Term) -> HeapFragment {
+    let mut frag = HeapFragment::new(Vaddr::new(base), 64);
+    frag.set_message(msg);
+    frag
+}
+
+#[test]
+fn push_fragment_and_take() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    let msg = crate::term::Term::TRUE;
+    table.push_fragment(pid, Box::new(make_fragment(0x5000, msg)));
+
+    let frags = table.take_fragments(pid).unwrap();
+    assert_eq!(frags.message(), msg);
+    assert!(frags.next.is_none());
+
+    // Inbox is now empty
+    assert!(table.take_fragments(pid).is_none());
+}
+
+#[test]
+fn push_multiple_fragments_forms_linked_list() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    let msg1 = crate::term::Term::small_int(1).unwrap();
+    let msg2 = crate::term::Term::small_int(2).unwrap();
+    let msg3 = crate::term::Term::small_int(3).unwrap();
+
+    table.push_fragment(pid, Box::new(make_fragment(0x5000, msg1)));
+    table.push_fragment(pid, Box::new(make_fragment(0x6000, msg2)));
+    table.push_fragment(pid, Box::new(make_fragment(0x7000, msg3)));
+
+    // Fragments are prepended, so order is reversed: 3, 2, 1
+    let head = table.take_fragments(pid).unwrap();
+    assert_eq!(head.message(), msg3);
+    let f2 = head.next.as_ref().unwrap();
+    assert_eq!(f2.message(), msg2);
+    let f1 = f2.next.as_ref().unwrap();
+    assert_eq!(f1.message(), msg1);
+    assert!(f1.next.is_none());
+}
+
+#[test]
+fn push_fragment_to_taken_slot() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    // Take process (simulates execution on another worker)
+    let _taken = table.take(pid).unwrap();
+    assert!(table.is_taken(pid));
+
+    // Push fragment to taken slot — this should work
+    let msg = crate::term::Term::TRUE;
+    table.push_fragment(pid, Box::new(make_fragment(0x5000, msg)));
+
+    let frags = table.take_fragments(pid).unwrap();
+    assert_eq!(frags.message(), msg);
+}
+
+#[test]
+fn push_fragment_to_invalid_pid_ignored() {
+    let mut table = ProcessTable::new();
+
+    // Push to unallocated slot — silent no-op
+    let pid = ProcessId::new(0, 99);
+    table.push_fragment(
+        pid,
+        Box::new(make_fragment(0x5000, crate::term::Term::TRUE)),
+    );
+
+    // Push to null — silent no-op
+    table.push_fragment(
+        ProcessId::NULL,
+        Box::new(make_fragment(0x5000, crate::term::Term::TRUE)),
+    );
+}
+
+#[test]
+fn take_fragments_from_empty_inbox() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    assert!(table.take_fragments(pid).is_none());
+}
+
+#[test]
+fn take_fragments_stale_pid() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    table.push_fragment(
+        pid,
+        Box::new(make_fragment(0x5000, crate::term::Term::TRUE)),
+    );
+
+    // Remove process (increments generation)
+    table.remove(pid);
+
+    // Stale PID should not retrieve fragments
+    assert!(table.take_fragments(pid).is_none());
 }
