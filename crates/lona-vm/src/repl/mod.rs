@@ -247,6 +247,12 @@ fn print_runtime_error<U: Uart>(e: &RuntimeError, uart: &mut U) {
         RuntimeError::Badmatch { .. } => {
             uart.write_str("badmatch: no clause matched");
         }
+        RuntimeError::EvalError => {
+            uart.write_str("eval: compilation failed");
+        }
+        RuntimeError::ProcessLimitReached => {
+            uart.write_str("process limit reached");
+        }
     }
 }
 

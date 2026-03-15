@@ -16,6 +16,13 @@ mod meta;
 mod sequence;
 mod string;
 
+/// Maximum length for `read-string` input.
+///
+/// Stack-buffered to release the immutable `MemorySpace` borrow before
+/// calling the reader (which needs `&mut`). 1024 bytes accommodates
+/// typical REPL and eval expressions.
+const MAX_READ_STRING_LEN: usize = 1024;
+
 #[cfg(test)]
 mod arithmetic_test;
 #[cfg(test)]
@@ -176,13 +183,34 @@ pub mod id {
     ///
     /// Handled directly in `Vm::run` (needs direct process access).
     pub const PROCESS_INFO: u8 = 49;
+    /// Spawn a new process: `(spawn f)` -> pid.
+    ///
+    /// Handled directly in `Vm::run` (needs `ProcessTable` access).
+    pub const SPAWN: u8 = 50;
+    /// Get current process PID: `(self)` -> pid.
+    pub const SELF: u8 = 51;
+    /// Check if process is alive: `(alive? pid)` -> boolean.
+    ///
+    /// Handled directly in `Vm::run` (needs `ProcessTable` access).
+    pub const ALIVE: u8 = 52;
+    /// PID predicate: `(pid? x)` -> boolean.
+    pub const IS_PID: u8 = 53;
+    /// Parse string to form: `(read-string s)` -> form.
+    pub const READ_STRING: u8 = 54;
+    /// Evaluate a form: `(eval form)` -> result.
+    ///
+    /// Handled directly in `Vm::run` (uses eval trampoline).
+    pub const EVAL: u8 = 55;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 50;
+pub const INTRINSIC_COUNT: usize = 56;
 
 /// Intrinsic name lookup table.
-const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
+///
+/// This is the single source of truth for intrinsic names. The bootstrap
+/// module imports this to register intrinsics in `lona.core`.
+pub const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
     "+",               // 0: ADD
     "-",               // 1: SUB
     "*",               // 2: MUL
@@ -233,6 +261,12 @@ const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
     "contains?",       // 47: CONTAINS
     "garbage-collect", // 48: GARBAGE_COLLECT
     "process-info",    // 49: PROCESS_INFO
+    "spawn",           // 50: SPAWN
+    "self",            // 51: SELF
+    "alive?",          // 52: ALIVE
+    "pid?",            // 53: IS_PID
+    "read-string",     // 54: READ_STRING
+    "eval",            // 55: EVAL
 ];
 
 /// Look up an intrinsic ID by name.
@@ -290,7 +324,9 @@ pub const fn intrinsic_cost(id: u8) -> u32 {
         | id::IS_VECTOR
         | id::IS_NAMESPACE
         | id::IS_FN
-        | id::IS_VAR => 1,
+        | id::IS_VAR
+        | id::SELF
+        | id::IS_PID => 1,
 
         // Simple collection ops: cost 2
         id::COUNT | id::FIRST | id::IS_EMPTY => 2,
@@ -320,7 +356,11 @@ pub const fn intrinsic_cost(id: u8) -> u32 {
         | id::DEF_BINDING
         | id::DEF_META
         | id::GARBAGE_COLLECT
-        | id::PROCESS_INFO => 10,
+        | id::PROCESS_INFO
+        | id::SPAWN
+        | id::ALIVE
+        | id::READ_STRING
+        | id::EVAL => 10,
 
         // Unknown and PUT: default cost 5
         _ => 5,
@@ -445,9 +485,39 @@ pub fn call_intrinsic<M: MemorySpace>(
         id::DEF_BINDING => intrinsic_def_binding(x_regs, proc, mem, intrinsic_id)?,
         id::DEF_META => intrinsic_def_meta(x_regs, proc, realm, mem, intrinsic_id)?,
 
-        // GARBAGE_COLLECT and PROCESS_INFO are handled directly in Vm::run
-        // before reaching this dispatch. If we get here, return a no-op.
-        id::GARBAGE_COLLECT | id::PROCESS_INFO => return Ok(()),
+        // These intrinsics are handled directly in Vm::run before reaching
+        // this dispatch (they need Worker, ProcessTable, or eval trampoline).
+        // If we get here, return a no-op.
+        id::GARBAGE_COLLECT | id::PROCESS_INFO | id::SPAWN | id::ALIVE | id::EVAL => return Ok(()),
+
+        // Regular process intrinsics
+        id::SELF => {
+            x_regs[0] = proc.pid_term.unwrap_or(Term::NIL);
+            return Ok(());
+        }
+        id::IS_PID => Term::bool(proc.is_term_pid(mem, x_regs[1])),
+        id::READ_STRING => {
+            // Read string content into a stack buffer to release the immutable borrow
+            // on `mem` before calling the reader (which needs `&mut mem`).
+            let s = proc
+                .read_term_string(mem, x_regs[1])
+                .ok_or(IntrinsicError::TypeError {
+                    intrinsic: id::READ_STRING,
+                    arg: 0,
+                    expected: "string",
+                })?;
+            if s.len() > MAX_READ_STRING_LEN {
+                return Err(IntrinsicError::OutOfMemory);
+            }
+            let mut buf = [0u8; MAX_READ_STRING_LEN];
+            let len = s.len();
+            buf[..len].copy_from_slice(s.as_bytes());
+            // Now mem borrow is released
+            let str_ref = core::str::from_utf8(&buf[..len]).unwrap_or("");
+            crate::reader::read(str_ref, proc, realm, mem)
+                .map_err(|_| IntrinsicError::OutOfMemory)?
+                .unwrap_or(Term::NIL)
+        }
 
         _ => return Err(IntrinsicError::UnknownIntrinsic(intrinsic_id)),
     };

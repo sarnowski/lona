@@ -392,3 +392,203 @@ fn deep_copy_closure<M: MemorySpace>(
 
     Some(Term::boxed_vaddr(dst_addr))
 }
+
+// ============================================================================
+// Process-to-Process Deep Copy (for spawn)
+// ============================================================================
+
+use crate::process::Process;
+
+/// Deep copy a Term from one process's heap to another's.
+///
+/// Used by `spawn` to copy the function (and its captures/constants)
+/// to the new process's heap. Both processes share the same `MemorySpace`.
+pub fn deep_copy_term_to_process<M: MemorySpace>(
+    term: Term,
+    _src_proc: &Process,
+    dst_proc: &mut Process,
+    mem: &mut M,
+) -> Option<Term> {
+    let mut visited = VisitedTracker::new();
+    deep_copy_to_proc(term, dst_proc, mem, &mut visited)
+}
+
+/// Recursive deep copy to a process heap.
+fn deep_copy_to_proc<M: MemorySpace>(
+    term: Term,
+    dst_proc: &mut Process,
+    mem: &mut M,
+    visited: &mut VisitedTracker,
+) -> Option<Term> {
+    if term.is_immediate() || term.is_nil() {
+        return Some(term);
+    }
+
+    if term.is_list() {
+        let addr = term.to_vaddr();
+        if let Some(dst) = visited.check(addr) {
+            return Some(Term::list_vaddr(dst));
+        }
+        let pair: HeapPair = mem.read(addr);
+        let dst_addr = dst_proc.alloc(HeapPair::SIZE, 8)?;
+        visited.record(addr, dst_addr);
+        let head = deep_copy_to_proc(pair.head, dst_proc, mem, visited)?;
+        let tail = deep_copy_to_proc(pair.tail, dst_proc, mem, visited)?;
+        let dst_pair = HeapPair { head, tail };
+        mem.write(dst_addr, dst_pair);
+        return Some(Term::list_vaddr(dst_addr));
+    }
+
+    if term.is_boxed() {
+        let addr = term.to_vaddr();
+        if let Some(dst) = visited.check(addr) {
+            return Some(Term::boxed_vaddr(dst));
+        }
+        return deep_copy_boxed_to_proc(term, addr, dst_proc, mem, visited);
+    }
+
+    None
+}
+
+/// Deep copy a boxed term to a process heap.
+fn deep_copy_boxed_to_proc<M: MemorySpace>(
+    original_term: Term,
+    addr: Vaddr,
+    dst_proc: &mut Process,
+    mem: &mut M,
+    visited: &mut VisitedTracker,
+) -> Option<Term> {
+    let header: Header = mem.read(addr);
+    let tag = header.object_tag();
+
+    match tag {
+        object::STRING => {
+            let len = header.arity() as usize;
+            let total = HeapString::alloc_size(len);
+            let dst_addr = dst_proc.alloc(total, 8)?;
+            visited.record(addr, dst_addr);
+            mem.write(dst_addr, header);
+            let src_data = addr.add(HeapString::HEADER_SIZE as u64);
+            let dst_data = dst_addr.add(HeapString::HEADER_SIZE as u64);
+            for i in 0..len {
+                let byte: u8 = mem.read(src_data.add(i as u64));
+                mem.write(dst_data.add(i as u64), byte);
+            }
+            Some(Term::boxed_vaddr(dst_addr))
+        }
+        object::TUPLE => {
+            let len = header.arity() as usize;
+            let total = HeapTuple::alloc_size(len);
+            let dst_addr = dst_proc.alloc(total, 8)?;
+            visited.record(addr, dst_addr);
+            mem.write(dst_addr, header);
+            let src_data = addr.add(HeapTuple::HEADER_SIZE as u64);
+            let dst_data = dst_addr.add(HeapTuple::HEADER_SIZE as u64);
+            for i in 0..len {
+                let offset = (i * 8) as u64;
+                let elem: Term = mem.read(src_data.add(offset));
+                let copied = deep_copy_to_proc(elem, dst_proc, mem, visited)?;
+                mem.write(dst_data.add(offset), copied);
+            }
+            Some(Term::boxed_vaddr(dst_addr))
+        }
+        object::VECTOR => {
+            let len_val: u64 = mem.read(addr.add(8));
+            let len = len_val as usize;
+            let total = HeapVector::alloc_size(len);
+            let dst_addr = dst_proc.alloc(total, 8)?;
+            visited.record(addr, dst_addr);
+            mem.write(dst_addr, header);
+            mem.write(dst_addr.add(8), len_val);
+            let src_data = addr.add(HeapVector::PREFIX_SIZE as u64);
+            let dst_data = dst_addr.add(HeapVector::PREFIX_SIZE as u64);
+            for i in 0..len {
+                let offset = (i * 8) as u64;
+                let elem: Term = mem.read(src_data.add(offset));
+                let copied = deep_copy_to_proc(elem, dst_proc, mem, visited)?;
+                mem.write(dst_data.add(offset), copied);
+            }
+            Some(Term::boxed_vaddr(dst_addr))
+        }
+        object::MAP => {
+            let entries: Term = mem.read(addr.add(8));
+            let dst_addr = dst_proc.alloc(HeapMap::SIZE, 8)?;
+            visited.record(addr, dst_addr);
+            let copied_entries = deep_copy_to_proc(entries, dst_proc, mem, visited)?;
+            mem.write(dst_addr, header);
+            mem.write(dst_addr.add(8), copied_entries);
+            Some(Term::boxed_vaddr(dst_addr))
+        }
+        object::FUN => copy_fun_to_proc(addr, dst_proc, mem, visited),
+        object::CLOSURE => copy_closure_to_proc(addr, dst_proc, mem, visited),
+        object::VAR | object::NAMESPACE => Some(original_term),
+        _ => None,
+    }
+}
+
+/// Copy a compiled function to a process heap.
+fn copy_fun_to_proc<M: MemorySpace>(
+    addr: Vaddr,
+    dst_proc: &mut Process,
+    mem: &mut M,
+    visited: &mut VisitedTracker,
+) -> Option<Term> {
+    let fun: HeapFun = mem.read(addr);
+    let code_len = fun.code_len as usize;
+    let const_count = fun.const_count as usize;
+    let total = HeapFun::alloc_size(code_len, const_count);
+    let dst_addr = dst_proc.alloc(total, 8)?;
+    visited.record(addr, dst_addr);
+    mem.write(dst_addr, fun);
+
+    let src_code = addr.add(HeapFun::PREFIX_SIZE as u64);
+    let dst_code = dst_addr.add(HeapFun::PREFIX_SIZE as u64);
+    for i in 0..code_len {
+        let byte: u8 = mem.read(src_code.add(i as u64));
+        mem.write(dst_code.add(i as u64), byte);
+    }
+
+    let const_offset = HeapFun::constants_offset(code_len);
+    let src_const = addr.add(const_offset as u64);
+    let dst_const = dst_addr.add(const_offset as u64);
+    for i in 0..const_count {
+        let offset = (i * core::mem::size_of::<Term>()) as u64;
+        let c: Term = mem.read(src_const.add(offset));
+        let copied = deep_copy_to_proc(c, dst_proc, mem, visited)?;
+        mem.write(dst_const.add(offset), copied);
+    }
+
+    Some(Term::boxed_vaddr(dst_addr))
+}
+
+/// Copy a closure to a process heap.
+fn copy_closure_to_proc<M: MemorySpace>(
+    addr: Vaddr,
+    dst_proc: &mut Process,
+    mem: &mut M,
+    visited: &mut VisitedTracker,
+) -> Option<Term> {
+    let closure: HeapClosure = mem.read(addr);
+    let captures_len = closure.capture_count();
+    let total = HeapClosure::alloc_size(captures_len);
+    let dst_addr = dst_proc.alloc(total, 8)?;
+    visited.record(addr, dst_addr);
+
+    let dst_func = deep_copy_to_proc(closure.function, dst_proc, mem, visited)?;
+    let dst_hdr = HeapClosure {
+        header: HeapClosure::make_header(captures_len),
+        function: dst_func,
+    };
+    mem.write(dst_addr, dst_hdr);
+
+    let src_caps = addr.add(HeapClosure::PREFIX_SIZE as u64);
+    let dst_caps = dst_addr.add(HeapClosure::PREFIX_SIZE as u64);
+    for i in 0..captures_len {
+        let offset = (i * core::mem::size_of::<Term>()) as u64;
+        let cap: Term = mem.read(src_caps.add(offset));
+        let copied = deep_copy_to_proc(cap, dst_proc, mem, visited)?;
+        mem.write(dst_caps.add(offset), copied);
+    }
+
+    Some(Term::boxed_vaddr(dst_addr))
+}

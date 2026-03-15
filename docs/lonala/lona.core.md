@@ -143,7 +143,6 @@ Return object with new metadata.
 Evaluate form.
 
 ```clojure
-;; @todo
 (eval '(+ 1 2))       ; => 3
 (eval '[1 2 3])       ; => [1 2 3]
 (def a 10)
@@ -155,12 +154,15 @@ Evaluate form.
 Parse string to form.
 
 ```clojure
-;; @todo
 (read-string "42")         ; => 42
 (read-string "(+ 1 2)")    ; => (+ 1 2)
-(list? (read-string "(+ 1 2)"))  ; => true
 (read-string ":keyword")   ; => :keyword
 (read-string "[1 2 3]")    ; => [1 2 3]
+```
+
+```clojure
+;; @todo
+(list? (read-string "(+ 1 2)"))  ; => true
 (read-string "(")          ; => ERROR :unexpected-eof
 (read-string ")")          ; => ERROR :unmatched-delimiter
 ```

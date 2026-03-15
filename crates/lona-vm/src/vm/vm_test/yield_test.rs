@@ -64,7 +64,7 @@ fn vm_yields_when_budget_exhausted() {
     );
     proc.reductions = 5; // Budget for only 5 instructions
 
-    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(result, RunResult::Yielded));
     assert_eq!(proc.ip, 5); // Should have executed 5 instructions
 }
@@ -80,7 +80,7 @@ fn vm_completes_with_sufficient_budget() {
     );
     proc.reductions = 100;
 
-    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(result, RunResult::Completed(_)));
 }
 
@@ -106,7 +106,7 @@ fn vm_resumes_correctly() {
     proc.reductions = 3; // First run: execute 3 instructions
 
     // First run - should yield after 3 instructions
-    let result1 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result1 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(result1, RunResult::Yielded));
     assert_eq!(worker.x_regs[1], int(1));
     assert_eq!(worker.x_regs[2], int(2));
@@ -115,7 +115,7 @@ fn vm_resumes_correctly() {
 
     // Resume with more budget
     proc.reductions = 100;
-    let result2 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result2 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(result2, RunResult::Completed(v) if v == int(42)));
 }
 
@@ -131,7 +131,7 @@ fn reductions_are_consumed() {
     proc.reductions = 100;
     proc.total_reductions = 0;
 
-    let _ = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let _ = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
 
     // 3 LOADINT (cost 1 each) + 1 HALT (cost 0, returns before consuming)
     // So 3 reductions should be consumed
@@ -223,13 +223,13 @@ fn yield_during_simple_function_call() {
     // Very small budget to force yield inside function
     proc.reductions = 2;
 
-    let result1 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result1 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     // May yield or complete depending on exact instruction count
     match result1 {
         RunResult::Yielded => {
             // Resume and complete
             proc.reductions = 100;
-            let result2 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+            let result2 = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
             assert!(matches!(result2, RunResult::Completed(v) if v == int(6)));
         }
         RunResult::Completed(v) => {
@@ -292,7 +292,7 @@ fn yield_and_resume_nested_calls() {
     let mut yield_count = 0;
 
     loop {
-        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
+        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None) {
             RunResult::Completed(v) => {
                 assert_eq!(v, int(14));
                 break;
@@ -379,7 +379,7 @@ fn stress_many_yields() {
     let mut yield_count = 0;
 
     loop {
-        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
+        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None) {
             RunResult::Completed(v) => {
                 // Final value should be the last iteration (999)
                 assert_eq!(v, int(999));
@@ -508,7 +508,7 @@ fn stress_recursive_with_yields() {
     let mut yield_count = 0;
 
     loop {
-        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
+        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None) {
             RunResult::Completed(v) => {
                 // sum(1..10) = 55
                 assert_eq!(v, int(55));
@@ -598,7 +598,7 @@ fn stress_deep_call_chain_yield_resume() {
     let mut yield_count = 0;
 
     loop {
-        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm) {
+        match Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None) {
             RunResult::Completed(v) => {
                 assert_eq!(v, int(15));
                 break;

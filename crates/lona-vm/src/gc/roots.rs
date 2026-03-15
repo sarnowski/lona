@@ -43,10 +43,17 @@ pub enum RootLocation {
     ProcessBinding(Vaddr),
     /// Current chunk address (`process.chunk_addr`).
     ChunkAddr,
+    /// Cached PID term (`process.pid_term`).
+    PidTerm,
     /// Caller's chunk address in a stack frame.
     FrameChunkAddr {
         /// Address of the frame header.
         frame_addr: Vaddr,
+    },
+    /// Saved chunk address in an eval stack frame.
+    EvalChunkAddr {
+        /// Index into the eval stack.
+        eval_index: usize,
     },
 }
 
@@ -169,55 +176,31 @@ where
     }
 
     // 3. Y registers and frame chunk addresses (stack frames)
-    let mut frame_opt = process.frame_base;
+    trace_frame_chain(process.frame_base, mem, &mut callback);
 
-    while let Some(frame_addr) = frame_opt {
-        // Read frame header
-        let y_count: u64 = mem.read(Vaddr::new(
-            frame_addr.as_u64() + frame_offset::Y_COUNT as u64,
-        ));
-        let caller_frame: u64 = mem.read(Vaddr::new(
-            frame_addr.as_u64() + frame_offset::CALLER_FRAME_BASE as u64,
-        ));
-        let frame_chunk_addr: u64 = mem.read(Vaddr::new(
-            frame_addr.as_u64() + frame_offset::CHUNK_ADDR as u64,
-        ));
-
-        // Frame's chunk_addr is a root (points to caller's HeapFun)
-        if frame_chunk_addr != 0 {
-            let term = Term::boxed_vaddr(Vaddr::new(frame_chunk_addr));
-            if needs_tracing(term) {
-                callback(RootLocation::FrameChunkAddr { frame_addr }, term);
-            }
+    // 4. Cached PID term
+    if let Some(pid_term) = process.pid_term {
+        if needs_tracing(pid_term) {
+            callback(RootLocation::PidTerm, pid_term);
         }
-
-        // Y registers are BELOW the frame header
-        let y_base = frame_addr.as_u64() - y_count * Y_REGISTER_SIZE as u64;
-
-        for y_idx in 0..(y_count as usize) {
-            let y_addr = Vaddr::new(y_base + y_idx as u64 * Y_REGISTER_SIZE as u64);
-            let term: Term = mem.read(y_addr);
-
-            if needs_tracing(term) {
-                callback(
-                    RootLocation::YRegister {
-                        frame_addr,
-                        y_index: y_idx,
-                    },
-                    term,
-                );
-            }
-        }
-
-        // Move to caller's frame
-        frame_opt = if caller_frame == 0 {
-            None
-        } else {
-            Some(Vaddr::new(caller_frame))
-        };
     }
 
-    // 4. Process bindings
+    // 5. Eval stack: saved chunk addresses and pre-eval stack frames
+    for eval_index in 0..process.eval_depth {
+        let eval_frame = &process.eval_stack[eval_index];
+
+        if let Some(chunk_addr) = eval_frame.saved_chunk_addr {
+            let term = Term::boxed_vaddr(chunk_addr);
+            if needs_tracing(term) {
+                callback(RootLocation::EvalChunkAddr { eval_index }, term);
+            }
+        }
+
+        // Trace stack frames unreachable from current frame_base during eval
+        trace_frame_chain(eval_frame.saved_frame_base, mem, &mut callback);
+    }
+
+    // 6. Process bindings
     for (&var_addr, &term) in &process.bindings {
         if needs_tracing(term) {
             callback(RootLocation::ProcessBinding(var_addr), term);
@@ -229,6 +212,54 @@ where
 ///
 /// This updates the root location to point to the new address.
 /// X registers are updated in the worker, bindings in the process.
+/// Trace a chain of stack frames starting from `frame_base`, calling the
+/// callback for each Y register and frame chunk address that needs tracing.
+fn trace_frame_chain<M, F>(mut frame_opt: Option<Vaddr>, mem: &M, callback: &mut F)
+where
+    M: MemorySpace,
+    F: FnMut(RootLocation, Term),
+{
+    while let Some(frame_addr) = frame_opt {
+        let y_count: u64 = mem.read(Vaddr::new(
+            frame_addr.as_u64() + frame_offset::Y_COUNT as u64,
+        ));
+        let caller_frame: u64 = mem.read(Vaddr::new(
+            frame_addr.as_u64() + frame_offset::CALLER_FRAME_BASE as u64,
+        ));
+        let frame_chunk_addr: u64 = mem.read(Vaddr::new(
+            frame_addr.as_u64() + frame_offset::CHUNK_ADDR as u64,
+        ));
+
+        if frame_chunk_addr != 0 {
+            let term = Term::boxed_vaddr(Vaddr::new(frame_chunk_addr));
+            if needs_tracing(term) {
+                callback(RootLocation::FrameChunkAddr { frame_addr }, term);
+            }
+        }
+
+        let y_base = frame_addr.as_u64() - y_count * Y_REGISTER_SIZE as u64;
+        for y_idx in 0..(y_count as usize) {
+            let y_addr = Vaddr::new(y_base + y_idx as u64 * Y_REGISTER_SIZE as u64);
+            let term: Term = mem.read(y_addr);
+            if needs_tracing(term) {
+                callback(
+                    RootLocation::YRegister {
+                        frame_addr,
+                        y_index: y_idx,
+                    },
+                    term,
+                );
+            }
+        }
+
+        frame_opt = if caller_frame == 0 {
+            None
+        } else {
+            Some(Vaddr::new(caller_frame))
+        };
+    }
+}
+
 ///
 /// Note: For Y register roots, use `update_root_with_mem` instead.
 pub fn update_root(
@@ -256,6 +287,12 @@ pub fn update_root(
         RootLocation::ChunkAddr => {
             // Update process.chunk_addr
             process.chunk_addr = Some(new_term.to_vaddr());
+        }
+        RootLocation::PidTerm => {
+            process.pid_term = Some(new_term);
+        }
+        RootLocation::EvalChunkAddr { eval_index } => {
+            process.eval_stack[*eval_index].saved_chunk_addr = Some(new_term.to_vaddr());
         }
     }
 }
@@ -290,6 +327,12 @@ pub fn update_root_with_mem<M: MemorySpace>(
             // Update chunk_addr slot in frame header
             let chunk_addr_ptr = Vaddr::new(frame_addr.as_u64() + frame_offset::CHUNK_ADDR as u64);
             mem.write(chunk_addr_ptr, new_term.to_vaddr().as_u64());
+        }
+        RootLocation::PidTerm => {
+            process.pid_term = Some(new_term);
+        }
+        RootLocation::EvalChunkAddr { eval_index } => {
+            process.eval_stack[*eval_index].saved_chunk_addr = Some(new_term.to_vaddr());
         }
     }
 }

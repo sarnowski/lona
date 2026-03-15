@@ -49,7 +49,6 @@ Tail-call optimization is guaranteed. Recursive functions in tail position use c
 ```
 
 ```clojure
-;; @todo
 ;; recur is not a special form - it's just an undefined symbol
 (read-string "recur")  ; => recur
 (symbol? (read-string "recur"))  ; => true

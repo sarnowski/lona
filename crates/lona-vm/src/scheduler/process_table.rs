@@ -18,12 +18,14 @@ pub const MAX_PROCESSES: usize = 1024;
 
 /// Slot in the process table.
 struct Slot {
-    /// The process in this slot, or None if free.
+    /// The process in this slot, or None if free or taken.
     process: Option<Process>,
     /// Generation counter, incremented on each reuse.
     generation: u32,
     /// Index of next free slot (used when slot is free).
     next_free: u32,
+    /// Whether this slot is allocated (true from `allocate` until `remove`/`free_taken_slot`).
+    allocated: bool,
 }
 
 /// Fixed-size table for O(1) process lookup by PID.
@@ -53,6 +55,7 @@ impl ProcessTable {
                 } else {
                     u32::MAX // End of free list
                 },
+                allocated: false,
             })
             .collect();
 
@@ -76,6 +79,7 @@ impl ProcessTable {
 
         // Remove from free list
         self.free_head = slot.next_free;
+        slot.allocated = true;
 
         // Return current generation (will be stored in ProcessId)
         Some((index, slot.generation))
@@ -163,6 +167,7 @@ impl ProcessTable {
 
         // Increment generation for next reuse
         slot.generation = slot.generation.wrapping_add(1);
+        slot.allocated = false;
 
         // Add to free list
         slot.next_free = self.free_head;
@@ -170,6 +175,101 @@ impl ProcessTable {
 
         self.count -= 1;
         Some(process)
+    }
+
+    /// Temporarily extract a process for execution.
+    ///
+    /// The slot remains allocated (generation unchanged) but the process
+    /// is removed. Use `put_back` to return it, or `free_taken_slot`
+    /// to reclaim the slot after the process completes.
+    ///
+    /// This enables passing `&mut ProcessTable` to `Vm::run` while a
+    /// process is being executed (no aliased borrows).
+    pub fn take(&mut self, pid: ProcessId) -> Option<Process> {
+        if pid.is_null() {
+            return None;
+        }
+
+        let index = pid.index();
+        if index >= MAX_PROCESSES {
+            return None;
+        }
+
+        let slot = &mut self.slots[index];
+        if slot.generation != pid.generation() {
+            return None;
+        }
+
+        let process = slot.process.take()?;
+        // count stays the same — slot is still logically occupied
+        Some(process)
+    }
+
+    /// Return a previously taken process to its slot.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if:
+    /// - The PID doesn't match the slot's generation
+    /// - The slot already contains a process
+    pub fn put_back(&mut self, pid: ProcessId, process: Process) {
+        let index = pid.index();
+        debug_assert!(index < MAX_PROCESSES, "PID index out of bounds");
+        debug_assert!(
+            self.slots[index].process.is_none(),
+            "Slot already occupied (put_back on non-taken slot)"
+        );
+        debug_assert_eq!(
+            self.slots[index].generation,
+            pid.generation(),
+            "Generation mismatch on put_back"
+        );
+
+        self.slots[index].process = Some(process);
+    }
+
+    /// Reclaim a slot after a taken process completes.
+    ///
+    /// Increments generation and returns the slot to the free list.
+    /// Call this instead of `put_back` when the process is done.
+    pub fn free_taken_slot(&mut self, pid: ProcessId) {
+        let index = pid.index();
+        debug_assert!(index < MAX_PROCESSES, "PID index out of bounds");
+        debug_assert!(
+            self.slots[index].process.is_none(),
+            "Slot still has process (use remove instead)"
+        );
+        debug_assert_eq!(
+            self.slots[index].generation,
+            pid.generation(),
+            "Generation mismatch on free_taken_slot"
+        );
+
+        let slot = &mut self.slots[index];
+        slot.generation = slot.generation.wrapping_add(1);
+        slot.allocated = false;
+        slot.next_free = self.free_head;
+        self.free_head = index as u32;
+        self.count -= 1;
+    }
+
+    /// Check if a slot is allocated but its process was taken.
+    ///
+    /// Returns `true` if the slot's generation matches, is allocated,
+    /// and the process is currently extracted (e.g., being executed).
+    #[must_use]
+    pub fn is_taken(&self, pid: ProcessId) -> bool {
+        if pid.is_null() {
+            return false;
+        }
+
+        let index = pid.index();
+        if index >= MAX_PROCESSES {
+            return false;
+        }
+
+        let slot = &self.slots[index];
+        slot.allocated && slot.generation == pid.generation() && slot.process.is_none()
     }
 
     /// Number of active processes.

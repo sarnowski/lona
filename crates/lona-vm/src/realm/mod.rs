@@ -16,7 +16,7 @@
 //! code region, but only `def` operations write to it.
 
 mod bootstrap;
-mod copy;
+pub(crate) mod copy;
 
 #[cfg(test)]
 mod bootstrap_test;

@@ -637,6 +637,9 @@ Predicate: `pid?`
 ```clojure
 ;; @todo
 (pid? (self))  ; => true
+```
+
+```clojure
 (pid? 42)      ; => false
 (pid? nil)     ; => false
 ```

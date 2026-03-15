@@ -154,7 +154,7 @@ pub extern "C" fn _start(
     }
 
     // Create process pool from boot-allocated heap memory and allocate code region
-    const REALM_CODE_SIZE: usize = 16 * 1024;
+    const REALM_CODE_SIZE: usize = 32 * 1024;
     let mut pool = ProcessPool::new(Vaddr::new(heap_start), heap_size as usize);
     let code_base = pool
         .allocate(REALM_CODE_SIZE, 8)
@@ -200,6 +200,15 @@ pub extern "C" fn _start(
             uart.write_line("\nStarting REPL...\n");
         }
         let mut worker = Worker::new(WorkerId(0));
+
+        // Give the REPL process a PID so (self) returns a valid PID term.
+        // Index 0, generation 0 — the REPL is always the first process.
+        let repl_pid = lona_vm::process::ProcessId::new(0, 0);
+        process.pid = repl_pid;
+        if let Some(pid_term) = process.alloc_term_pid(&mut vspace, 0, 0) {
+            process.pid_term = Some(pid_term);
+        }
+
         repl::run(
             &mut worker,
             &mut process,

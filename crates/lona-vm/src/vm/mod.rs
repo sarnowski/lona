@@ -16,6 +16,7 @@
 mod vm_test;
 
 mod pattern;
+mod special_intrinsics;
 
 use crate::Vaddr;
 use crate::bytecode::{decode_a, decode_b, decode_bx, decode_c, decode_opcode, decode_sbx, op};
@@ -24,7 +25,7 @@ use crate::intrinsics::{self, IntrinsicError, XRegs, intrinsic_cost};
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::Realm;
-use crate::scheduler::Worker;
+use crate::scheduler::{ProcessTable, Worker};
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::heap::{HeapClosure, HeapFun};
@@ -364,6 +365,7 @@ fn term_type_name<M: MemorySpace>(mem: &M, term: Term) -> &'static str {
             object::VAR => "var",
             object::NAMESPACE => "namespace",
             object::FLOAT => "float",
+            object::PID => "pid",
             _ => "unknown",
         };
     }
@@ -624,6 +626,16 @@ pub enum RuntimeError {
         /// The value that failed to match any pattern.
         value: Term,
     },
+
+    /// Eval compilation failed (syntax error, undefined var, etc.).
+    ///
+    /// Distinct from `OutOfMemory` so GC retry is not triggered.
+    EvalError,
+
+    /// Process table is full — no more processes can be spawned.
+    ///
+    /// Distinct from `OutOfMemory` so GC retry is not triggered.
+    ProcessLimitReached,
 }
 
 impl RuntimeError {
@@ -858,7 +870,22 @@ fn execute_instruction<M: MemorySpace>(
         .map_err(RunResult::Error),
 
         op::RETURN => handle_return(x_regs, proc, mem),
-        op::HALT => Err(RunResult::Completed(x_regs[0])),
+        op::HALT => {
+            // Check eval stack: if non-empty, restore caller's context
+            if proc.eval_depth > 0 {
+                proc.eval_depth -= 1;
+                let frame = proc.eval_stack[proc.eval_depth];
+                proc.ip = frame.saved_ip;
+                proc.chunk_addr = frame.saved_chunk_addr;
+                proc.frame_base = frame.saved_frame_base;
+                proc.current_y_count = frame.saved_y_count;
+                proc.stop = frame.saved_stop;
+                // Result of eval is already in x_regs[0]
+                Ok(1)
+            } else {
+                Err(RunResult::Completed(x_regs[0]))
+            }
+        }
 
         // Build instructions
         op::BUILD_TUPLE | op::BUILD_VECTOR | op::BUILD_MAP | op::BUILD_CLOSURE => {
@@ -1049,7 +1076,9 @@ impl Vm {
         proc: &mut Process,
         mem: &mut M,
         realm: &mut Realm,
+        process_table: Option<&mut ProcessTable>,
     ) -> RunResult {
+        let mut process_table = process_table;
         // Track whether the last instruction already triggered a GC retry.
         // This prevents infinite retry loops when GC frees some bytes but not
         // enough for the allocation that failed.
@@ -1093,31 +1122,26 @@ impl Vm {
                 None
             };
 
-            // Intercept garbage-collect and process-info intrinsics before dispatch.
-            // These need Worker/Realm access that execute_instruction doesn't have.
+            // Special intrinsics need Worker/Realm/ProcessTable access.
             if opcode == op::INTRINSIC {
                 let id = decode_a(instr);
-                if id == intrinsics::id::GARBAGE_COLLECT {
-                    let argc = decode_b(instr) as u8;
-                    let is_full = argc >= 1 && worker.x_regs[1].is_keyword();
-                    if is_full {
-                        let _ = gc::major_gc(proc, worker, realm.pool_mut(), mem);
-                    } else {
-                        let _ = gc::minor_gc(proc, worker, mem);
+                if let Some(handled) = special_intrinsics::dispatch(
+                    id,
+                    decode_b(instr) as u8,
+                    worker,
+                    proc,
+                    mem,
+                    realm,
+                    &mut process_table,
+                ) {
+                    match handled {
+                        Ok(()) => {
+                            proc.consume_reductions(intrinsic_cost(id));
+                            gc_retry_pending = false;
+                            continue;
+                        }
+                        Err(result) => return result,
                     }
-                    worker.x_regs[0] = realm.intern_keyword(mem, "ok").unwrap_or(Term::TRUE);
-                    proc.consume_reductions(intrinsic_cost(id));
-                    gc_retry_pending = false;
-                    continue;
-                }
-                if id == intrinsics::id::PROCESS_INFO {
-                    if let Some(map) = build_process_info(proc, realm, mem) {
-                        worker.x_regs[0] = map;
-                        proc.consume_reductions(intrinsic_cost(id));
-                        gc_retry_pending = false;
-                        continue;
-                    }
-                    // OOM building the map - fall through to OOM handling
                 }
             }
 
@@ -1168,11 +1192,29 @@ pub fn execute<M: MemorySpace>(
     mem: &mut M,
     realm: &mut Realm,
 ) -> Result<Term, RuntimeError> {
+    execute_with_table(worker, proc, mem, realm, None)
+}
+
+/// Run a process to completion with access to a process table.
+///
+/// Like `execute`, but passes a `ProcessTable` so `spawn` and `alive?`
+/// intrinsics work during execution.
+///
+/// # Errors
+///
+/// Returns an error if execution fails.
+pub fn execute_with_table<M: MemorySpace>(
+    worker: &mut Worker,
+    proc: &mut Process,
+    mem: &mut M,
+    realm: &mut Realm,
+    mut process_table: Option<&mut ProcessTable>,
+) -> Result<Term, RuntimeError> {
     // Initialize reduction budget
     proc.reset_reductions();
 
     loop {
-        match Vm::run(worker, proc, mem, realm) {
+        match Vm::run(worker, proc, mem, realm, process_table.as_deref_mut()) {
             RunResult::Completed(term) => return Ok(term),
             RunResult::Yielded => {
                 // Single-threaded execution: just continue with fresh budget

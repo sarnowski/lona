@@ -406,4 +406,80 @@ fn verify_object_tags() {
     let map_addr = Vaddr::new(map_term.as_raw() & !0b11);
     let map_header: Header = mem.read(map_addr);
     assert_eq!(map_header.object_tag(), object::MAP);
+
+    // PID
+    let pid_term = proc.alloc_term_pid(&mut mem, 5, 3).unwrap();
+    let pid_addr = Vaddr::new(pid_term.as_raw() & !0b11);
+    let pid_header: Header = mem.read(pid_addr);
+    assert_eq!(pid_header.object_tag(), object::PID);
+}
+
+// ============================================================================
+// PID Tests
+// ============================================================================
+
+#[test]
+fn alloc_term_pid_roundtrip() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_pid(&mut mem, 42, 7).unwrap();
+    assert!(term.is_boxed());
+
+    let (index, generation) = proc.read_term_pid(&mem, term).unwrap();
+    assert_eq!(index, 42);
+    assert_eq!(generation, 7);
+}
+
+#[test]
+fn alloc_term_pid_zero_values() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_pid(&mut mem, 0, 0).unwrap();
+    let (index, generation) = proc.read_term_pid(&mem, term).unwrap();
+    assert_eq!(index, 0);
+    assert_eq!(generation, 0);
+}
+
+#[test]
+fn alloc_term_pid_max_values() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_pid(&mut mem, u32::MAX, u32::MAX).unwrap();
+    let (index, generation) = proc.read_term_pid(&mem, term).unwrap();
+    assert_eq!(index, u32::MAX);
+    assert_eq!(generation, u32::MAX);
+}
+
+#[test]
+fn is_term_pid_true() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_pid(&mut mem, 1, 0).unwrap();
+    assert!(proc.is_term_pid(&mem, term));
+}
+
+#[test]
+fn is_term_pid_false_for_other_types() {
+    let (mut proc, mut mem) = setup();
+
+    assert!(!proc.is_term_pid(&mem, Term::NIL));
+    assert!(!proc.is_term_pid(&mem, Term::TRUE));
+    assert!(!proc.is_term_pid(&mem, Term::small_int(42).unwrap()));
+
+    let string = proc.alloc_term_string(&mut mem, "hello").unwrap();
+    assert!(!proc.is_term_pid(&mem, string));
+
+    let tuple = proc.alloc_term_tuple(&mut mem, &[Term::NIL]).unwrap();
+    assert!(!proc.is_term_pid(&mem, tuple));
+}
+
+#[test]
+fn read_term_pid_wrong_type() {
+    let (proc, mem) = setup();
+
+    assert!(proc.read_term_pid(&mem, Term::NIL).is_none());
+    assert!(
+        proc.read_term_pid(&mem, Term::small_int(42).unwrap())
+            .is_none()
+    );
 }

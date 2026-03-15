@@ -59,7 +59,7 @@ fn run_chunk(
         "out of memory writing chunk to heap"
     );
     proc.reset_reductions();
-    Vm::run(worker, proc, mem, realm)
+    Vm::run(worker, proc, mem, realm, None)
 }
 
 // =============================================================================

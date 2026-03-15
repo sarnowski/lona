@@ -12,7 +12,7 @@ use crate::platform::MemorySpace;
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::heap::{
-    HeapClosure, HeapFloat, HeapFun, HeapMap, HeapString, HeapTuple, HeapVector,
+    HeapClosure, HeapFloat, HeapFun, HeapMap, HeapPid, HeapString, HeapTuple, HeapVector,
 };
 use crate::term::pair::Pair;
 use crate::term::tag::primary;
@@ -269,6 +269,32 @@ impl Process {
         Some(unsafe { term_from_boxed_addr(addr) })
     }
 
+    /// Allocate a PID (process identifier) on the young heap.
+    ///
+    /// Packs index and generation into a 64-bit data field:
+    /// `data = (generation << 32) | index`.
+    ///
+    /// Returns a boxed Term pointing to the allocated PID, or `None` if OOM.
+    #[must_use]
+    pub fn alloc_term_pid<M: MemorySpace>(
+        &mut self,
+        mem: &mut M,
+        index: u32,
+        generation: u32,
+    ) -> Option<Term> {
+        let addr = self.alloc(HeapPid::SIZE, 8)?;
+
+        let header = HeapPid::make_header();
+        mem.write(addr, header);
+
+        let data = u64::from(generation) << 32 | u64::from(index);
+        let data_addr = addr.add(8);
+        mem.write(data_addr, data);
+
+        // SAFETY: We just allocated and initialized a valid PID object
+        Some(unsafe { term_from_boxed_addr(addr) })
+    }
+
     // ========================================================================
     // Term Reading Methods
     // ========================================================================
@@ -448,6 +474,29 @@ impl Process {
         Some(mem.read(entries_addr))
     }
 
+    /// Read a PID from the heap.
+    ///
+    /// Returns `(index, generation)`, or `None` if the term is not a PID.
+    #[must_use]
+    pub fn read_term_pid<M: MemorySpace>(&self, mem: &M, term: Term) -> Option<(u32, u32)> {
+        if !term.is_boxed() {
+            return None;
+        }
+
+        let addr = term_to_vaddr(term);
+        let header: Header = mem.read(addr);
+
+        if header.object_tag() != crate::term::tag::object::PID {
+            return None;
+        }
+
+        let data_addr = addr.add(8);
+        let data: u64 = mem.read(data_addr);
+        let index = data as u32;
+        let generation = (data >> 32) as u32;
+        Some((index, generation))
+    }
+
     // ========================================================================
     // Type checking helpers
     // ========================================================================
@@ -594,6 +643,18 @@ impl Process {
         let header: Header = mem.read(addr);
         let tag = header.object_tag();
         tag == crate::term::tag::object::FUN || tag == crate::term::tag::object::CLOSURE
+    }
+
+    /// Check if a term is a PID (process identifier).
+    #[must_use]
+    pub fn is_term_pid<M: MemorySpace>(&self, mem: &M, term: Term) -> bool {
+        if !term.is_boxed() {
+            return false;
+        }
+
+        let addr = term_to_vaddr(term);
+        let header: Header = mem.read(addr);
+        header.object_tag() == crate::term::tag::object::PID
     }
 
     /// Check if a term is a string.

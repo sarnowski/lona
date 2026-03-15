@@ -289,6 +289,8 @@ fn eval_and_capture<M: MemorySpace>(
                 RuntimeError::YRegisterOutOfBounds { .. } => ":y-register-out-of-bounds",
                 RuntimeError::FrameMismatch { .. } => ":frame-mismatch",
                 RuntimeError::Badmatch { .. } => ":badmatch",
+                RuntimeError::EvalError => ":eval-error",
+                RuntimeError::ProcessLimitReached => ":process-limit",
             };
             return Err(EvalError::Runtime(kind));
         }

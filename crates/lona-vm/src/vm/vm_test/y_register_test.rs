@@ -68,7 +68,7 @@ fn allocate_zero_creates_y_registers() {
     );
     proc.reset_reductions();
 
-    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(result, RunResult::Completed(_)));
 
     // Verify Y registers exist and are nil
@@ -94,7 +94,7 @@ fn allocate_creates_y_registers_uninitialized() {
     );
     proc.reset_reductions();
 
-    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(result, RunResult::Completed(_)));
 
     // Y registers exist (values are undefined, but we can access them)
@@ -125,7 +125,7 @@ fn move_xy_saves_x_to_y() {
     );
     proc.reset_reductions();
 
-    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
 
     assert_eq!(proc.get_y(&mem, 0), Some(int(42)));
 }
@@ -154,7 +154,7 @@ fn move_yx_restores_y_to_x() {
     );
     proc.reset_reductions();
 
-    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
 
     assert_eq!(worker.x_regs[0], int(999)); // clobbered
     assert_eq!(worker.x_regs[1], int(42)); // restored from Y
@@ -189,7 +189,7 @@ fn y_register_preserves_multiple_values() {
     );
     proc.reset_reductions();
 
-    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
 
     assert_eq!(worker.x_regs[3], int(10));
     assert_eq!(worker.x_regs[4], int(20));
@@ -213,7 +213,7 @@ fn deallocate_releases_y_registers() {
     );
     proc.reset_reductions();
 
-    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(result, RunResult::Completed(_)));
 
     // Y registers should be released
@@ -239,7 +239,7 @@ fn move_xy_out_of_bounds_error() {
     );
     proc.reset_reductions();
 
-    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(
         result,
         RunResult::Error(RuntimeError::YRegisterOutOfBounds {
@@ -266,7 +266,7 @@ fn move_yx_out_of_bounds_error() {
     );
     proc.reset_reductions();
 
-    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(
         result,
         RunResult::Error(RuntimeError::YRegisterOutOfBounds {
@@ -293,7 +293,7 @@ fn deallocate_mismatch_error() {
     );
     proc.reset_reductions();
 
-    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm);
+    let result = Vm::run(&mut worker, &mut proc, &mut mem, &mut realm, None);
     assert!(matches!(
         result,
         RunResult::Error(RuntimeError::FrameMismatch {

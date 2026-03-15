@@ -229,6 +229,39 @@ pub enum ProcessStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StackOverflow;
 
+/// Maximum depth of nested `eval` calls.
+pub const MAX_EVAL_DEPTH: usize = 8;
+
+/// Saved execution state for the eval trampoline.
+///
+/// When `eval` is invoked, the current execution context is pushed onto
+/// `Process.eval_stack`. When the eval'd code completes (HALT), the
+/// context is restored and execution resumes at the call site.
+#[derive(Clone, Copy)]
+pub struct EvalFrame {
+    /// Saved instruction pointer.
+    pub saved_ip: usize,
+    /// Saved chunk address.
+    pub saved_chunk_addr: Option<Vaddr>,
+    /// Saved frame base.
+    pub saved_frame_base: Option<Vaddr>,
+    /// Saved Y register count.
+    pub saved_y_count: usize,
+    /// Saved stack pointer (must be restored to prevent stack leaks).
+    pub saved_stop: Vaddr,
+}
+
+impl EvalFrame {
+    /// Uninitialized eval frame (for array initialization only).
+    const UNINIT: Self = Self {
+        saved_ip: 0,
+        saved_chunk_addr: None,
+        saved_frame_base: None,
+        saved_y_count: 0,
+        saved_stop: Vaddr::new(0),
+    };
+}
+
 /// A lightweight process with BEAM-style memory layout.
 ///
 /// Each process owns its heap and execution state. The VM operates on
@@ -306,6 +339,19 @@ pub struct Process {
     // Process-bound var bindings
     /// Bindings (var address -> value).
     pub(crate) bindings: BTreeMap<Vaddr, Term>,
+
+    // Cached PID term
+    /// Cached PID term for `self` intrinsic (zero allocation per call).
+    ///
+    /// Allocated on this process's heap at spawn time. Updated by GC
+    /// when the `HeapPid` is moved (treated as a GC root).
+    pub pid_term: Option<Term>,
+
+    // Eval trampoline
+    /// Stack of saved execution contexts for nested `eval` calls.
+    pub eval_stack: [EvalFrame; MAX_EVAL_DEPTH],
+    /// Current depth of the eval stack (0 = no active eval).
+    pub eval_depth: usize,
 }
 
 impl Process {
@@ -362,6 +408,11 @@ impl Process {
             frame_depth: 0,
             // Process-bound var bindings
             bindings: BTreeMap::new(),
+            // Cached PID term
+            pid_term: None,
+            // Eval trampoline
+            eval_stack: [EvalFrame::UNINIT; MAX_EVAL_DEPTH],
+            eval_depth: 0,
         }
     }
 
@@ -455,6 +506,8 @@ impl Process {
         // Reset stack pointer to top of young heap
         self.stop = self.hend;
         self.status = ProcessStatus::Ready;
+        // Reset eval trampoline
+        self.eval_depth = 0;
     }
 
     /// Reset heap allocation pointer, clearing all heap allocations.
@@ -463,6 +516,8 @@ impl Process {
     /// WARNING: Invalidates all previously allocated values!
     pub const fn reset_heap(&mut self) {
         self.htop = self.heap;
+        // Clear cached PID term — it points into the heap we just invalidated
+        self.pid_term = None;
     }
 
     /// Check if at top level (no active call frames).

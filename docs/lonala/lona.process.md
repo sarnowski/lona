@@ -187,7 +187,14 @@ Current process PID.
 ```clojure
 ;; @todo
 (pid? (self))              ; => true
+```
+
+```clojure
 (= (self) (self))          ; => true
+```
+
+```clojure
+;; @todo
 (pid-realm (self))         ; => (self-realm)
 ```
 
@@ -219,11 +226,15 @@ Check if process exists.
 Get process information.
 
 ```clojure
-;; @todo
-(def info (process-info (self)))
+(def info (process-info))
 (map? info)                   ; => true
 (contains? info :status)      ; => true
 (contains? info :heap-size)   ; => true
+```
+
+```clojure
+;; @todo
+(def info (process-info (self)))
 (contains? info :mailbox-len) ; => true
 (contains? info :priority)    ; => true
 (contains? info :links)       ; => true

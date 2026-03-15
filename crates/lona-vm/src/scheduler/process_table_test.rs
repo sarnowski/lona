@@ -131,6 +131,129 @@ fn process_table_multiple_allocations() {
     assert_eq!(gen3, 0);
 }
 
+// ============================================================================
+// Take / Put Back Tests
+// ============================================================================
+
+#[test]
+fn take_extracts_process() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    process.ip = 42;
+    table.insert(process);
+
+    let taken = table.take(pid).unwrap();
+    assert_eq!(taken.ip, 42);
+
+    // get returns None (process extracted)
+    assert!(table.get(pid).is_none());
+    // is_taken returns true
+    assert!(table.is_taken(pid));
+    // count unchanged — slot still logically occupied
+    assert_eq!(table.count(), 1);
+}
+
+#[test]
+fn put_back_restores_process() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    process.ip = 42;
+    table.insert(process);
+
+    let taken = table.take(pid).unwrap();
+    table.put_back(pid, taken);
+
+    // Process is back
+    let proc = table.get(pid).unwrap();
+    assert_eq!(proc.ip, 42);
+    assert!(!table.is_taken(pid));
+}
+
+#[test]
+fn free_taken_slot_reclaims() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    let _taken = table.take(pid);
+    table.free_taken_slot(pid);
+
+    assert_eq!(table.count(), 0);
+    assert!(!table.is_taken(pid));
+    assert!(table.get(pid).is_none());
+
+    // Slot can be reused
+    let (idx2, gen2) = table.allocate().unwrap();
+    assert_eq!(idx2, index);
+    assert_eq!(gen2, generation + 1);
+}
+
+#[test]
+fn take_invalid_pid_returns_none() {
+    let mut table = ProcessTable::new();
+    let pid = ProcessId::new(0, 0);
+    assert!(table.take(pid).is_none());
+}
+
+#[test]
+fn take_null_pid_returns_none() {
+    let mut table = ProcessTable::new();
+    assert!(table.take(ProcessId::NULL).is_none());
+}
+
+#[test]
+fn take_put_back_preserves_generation() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    let taken = table.take(pid).unwrap();
+    table.put_back(pid, taken);
+
+    // Same generation — stale references still work
+    assert!(table.get(pid).is_some());
+}
+
+#[test]
+fn is_taken_false_for_unallocated() {
+    let table = ProcessTable::new();
+    assert!(!table.is_taken(ProcessId::new(0, 0)));
+}
+
+#[test]
+fn is_taken_false_for_occupied() {
+    let mut table = ProcessTable::new();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    // Slot occupied, not taken
+    assert!(!table.is_taken(pid));
+}
+
+// ============================================================================
+// Free List Reuse Tests
+// ============================================================================
+
 #[test]
 fn process_table_free_list_reuse() {
     let mut table = ProcessTable::new();

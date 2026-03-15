@@ -20,7 +20,7 @@ mod scheduler_test;
 #[cfg(test)]
 mod worker_test;
 
-pub use self::core::{Scheduler, TickResult};
+pub use self::core::{DEFAULT_WORKER_COUNT, Scheduler, TickResult};
 pub use process_table::{MAX_PROCESSES, ProcessTable};
 pub use run_queue::{RUN_QUEUE_CAPACITY, RunQueue};
 pub use worker::Worker;
