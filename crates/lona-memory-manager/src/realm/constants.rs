@@ -37,6 +37,22 @@ pub const TEMP_MAP_VADDR: u64 = 0x0000_0000_4000_0000;
 #[cfg(feature = "sel4")]
 pub const SCHED_BUDGET_US: u64 = 500;
 
+/// Maximum number of worker TCBs per realm.
+///
+/// Each worker gets its own TCB, `SchedContext`, stack, and IPC buffer.
+/// Arrays in the Realm struct are sized to this constant.
+#[cfg(feature = "sel4")]
+pub const MAX_REALM_WORKERS: usize = 4;
+
+/// Number of workers to create for the init realm.
+///
+/// Set to 1 until workers 1-3 participate in scheduling (M2 Phase 2E).
+/// Creating idle workers wastes CPU in QEMU TCG emulation.
+/// The multi-TCB infrastructure (arrays, per-worker TLS) supports up to
+/// `MAX_REALM_WORKERS` and can be activated by increasing this value.
+#[cfg(feature = "sel4")]
+pub const INIT_REALM_WORKER_COUNT: usize = 1;
+
 /// Default scheduling period in microseconds.
 ///
 /// The time window in which the budget is available. With budget = period,

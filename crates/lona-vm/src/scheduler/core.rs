@@ -1,24 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 Tobias Sarnowski
 
-//! Multi-worker scheduler that orchestrates `ProcessTable` + `Worker` to run
+//! Multi-worker scheduler that orchestrates `ProcessTable` + run queues to run
 //! multiple processes across N workers.
 //!
-//! Each worker has its own run queue. Processes are spawned onto a specific
-//! worker (default: the spawning worker, for locality). When a worker's queue
-//! is empty, it steals from the busiest neighbor.
+//! Each worker has its own run queue (behind `SpinMutex` for work stealing).
+//! Processes are spawned onto a specific worker (default: Worker 0, for locality).
+//! When a worker's queue is empty, it steals from the busiest neighbor.
+//!
+//! The `ProcessTable` is behind `SpinMutex` to enable concurrent access from
+//! multiple workers. All `Scheduler` methods take `&self` (not `&mut self`)
+//! and acquire locks as needed.
 
-use super::{ProcessTable, Worker};
+use super::{ProcessTable, RunQueue, Worker};
 use crate::platform::MemorySpace;
 use crate::process::{
     INITIAL_OLD_HEAP_SIZE, INITIAL_YOUNG_HEAP_SIZE, ProcessId, ProcessStatus, WorkerId,
 };
 use crate::realm::Realm;
+use crate::sync::{SpinMutex, SpinRwLock};
 use crate::term::Term;
 use crate::vm::{RunResult, RuntimeError, Vm};
 
 /// Default number of workers (matches typical core count).
 pub const DEFAULT_WORKER_COUNT: usize = 4;
+
+/// Minimum number of processes a worker must have before work can be stolen.
+///
+/// Prevents ping-pong stealing when a worker has only one process.
+const MIN_STEAL_THRESHOLD: usize = 2;
 
 /// Result of a single scheduler tick.
 #[derive(Debug)]
@@ -36,12 +46,16 @@ pub enum TickResult {
 
 /// Orchestrates multi-worker process scheduling within a realm.
 ///
-/// Owns a `ProcessTable` for process storage and N `Worker`s for execution.
-/// Uses the take/put-back pattern to avoid borrow conflicts between
-/// the process table and VM execution.
+/// Owns a `ProcessTable` (behind `SpinMutex`) for process storage and
+/// N run queues (each behind `SpinMutex`) for work distribution.
+///
+/// Workers (with their X registers and per-TCB state) are NOT owned by the
+/// Scheduler. Each seL4 TCB owns its own `Worker` and passes it to
+/// `tick_worker`. This enables safe concurrent access: `&self` methods
+/// lock only what they need.
 pub struct Scheduler {
-    process_table: ProcessTable,
-    workers: [Worker; DEFAULT_WORKER_COUNT],
+    process_table: SpinMutex<ProcessTable>,
+    run_queues: [SpinMutex<RunQueue>; DEFAULT_WORKER_COUNT],
     /// Number of active workers (1 to `DEFAULT_WORKER_COUNT`).
     worker_count: usize,
     /// The `*ns*` var for bootstrapping new processes.
@@ -69,11 +83,9 @@ impl Scheduler {
             "worker count must be 1..={DEFAULT_WORKER_COUNT}"
         );
 
-        let workers = core::array::from_fn(|i| Worker::new(WorkerId(i as u8)));
-
         Self {
-            process_table: ProcessTable::new(),
-            workers,
+            process_table: SpinMutex::new(ProcessTable::new()),
+            run_queues: core::array::from_fn(|_| SpinMutex::new(RunQueue::new())),
             worker_count: count,
             ns_var,
             core_ns,
@@ -84,12 +96,12 @@ impl Scheduler {
     ///
     /// Allocates process memory from the realm's pool, creates a `Process`,
     /// assigns a PID, bootstraps it with `*ns*`, and enqueues it on the
-    /// given worker.
+    /// given worker's run queue.
     ///
     /// Returns `None` if the process table is full or memory allocation fails.
     pub fn spawn_on<M: MemorySpace>(
-        &mut self,
-        realm: &mut Realm,
+        &self,
+        realm: &SpinRwLock<Realm>,
         mem: &mut M,
         chunk_addr: crate::Vaddr,
         parent_pid: ProcessId,
@@ -102,8 +114,10 @@ impl Scheduler {
         );
         let target_worker = worker_idx.min(self.worker_count - 1);
 
-        let (young_base, old_base) =
-            realm.allocate_process_memory(INITIAL_YOUNG_HEAP_SIZE, INITIAL_OLD_HEAP_SIZE)?;
+        let (young_base, old_base) = {
+            let mut realm_guard = realm.write();
+            realm_guard.allocate_process_memory(INITIAL_YOUNG_HEAP_SIZE, INITIAL_OLD_HEAP_SIZE)?
+        };
 
         let mut process = crate::process::Process::new(
             young_base,
@@ -112,12 +126,15 @@ impl Scheduler {
             INITIAL_OLD_HEAP_SIZE,
         );
 
-        let (index, generation) = self.process_table.allocate()?;
+        let (index, generation) = {
+            let mut pt = self.process_table.lock();
+            pt.allocate()?
+        };
         let pid = ProcessId::new(index, generation);
 
         process.pid = pid;
         process.parent_pid = parent_pid;
-        process.worker_id = self.workers[target_worker].id;
+        process.worker_id = WorkerId(target_worker as u8);
         process.chunk_addr = Some(chunk_addr);
         process.ip = 0;
 
@@ -128,10 +145,18 @@ impl Scheduler {
             process.pid_term = Some(pid_term);
         }
 
-        self.process_table.insert(process);
-        if !self.workers[target_worker].enqueue(pid) {
-            self.process_table.remove(pid);
-            return None;
+        {
+            let mut pt = self.process_table.lock();
+            pt.insert(process);
+        }
+
+        {
+            let mut rq = self.run_queues[target_worker].lock();
+            if !rq.push_back(pid) {
+                let mut pt = self.process_table.lock();
+                pt.remove(pid);
+                return None;
+            }
         }
 
         Some(pid)
@@ -139,8 +164,8 @@ impl Scheduler {
 
     /// Spawn a new process on Worker 0 (convenience for single-worker usage).
     pub fn spawn<M: MemorySpace>(
-        &mut self,
-        realm: &mut Realm,
+        &self,
+        realm: &SpinRwLock<Realm>,
         mem: &mut M,
         chunk_addr: crate::Vaddr,
         parent_pid: ProcessId,
@@ -148,73 +173,105 @@ impl Scheduler {
         self.spawn_on(realm, mem, chunk_addr, parent_pid, 0)
     }
 
+    /// Enqueue a PID on a specific worker's run queue.
+    ///
+    /// Used by special intrinsics (spawn) that need to enqueue a newly
+    /// created process.
+    pub(crate) fn enqueue_on(&self, worker_idx: usize, pid: ProcessId) -> bool {
+        debug_assert!(
+            worker_idx < self.worker_count,
+            "worker_idx {worker_idx} >= worker_count {}",
+            self.worker_count
+        );
+        let target = worker_idx.min(self.worker_count - 1);
+        let mut rq = self.run_queues[target].lock();
+        rq.push_back(pid)
+    }
+
     /// Execute one tick on a specific worker.
     ///
     /// Uses the take/put-back pattern: the process is extracted from the
-    /// table during execution so `Vm::run` can receive `&mut ProcessTable`
-    /// (needed for spawn/alive? intrinsics in later steps).
+    /// table during execution so `Vm::run` can access the `ProcessTable`
+    /// (via `&Scheduler`) for spawn/alive? intrinsics.
     pub fn tick_worker<M: MemorySpace>(
-        &mut self,
-        worker_idx: usize,
-        realm: &mut Realm,
+        &self,
+        worker: &mut Worker,
+        realm: &SpinRwLock<Realm>,
         mem: &mut M,
     ) -> TickResult {
+        let worker_idx = worker.id.0 as usize;
         debug_assert!(worker_idx < self.worker_count, "worker_idx out of bounds");
-        // Split borrow: access worker and process_table independently
-        let Self {
-            workers,
-            process_table,
-            ..
-        } = self;
 
-        let worker = &mut workers[worker_idx];
+        let pid = {
+            let mut rq = self.run_queues[worker_idx].lock();
+            rq.pop_front()
+        };
 
-        let Some(pid) = worker.dequeue() else {
+        let Some(pid) = pid else {
             return TickResult::Idle;
         };
 
-        let Some(mut proc) = process_table.take(pid) else {
-            debug_assert!(false, "stale PID dequeued: {pid:?}");
-            return TickResult::Idle;
+        let mut proc = {
+            let mut pt = self.process_table.lock();
+            if let Some(p) = pt.take(pid) {
+                p
+            } else {
+                debug_assert!(false, "stale PID dequeued: {pid:?}");
+                return TickResult::Idle;
+            }
         };
 
         proc.status = ProcessStatus::Running;
         proc.reset_reductions();
         worker.current_pid = Some(pid);
 
-        let result = Vm::run(worker, &mut proc, mem, realm, Some(process_table));
+        // Acquire realm write lock for the duration of Vm::run.
+        // This is coarse-grained but correct — other workers block on realm
+        // access during this time. Fine-grained per-instruction locking can
+        // be added later if profiling shows contention.
+        let result = {
+            let mut realm_guard = realm.write();
+            Vm::run(worker, &mut proc, mem, &mut realm_guard, Some(self))
+        };
 
         worker.current_pid = None;
 
         match result {
             RunResult::Yielded => {
                 proc.status = ProcessStatus::Ready;
-                process_table.put_back(pid, proc);
-                let enqueued = worker.enqueue(pid);
-                debug_assert!(enqueued, "re-enqueue of yielding process must not fail");
+                {
+                    let mut pt = self.process_table.lock();
+                    pt.put_back(pid, proc);
+                }
+                {
+                    let mut rq = self.run_queues[worker_idx].lock();
+                    let enqueued = rq.push_back(pid);
+                    debug_assert!(enqueued, "re-enqueue of yielding process must not fail");
+                }
                 TickResult::Continued(pid)
             }
             RunResult::Completed(value) => {
-                process_table.free_taken_slot(pid);
+                let mut pt = self.process_table.lock();
+                pt.free_taken_slot(pid);
                 TickResult::Completed(pid, value)
             }
             RunResult::Error(err) => {
-                process_table.free_taken_slot(pid);
+                let mut pt = self.process_table.lock();
+                pt.free_taken_slot(pid);
                 TickResult::Error(pid, err)
             }
         }
     }
 
-    /// Execute one tick on Worker 0 (convenience for single-worker patterns).
-    pub fn tick<M: MemorySpace>(&mut self, realm: &mut Realm, mem: &mut M) -> TickResult {
-        self.tick_worker(0, realm, mem)
-    }
-
     /// Try to steal work for an idle worker from the busiest neighbor.
     ///
+    /// Uses ordered locking (lower index first) to prevent deadlock.
+    /// The busiest-worker scan is TOCTOU-tolerant: queue lengths may change
+    /// between the scan and the steal, so we re-check inside the critical section.
+    ///
     /// Returns `true` if a process was stolen.
-    pub(crate) fn try_steal_for(&mut self, idle_idx: usize) -> bool {
-        // Find the busiest worker
+    pub fn try_steal_for(&self, idle_idx: usize) -> bool {
+        // Find the busiest worker (advisory — may be stale by the time we lock)
         let mut busiest_idx = 0;
         let mut busiest_len = 0;
 
@@ -222,36 +279,62 @@ impl Scheduler {
             if i == idle_idx {
                 continue;
             }
-            let len = self.workers[i].run_queue.len();
+            let rq = self.run_queues[i].lock();
+            let len = rq.len();
             if len > busiest_len {
                 busiest_len = len;
                 busiest_idx = i;
             }
         }
 
-        // Only steal if the busiest has at least 2 processes
-        if busiest_len < 2 {
+        // Only steal if the busiest had at least MIN_STEAL_THRESHOLD processes
+        if busiest_len < MIN_STEAL_THRESHOLD {
             return false;
         }
 
-        if let Some(pid) = self.workers[busiest_idx].steal() {
-            self.workers[idle_idx].enqueue(pid);
-            true
+        // Ordered locking: acquire lower index first to prevent deadlock
+        let (lo, hi) = if idle_idx < busiest_idx {
+            (idle_idx, busiest_idx)
         } else {
-            false
+            (busiest_idx, idle_idx)
+        };
+
+        let mut lo_guard = self.run_queues[lo].lock();
+        let mut hi_guard = self.run_queues[hi].lock();
+
+        let (src, dst) = if busiest_idx == lo {
+            (&mut *lo_guard, &mut *hi_guard)
+        } else {
+            (&mut *hi_guard, &mut *lo_guard)
+        };
+
+        // Re-check threshold under lock (scan was advisory, lengths may have changed)
+        if src.len() < MIN_STEAL_THRESHOLD {
+            return false;
         }
+
+        src.steal_back().is_some_and(|pid| {
+            dst.push_back(pid);
+            true
+        })
     }
 
-    /// Run all processes to completion across all workers.
+    /// Run all processes to completion across all workers (single-threaded).
     ///
-    /// Round-robins `tick_worker` across all workers. When a worker is idle,
-    /// attempts work stealing. Stops when all queues are empty and no work
-    /// was done in a full cycle.
-    pub fn run_all<M: MemorySpace>(&mut self, realm: &mut Realm, mem: &mut M) {
+    /// Creates local workers and sequentially round-robins `tick_worker`
+    /// across them. Intended for tests and single-threaded execution —
+    /// real multi-TCB execution uses per-TCB `tick_worker` loops.
+    ///
+    /// When a worker is idle, attempts work stealing. Stops when all queues
+    /// are empty and no work was done in a full cycle.
+    pub fn run_all<M: MemorySpace>(&self, realm: &SpinRwLock<Realm>, mem: &mut M) {
+        let mut workers: [Worker; DEFAULT_WORKER_COUNT] =
+            core::array::from_fn(|i| Worker::new(WorkerId(i as u8)));
+
         loop {
             let mut any_work = false;
-            for idx in 0..self.worker_count {
-                match self.tick_worker(idx, realm, mem) {
+            for (idx, worker) in workers.iter_mut().enumerate().take(self.worker_count) {
+                match self.tick_worker(worker, realm, mem) {
                     TickResult::Idle => {
                         if self.try_steal_for(idx) {
                             any_work = true;
@@ -270,14 +353,25 @@ impl Scheduler {
 
     /// Number of active processes in the table.
     #[must_use]
-    pub const fn process_count(&self) -> usize {
-        self.process_table.count()
+    pub fn process_count(&self) -> usize {
+        let pt = self.process_table.lock();
+        pt.count()
     }
 
-    /// Get a reference to a process by PID.
-    #[must_use]
-    pub const fn get_process(&self, pid: ProcessId) -> Option<&crate::process::Process> {
-        self.process_table.get(pid)
+    /// Get a reference to the process table (locked).
+    ///
+    /// This acquires the lock. The caller must drop the guard promptly.
+    pub fn with_process_table<R>(&self, f: impl FnOnce(&ProcessTable) -> R) -> R {
+        let pt = self.process_table.lock();
+        f(&pt)
+    }
+
+    /// Get a mutable reference to the process table (locked).
+    ///
+    /// This acquires the lock. The caller must drop the guard promptly.
+    pub fn with_process_table_mut<R>(&self, f: impl FnOnce(&mut ProcessTable) -> R) -> R {
+        let mut pt = self.process_table.lock();
+        f(&mut pt)
     }
 
     /// Check if a process is still alive.
@@ -286,15 +380,20 @@ impl Scheduler {
     /// taken for execution.
     #[must_use]
     pub fn is_alive(&self, pid: ProcessId) -> bool {
-        self.process_table.get(pid).is_some() || self.process_table.is_taken(pid)
+        let pt = self.process_table.lock();
+        pt.get(pid).is_some() || pt.is_taken(pid)
     }
 
     /// Check if any worker has runnable processes.
     #[must_use]
     pub fn has_work(&self) -> bool {
-        self.workers[..self.worker_count]
-            .iter()
-            .any(Worker::has_work)
+        for i in 0..self.worker_count {
+            let rq = self.run_queues[i].lock();
+            if !rq.is_empty() {
+                return true;
+            }
+        }
+        false
     }
 
     /// Get the number of active workers.
@@ -303,25 +402,10 @@ impl Scheduler {
         self.worker_count
     }
 
-    /// Get a reference to the process table.
+    /// Get the length of a worker's run queue.
     #[must_use]
-    pub const fn process_table(&self) -> &ProcessTable {
-        &self.process_table
-    }
-
-    /// Get a mutable reference to the process table.
-    pub const fn process_table_mut(&mut self) -> &mut ProcessTable {
-        &mut self.process_table
-    }
-
-    /// Get a reference to a worker by index.
-    #[must_use]
-    pub const fn worker(&self, idx: usize) -> &Worker {
-        &self.workers[idx]
-    }
-
-    /// Get a mutable reference to a worker by index.
-    pub const fn worker_mut(&mut self, idx: usize) -> &mut Worker {
-        &mut self.workers[idx]
+    pub fn run_queue_len(&self, worker_idx: usize) -> usize {
+        let rq = self.run_queues[worker_idx].lock();
+        rq.len()
     }
 }

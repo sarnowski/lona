@@ -25,7 +25,7 @@ use crate::intrinsics::{self, IntrinsicError, XRegs, intrinsic_cost};
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::Realm;
-use crate::scheduler::{ProcessTable, Worker};
+use crate::scheduler::{Scheduler, Worker};
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::heap::{HeapClosure, HeapFun};
@@ -1076,9 +1076,8 @@ impl Vm {
         proc: &mut Process,
         mem: &mut M,
         realm: &mut Realm,
-        process_table: Option<&mut ProcessTable>,
+        scheduler: Option<&Scheduler>,
     ) -> RunResult {
-        let mut process_table = process_table;
         // Track whether the last instruction already triggered a GC retry.
         // This prevents infinite retry loops when GC frees some bytes but not
         // enough for the allocation that failed.
@@ -1122,7 +1121,7 @@ impl Vm {
                 None
             };
 
-            // Special intrinsics need Worker/Realm/ProcessTable access.
+            // Special intrinsics need Worker/Realm/Scheduler access.
             if opcode == op::INTRINSIC {
                 let id = decode_a(instr);
                 if let Some(handled) = special_intrinsics::dispatch(
@@ -1132,7 +1131,7 @@ impl Vm {
                     proc,
                     mem,
                     realm,
-                    &mut process_table,
+                    scheduler,
                 ) {
                     match handled {
                         Ok(()) => {
@@ -1192,29 +1191,29 @@ pub fn execute<M: MemorySpace>(
     mem: &mut M,
     realm: &mut Realm,
 ) -> Result<Term, RuntimeError> {
-    execute_with_table(worker, proc, mem, realm, None)
+    execute_with_scheduler(worker, proc, mem, realm, None)
 }
 
-/// Run a process to completion with access to a process table.
+/// Run a process to completion with access to a scheduler.
 ///
-/// Like `execute`, but passes a `ProcessTable` so `spawn` and `alive?`
+/// Like `execute`, but passes a `Scheduler` so `spawn` and `alive?`
 /// intrinsics work during execution.
 ///
 /// # Errors
 ///
 /// Returns an error if execution fails.
-pub fn execute_with_table<M: MemorySpace>(
+pub fn execute_with_scheduler<M: MemorySpace>(
     worker: &mut Worker,
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
-    mut process_table: Option<&mut ProcessTable>,
+    scheduler: Option<&Scheduler>,
 ) -> Result<Term, RuntimeError> {
     // Initialize reduction budget
     proc.reset_reductions();
 
     loop {
-        match Vm::run(worker, proc, mem, realm, process_table.as_deref_mut()) {
+        match Vm::run(worker, proc, mem, realm, scheduler) {
             RunResult::Completed(term) => return Ok(term),
             RunResult::Yielded => {
                 // Single-threaded execution: just continue with fresh budget

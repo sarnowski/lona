@@ -3,7 +3,7 @@
 
 //! seL4 implementation of the event loop.
 
-use crate::realm::constants::{SCHED_BUDGET_US, SCHED_PERIOD_US};
+use crate::realm::constants::{MAX_REALM_WORKERS, SCHED_BUDGET_US, SCHED_PERIOD_US};
 use crate::realm::create_reply;
 use crate::realm::frame_mapping::map_rw_frame;
 use crate::slots::SlotAllocator;
@@ -65,6 +65,13 @@ pub struct RealmEntry {
     pub next_realm_local: u64,
     /// Total pages allocated to this realm.
     pub pages_allocated: u64,
+    /// Additional worker `SchedContext` capabilities for timeout replenishment.
+    ///
+    /// The primary `sched_context` field holds Worker 0's cap. This array
+    /// holds Workers 1..N for replenishing all workers on timeout faults.
+    extra_sched_contexts: [Option<Cap<SchedContext>>; MAX_REALM_WORKERS],
+    /// Number of extra `SchedContexts` registered.
+    extra_sched_context_count: usize,
 }
 
 impl RealmEntry {
@@ -89,6 +96,16 @@ impl RealmEntry {
             next_realm_binary: REALM_BINARY_BASE,
             next_realm_local: REALM_LOCAL_BASE,
             pages_allocated: 0,
+            extra_sched_contexts: [None; MAX_REALM_WORKERS],
+            extra_sched_context_count: 0,
+        }
+    }
+
+    /// Register an additional worker's `SchedContext` for timeout replenishment.
+    pub fn add_worker_sched_context(&mut self, sc: Cap<SchedContext>) {
+        if self.extra_sched_context_count < MAX_REALM_WORKERS {
+            self.extra_sched_contexts[self.extra_sched_context_count] = Some(sc);
+            self.extra_sched_context_count += 1;
         }
     }
 
@@ -576,12 +593,18 @@ impl EventLoop {
             return;
         };
 
-        // CRITICAL: Replenish budget before replying.
-        // Without this, the thread will immediately timeout again.
-        let sched_context = realm.sched_context;
+        // CRITICAL: Replenish budget for ALL workers before replying.
+        // Without this, the faulting thread will immediately timeout again.
+        // We replenish all workers because we don't know which worker faulted
+        // (all share the same endpoint). This is coarse-grained but correct.
         let budget_us = realm.budget_us;
         let period_us = realm.period_us;
+        let sched_context = realm.sched_context;
+        let extra_count = realm.extra_sched_context_count;
+        let extra_contexts: [Option<Cap<SchedContext>>; MAX_REALM_WORKERS] =
+            realm.extra_sched_contexts;
 
+        // Replenish primary worker (Worker 0)
         if let Err(e) = self.sched_control.sched_control_configure_flags(
             sched_context,
             budget_us,
@@ -590,8 +613,16 @@ impl EventLoop {
             0, // badge
             0, // flags
         ) {
-            sel4::debug_println!("Event loop: Failed to replenish budget: {:?}", e);
-            // Still try to continue - maybe the thread can make progress
+            sel4::debug_println!("Event loop: Failed to replenish worker 0 budget: {:?}", e);
+        }
+
+        // Replenish additional workers
+        for sc in &extra_contexts[..extra_count] {
+            if let Some(cap) = sc {
+                let _ = self
+                    .sched_control
+                    .sched_control_configure_flags(*cap, budget_us, period_us, 0, 0, 0);
+            }
         }
 
         // Check if this looks like an interrupted page fault in inherited region.

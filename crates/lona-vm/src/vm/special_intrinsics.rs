@@ -3,15 +3,15 @@
 
 //! Special intrinsic handlers for the VM.
 //!
-//! These intrinsics need access to Worker, Realm, or `ProcessTable` that
+//! These intrinsics need access to Worker, Realm, or `Scheduler` that
 //! the normal `call_intrinsic` dispatch doesn't provide.
 
 use crate::gc;
-use crate::intrinsics::{self, IntrinsicError};
+use crate::intrinsics;
 use crate::platform::MemorySpace;
 use crate::process::Process;
 use crate::realm::Realm;
-use crate::scheduler::{ProcessTable, Worker};
+use crate::scheduler::{ProcessTable, Scheduler, Worker};
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::tag::object;
@@ -29,7 +29,7 @@ pub fn dispatch<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
-    process_table: &mut Option<&mut ProcessTable>,
+    scheduler: Option<&Scheduler>,
 ) -> Option<Result<(), RunResult>> {
     match id {
         intrinsics::id::GARBAGE_COLLECT => {
@@ -48,17 +48,14 @@ pub fn dispatch<M: MemorySpace>(
         }),
         intrinsics::id::EVAL => Some(handle_eval(worker, proc, mem, realm)),
         intrinsics::id::SPAWN => {
-            let Some(pt) = process_table.as_deref_mut() else {
-                return Some(Err(RunResult::Error(RuntimeError::Intrinsic(
-                    IntrinsicError::OutOfMemory,
-                ))));
+            let Some(sched) = scheduler else {
+                return Some(Err(RunResult::Error(RuntimeError::ProcessLimitReached)));
             };
-            Some(handle_spawn(worker, proc, mem, realm, pt))
+            Some(handle_spawn(worker, proc, mem, realm, sched))
         }
         intrinsics::id::ALIVE => {
-            worker.x_regs[0] = process_table
-                .as_ref()
-                .map_or(Term::FALSE, |pt| handle_alive(worker, proc, mem, pt));
+            worker.x_regs[0] =
+                scheduler.map_or(Term::FALSE, |sched| handle_alive(worker, proc, mem, sched));
             Some(Ok(()))
         }
         _ => None,
@@ -120,7 +117,7 @@ fn handle_spawn<M: MemorySpace>(
     proc: &mut Process,
     mem: &mut M,
     realm: &mut Realm,
-    process_table: &mut ProcessTable,
+    scheduler: &Scheduler,
 ) -> Result<(), RunResult> {
     use crate::process::{INITIAL_OLD_HEAP_SIZE, INITIAL_YOUNG_HEAP_SIZE, ProcessId};
 
@@ -142,8 +139,8 @@ fn handle_spawn<M: MemorySpace>(
         crate::realm::copy::deep_copy_term_to_process(fn_term, proc, &mut new_proc, mem)
             .ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
 
-    let (index, generation) = process_table
-        .allocate()
+    let (index, generation) = scheduler
+        .with_process_table_mut(ProcessTable::allocate)
         .ok_or(RunResult::Error(RuntimeError::ProcessLimitReached))?;
     let pid = ProcessId::new(index, generation);
 
@@ -164,9 +161,13 @@ fn handle_spawn<M: MemorySpace>(
         new_proc.pid_term = Some(pid_term);
     }
 
-    process_table.insert(new_proc);
-    if !worker.enqueue(pid) {
-        process_table.remove(pid);
+    scheduler.with_process_table_mut(|pt| pt.insert(new_proc));
+
+    let worker_idx = worker.id.0 as usize;
+    if !scheduler.enqueue_on(worker_idx, pid) {
+        scheduler.with_process_table_mut(|pt| {
+            pt.remove(pid);
+        });
         return Err(RunResult::Error(RuntimeError::ProcessLimitReached));
     }
 
@@ -210,12 +211,12 @@ fn handle_alive<M: MemorySpace>(
     worker: &Worker,
     proc: &Process,
     mem: &M,
-    process_table: &ProcessTable,
+    scheduler: &Scheduler,
 ) -> Term {
     let pid_term = worker.x_regs[1];
     if let Some((index, generation)) = proc.read_term_pid(mem, pid_term) {
         let pid = crate::process::ProcessId::new(index, generation);
-        Term::bool(process_table.get(pid).is_some() || process_table.is_taken(pid))
+        Term::bool(scheduler.is_alive(pid))
     } else {
         Term::FALSE
     }

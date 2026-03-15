@@ -36,6 +36,7 @@ pub mod reader;
 pub mod realm;
 pub mod repl;
 pub mod scheduler;
+pub mod sync;
 pub mod term;
 pub mod types;
 pub mod uart;

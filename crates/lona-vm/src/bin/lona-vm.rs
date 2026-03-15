@@ -32,7 +32,9 @@ mod allocator {
         next: AtomicUsize,
     }
 
-    // SAFETY: Single-threaded environment, no concurrent access.
+    // SAFETY: alloc() uses atomic compare_exchange_weak on the bump pointer,
+    // ensuring thread-safe allocation across concurrent worker TCBs.
+    // dealloc() is a no-op (bump allocator never frees).
     unsafe impl Sync for BumpAllocator {}
 
     impl BumpAllocator {
@@ -146,6 +148,16 @@ pub extern "C" fn _start(
     #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
     let mut uart = init_uart_x86_64(boot_flags, worker_id);
 
+    // Non-bootstrap workers: set up platform, then idle.
+    // Only Worker 0 bootstraps the realm and runs REPL/E2E.
+    // Workers 1-3 will participate in scheduling once the Scheduler
+    // is shared across workers (M2 Phase 2E).
+    if worker_id != 0 {
+        idle_loop();
+    }
+
+    // --- Worker 0 only below this point ---
+
     // Print boot info if UART is available
     if boot_flags.has_uart() {
         print_boot_info(
@@ -219,15 +231,35 @@ pub extern "C" fn _start(
     }
 }
 
+/// Idle loop for non-bootstrap workers.
+///
+/// Workers 1-3 voluntarily yield their seL4 time slice. They don't
+/// participate in scheduling until the Scheduler is shared across
+/// workers (M2 Phase 2E).
+///
+/// Uses `seL4_Yield` on both architectures — this surrenders the
+/// remaining budget to the kernel scheduler without burning CPU.
+fn idle_loop() -> ! {
+    loop {
+        sel4::r#yield();
+    }
+}
+
+/// Maximum workers per realm (must match LMM's `MAX_REALM_WORKERS`).
+const MAX_WORKERS: usize = 4;
+
 /// TLS block size for aarch64 (matches x86_64 for consistency).
 #[cfg(target_arch = "aarch64")]
 const TLS_BLOCK_SIZE_AARCH64: usize = 4096;
 
-/// Static TLS block for aarch64.
+/// Static TLS blocks for aarch64 (one per worker).
 ///
 /// On aarch64, TLS uses variant 1 where the thread pointer (TPIDR_EL0) points
 /// to the TCB at the START of the TLS block. TLS variables are accessed via
 /// positive offsets from the thread pointer.
+///
+/// Each worker TCB needs its own TLS block to have independent thread-local
+/// storage (e.g., the seL4 IPC buffer pointer).
 #[cfg(target_arch = "aarch64")]
 #[repr(C, align(16))]
 struct TlsBlockAarch64 {
@@ -238,17 +270,20 @@ struct TlsBlockAarch64 {
 }
 
 #[cfg(target_arch = "aarch64")]
-static mut TLS_BLOCK_AARCH64: TlsBlockAarch64 = TlsBlockAarch64 {
-    tcb: [0; 2],
-    data: [0u8; TLS_BLOCK_SIZE_AARCH64],
-};
+static mut TLS_BLOCKS_AARCH64: [TlsBlockAarch64; MAX_WORKERS] = [const {
+    TlsBlockAarch64 {
+        tcb: [0; 2],
+        data: [0u8; TLS_BLOCK_SIZE_AARCH64],
+    }
+}; MAX_WORKERS];
 
-/// Initialize TLS on aarch64 by setting TPIDR_EL0.
+/// Initialize TLS on aarch64 by setting TPIDR_EL0 to this worker's TLS block.
 #[cfg(target_arch = "aarch64")]
-unsafe fn init_tls_aarch64() {
+unsafe fn init_tls_aarch64(worker_id: u16) {
     use core::arch::asm;
     unsafe {
-        let tls_ptr = core::ptr::addr_of_mut!(TLS_BLOCK_AARCH64) as usize;
+        let idx = (worker_id as usize).min(MAX_WORKERS - 1);
+        let tls_ptr = core::ptr::addr_of_mut!(TLS_BLOCKS_AARCH64[idx]) as usize;
         asm!("msr tpidr_el0, {}", in(reg) tls_ptr, options(nomem, nostack));
     }
 }
@@ -257,9 +292,10 @@ unsafe fn init_tls_aarch64() {
 #[cfg(target_arch = "aarch64")]
 fn init_uart_aarch64(boot_flags: BootFlags, worker_id: u16) -> Pl011Uart {
     // Initialize TLS first - required for seL4 TLS variables
-    // SAFETY: Single-threaded, called once at startup
+    // SAFETY: Each worker calls this once with its own worker_id,
+    // getting its own TLS block. No concurrent access to the same block.
     unsafe {
-        init_tls_aarch64();
+        init_tls_aarch64(worker_id);
     }
 
     // Initialize UART (MMIO-based, no seL4 syscalls needed)
@@ -288,22 +324,14 @@ fn init_uart_aarch64(boot_flags: BootFlags, worker_id: u16) -> Pl011Uart {
 #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
 const TLS_BLOCK_SIZE: usize = 4096;
 
-/// Static TLS block for x86_64.
+/// Static TLS blocks for x86_64 (one per worker).
 ///
 /// On x86_64, TLS uses variant 2 where the thread pointer (FS) points to
 /// the TCB at the END of the TLS block. TLS variables are accessed via
 /// negative offsets from FS.
 ///
-/// Layout:
-/// ```text
-/// +----------------------------------+
-/// | .tdata (copied from ELF)         | <- TLS variables (initialized)
-/// +----------------------------------+
-/// | .tbss (zero-initialized)         | <- TLS variables (uninitialized)
-/// +----------------------------------+
-/// | self_ptr (points to itself)      | <- FS points here
-/// +----------------------------------+
-/// ```
+/// Each worker TCB needs its own TLS block to have independent thread-local
+/// storage (e.g., the seL4 IPC buffer pointer).
 #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
 #[repr(C, align(16))]
 struct TlsBlock {
@@ -314,10 +342,12 @@ struct TlsBlock {
 }
 
 #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
-static mut TLS_BLOCK: TlsBlock = TlsBlock {
-    data: [0u8; TLS_BLOCK_SIZE],
-    self_ptr: 0,
-};
+static mut TLS_BLOCKS: [TlsBlock; MAX_WORKERS] = [const {
+    TlsBlock {
+        data: [0u8; TLS_BLOCK_SIZE],
+        self_ptr: 0,
+    }
+}; MAX_WORKERS];
 
 // Linker-provided symbols for TLS template sections.
 // These are defined in lona-vm.ld and mark the start/end of .tdata and .tbss.
@@ -331,16 +361,19 @@ unsafe extern "C" {
 
 /// Initialize TLS on x86_64 using wrfsbase instruction.
 ///
+/// Each worker gets its own TLS block (indexed by `worker_id`).
+///
 /// This function properly initializes TLS by:
 /// 1. Calculating the TLS size from linker-provided symbols
-/// 2. Copying the .tdata template to the TLS block
+/// 2. Copying the .tdata template to this worker's TLS block
 /// 3. Zero-initializing the .tbss portion (already zero in static)
 /// 4. Setting FS to point to the thread pointer (end of TLS block)
 #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
-unsafe fn init_tls_x86_64() {
+unsafe fn init_tls_x86_64(worker_id: u16) {
     unsafe {
+        let idx = (worker_id as usize).min(MAX_WORKERS - 1);
+
         // Calculate TLS section sizes from linker symbols.
-        // Use tbss_end - tdata_start to include any alignment padding between sections.
         let tdata_start = &__tdata_start as *const u8;
         let tdata_end = &__tdata_end as *const u8;
         let tbss_end = &__tbss_end as *const u8;
@@ -349,36 +382,21 @@ unsafe fn init_tls_x86_64() {
         let total_tls_size = tbss_end.offset_from(tdata_start) as usize;
 
         // Verify TLS fits in our static block
-        // Note: In production, this should never fail as TLS_BLOCK_SIZE is generous
         if total_tls_size > TLS_BLOCK_SIZE {
-            // TLS too large - halt permanently. Single HLT can return after interrupt.
             loop {
                 asm!("hlt", options(nomem, nostack));
             }
         }
 
-        // Calculate where TLS data should start in our block.
-        // For variant 2, TLS data is placed BEFORE the thread pointer.
-        // The thread pointer (FS) will point to the self_ptr field.
-        //
-        // Our block layout:
-        //   TLS_BLOCK.data[TLS_BLOCK_SIZE - total_tls_size .. TLS_BLOCK_SIZE] = TLS data
-        //   TLS_BLOCK.self_ptr = thread pointer (FS points here)
-        //
-        // TLS variables have negative offsets from FS, so:
-        //   fs:[offset] where offset is negative
-        //
-        // The linker computes offsets as if TLS data ends right before the TCB.
-        let tls_block_ptr = core::ptr::addr_of_mut!(TLS_BLOCK);
+        // Use this worker's TLS block
+        let tls_block_ptr = core::ptr::addr_of_mut!(TLS_BLOCKS[idx]);
         let tls_data_ptr = core::ptr::addr_of_mut!((*tls_block_ptr).data) as *mut u8;
         let tls_data_start = tls_data_ptr.add(TLS_BLOCK_SIZE - total_tls_size);
 
-        // Copy .tdata template from ELF to our TLS block
+        // Copy .tdata template from ELF to this worker's TLS block
         if tdata_size > 0 {
             core::ptr::copy_nonoverlapping(tdata_start, tls_data_start, tdata_size);
         }
-
-        // .tbss is already zero-initialized in the static TLS_BLOCK
 
         // Set up the thread pointer (self-pointer for variant 2)
         let self_ptr_ptr = core::ptr::addr_of_mut!((*tls_block_ptr).self_ptr);
@@ -395,9 +413,10 @@ unsafe fn init_tls_x86_64() {
 fn init_uart_x86_64(boot_flags: BootFlags, worker_id: u16) -> Com1Uart {
     if boot_flags.has_uart() {
         // Initialize TLS first - required for seL4 syscalls
-        // SAFETY: Single-threaded, called once at startup
+        // SAFETY: Each worker calls this once with its own worker_id,
+        // getting its own TLS block. No concurrent access to the same block.
         unsafe {
-            init_tls_x86_64();
+            init_tls_x86_64(worker_id);
         }
 
         // Set up IPC buffer for seL4 syscalls

@@ -12,40 +12,7 @@ use crate::process::{ProcessId, WorkerId};
 fn worker_new() {
     let worker = Worker::new(WorkerId(0));
     assert_eq!(worker.id, WorkerId(0));
-    assert!(!worker.has_work());
     assert!(worker.current_pid.is_none());
-}
-
-#[test]
-fn worker_enqueue_dequeue() {
-    let mut worker = Worker::new(WorkerId(0));
-    let pid = ProcessId::new(1, 0);
-
-    assert!(worker.enqueue(pid));
-    assert!(worker.has_work());
-    assert_eq!(worker.dequeue(), Some(pid));
-    assert!(!worker.has_work());
-}
-
-#[test]
-fn worker_steal() {
-    let mut worker = Worker::new(WorkerId(0));
-    let pid1 = ProcessId::new(1, 0);
-    let pid2 = ProcessId::new(2, 0);
-
-    worker.enqueue(pid1);
-    worker.enqueue(pid2);
-
-    // Steal takes from back
-    assert_eq!(worker.steal(), Some(pid2));
-    assert_eq!(worker.dequeue(), Some(pid1));
-    assert!(!worker.has_work());
-}
-
-#[test]
-fn worker_steal_empty() {
-    let mut worker = Worker::new(WorkerId(0));
-    assert_eq!(worker.steal(), None);
 }
 
 #[test]
@@ -63,4 +30,14 @@ fn worker_current_pid() {
     // Clear current process
     worker.current_pid = None;
     assert!(worker.current_pid.is_none());
+}
+
+#[test]
+fn worker_reset_x_regs() {
+    let mut worker = Worker::new(WorkerId(0));
+    worker.x_regs[0] = crate::term::Term::TRUE;
+    worker.x_regs[1] = crate::term::Term::small_int(42).unwrap();
+    worker.reset_x_regs();
+    assert_eq!(worker.x_regs[0], crate::term::Term::NIL);
+    assert_eq!(worker.x_regs[1], crate::term::Term::NIL);
 }

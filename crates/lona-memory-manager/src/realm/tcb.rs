@@ -24,15 +24,17 @@ use sel4::Cap;
 use sel4::cap_type::{Endpoint, SchedContext, Tcb};
 
 /// Start a worker TCB in a realm.
+///
+/// Uses the worker's TCB and `SchedContext` from the realm's per-worker arrays.
 #[cfg(feature = "sel4")]
 pub fn start_worker(realm: &Realm, worker_id: WorkerId) -> Result<(), RealmError> {
-    let tcb_cap: Cap<Tcb> = Cap::from_bits(realm.tcb_slot as u64);
-    let sched_cap: Cap<SchedContext> = Cap::from_bits(realm.sched_context_slot as u64);
+    let worker_idx = worker_id.as_u16() as usize;
+    let tcb_cap: Cap<Tcb> = Cap::from_bits(realm.tcb_slots[worker_idx] as u64);
+    let sched_cap: Cap<SchedContext> = Cap::from_bits(realm.sched_context_slots[worker_idx] as u64);
 
-    // Step 12: Write initial registers
-    sel4::debug_println!("Writing TCB registers...");
-    let worker_idx = worker_id.as_u16();
-    let stack_top = worker_stack_base(worker_idx) + WORKER_STACK_SIZE;
+    // Write initial registers
+    sel4::debug_println!("Writing TCB registers for worker {}...", worker_idx);
+    let stack_top = worker_stack_base(worker_id.as_u16()) + WORKER_STACK_SIZE;
     let heap_start = PROCESS_POOL_BASE;
     let heap_size = INIT_HEAP_SIZE;
     let flags = BootFlags::NONE
@@ -51,10 +53,13 @@ pub fn start_worker(realm: &Realm, worker_id: WorkerId) -> Result<(), RealmError
         flags,
     )?;
 
-    // Step 13: Bind SchedContext and fault endpoint to TCB via set_sched_params (MCS)
+    // Bind SchedContext and fault endpoint to TCB via set_sched_params (MCS)
     // NOTE: We use a single endpoint for both faults AND IPC requests.
     // The event loop distinguishes them by message label (faults have label != 0).
-    sel4::debug_println!("Binding SchedContext via set_sched_params...");
+    sel4::debug_println!(
+        "Binding SchedContext via set_sched_params for worker {}...",
+        worker_idx
+    );
     let endpoint_cap: Cap<Endpoint> = Cap::from_bits(realm.endpoint_slot as u64);
     tcb_cap
         .tcb_set_sched_params(
@@ -65,18 +70,22 @@ pub fn start_worker(realm: &Realm, worker_id: WorkerId) -> Result<(), RealmError
             endpoint_cap,
         )
         .map_err(|e| {
-            sel4::debug_println!("TCB set_sched_params failed: {:?}", e);
+            sel4::debug_println!(
+                "TCB set_sched_params failed for worker {}: {:?}",
+                worker_idx,
+                e
+            );
             RealmError::TcbConfiguration
         })?;
 
-    // Step 14: Resume TCB
-    sel4::debug_println!("Resuming TCB...");
+    // Resume TCB
+    sel4::debug_println!("Resuming worker {}...", worker_idx);
     tcb_cap.tcb_resume().map_err(|e| {
-        sel4::debug_println!("TCB resume failed: {:?}", e);
+        sel4::debug_println!("TCB resume failed for worker {}: {:?}", worker_idx, e);
         RealmError::TcbConfiguration
     })?;
 
-    sel4::debug_println!("Worker started!");
+    sel4::debug_println!("Worker {} started!", worker_idx);
     Ok(())
 }
 

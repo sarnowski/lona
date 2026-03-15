@@ -29,7 +29,7 @@ QEMU_X86           = qemu-system-x86_64
 QEMU_X86_MACHINE   = q35
 QEMU_X86_CPU       = Cascadelake-Server
 QEMU_X86_MEMORY    = 1G
-QEMU_X86_SMP       = 1
+QEMU_X86_SMP       = 4
 OVMF_CODE          = /usr/share/OVMF/OVMF_CODE.fd
 
 # QEMU aarch64 configuration
