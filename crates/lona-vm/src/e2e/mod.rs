@@ -36,6 +36,7 @@ mod spec_runner;
 mod tests_basic;
 mod tests_lmm;
 mod tests_lmm_demand;
+mod tests_process;
 
 pub use runner::{TestResult, TestStatus, run_all_tests};
 pub use spec_runner::run_spec_tests;

@@ -21,7 +21,7 @@ use crate::platform::MemorySpace;
 use crate::process::{Process, WorkerId};
 use crate::reader::read;
 use crate::realm::Realm;
-use crate::scheduler::Worker;
+use crate::scheduler::{Scheduler, Worker};
 use crate::term::printer::print_term;
 use crate::uart::Uart;
 use crate::vm;
@@ -39,6 +39,7 @@ pub fn run_spec_tests<M: MemorySpace, U: Uart>(
     realm: &mut Realm,
     mem: &mut M,
     _uart: &mut U,
+    scheduler: Option<&Scheduler>,
 ) -> u32 {
     sel4::debug_println!("=== SPEC TEST RUN ===");
 
@@ -70,7 +71,7 @@ pub fn run_spec_tests<M: MemorySpace, U: Uart>(
         // Run setup lines first
         let mut setup_failed = false;
         for setup in block.setup {
-            if let Err(_) = eval_expr(setup.expression, &mut worker, proc, realm, mem) {
+            if eval_expr(setup.expression, &mut worker, proc, realm, mem, scheduler).is_err() {
                 // Setup failure - skip entire block
                 let source_line = block.line_start + setup.line_offset;
                 sel4::debug_println!(
@@ -105,7 +106,14 @@ pub fn run_spec_tests<M: MemorySpace, U: Uart>(
                 continue;
             }
 
-            let result = eval_and_capture(assertion.expression, &mut worker, proc, realm, mem);
+            let result = eval_and_capture(
+                assertion.expression,
+                &mut worker,
+                proc,
+                realm,
+                mem,
+                scheduler,
+            );
 
             let (pass, actual_str): (bool, &str) = match &result {
                 Ok(output_buf) => {
@@ -220,13 +228,14 @@ impl EvalError {
     }
 }
 
-/// Evaluate an expression and return the result in an OutputBuffer.
+/// Evaluate an expression and return the result in an `OutputBuffer`.
 fn eval_and_capture<M: MemorySpace>(
     expr_str: &str,
     worker: &mut Worker,
     proc: &mut Process,
     realm: &mut Realm,
     mem: &mut M,
+    scheduler: Option<&Scheduler>,
 ) -> Result<OutputBuffer, EvalError> {
     use crate::compiler::CompileError;
     use crate::vm::RuntimeError;
@@ -259,7 +268,7 @@ fn eval_and_capture<M: MemorySpace>(
     if !proc.write_chunk_to_heap(mem, &chunk) {
         return Err(EvalError::Runtime(":out-of-memory"));
     }
-    let result = match vm::execute(worker, proc, mem, realm) {
+    let result = match vm::execute_with_scheduler(worker, proc, mem, realm, scheduler) {
         Ok(v) => v,
         Err(e) => {
             worker.reset_x_regs();
@@ -311,6 +320,7 @@ fn eval_expr<M: MemorySpace>(
     proc: &mut Process,
     realm: &mut Realm,
     mem: &mut M,
+    scheduler: Option<&Scheduler>,
 ) -> Result<(), ()> {
     // Parse
     let expr = match read(expr_str, proc, realm, mem) {
@@ -329,7 +339,7 @@ fn eval_expr<M: MemorySpace>(
     if !proc.write_chunk_to_heap(mem, &chunk) {
         return Err(());
     }
-    match vm::execute(worker, proc, mem, realm) {
+    match vm::execute_with_scheduler(worker, proc, mem, realm, scheduler) {
         Ok(_) => Ok(()),
         Err(_) => {
             worker.reset_x_regs();

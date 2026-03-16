@@ -12,84 +12,116 @@ mod mod_test;
 use crate::compiler::{self, CompileError};
 use crate::intrinsics::IntrinsicError;
 use crate::platform::MemorySpace;
-use crate::process::Process;
 #[cfg(test)]
 use crate::process::WorkerId;
+use crate::process::{Process, ProcessId, ProcessStatus};
 use crate::reader::{ReadError, read};
 use crate::realm::Realm;
-use crate::scheduler::Worker;
+use crate::scheduler::{Scheduler, Worker};
+use crate::sync::SpinRwLock;
 use crate::term::printer::print_term;
 use crate::uart::{Uart, UartExt};
-use crate::vm::{self, RuntimeError};
+#[cfg(test)]
+use crate::vm;
+use crate::vm::{RuntimeError, Vm};
 
 /// Maximum line buffer size.
 const LINE_BUFFER_SIZE: usize = 256;
 
-/// Run the REPL loop.
+/// Run the scheduler-integrated REPL loop.
+///
+/// The REPL process stays "taken" from the `ProcessTable` at all times.
+/// This prevents background workers from picking it up if a message or
+/// exit signal wakes it. Messages targeting the REPL while it is taken
+/// go to the slot's fragment inbox and are drained before each expression.
+///
+/// Worker 0 manages the REPL directly and also ticks other processes
+/// via `tick_worker` while waiting for UART input.
 ///
 /// This function never returns under normal operation.
-///
-/// # Arguments
-/// * `worker` - Worker providing X registers for execution
-/// * `proc` - Process for execution (should be bootstrapped)
-/// * `mem` - Memory space
-/// * `realm` - Realm (should be bootstrapped, mutable for `def`)
-/// * `uart` - UART for I/O
-pub fn run<M: MemorySpace, U: Uart>(
+pub fn run_scheduled<M: MemorySpace, U: Uart>(
     worker: &mut Worker,
-    proc: &mut Process,
+    repl_pid: ProcessId,
     mem: &mut M,
-    realm: &mut Realm,
+    realm: &'static SpinRwLock<Realm>,
+    scheduler: &'static Scheduler,
     uart: &mut U,
 ) -> ! {
+    // Take the REPL process once — it stays taken for the REPL's lifetime.
+    // The slot remains allocated (generation preserved), so is_alive(repl_pid)
+    // returns true via the is_taken check. Messages go to fragment inbox.
+    // The process was just inserted by the caller, so take always succeeds.
+    let Some(mut proc) = scheduler.with_process_table_mut(|pt| pt.take(repl_pid)) else {
+        loop {
+            core::hint::spin_loop();
+        }
+    };
+
     let mut line_buf = [0u8; LINE_BUFFER_SIZE];
 
     loop {
+        // Drain fragments and pending exit signals accumulated while REPL was taken
+        drain_repl_fragments(repl_pid, &mut proc, mem, scheduler);
+        drain_repl_pending_signals(repl_pid, &mut proc, realm, mem, scheduler);
+
         // Print prompt
         uart.write_str("lona> ");
 
-        // Read line
-        let len = uart.read_line(&mut line_buf);
+        // Read line, ticking background processes while waiting for input
+        let len = read_line_with_ticks(uart, &mut line_buf, worker, realm, scheduler, mem);
 
-        // Skip empty lines
         if len == 0 {
             continue;
         }
 
-        // Convert to str
         let Ok(line) = core::str::from_utf8(&line_buf[..len]) else {
             uart.write_line("Error: invalid UTF-8");
             continue;
         };
 
-        // Parse
-        let expr = match read(line, proc, realm, mem) {
-            Ok(Some(v)) => v,
-            Ok(None) => continue, // Empty input
-            Err(e) => {
-                uart.write_str("Error: ");
-                print_read_error(&e, uart);
-                uart.write_byte(b'\n');
-                continue;
+        // Drain fragments and pending signals (may have arrived during input)
+        drain_repl_fragments(repl_pid, &mut proc, mem, scheduler);
+        drain_repl_pending_signals(repl_pid, &mut proc, realm, mem, scheduler);
+
+        // Parse (needs realm write lock for interning)
+        let expr = {
+            let mut realm_guard = realm.write();
+            match read(line, &mut proc, &mut realm_guard, mem) {
+                Ok(Some(v)) => v,
+                Ok(None) => continue,
+                Err(e) => {
+                    uart.write_str("Error: ");
+                    print_read_error(&e, uart);
+                    uart.write_byte(b'\n');
+                    continue;
+                }
             }
         };
 
-        // Compile
-        let chunk = match compiler::compile(expr, proc, mem, realm) {
-            Ok(c) => c,
-            Err(e) => {
-                uart.write_str("Error: ");
-                print_compile_error(e, uart);
-                uart.write_byte(b'\n');
-                continue;
+        // Compile (needs realm write lock)
+        let chunk = {
+            let mut realm_guard = realm.write();
+            match compiler::compile(expr, &mut proc, mem, &mut realm_guard) {
+                Ok(c) => c,
+                Err(e) => {
+                    uart.write_str("Error: ");
+                    print_compile_error(e, uart);
+                    uart.write_byte(b'\n');
+                    worker.reset_x_regs();
+                    proc.reset();
+                    continue;
+                }
             }
         };
 
         // Serialize chunk to heap (try GC on failure)
         if !proc.write_chunk_to_heap(mem, &chunk) {
-            let _ = crate::gc::minor_gc(proc, worker, mem);
+            let _ = crate::gc::minor_gc(&mut proc, worker, mem);
             if !proc.write_chunk_to_heap(mem, &chunk) {
-                let _ = crate::gc::major_gc(proc, worker, realm.pool_mut(), mem);
+                {
+                    let mut realm_guard = realm.write();
+                    let _ = crate::gc::major_gc(&mut proc, worker, realm_guard.pool_mut(), mem);
+                }
                 if !proc.write_chunk_to_heap(mem, &chunk) {
                     uart.write_line("Error: out of memory");
                     worker.reset_x_regs();
@@ -98,25 +130,187 @@ pub fn run<M: MemorySpace, U: Uart>(
                 }
             }
         }
-        let result = match vm::execute(worker, proc, mem, realm) {
-            Ok(v) => v,
+
+        // Execute with scheduler (handles yielding internally)
+        proc.reset_reductions();
+        let result = execute_repl_expression(worker, &mut proc, mem, realm, scheduler);
+
+        match result {
+            Ok(value) => {
+                let realm_guard = realm.read();
+                print_term(value, &proc, &realm_guard, mem, uart);
+                uart.write_byte(b'\n');
+            }
             Err(e) => {
                 uart.write_str("Error: ");
                 print_runtime_error(&e, uart);
                 uart.write_byte(b'\n');
-                worker.reset_x_regs();
-                proc.reset();
-                continue;
             }
-        };
+        }
 
-        // Print result
-        print_term(result, proc, realm, mem, uart);
-        uart.write_byte(b'\n');
-
-        // Reset for next expression
+        // Reset for next expression (REPL stays taken — not put back)
         worker.reset_x_regs();
         proc.reset();
+    }
+}
+
+/// Read a line from UART, ticking background processes while waiting.
+///
+/// Polls UART character-by-character. When no data is available, runs
+/// one `tick_worker` to service background processes.
+fn read_line_with_ticks<M: MemorySpace, U: Uart>(
+    uart: &mut U,
+    buf: &mut [u8],
+    worker: &mut Worker,
+    realm: &'static SpinRwLock<Realm>,
+    scheduler: &'static Scheduler,
+    mem: &mut M,
+) -> usize {
+    let mut pos = 0;
+
+    loop {
+        if uart.can_read() {
+            let byte = uart.read_byte();
+
+            // Echo character
+            if byte == b'\r' || byte == b'\n' {
+                uart.write_byte(b'\n');
+                return pos;
+            }
+
+            // Backspace handling
+            if byte == 0x7F || byte == 0x08 {
+                if pos > 0 {
+                    pos -= 1;
+                    uart.write_str("\x08 \x08");
+                }
+                continue;
+            }
+
+            // Store if buffer has space
+            if pos < buf.len() {
+                buf[pos] = byte;
+                pos += 1;
+                uart.write_byte(byte);
+            }
+        } else {
+            // No UART data — tick background processes
+            let _ = scheduler.tick_worker(worker, realm, mem);
+        }
+    }
+}
+
+/// Execute a REPL expression, handling yield and wait.
+///
+/// Runs `Vm::run` in a loop, resetting reductions on yield. The realm
+/// write lock is held per `Vm::run` call (not batched) since the REPL
+/// is the primary Worker 0 activity.
+///
+/// **Limitation:** When `Waiting` (receive with no matching message), this
+/// loops without ticking background processes. Self-send works (message
+/// is already in mailbox), but receiving from a spawned process will
+/// busy-wait until the timeout expires. Background workers still run
+/// spawned processes independently; messages arrive via fragments which
+/// are drained between expressions, not mid-expression.
+fn execute_repl_expression<M: MemorySpace>(
+    worker: &mut Worker,
+    proc: &mut Process,
+    mem: &mut M,
+    realm: &'static SpinRwLock<Realm>,
+    scheduler: &'static Scheduler,
+) -> Result<crate::term::Term, RuntimeError> {
+    use crate::vm::RunResult;
+
+    proc.status = ProcessStatus::Running;
+
+    loop {
+        proc.reset_reductions();
+
+        let result = {
+            let mut realm_guard = realm.write();
+            Vm::run(worker, proc, mem, &mut realm_guard, Some(scheduler))
+        };
+
+        match result {
+            RunResult::Completed(value) | RunResult::Exited(value) => return Ok(value),
+            RunResult::Error(e) => return Err(e),
+            RunResult::Yielded | RunResult::Waiting => {}
+        }
+    }
+}
+
+/// Drain heap fragments from the REPL's slot inbox into its mailbox.
+///
+/// When the REPL is taken (always, in this design), messages sent to it
+/// via `send` go through the fragment path. This drains those fragments
+/// into the process mailbox so `receive` can find them.
+fn drain_repl_fragments<M: MemorySpace>(
+    repl_pid: ProcessId,
+    proc: &mut Process,
+    mem: &mut M,
+    scheduler: &'static Scheduler,
+) {
+    let fragments = scheduler.with_process_table_mut(|pt| pt.take_fragments(repl_pid));
+    if let Some(head) = fragments {
+        // Reverse the LIFO fragment list to restore FIFO send order
+        let mut reversed = None;
+        let mut current = Some(head);
+        while let Some(mut frag) = current {
+            current = frag.next.take();
+            frag.next = reversed;
+            reversed = Some(frag);
+        }
+        // Drain reversed list into mailbox
+        let mut frag = reversed;
+        while let Some(mut f) = frag {
+            let next = f.next.take();
+            let msg = f.message();
+            if let Some(copied) =
+                crate::process::deep_copy::deep_copy_message_to_process(msg, proc, mem)
+            {
+                proc.mailbox.push(copied);
+            }
+            frag = next;
+        }
+    }
+}
+
+/// Drain pending exit signals from the REPL's slot.
+///
+/// Since the REPL is always taken, exit signals from linked/monitored
+/// processes are queued as pending signals. This delivers them to the
+/// REPL process. For trap-exit processes, signals become messages;
+/// otherwise non-normal signals would kill the REPL.
+fn drain_repl_pending_signals<M: MemorySpace>(
+    repl_pid: ProcessId,
+    proc: &mut Process,
+    realm: &'static SpinRwLock<Realm>,
+    mem: &mut M,
+    scheduler: &'static Scheduler,
+) {
+    let signals = scheduler.with_process_table_mut(|pt| pt.take_pending_signals(repl_pid));
+    if signals.is_empty() {
+        return;
+    }
+    // The REPL traps exits by default so it survives linked process crashes.
+    // Deliver each signal as a [:EXIT sender reason] message.
+    proc.trap_exit = true;
+    for (sender, reason) in signals {
+        let exit_kw = {
+            let mut realm_guard = realm.write();
+            realm_guard
+                .intern_keyword(mem, "EXIT")
+                .unwrap_or(crate::term::Term::NIL)
+        };
+        let pid_term = proc
+            .alloc_term_pid(mem, sender.index() as u32, sender.generation())
+            .unwrap_or(crate::term::Term::NIL);
+        let copied_reason =
+            crate::process::deep_copy::deep_copy_message_to_process(reason, proc, mem)
+                .unwrap_or(reason);
+        if let Some(msg) = proc.alloc_term_tuple(mem, &[exit_kw, pid_term, copied_reason]) {
+            proc.mailbox.push(msg);
+        }
     }
 }
 

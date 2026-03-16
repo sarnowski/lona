@@ -23,8 +23,11 @@ mod allocator {
     use core::ptr;
     use core::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Size of the allocation buffer (128 KB for Realm struct + bytecode chunks).
-    const ALLOC_SIZE: usize = 128 * 1024;
+    /// Size of the allocation buffer.
+    ///
+    /// Must accommodate: `Box<Realm>` (~60KB initial, consumed), `Box<Scheduler>` (~8KB),
+    /// `Box<SpinRwLock<Realm>>` (~60KB), plus bytecode chunks and other allocations.
+    const ALLOC_SIZE: usize = 192 * 1024;
 
     /// Simple bump allocator for no_std environments.
     pub struct BumpAllocator {
@@ -84,6 +87,8 @@ mod allocator {
     static ALLOCATOR: BumpAllocator = BumpAllocator::new();
 }
 
+use core::sync::atomic::{AtomicPtr, Ordering};
+
 use lona_abi::BootFlags;
 #[cfg(target_arch = "aarch64")]
 use lona_abi::layout::UART_VADDR;
@@ -93,15 +98,14 @@ use lona_vm::e2e;
 use lona_vm::loader::TarSource;
 #[cfg(not(any(test, feature = "std")))]
 use lona_vm::platform::Sel4VSpace;
-#[cfg(not(feature = "e2e-test"))]
 use lona_vm::process::WorkerId;
 use lona_vm::process::pool::ProcessPool;
 use lona_vm::process::{INITIAL_OLD_HEAP_SIZE, INITIAL_YOUNG_HEAP_SIZE, Process};
 use lona_vm::realm::Realm;
 #[cfg(not(feature = "e2e-test"))]
 use lona_vm::repl;
-#[cfg(not(feature = "e2e-test"))]
-use lona_vm::scheduler::Worker;
+use lona_vm::scheduler::{Scheduler, Worker};
+use lona_vm::sync::SpinRwLock;
 use lona_vm::uart::{Uart, UartExt};
 
 #[cfg(target_arch = "aarch64")]
@@ -113,6 +117,12 @@ use lona_abi::layout::worker_ipc_buffer;
 use lona_abi::types::CapSlot;
 #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
 use lona_vm::uart::Com1Uart;
+
+/// Shared scheduler, set by Worker 0 and read by Workers 1-3.
+static SCHEDULER: AtomicPtr<Scheduler> = AtomicPtr::new(core::ptr::null_mut());
+
+/// Shared realm (behind `SpinRwLock`), set by Worker 0 and read by Workers 1-3.
+static REALM: AtomicPtr<SpinRwLock<Realm>> = AtomicPtr::new(core::ptr::null_mut());
 
 /// Entry point called when TCB is resumed.
 ///
@@ -148,12 +158,11 @@ pub extern "C" fn _start(
     #[cfg(all(target_arch = "x86_64", feature = "sel4"))]
     let mut uart = init_uart_x86_64(boot_flags, worker_id);
 
-    // Non-bootstrap workers: set up platform, then idle.
+    // Non-bootstrap workers: wait for shared state, then enter scheduler loop.
     // Only Worker 0 bootstraps the realm and runs REPL/E2E.
-    // Workers 1-3 will participate in scheduling once the Scheduler
-    // is shared across workers (M2 Phase 2E).
     if worker_id != 0 {
-        idle_loop();
+        let mut vspace = Sel4VSpace;
+        worker_loop(worker_id, &mut vspace);
     }
 
     // --- Worker 0 only below this point ---
@@ -211,37 +220,99 @@ pub extern "C" fn _start(
         if boot_flags.has_uart() {
             uart.write_line("\nStarting REPL...\n");
         }
-        let mut worker = Worker::new(WorkerId(0));
 
-        // Give the REPL process a PID so (self) returns a valid PID term.
-        // Index 0, generation 0 — the REPL is always the first process.
-        let repl_pid = lona_vm::process::ProcessId::new(0, 0);
+        // Create scheduler with shared state
+        let scheduler = Box::new(Scheduler::new(
+            bootstrap_result.ns_var,
+            bootstrap_result.core_ns,
+        ));
+
+        // Wrap realm in SpinRwLock for multi-worker access.
+        // Use two-step: move Realm out of Box, construct SpinRwLock, re-box.
+        // With NRVO the compiler avoids the 60KB stack copy.
+        let realm = Box::new(SpinRwLock::new(*realm));
+
+        // Leak both to get 'static references
+        let scheduler: &'static Scheduler = Box::leak(scheduler);
+        let realm: &'static SpinRwLock<Realm> = Box::leak(realm);
+
+        // Register REPL process in ProcessTable
+        // Grow first segment, allocate slot, insert process
+        scheduler.ensure_capacity(realm);
+        let Some((index, generation)) = scheduler.with_process_table_mut(|pt| pt.allocate()) else {
+            halt_loop()
+        };
+        let repl_pid = lona_vm::process::ProcessId::new(index, generation);
         process.pid = repl_pid;
-        if let Some(pid_term) = process.alloc_term_pid(&mut vspace, 0, 0) {
+        process.status = lona_vm::process::ProcessStatus::Waiting;
+        if let Some(pid_term) = process.alloc_term_pid(&mut vspace, index, generation) {
             process.pid_term = Some(pid_term);
         }
+        scheduler.with_process_table_mut(|pt| pt.insert(process));
 
-        repl::run(
+        // Publish shared state for Workers 1-3
+        SCHEDULER.store(
+            scheduler as *const Scheduler as *mut Scheduler,
+            Ordering::Release,
+        );
+        REALM.store(
+            realm as *const SpinRwLock<Realm> as *mut SpinRwLock<Realm>,
+            Ordering::Release,
+        );
+
+        // Start REPL on Worker 0
+        let mut worker = Worker::new(WorkerId(0));
+        repl::run_scheduled(
             &mut worker,
-            &mut process,
+            repl_pid,
             &mut vspace,
-            &mut realm,
+            realm,
+            scheduler,
             &mut uart,
         )
     }
 }
 
-/// Idle loop for non-bootstrap workers.
+/// Worker loop for non-bootstrap workers (Workers 1-3).
 ///
-/// Workers 1-3 voluntarily yield their seL4 time slice. They don't
-/// participate in scheduling until the Scheduler is shared across
-/// workers (M2 Phase 2E).
-///
-/// Uses `seL4_Yield` on both architectures — this surrenders the
-/// remaining budget to the kernel scheduler without burning CPU.
-fn idle_loop() -> ! {
-    loop {
+/// Spins waiting for Worker 0 to publish shared state, then enters the
+/// scheduler loop: tick processes, attempt work stealing when idle,
+/// and yield to the kernel when there's nothing to do.
+fn worker_loop<M: lona_vm::platform::MemorySpace>(worker_id: u16, mem: &mut M) -> ! {
+    // Wait for Worker 0 to publish shared state
+    let scheduler: &'static Scheduler = loop {
+        let ptr = SCHEDULER.load(Ordering::Acquire);
+        if !ptr.is_null() {
+            // SAFETY: Worker 0 stores a valid &'static Scheduler pointer
+            break unsafe { &*ptr };
+        }
         sel4::r#yield();
+    };
+    let realm: &'static SpinRwLock<Realm> = loop {
+        let ptr = REALM.load(Ordering::Acquire);
+        if !ptr.is_null() {
+            // SAFETY: Worker 0 stores a valid &'static SpinRwLock<Realm> pointer
+            break unsafe { &*ptr };
+        }
+        sel4::r#yield();
+    };
+
+    let mut worker = Worker::new(WorkerId(worker_id as u8));
+    let worker_idx = worker_id as usize;
+
+    loop {
+        match scheduler.tick_worker(&mut worker, realm, mem) {
+            lona_vm::scheduler::TickResult::Idle => {
+                // No work — try stealing from another worker
+                if !scheduler.try_steal_for(worker_idx) {
+                    // Nothing to steal — yield CPU time
+                    sel4::r#yield();
+                }
+            }
+            _ => {
+                // Did work — continue immediately
+            }
+        }
     }
 }
 

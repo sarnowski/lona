@@ -47,11 +47,12 @@ pub const MAX_REALM_WORKERS: usize = 4;
 /// Number of workers to create for the init realm.
 ///
 /// Set to 1 until workers 1-3 participate in scheduling (M2 Phase 2E).
-/// Creating idle workers wastes CPU in QEMU TCG emulation.
-/// The multi-TCB infrastructure (arrays, per-worker TLS) supports up to
-/// `MAX_REALM_WORKERS` and can be activated by increasing this value.
+/// All 4 workers are active: Worker 0 runs the REPL, Workers 1-3 run
+/// background processes via the scheduler's `tick_worker` loop.
+///
+/// Hardcoded to 4 pending runtime CPU core detection.
 #[cfg(feature = "sel4")]
-pub const INIT_REALM_WORKER_COUNT: usize = 1;
+pub const INIT_REALM_WORKER_COUNT: usize = 4;
 
 /// Default scheduling period in microseconds.
 ///

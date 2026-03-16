@@ -19,7 +19,7 @@ use crate::process::Process;
 use crate::process::deep_copy::{deep_copy_message_to_fragment, deep_copy_message_to_process};
 use crate::process::heap_fragment::HeapFragment;
 use crate::realm::Realm;
-use crate::scheduler::{ProcessTable, Scheduler, Worker};
+use crate::scheduler::{Scheduler, Worker};
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::tag::object;
@@ -204,9 +204,7 @@ fn handle_spawn<M: MemorySpace>(
         crate::realm::copy::deep_copy_term_to_process(fn_term, proc, &mut new_proc, mem)
             .ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
 
-    let (index, generation) = scheduler
-        .with_process_table_mut(ProcessTable::allocate)
-        .ok_or(RunResult::Error(RuntimeError::ProcessLimitReached))?;
+    let (index, generation) = link_monitor::allocate_slot_with_growth(scheduler, realm)?;
     let pid = ProcessId::new(index, generation);
 
     link_monitor::setup_new_process(&mut new_proc, pid, proc.pid, worker, realm, mem, copied_fn);

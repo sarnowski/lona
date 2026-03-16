@@ -21,6 +21,9 @@ impl Scheduler {
     ///
     /// Handles `:kill` → `:killed` transformation, trap-exit message delivery
     /// with wake-up, and cascade to target's links/monitors for non-trapping kills.
+    ///
+    /// If the target is currently taken (running on a worker), the signal is
+    /// queued as a pending signal and delivered when the process is put back.
     pub(crate) fn deliver_exit_signal<M: MemorySpace>(
         &self,
         target_pid: ProcessId,
@@ -35,6 +38,10 @@ impl Scheduler {
         let action = {
             let mut pt = self.process_table.lock();
             let Some(target) = pt.get_mut(target_pid) else {
+                // Target may be taken (running on a worker) — queue the signal
+                if pt.is_taken(target_pid) {
+                    pt.push_pending_signal(target_pid, sender_pid, reason);
+                }
                 return;
             };
 
@@ -146,6 +153,10 @@ impl Scheduler {
         let action = {
             let mut pt = self.process_table.lock();
             let Some(target) = pt.get_mut(target_pid) else {
+                // Target may be taken — queue the signal for delivery after put_back
+                if pt.is_taken(target_pid) {
+                    pt.push_pending_signal(target_pid, source_pid, exit_reason);
+                }
                 return;
             };
             target.links.remove(&source_pid);

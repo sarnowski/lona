@@ -11,11 +11,12 @@ use core::option::Option;
 use core::result::Result::{self, Err, Ok};
 
 use crate::platform::MemorySpace;
-use crate::process::Process;
+use crate::process::{Process, ProcessId, ProcessStatus};
 use crate::realm::Realm;
+use crate::scheduler::Scheduler;
 use crate::uart::Uart;
 
-use super::{spec_runner, tests_basic, tests_lmm, tests_lmm_demand};
+use super::{spec_runner, tests_basic, tests_lmm, tests_lmm_demand, tests_process};
 
 /// Status of a single test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,11 +201,29 @@ pub fn run_all_tests<M: MemorySpace, U: Uart>(
         skipped
     );
 
-    // Run specification tests
-    let spec_failed = spec_runner::run_spec_tests(proc, realm, mem, uart);
+    // Create scheduler for process-aware spec tests
+    let ns_var = crate::realm::get_ns_var(realm, mem);
+    let core_ns = crate::realm::get_core_ns(realm, mem);
+    let scheduler = match (ns_var, core_ns) {
+        (Some(nv), Some(cn)) => {
+            let sched = Scheduler::new(nv, cn);
+            // Register the test process so (self), (alive? (self)) work
+            register_test_process(&sched, proc, realm, mem);
+            Some(sched)
+        }
+        _ => None,
+    };
 
-    // Print verdict (includes both e2e and spec test results)
-    let all_passed = failed == 0 && spec_failed == 0;
+    // Run process-related tests (need scheduler)
+    let process_failed = scheduler.as_ref().map_or(0, |sched| {
+        tests_process::run_process_tests(proc, realm, mem, uart, sched)
+    });
+
+    // Run specification tests
+    let spec_failed = spec_runner::run_spec_tests(proc, realm, mem, uart, scheduler.as_ref());
+
+    // Print verdict (includes all test results)
+    let all_passed = failed == 0 && spec_failed == 0 && process_failed == 0;
     if all_passed {
         sel4::debug_println!("=== E2E_VERDICT: PASS ===");
     } else {
@@ -212,4 +231,46 @@ pub fn run_all_tests<M: MemorySpace, U: Uart>(
     }
 
     all_passed
+}
+
+/// Register the test process in the scheduler's process table.
+///
+/// Allocates a slot so the test process has a valid PID and
+/// `alive?` returns true. The process is NOT inserted (it lives
+/// outside the table as a local variable in the runner), so the
+/// slot appears "taken" — this is the same state as a process being
+/// executed by a worker.
+fn register_test_process<M: MemorySpace>(
+    scheduler: &Scheduler,
+    proc: &mut Process,
+    realm: &mut Realm,
+    mem: &mut M,
+) {
+    // Grow the process table by one segment so we can allocate a slot.
+    #[cfg(test)]
+    {
+        let _ = &mut *realm;
+        let segment = crate::scheduler::ProcessTable::alloc_test_segment();
+        scheduler.with_process_table_mut(|pt| unsafe { pt.grow_segment(segment) });
+    }
+    #[cfg(not(test))]
+    {
+        use crate::scheduler::process_table::{SEGMENT_SIZE, Slot};
+        let size = core::mem::size_of::<Slot>() * SEGMENT_SIZE;
+        if let Some(vaddr) = realm.pool_mut().allocate_with_growth(size, 8) {
+            let segment_ptr = vaddr.as_u64() as *mut Slot;
+            scheduler.with_process_table_mut(|pt| unsafe { pt.grow_segment(segment_ptr) });
+        }
+    }
+
+    if let Some((index, generation)) = scheduler.with_process_table_mut(|pt| pt.allocate()) {
+        let pid = ProcessId::new(index, generation);
+        proc.pid = pid;
+        proc.status = ProcessStatus::Ready;
+        if let Some(pid_term) = proc.alloc_term_pid(mem, index, generation) {
+            proc.pid_term = Some(pid_term);
+        }
+        // Slot remains "allocated but no process" (= taken state).
+        // is_alive(pid) will return true via is_taken check.
+    }
 }

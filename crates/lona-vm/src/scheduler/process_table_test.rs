@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 Tobias Sarnowski
 
-//! Tests for `ProcessTable`.
+//! Tests for segmented `ProcessTable`.
 
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::large_stack_frames)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::process_table::ProcessTable;
+use super::process_table::{ProcessTable, SEGMENT_SIZE};
 use crate::Vaddr;
 use crate::process::heap_fragment::HeapFragment;
 use crate::process::{Process, ProcessId};
@@ -15,16 +15,64 @@ fn create_test_process() -> Process {
     Process::new(Vaddr::new(0x1000), 0x1000, Vaddr::new(0x2000), 0x1000)
 }
 
+/// Create a `ProcessTable` with one segment pre-allocated.
+fn table_with_one_segment() -> ProcessTable {
+    let mut table = ProcessTable::new();
+    let segment = ProcessTable::alloc_test_segment();
+    unsafe { table.grow_segment(segment) };
+    table
+}
+
+// ============================================================================
+// Segmented table initialization tests
+// ============================================================================
+
 #[test]
-fn process_table_new_is_empty() {
+fn new_table_is_empty() {
     let table = ProcessTable::new();
     assert_eq!(table.count(), 0);
+    assert_eq!(table.num_segments(), 0);
+    assert_eq!(table.capacity(), 0);
+    assert!(table.is_full()); // No segments means no free slots
+    assert!(!table.has_free_slots());
+}
+
+#[test]
+fn grow_segment_adds_capacity() {
+    let mut table = ProcessTable::new();
+    assert_eq!(table.capacity(), 0);
+
+    let segment = ProcessTable::alloc_test_segment();
+    unsafe { table.grow_segment(segment) };
+
+    assert_eq!(table.num_segments(), 1);
+    assert_eq!(table.capacity(), SEGMENT_SIZE);
+    assert!(table.has_free_slots());
     assert!(!table.is_full());
 }
 
 #[test]
-fn process_table_allocate_and_insert() {
+fn grow_multiple_segments() {
     let mut table = ProcessTable::new();
+
+    let seg1 = ProcessTable::alloc_test_segment();
+    let seg2 = ProcessTable::alloc_test_segment();
+    unsafe {
+        table.grow_segment(seg1);
+        table.grow_segment(seg2);
+    }
+
+    assert_eq!(table.num_segments(), 2);
+    assert_eq!(table.capacity(), 2 * SEGMENT_SIZE);
+}
+
+// ============================================================================
+// Allocate / insert / get tests
+// ============================================================================
+
+#[test]
+fn allocate_and_insert() {
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -37,8 +85,14 @@ fn process_table_allocate_and_insert() {
 }
 
 #[test]
-fn process_table_get_stale_generation() {
+fn allocate_returns_none_when_empty() {
     let mut table = ProcessTable::new();
+    assert!(table.allocate().is_none());
+}
+
+#[test]
+fn get_stale_generation() {
+    let mut table = table_with_one_segment();
 
     // Allocate, insert, remove
     let (index, gen1) = table.allocate().unwrap();
@@ -50,8 +104,8 @@ fn process_table_get_stale_generation() {
 
     // Allocate again (reuses same slot with new generation)
     let (index2, gen2) = table.allocate().unwrap();
-    assert_eq!(index, index2); // Same slot
-    assert_eq!(gen2, gen1 + 1); // Generation incremented
+    assert_eq!(index, index2);
+    assert_eq!(gen2, gen1 + 1);
 
     let pid2 = ProcessId::new(index2, gen2);
     let mut p2 = create_test_process();
@@ -65,8 +119,8 @@ fn process_table_get_stale_generation() {
 }
 
 #[test]
-fn process_table_remove_returns_process() {
-    let mut table = ProcessTable::new();
+fn remove_returns_process() {
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -81,8 +135,8 @@ fn process_table_remove_returns_process() {
 }
 
 #[test]
-fn process_table_get_mut() {
-    let mut table = ProcessTable::new();
+fn get_mut() {
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -91,42 +145,35 @@ fn process_table_get_mut() {
     process.ip = 0;
     table.insert(process);
 
-    // Modify via get_mut
     table.get_mut(pid).unwrap().ip = 42;
-
-    // Verify modification persisted
     assert_eq!(table.get(pid).unwrap().ip, 42);
 }
 
 #[test]
-fn process_table_remove_invalid_pid() {
-    let mut table = ProcessTable::new();
-
-    // Remove from empty table
+fn remove_invalid_pid() {
+    let mut table = table_with_one_segment();
     let pid = ProcessId::new(0, 0);
     assert!(table.remove(pid).is_none());
 }
 
 #[test]
-fn process_table_get_null_pid() {
+fn get_null_pid() {
     let table = ProcessTable::new();
     assert!(table.get(ProcessId::NULL).is_none());
 }
 
 #[test]
-fn process_table_multiple_allocations() {
-    let mut table = ProcessTable::new();
+fn multiple_allocations() {
+    let mut table = table_with_one_segment();
 
     let (idx1, gen1) = table.allocate().unwrap();
     let (idx2, gen2) = table.allocate().unwrap();
     let (idx3, gen3) = table.allocate().unwrap();
 
-    // Should get different indices
     assert_ne!(idx1, idx2);
     assert_ne!(idx2, idx3);
     assert_ne!(idx1, idx3);
 
-    // Initial generation should be 0
     assert_eq!(gen1, 0);
     assert_eq!(gen2, 0);
     assert_eq!(gen3, 0);
@@ -138,7 +185,7 @@ fn process_table_multiple_allocations() {
 
 #[test]
 fn take_extracts_process() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -150,17 +197,14 @@ fn take_extracts_process() {
     let taken = table.take(pid).unwrap();
     assert_eq!(taken.ip, 42);
 
-    // get returns None (process extracted)
     assert!(table.get(pid).is_none());
-    // is_taken returns true
     assert!(table.is_taken(pid));
-    // count unchanged — slot still logically occupied
     assert_eq!(table.count(), 1);
 }
 
 #[test]
 fn put_back_restores_process() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -172,7 +216,6 @@ fn put_back_restores_process() {
     let taken = table.take(pid).unwrap();
     table.put_back(pid, taken);
 
-    // Process is back
     let proc = table.get(pid).unwrap();
     assert_eq!(proc.ip, 42);
     assert!(!table.is_taken(pid));
@@ -180,7 +223,7 @@ fn put_back_restores_process() {
 
 #[test]
 fn free_taken_slot_reclaims() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -203,7 +246,7 @@ fn free_taken_slot_reclaims() {
 
 #[test]
 fn take_invalid_pid_returns_none() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let pid = ProcessId::new(0, 0);
     assert!(table.take(pid).is_none());
 }
@@ -216,7 +259,7 @@ fn take_null_pid_returns_none() {
 
 #[test]
 fn take_put_back_preserves_generation() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -227,19 +270,18 @@ fn take_put_back_preserves_generation() {
     let taken = table.take(pid).unwrap();
     table.put_back(pid, taken);
 
-    // Same generation — stale references still work
     assert!(table.get(pid).is_some());
 }
 
 #[test]
 fn is_taken_false_for_unallocated() {
-    let table = ProcessTable::new();
+    let table = table_with_one_segment();
     assert!(!table.is_taken(ProcessId::new(0, 0)));
 }
 
 #[test]
 fn is_taken_false_for_occupied() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -247,7 +289,6 @@ fn is_taken_false_for_occupied() {
     process.pid = pid;
     table.insert(process);
 
-    // Slot occupied, not taken
     assert!(!table.is_taken(pid));
 }
 
@@ -256,15 +297,13 @@ fn is_taken_false_for_occupied() {
 // ============================================================================
 
 #[test]
-fn process_table_free_list_reuse() {
-    let mut table = ProcessTable::new();
+fn free_list_reuse() {
+    let mut table = table_with_one_segment();
 
-    // Allocate 3 slots
     let (idx1, _) = table.allocate().unwrap();
     let (idx2, _) = table.allocate().unwrap();
     let (idx3, _) = table.allocate().unwrap();
 
-    // Insert processes
     let pid1 = ProcessId::new(idx1, 0);
     let pid2 = ProcessId::new(idx2, 0);
     let pid3 = ProcessId::new(idx3, 0);
@@ -288,14 +327,115 @@ fn process_table_free_list_reuse() {
     // Next allocation should reuse idx2's slot
     let (idx_new, gen_new) = table.allocate().unwrap();
     assert_eq!(idx_new, idx2);
-    assert_eq!(gen_new, 1); // Generation incremented
+    assert_eq!(gen_new, 1);
+}
+
+// ============================================================================
+// Cross-segment Tests
+// ============================================================================
+
+#[test]
+fn allocations_span_segments() {
+    let mut table = ProcessTable::new();
+
+    // Add first segment and exhaust it
+    let seg1 = ProcessTable::alloc_test_segment();
+    unsafe { table.grow_segment(seg1) };
+
+    for i in 0..SEGMENT_SIZE {
+        let (index, generation) = table.allocate().unwrap();
+        let pid = ProcessId::new(index, generation);
+        let mut p = create_test_process();
+        p.pid = pid;
+        table.insert(p);
+        assert_eq!(index as usize, i);
+    }
+
+    // Table is now full — add second segment
+    assert!(!table.has_free_slots());
+    let seg2 = ProcessTable::alloc_test_segment();
+    unsafe { table.grow_segment(seg2) };
+
+    // Next allocation should be in second segment
+    let (index, generation) = table.allocate().unwrap();
+    assert_eq!(index as usize, SEGMENT_SIZE);
+    let pid = ProcessId::new(index, generation);
+    let mut p = create_test_process();
+    p.pid = pid;
+    table.insert(p);
+
+    assert_eq!(table.count(), SEGMENT_SIZE + 1);
+}
+
+#[test]
+fn free_list_chains_across_segments() {
+    let mut table = ProcessTable::new();
+
+    // Add first segment, allocate one slot
+    let seg1 = ProcessTable::alloc_test_segment();
+    unsafe { table.grow_segment(seg1) };
+    let (idx1, _) = table.allocate().unwrap();
+    let pid1 = ProcessId::new(idx1, 0);
+    let mut p1 = create_test_process();
+    p1.pid = pid1;
+    table.insert(p1);
+
+    // Add second segment (its slots are prepended to free list)
+    let seg2 = ProcessTable::alloc_test_segment();
+    unsafe { table.grow_segment(seg2) };
+
+    // Next allocation should come from second segment (prepended)
+    let (idx2, _) = table.allocate().unwrap();
+    assert_eq!(idx2 as usize, SEGMENT_SIZE); // First slot of second segment
+
+    // Remove from first segment
+    table.remove(pid1);
+
+    // Should be able to allocate from the freed slot
+    let (idx3, gen3) = table.allocate().unwrap();
+    assert_eq!(idx3, idx1);
+    assert_eq!(gen3, 1); // Generation incremented
+}
+
+#[test]
+fn get_across_segments() {
+    let mut table = ProcessTable::new();
+    let seg1 = ProcessTable::alloc_test_segment();
+    let seg2 = ProcessTable::alloc_test_segment();
+    unsafe {
+        table.grow_segment(seg1);
+        table.grow_segment(seg2);
+    }
+
+    // Fill first segment
+    let mut pids = Vec::new();
+    for _ in 0..SEGMENT_SIZE {
+        let (idx, generation) = table.allocate().unwrap();
+        let pid = ProcessId::new(idx, generation);
+        let mut p = create_test_process();
+        p.pid = pid;
+        table.insert(p);
+        pids.push(pid);
+    }
+
+    // Allocate in second segment
+    let (idx, generation) = table.allocate().unwrap();
+    let pid_seg2 = ProcessId::new(idx, generation);
+    let mut p = create_test_process();
+    p.pid = pid_seg2;
+    p.ip = 999;
+    table.insert(p);
+
+    // Verify access in both segments
+    assert!(table.get(pids[0]).is_some());
+    assert!(table.get(pids[SEGMENT_SIZE - 1]).is_some());
+    assert_eq!(table.get(pid_seg2).unwrap().ip, 999);
 }
 
 // ============================================================================
 // Fragment Inbox Tests
 // ============================================================================
 
-/// Helper to create a fragment with a given base address and message.
 fn make_fragment(base: u64, msg: crate::term::Term) -> HeapFragment {
     let mut frag = HeapFragment::new(Vaddr::new(base), 64);
     frag.set_message(msg);
@@ -304,7 +444,7 @@ fn make_fragment(base: u64, msg: crate::term::Term) -> HeapFragment {
 
 #[test]
 fn push_fragment_and_take() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -319,13 +459,12 @@ fn push_fragment_and_take() {
     assert_eq!(frags.message(), msg);
     assert!(frags.next.is_none());
 
-    // Inbox is now empty
     assert!(table.take_fragments(pid).is_none());
 }
 
 #[test]
 fn push_multiple_fragments_forms_linked_list() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -353,7 +492,7 @@ fn push_multiple_fragments_forms_linked_list() {
 
 #[test]
 fn push_fragment_to_taken_slot() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -361,11 +500,9 @@ fn push_fragment_to_taken_slot() {
     process.pid = pid;
     table.insert(process);
 
-    // Take process (simulates execution on another worker)
     let _taken = table.take(pid).unwrap();
     assert!(table.is_taken(pid));
 
-    // Push fragment to taken slot — this should work
     let msg = crate::term::Term::TRUE;
     table.push_fragment(pid, Box::new(make_fragment(0x5000, msg)));
 
@@ -375,16 +512,14 @@ fn push_fragment_to_taken_slot() {
 
 #[test]
 fn push_fragment_to_invalid_pid_ignored() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
 
-    // Push to unallocated slot — silent no-op
     let pid = ProcessId::new(0, 99);
     table.push_fragment(
         pid,
         Box::new(make_fragment(0x5000, crate::term::Term::TRUE)),
     );
 
-    // Push to null — silent no-op
     table.push_fragment(
         ProcessId::NULL,
         Box::new(make_fragment(0x5000, crate::term::Term::TRUE)),
@@ -393,7 +528,7 @@ fn push_fragment_to_invalid_pid_ignored() {
 
 #[test]
 fn take_fragments_from_empty_inbox() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -406,7 +541,7 @@ fn take_fragments_from_empty_inbox() {
 
 #[test]
 fn take_fragments_stale_pid() {
-    let mut table = ProcessTable::new();
+    let mut table = table_with_one_segment();
     let (index, generation) = table.allocate().unwrap();
     let pid = ProcessId::new(index, generation);
 
@@ -419,9 +554,104 @@ fn take_fragments_stale_pid() {
         Box::new(make_fragment(0x5000, crate::term::Term::TRUE)),
     );
 
-    // Remove process (increments generation)
+    table.remove(pid);
+    assert!(table.take_fragments(pid).is_none());
+}
+
+// ============================================================================
+// Pending Signal Tests
+// ============================================================================
+
+#[test]
+fn push_and_take_pending_signals() {
+    let mut table = table_with_one_segment();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    // Take the process (simulates execution on a worker)
+    let _taken = table.take(pid).unwrap();
+
+    let sender = ProcessId::new(99, 0);
+    let reason = crate::term::Term::TRUE;
+    table.push_pending_signal(pid, sender, reason);
+
+    let signals = table.take_pending_signals(pid);
+    assert_eq!(signals.len(), 1);
+    assert_eq!(signals[0].0, sender);
+    assert_eq!(signals[0].1, reason);
+
+    // Queue should be empty after take
+    let signals2 = table.take_pending_signals(pid);
+    assert!(signals2.is_empty());
+}
+
+#[test]
+fn pending_signals_cleared_on_free_taken_slot() {
+    let mut table = table_with_one_segment();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    let _taken = table.take(pid).unwrap();
+    table.push_pending_signal(pid, ProcessId::new(99, 0), crate::term::Term::TRUE);
+
+    table.free_taken_slot(pid);
+
+    // Reuse the slot — should have no pending signals
+    let (idx2, gen2) = table.allocate().unwrap();
+    assert_eq!(idx2, index);
+    let new_pid = ProcessId::new(idx2, gen2);
+    let mut p2 = create_test_process();
+    p2.pid = new_pid;
+    table.insert(p2);
+
+    let signals = table.take_pending_signals(new_pid);
+    assert!(signals.is_empty());
+}
+
+#[test]
+fn pending_signals_cleared_on_remove() {
+    let mut table = table_with_one_segment();
+    let (index, generation) = table.allocate().unwrap();
+    let pid = ProcessId::new(index, generation);
+
+    let mut process = create_test_process();
+    process.pid = pid;
+    table.insert(process);
+
+    table.push_pending_signal(pid, ProcessId::new(99, 0), crate::term::Term::TRUE);
     table.remove(pid);
 
-    // Stale PID should not retrieve fragments
-    assert!(table.take_fragments(pid).is_none());
+    // Reuse the slot — should have no pending signals
+    let (idx2, gen2) = table.allocate().unwrap();
+    let new_pid = ProcessId::new(idx2, gen2);
+    let mut p2 = create_test_process();
+    p2.pid = new_pid;
+    table.insert(p2);
+
+    let signals = table.take_pending_signals(new_pid);
+    assert!(signals.is_empty());
+}
+
+#[test]
+fn push_pending_signal_to_invalid_pid_ignored() {
+    let mut table = table_with_one_segment();
+    table.push_pending_signal(
+        ProcessId::new(0, 99),
+        ProcessId::new(1, 0),
+        crate::term::Term::TRUE,
+    );
+    table.push_pending_signal(
+        ProcessId::NULL,
+        ProcessId::new(1, 0),
+        crate::term::Term::TRUE,
+    );
+    // No panic = success
 }

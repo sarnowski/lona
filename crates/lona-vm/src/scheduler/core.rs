@@ -103,6 +103,50 @@ impl Scheduler {
         }
     }
 
+    /// Ensure the process table has at least one free slot.
+    ///
+    /// Uses lock ordering (PT → Realm → PT) to avoid deadlock when growing:
+    /// 1. Check free list (PT lock) → release
+    /// 2. Allocate segment memory (Realm lock) → release
+    /// 3. Add segment to table (PT lock) → release
+    ///
+    /// In tests, segments are allocated from the system heap.
+    /// On seL4, segments come from the `ProcessPool` via the Realm.
+    ///
+    /// Returns `true` if capacity is available, `false` if growth failed.
+    pub fn ensure_capacity(&self, realm: &SpinRwLock<Realm>) -> bool {
+        let needs_growth = {
+            let pt = self.process_table.lock();
+            !pt.has_free_slots()
+        };
+        if !needs_growth {
+            return true;
+        }
+
+        #[cfg(test)]
+        let segment_ptr = {
+            let _ = realm;
+            ProcessTable::alloc_test_segment()
+        };
+
+        #[cfg(not(test))]
+        let segment_ptr = {
+            use super::process_table::{SEGMENT_SIZE, Slot};
+            let size = core::mem::size_of::<Slot>() * SEGMENT_SIZE;
+            let mut realm_guard = realm.write();
+            let Some(vaddr) = realm_guard.pool_mut().allocate_with_growth(size, 8) else {
+                return false;
+            };
+            vaddr.as_u64() as *mut Slot
+        };
+
+        let mut pt = self.process_table.lock();
+        // SAFETY: segment_ptr points to exclusively-owned memory of SEGMENT_SIZE
+        // Slots, allocated from either the system heap (tests) or ProcessPool (seL4).
+        unsafe { pt.grow_segment(segment_ptr) };
+        true
+    }
+
     /// Spawn a new process on a specific worker.
     ///
     /// Allocates process memory from the realm's pool, creates a `Process`,
@@ -124,6 +168,11 @@ impl Scheduler {
             self.worker_count
         );
         let target_worker = worker_idx.min(self.worker_count - 1);
+
+        // Grow process table if needed (lock ordering: PT → Realm → PT)
+        if !self.ensure_capacity(realm) {
+            return None;
+        }
 
         let (young_base, old_base) = {
             let mut realm_guard = realm.write();
@@ -270,6 +319,8 @@ impl Scheduler {
                     let mut pt = self.process_table.lock();
                     pt.put_back(pid, proc);
                 }
+                // Drain exit signals queued while process was taken
+                self.drain_pending_signals(pid, realm, mem);
                 {
                     let mut rq = self.run_queues[worker_idx].lock();
                     let enqueued = rq.push_back(pid);
@@ -291,6 +342,8 @@ impl Scheduler {
                     let mut pt = self.process_table.lock();
                     pt.put_back(pid, proc);
                 }
+                // Drain exit signals queued while process was taken
+                self.drain_pending_signals(pid, realm, mem);
                 TickResult::Continued(pid)
             }
             RunResult::Completed(value) => {
@@ -530,6 +583,30 @@ impl Scheduler {
     /// not from cross-thread visibility of the counter itself.
     pub fn next_ref(&self) -> u64 {
         self.next_ref_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Drain pending exit signals queued while a process was taken.
+    ///
+    /// Called after `put_back` to deliver signals that arrived during execution.
+    /// Each signal is delivered via `deliver_exit_signal`, which may kill the
+    /// process or deliver a trap-exit message.
+    fn drain_pending_signals<M: MemorySpace>(
+        &self,
+        pid: ProcessId,
+        realm: &SpinRwLock<Realm>,
+        mem: &mut M,
+    ) {
+        let signals = {
+            let mut pt = self.process_table.lock();
+            pt.take_pending_signals(pid)
+        };
+        if signals.is_empty() {
+            return;
+        }
+        let mut realm_guard = realm.write();
+        for (sender, reason) in signals {
+            self.deliver_exit_signal(pid, sender, reason, &mut realm_guard, mem);
+        }
     }
 
     // Exit propagation methods are in `exit_propagation.rs`.

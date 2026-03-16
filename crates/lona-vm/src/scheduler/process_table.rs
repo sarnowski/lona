@@ -1,29 +1,51 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright 2026 Tobias Sarnowski
 
-//! Process table with generation-based slot reuse.
+//! Segmented process table with generation-based slot reuse.
 //!
-//! The process table is a fixed-size array that stores processes by slot index.
-//! Each slot has a generation counter to prevent the ABA problem when slots
-//! are reused after a process terminates.
+//! The process table uses two-level indexing for scalable process storage:
+//! an array of segment pointers (L1) maps to segment arrays of Slots (L2).
+//! Segments are allocated lazily from the `ProcessPool`, so no memory is used
+//! until the first process is spawned.
+//!
+//! This design supports up to `MAX_SEGMENTS` × `SEGMENT_SIZE` concurrent
+//! processes (1M with default settings), limited only by available memory
+//! rather than a fixed constant.
 
 extern crate alloc;
 
-use crate::process::heap_fragment::HeapFragment;
-use crate::process::{Process, ProcessId};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-/// Maximum number of processes in a realm.
-pub const MAX_PROCESSES: usize = 1024;
+use crate::process::heap_fragment::HeapFragment;
+use crate::process::{Process, ProcessId};
+use crate::term::Term;
+
+/// Number of slots per segment (must be a power of 2).
+pub const SEGMENT_SIZE: usize = 1024;
+
+/// Bit shift for segment indexing (log2 of `SEGMENT_SIZE`).
+const SEGMENT_BITS: usize = 10;
+
+/// Maximum number of segments (pointer array is inline, 8 bytes × 1024 = 8KB).
+pub const MAX_SEGMENTS: usize = 1024;
+
+const _: () = assert!(
+    1usize << SEGMENT_BITS == SEGMENT_SIZE,
+    "SEGMENT_BITS must equal log2(SEGMENT_SIZE)"
+);
+const _: () = assert!(
+    SEGMENT_SIZE.is_power_of_two(),
+    "SEGMENT_SIZE must be a power of two"
+);
 
 /// Slot in the process table.
-struct Slot {
+pub struct Slot {
     /// The process in this slot, or None if free or taken.
     process: Option<Process>,
     /// Generation counter, incremented on each reuse.
     generation: u32,
-    /// Index of next free slot (used when slot is free).
+    /// Index of next free slot (used when slot is free). `u32::MAX` = end of list.
     next_free: u32,
     /// Whether this slot is allocated (true from `allocate` until `remove`/`free_taken_slot`).
     allocated: bool,
@@ -33,63 +55,153 @@ struct Slot {
     /// fragments here instead of writing to the process's mailbox directly.
     /// The fragments are drained when the process is put back or during GC.
     fragment_inbox: Option<Box<HeapFragment>>,
+    /// Pending exit signals for processes that are currently taken.
+    ///
+    /// When an exit signal targets a taken process (running on a worker),
+    /// it is queued here. The signals are drained when the process is put
+    /// back via `take_pending_signals`.
+    pending_signals: Vec<(ProcessId, Term)>,
 }
 
-/// Fixed-size table for O(1) process lookup by PID.
+/// Segmented table for O(1) process lookup by PID.
 ///
-/// Uses a free list for allocation and generation counters for ABA safety.
-/// The slots are heap-allocated to keep the table off the stack.
+/// Uses two-level indexing: `segments[index >> SEGMENT_BITS]` gives the
+/// segment pointer, `index & (SEGMENT_SIZE - 1)` gives the slot offset.
+/// Segments are allocated lazily — memory cost is zero until first spawn.
+///
+/// A free list chains slots across segments for O(1) allocation. Generation
+/// counters prevent the ABA problem when slots are reused.
 pub struct ProcessTable {
-    slots: Box<[Slot]>,
-    /// Head of free list (index of first free slot, or `u32::MAX` if full).
+    /// Segment pointers (null = not allocated).
+    segments: [*mut Slot; MAX_SEGMENTS],
+    /// Number of allocated segments.
+    num_segments: usize,
+    /// Total capacity (`num_segments` × `SEGMENT_SIZE`).
+    total_capacity: usize,
+    /// Head of free list (flat index, or `u32::MAX` if empty).
     free_head: u32,
     /// Number of active processes.
     count: usize,
 }
 
-impl ProcessTable {
-    /// Create a new empty process table.
-    #[must_use]
-    pub fn new() -> Self {
-        // Initialize slots with free list chain
-        // Use Vec to allocate directly on heap, keeping table off the stack
-        let slots: Vec<Slot> = (0..MAX_PROCESSES)
-            .map(|i| Slot {
-                process: None,
-                generation: 0,
-                next_free: if i + 1 < MAX_PROCESSES {
-                    (i + 1) as u32
-                } else {
-                    u32::MAX // End of free list
-                },
-                allocated: false,
-                fragment_inbox: None,
-            })
-            .collect();
+// SAFETY: Segment pointers point to exclusively-owned memory allocated
+// via `Box::into_raw` (in tests) or `ProcessPool` (on seL4). The `ProcessTable`
+// is always behind `SpinMutex`, preventing concurrent access.
+unsafe impl Send for ProcessTable {}
 
+/// Get raw pointer to a slot by flat index and segment array.
+///
+/// This is a free function (not a method) to avoid borrowing `self`,
+/// enabling callers to modify other `ProcessTable` fields while holding
+/// a raw pointer to a slot.
+const fn slot_ptr(
+    segments: &[*mut Slot; MAX_SEGMENTS],
+    num_segments: usize,
+    index: usize,
+) -> Option<*mut Slot> {
+    let segment_idx = index >> SEGMENT_BITS;
+    let slot_idx = index & (SEGMENT_SIZE - 1);
+
+    if segment_idx >= num_segments {
+        return None;
+    }
+
+    let segment_ptr = segments[segment_idx];
+    if segment_ptr.is_null() {
+        return None;
+    }
+
+    // SAFETY: segment_ptr was initialized in grow_segment with SEGMENT_SIZE
+    // slots, and slot_idx < SEGMENT_SIZE due to the bitmask.
+    Some(unsafe { segment_ptr.add(slot_idx) })
+}
+
+impl ProcessTable {
+    /// Create a new empty process table with no segments allocated.
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
-            slots: slots.into_boxed_slice(),
-            free_head: 0,
+            segments: [core::ptr::null_mut(); MAX_SEGMENTS],
+            num_segments: 0,
+            total_capacity: 0,
+            free_head: u32::MAX,
             count: 0,
         }
     }
 
+    /// Check if there are free slots available without allocating.
+    #[must_use]
+    pub const fn has_free_slots(&self) -> bool {
+        self.free_head != u32::MAX
+    }
+
+    /// Add a pre-allocated segment to the table.
+    ///
+    /// The `segment_ptr` must point to a contiguous allocation of at least
+    /// `SEGMENT_SIZE` `Slot`s. On seL4, this comes from `ProcessPool::allocate`.
+    /// In tests, it comes from `Box::into_raw`.
+    ///
+    /// The new segment's slots are initialized and prepended to the free list.
+    ///
+    /// # Safety
+    ///
+    /// `segment_ptr` must point to valid, exclusively-owned memory large enough
+    /// for `SEGMENT_SIZE` Slots. The caller transfers ownership to the table.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the segment table is full (`num_segments >= MAX_SEGMENTS`).
+    pub unsafe fn grow_segment(&mut self, segment_ptr: *mut Slot) {
+        assert!(
+            self.num_segments < MAX_SEGMENTS,
+            "segment table full ({MAX_SEGMENTS} segments)"
+        );
+
+        let segment_idx = self.num_segments;
+        let base_index = (segment_idx * SEGMENT_SIZE) as u32;
+
+        // Initialize slots in the segment and chain them into the free list.
+        // Chain from last to first so that the first slot in the segment
+        // is at the head of the new free list chain.
+        let mut chain_next = self.free_head;
+        for i in (0..SEGMENT_SIZE).rev() {
+            let sp = unsafe { segment_ptr.add(i) };
+            unsafe {
+                sp.write(Slot {
+                    process: None,
+                    generation: 0,
+                    next_free: chain_next,
+                    allocated: false,
+                    fragment_inbox: None,
+                    pending_signals: Vec::new(),
+                });
+            }
+            chain_next = base_index + i as u32;
+        }
+
+        self.free_head = base_index;
+        self.segments[segment_idx] = segment_ptr;
+        self.num_segments += 1;
+        self.total_capacity += SEGMENT_SIZE;
+    }
+
     /// Allocate a slot, returns (index, generation) for creating `ProcessId`.
     ///
-    /// Returns `None` if table is full.
-    pub const fn allocate(&mut self) -> Option<(u32, u32)> {
+    /// Returns `None` if no free slots are available. Call `has_free_slots()`
+    /// first, and use `grow_segment()` to add capacity if needed.
+    pub fn allocate(&mut self) -> Option<(u32, u32)> {
         if self.free_head == u32::MAX {
-            return None; // Table full
+            return None;
         }
 
         let index = self.free_head;
-        let slot = &mut self.slots[index as usize];
+        let ptr = slot_ptr(&self.segments, self.num_segments, index as usize)?;
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
 
-        // Remove from free list
         self.free_head = slot.next_free;
         slot.allocated = true;
 
-        // Return current generation (will be stored in ProcessId)
         Some((index, slot.generation))
     }
 
@@ -99,55 +211,54 @@ impl ProcessTable {
     ///
     /// # Panics
     ///
-    /// Panics in debug builds if the PID doesn't match an allocated slot.
+    /// Panics if the index is out of bounds.
     pub fn insert(&mut self, process: Process) {
         let index = process.pid.index();
-        debug_assert!(index < MAX_PROCESSES, "PID index out of bounds");
-        debug_assert!(self.slots[index].process.is_none(), "Slot already occupied");
+        let Some(ptr) = slot_ptr(&self.segments, self.num_segments, index) else {
+            debug_assert!(false, "insert: index {index} out of bounds");
+            return;
+        };
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
+        debug_assert!(slot.process.is_none(), "Slot already occupied");
         debug_assert_eq!(
-            self.slots[index].generation,
+            slot.generation,
             process.pid.generation(),
             "Generation mismatch"
         );
 
-        self.slots[index].process = Some(process);
+        slot.process = Some(process);
         self.count += 1;
     }
 
     /// Get process by PID (validates generation).
     #[must_use]
-    pub const fn get(&self, pid: ProcessId) -> Option<&Process> {
+    pub fn get(&self, pid: ProcessId) -> Option<&Process> {
         if pid.is_null() {
             return None;
         }
 
-        let index = pid.index();
-        if index >= MAX_PROCESSES {
-            return None;
-        }
-
-        let slot = &self.slots[index];
+        let ptr = slot_ptr(&self.segments, self.num_segments, pid.index())?;
+        // SAFETY: ptr is valid and we have at least shared access via &self.
+        let slot = unsafe { &*ptr };
         if slot.generation != pid.generation() {
-            return None; // Stale reference
+            return None;
         }
 
         slot.process.as_ref()
     }
 
     /// Get mutable process by PID (validates generation).
-    pub const fn get_mut(&mut self, pid: ProcessId) -> Option<&mut Process> {
+    pub fn get_mut(&mut self, pid: ProcessId) -> Option<&mut Process> {
         if pid.is_null() {
             return None;
         }
 
-        let index = pid.index();
-        if index >= MAX_PROCESSES {
-            return None;
-        }
-
-        let slot = &mut self.slots[index];
+        let ptr = slot_ptr(&self.segments, self.num_segments, pid.index())?;
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
         if slot.generation != pid.generation() {
-            return None; // Stale reference
+            return None;
         }
 
         slot.process.as_mut()
@@ -162,24 +273,20 @@ impl ProcessTable {
         }
 
         let index = pid.index();
-        if index >= MAX_PROCESSES {
-            return None;
-        }
-
-        let slot = &mut self.slots[index];
+        let ptr = slot_ptr(&self.segments, self.num_segments, index)?;
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
         if slot.generation != pid.generation() {
-            return None; // Stale reference
+            return None;
         }
 
         let process = slot.process.take()?;
 
-        // Increment generation for next reuse
         slot.generation = slot.generation.wrapping_add(1);
         slot.allocated = false;
-        // Drop any pending fragments to prevent leaking into reused slots
         slot.fragment_inbox = None;
+        slot.pending_signals.clear();
 
-        // Add to free list
         slot.next_free = self.free_head;
         self.free_head = index as u32;
 
@@ -192,20 +299,14 @@ impl ProcessTable {
     /// The slot remains allocated (generation unchanged) but the process
     /// is removed. Use `put_back` to return it, or `free_taken_slot`
     /// to reclaim the slot after the process completes.
-    ///
-    /// This enables passing `&mut ProcessTable` to `Vm::run` while a
-    /// process is being executed (no aliased borrows).
     pub fn take(&mut self, pid: ProcessId) -> Option<Process> {
         if pid.is_null() {
             return None;
         }
 
-        let index = pid.index();
-        if index >= MAX_PROCESSES {
-            return None;
-        }
-
-        let slot = &mut self.slots[index];
+        let ptr = slot_ptr(&self.segments, self.num_segments, pid.index())?;
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
         if slot.generation != pid.generation() {
             return None;
         }
@@ -219,47 +320,58 @@ impl ProcessTable {
     ///
     /// # Panics
     ///
-    /// Panics in debug builds if:
-    /// - The PID doesn't match the slot's generation
-    /// - The slot already contains a process
+    /// Panics if the index is out of bounds.
     pub fn put_back(&mut self, pid: ProcessId, process: Process) {
         let index = pid.index();
-        debug_assert!(index < MAX_PROCESSES, "PID index out of bounds");
+        let Some(ptr) = slot_ptr(&self.segments, self.num_segments, index) else {
+            debug_assert!(false, "put_back: index {index} out of bounds");
+            return;
+        };
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
         debug_assert!(
-            self.slots[index].process.is_none(),
+            slot.process.is_none(),
             "Slot already occupied (put_back on non-taken slot)"
         );
         debug_assert_eq!(
-            self.slots[index].generation,
+            slot.generation,
             pid.generation(),
             "Generation mismatch on put_back"
         );
 
-        self.slots[index].process = Some(process);
+        slot.process = Some(process);
     }
 
     /// Reclaim a slot after a taken process completes.
     ///
     /// Increments generation and returns the slot to the free list.
     /// Call this instead of `put_back` when the process is done.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index is out of bounds.
     pub fn free_taken_slot(&mut self, pid: ProcessId) {
         let index = pid.index();
-        debug_assert!(index < MAX_PROCESSES, "PID index out of bounds");
+        let Some(ptr) = slot_ptr(&self.segments, self.num_segments, index) else {
+            debug_assert!(false, "free_taken_slot: index {index} out of bounds");
+            return;
+        };
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
         debug_assert!(
-            self.slots[index].process.is_none(),
+            slot.process.is_none(),
             "Slot still has process (use remove instead)"
         );
         debug_assert_eq!(
-            self.slots[index].generation,
+            slot.generation,
             pid.generation(),
             "Generation mismatch on free_taken_slot"
         );
 
-        let slot = &mut self.slots[index];
         slot.generation = slot.generation.wrapping_add(1);
         slot.allocated = false;
-        // Drop any pending fragments to prevent leaking into reused slots
         slot.fragment_inbox = None;
+        slot.pending_signals.clear();
         slot.next_free = self.free_head;
         self.free_head = index as u32;
         self.count -= 1;
@@ -275,12 +387,12 @@ impl ProcessTable {
             return false;
         }
 
-        let index = pid.index();
-        if index >= MAX_PROCESSES {
+        let Some(ptr) = slot_ptr(&self.segments, self.num_segments, pid.index()) else {
             return false;
-        }
+        };
+        // SAFETY: ptr is valid and we have at least shared access via &self.
+        let slot = unsafe { &*ptr };
 
-        let slot = &self.slots[index];
         slot.allocated && slot.generation == pid.generation() && slot.process.is_none()
     }
 
@@ -291,23 +403,21 @@ impl ProcessTable {
     ///
     /// **Important:** Prepend means fragments are in reverse send order.
     /// When draining the inbox into the process mailbox, the linked list
-    /// must be reversed to maintain FIFO delivery order (spec guarantee:
-    /// "order preserved between same sender-receiver pair").
+    /// must be reversed to maintain FIFO delivery order.
     ///
     /// Silently ignored if the PID is invalid or the slot is not allocated.
     pub fn push_fragment(&mut self, pid: ProcessId, mut fragment: Box<HeapFragment>) {
         if pid.is_null() {
             return;
         }
-        let index = pid.index();
-        if index >= MAX_PROCESSES {
+        let Some(ptr) = slot_ptr(&self.segments, self.num_segments, pid.index()) else {
             return;
-        }
-        let slot = &mut self.slots[index];
+        };
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
         if slot.generation != pid.generation() || !slot.allocated {
             return;
         }
-        // Prepend to linked list
         fragment.next = slot.fragment_inbox.take();
         slot.fragment_inbox = Some(fragment);
     }
@@ -320,15 +430,54 @@ impl ProcessTable {
         if pid.is_null() {
             return None;
         }
-        let index = pid.index();
-        if index >= MAX_PROCESSES {
-            return None;
-        }
-        let slot = &mut self.slots[index];
+        let ptr = slot_ptr(&self.segments, self.num_segments, pid.index())?;
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
         if slot.generation != pid.generation() {
             return None;
         }
         slot.fragment_inbox.take()
+    }
+
+    /// Queue an exit signal for a taken (running) process.
+    ///
+    /// When exit propagation targets a process that is currently taken
+    /// for execution, the signal cannot be delivered immediately. It is
+    /// queued here and drained when the process is put back.
+    ///
+    /// Silently ignored if the PID is invalid or the slot is not allocated.
+    pub fn push_pending_signal(&mut self, pid: ProcessId, sender: ProcessId, reason: Term) {
+        if pid.is_null() {
+            return;
+        }
+        let Some(ptr) = slot_ptr(&self.segments, self.num_segments, pid.index()) else {
+            return;
+        };
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
+        if slot.generation != pid.generation() || !slot.allocated {
+            return;
+        }
+        slot.pending_signals.push((sender, reason));
+    }
+
+    /// Drain all pending exit signals for a process.
+    ///
+    /// Returns the signals (sender, reason) and clears the queue.
+    /// Returns an empty `Vec` if no signals are pending.
+    pub fn take_pending_signals(&mut self, pid: ProcessId) -> Vec<(ProcessId, Term)> {
+        if pid.is_null() {
+            return Vec::new();
+        }
+        let Some(ptr) = slot_ptr(&self.segments, self.num_segments, pid.index()) else {
+            return Vec::new();
+        };
+        // SAFETY: ptr is valid and we have exclusive access via &mut self.
+        let slot = unsafe { &mut *ptr };
+        if slot.generation != pid.generation() {
+            return Vec::new();
+        }
+        core::mem::take(&mut slot.pending_signals)
     }
 
     /// Number of active processes.
@@ -337,10 +486,44 @@ impl ProcessTable {
         self.count
     }
 
-    /// Check if table is full.
+    /// Check if table has no free slots.
     #[must_use]
     pub const fn is_full(&self) -> bool {
         self.free_head == u32::MAX
+    }
+
+    /// Number of allocated segments.
+    #[must_use]
+    pub const fn num_segments(&self) -> usize {
+        self.num_segments
+    }
+
+    /// Total slot capacity across all segments.
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        self.total_capacity
+    }
+
+    /// Allocate a test segment from the system heap.
+    ///
+    /// Returns a raw pointer to `SEGMENT_SIZE` heap-allocated Slots.
+    /// The caller must pass this to `grow_segment` — the `ProcessTable`
+    /// takes ownership and the memory must not be freed separately.
+    #[cfg(test)]
+    #[must_use]
+    pub fn alloc_test_segment() -> *mut Slot {
+        let slots: Vec<Slot> = (0..SEGMENT_SIZE)
+            .map(|_| Slot {
+                process: None,
+                generation: 0,
+                next_free: u32::MAX,
+                allocated: false,
+                fragment_inbox: None,
+                pending_signals: Vec::new(),
+            })
+            .collect();
+        let boxed: Box<[Slot]> = slots.into_boxed_slice();
+        Box::into_raw(boxed).cast::<Slot>()
     }
 }
 

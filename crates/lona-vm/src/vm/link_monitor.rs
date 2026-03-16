@@ -274,9 +274,7 @@ pub fn handle_spawn_link<M: MemorySpace>(
         crate::realm::copy::deep_copy_term_to_process(fn_term, proc, &mut new_proc, mem)
             .ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
 
-    let (index, generation) = scheduler
-        .with_process_table_mut(ProcessTable::allocate)
-        .ok_or(RunResult::Error(RuntimeError::ProcessLimitReached))?;
+    let (index, generation) = allocate_slot_with_growth(scheduler, realm)?;
     let pid = ProcessId::new(index, generation);
 
     setup_new_process(&mut new_proc, pid, proc.pid, worker, realm, mem, copied_fn);
@@ -332,9 +330,7 @@ pub fn handle_spawn_monitor<M: MemorySpace>(
         crate::realm::copy::deep_copy_term_to_process(fn_term, proc, &mut new_proc, mem)
             .ok_or(RunResult::Error(RuntimeError::OutOfMemory))?;
 
-    let (index, generation) = scheduler
-        .with_process_table_mut(ProcessTable::allocate)
-        .ok_or(RunResult::Error(RuntimeError::ProcessLimitReached))?;
+    let (index, generation) = allocate_slot_with_growth(scheduler, realm)?;
     let pid = ProcessId::new(index, generation);
 
     setup_new_process(&mut new_proc, pid, proc.pid, worker, realm, mem, copied_fn);
@@ -389,6 +385,40 @@ fn deliver_exit_message<M: MemorySpace>(
             target.status = ProcessStatus::Ready;
         }
     }
+}
+
+/// Allocate a process table slot, growing the table if needed.
+///
+/// In tests, segments are allocated from the system heap.
+/// On seL4, segments come from the realm's `ProcessPool`.
+///
+/// Used by `handle_spawn`, `handle_spawn_link`, and `handle_spawn_monitor`.
+pub(super) fn allocate_slot_with_growth(
+    scheduler: &Scheduler,
+    realm: &mut Realm,
+) -> Result<(u32, u32), RunResult> {
+    let mut result = scheduler.with_process_table_mut(ProcessTable::allocate);
+    if result.is_none() {
+        #[cfg(test)]
+        {
+            let _ = &mut *realm;
+            let segment = ProcessTable::alloc_test_segment();
+            scheduler.with_process_table_mut(|pt| unsafe { pt.grow_segment(segment) });
+        }
+        #[cfg(not(test))]
+        {
+            use crate::scheduler::process_table::{SEGMENT_SIZE, Slot};
+            let size = core::mem::size_of::<Slot>() * SEGMENT_SIZE;
+            let vaddr = realm
+                .pool_mut()
+                .allocate_with_growth(size, 8)
+                .ok_or(RunResult::Error(RuntimeError::ProcessLimitReached))?;
+            let segment_ptr = vaddr.as_u64() as *mut Slot;
+            scheduler.with_process_table_mut(|pt| unsafe { pt.grow_segment(segment_ptr) });
+        }
+        result = scheduler.with_process_table_mut(ProcessTable::allocate);
+    }
+    result.ok_or(RunResult::Error(RuntimeError::ProcessLimitReached))
 }
 
 /// Common setup for a newly spawned process (shared by spawn, spawn-link, spawn-monitor).
