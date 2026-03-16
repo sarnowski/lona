@@ -128,6 +128,7 @@ where
         object::FUN => copy_fun(addr, alloc, mem, visited),
         object::CLOSURE => copy_closure(addr, alloc, mem, visited),
         object::PID => copy_pid(addr, header, alloc, mem, visited),
+        object::REF => copy_ref(addr, header, alloc, mem, visited),
         object::FLOAT => copy_float(addr, header, alloc, mem, visited),
         // Vars and Namespaces live in realm, pass through
         object::VAR | object::NAMESPACE => Some(original),
@@ -330,6 +331,28 @@ where
     // Copy index and generation (8 bytes after header)
     let pid_data: u64 = mem.read(addr.add(8));
     mem.write(dst.add(8), pid_data);
+    Some(Term::boxed_vaddr(dst))
+}
+
+fn copy_ref<M, A>(
+    addr: Vaddr,
+    header: Header,
+    alloc: &mut A,
+    mem: &mut M,
+    visited: &mut VisitedTracker,
+) -> Option<Term>
+where
+    M: MemorySpace,
+    A: FnMut(usize, usize) -> Option<Vaddr>,
+{
+    use crate::term::heap::HeapRef;
+    let total = HeapRef::SIZE;
+    let dst = alloc(total, 8)?;
+    visited.record(addr, dst);
+    mem.write(dst, header);
+    // Copy ref ID (8 bytes after header)
+    let ref_id: u64 = mem.read(addr.add(8));
+    mem.write(dst.add(8), ref_id);
     Some(Term::boxed_vaddr(dst))
 }
 

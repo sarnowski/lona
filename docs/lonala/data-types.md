@@ -678,6 +678,9 @@ Predicate: `ref?`
 ```clojure
 ;; @todo
 (ref? (make-ref))  ; => true
+```
+
+```clojure
 (ref? 42)          ; => false
 (ref? :ref)        ; => false
 ```

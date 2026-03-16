@@ -205,10 +205,48 @@ pub mod id {
     ///
     /// Handled directly in `Vm::run` (needs `ProcessTable` access for delivery).
     pub const SEND: u8 = 56;
+    /// Ref predicate: `(ref? x)` -> boolean.
+    pub const IS_REF: u8 = 57;
+    /// Link to another process: `(link pid)` -> `:ok`.
+    ///
+    /// Handled directly in `Vm::run` (needs `ProcessTable` access).
+    pub const LINK: u8 = 58;
+    /// Unlink from another process: `(unlink pid)` -> `:ok`.
+    ///
+    /// Handled directly in `Vm::run` (needs `ProcessTable` access).
+    pub const UNLINK: u8 = 59;
+    /// Set trap-exit flag: `(trap-exit bool)` -> `:ok`.
+    ///
+    /// Handled directly in `Vm::run` (needs direct process access).
+    pub const TRAP_EXIT: u8 = 60;
+    /// Monitor a process: `(monitor pid)` -> ref.
+    ///
+    /// Handled directly in `Vm::run` (needs `ProcessTable` + `Scheduler`).
+    pub const MONITOR: u8 = 61;
+    /// Remove a monitor: `(demonitor ref)` -> `:ok`.
+    ///
+    /// Handled directly in `Vm::run` (needs `ProcessTable`).
+    pub const DEMONITOR: u8 = 62;
+    /// Exit current process or send exit signal: `(exit reason)` or `(exit pid reason)`.
+    ///
+    /// 1-arg: terminates current process with reason.
+    /// 2-arg: sends exit signal to target process.
+    /// Handled directly in `Vm::run` (needs `ProcessTable`).
+    pub const EXIT: u8 = 63;
+    /// Spawn and link: `(spawn-link f)` -> pid.
+    ///
+    /// Atomically spawns and links before enqueue.
+    /// Handled directly in `Vm::run` (needs `ProcessTable`).
+    pub const SPAWN_LINK: u8 = 64;
+    /// Spawn and monitor: `(spawn-monitor f)` -> `[pid ref]`.
+    ///
+    /// Atomically spawns and monitors before enqueue.
+    /// Handled directly in `Vm::run` (needs `ProcessTable` + `Scheduler`).
+    pub const SPAWN_MONITOR: u8 = 65;
 }
 
 /// Number of defined intrinsics.
-pub const INTRINSIC_COUNT: usize = 57;
+pub const INTRINSIC_COUNT: usize = 66;
 
 /// Intrinsic name lookup table.
 ///
@@ -272,6 +310,15 @@ pub const INTRINSIC_NAMES: [&str; INTRINSIC_COUNT] = [
     "read-string",     // 54: READ_STRING
     "eval",            // 55: EVAL
     "send",            // 56: SEND
+    "ref?",            // 57: IS_REF
+    "link",            // 58: LINK
+    "unlink",          // 59: UNLINK
+    "trap-exit",       // 60: TRAP_EXIT
+    "monitor",         // 61: MONITOR
+    "demonitor",       // 62: DEMONITOR
+    "exit",            // 63: EXIT
+    "spawn-link",      // 64: SPAWN_LINK
+    "spawn-monitor",   // 65: SPAWN_MONITOR
 ];
 
 /// Look up an intrinsic ID by name.
@@ -331,7 +378,8 @@ pub const fn intrinsic_cost(id: u8) -> u32 {
         | id::IS_FN
         | id::IS_VAR
         | id::SELF
-        | id::IS_PID => 1,
+        | id::IS_PID
+        | id::IS_REF => 1,
 
         // Simple collection ops: cost 2
         id::COUNT | id::FIRST | id::IS_EMPTY => 2,
@@ -366,7 +414,15 @@ pub const fn intrinsic_cost(id: u8) -> u32 {
         | id::ALIVE
         | id::READ_STRING
         | id::EVAL
-        | id::SEND => 10,
+        | id::SEND
+        | id::LINK
+        | id::UNLINK
+        | id::TRAP_EXIT
+        | id::MONITOR
+        | id::DEMONITOR
+        | id::EXIT
+        | id::SPAWN_LINK
+        | id::SPAWN_MONITOR => 10,
 
         // Unknown and PUT: default cost 5
         _ => 5,
@@ -494,7 +550,20 @@ pub fn call_intrinsic<M: MemorySpace>(
         // These intrinsics are handled directly in Vm::run before reaching
         // this dispatch (they need Worker, ProcessTable, or eval trampoline).
         // If we get here, return a no-op.
-        id::GARBAGE_COLLECT | id::PROCESS_INFO | id::SPAWN | id::ALIVE | id::EVAL | id::SEND => {
+        id::GARBAGE_COLLECT
+        | id::PROCESS_INFO
+        | id::SPAWN
+        | id::ALIVE
+        | id::EVAL
+        | id::SEND
+        | id::LINK
+        | id::UNLINK
+        | id::TRAP_EXIT
+        | id::MONITOR
+        | id::DEMONITOR
+        | id::EXIT
+        | id::SPAWN_LINK
+        | id::SPAWN_MONITOR => {
             return Ok(());
         }
 
@@ -504,6 +573,7 @@ pub fn call_intrinsic<M: MemorySpace>(
             return Ok(());
         }
         id::IS_PID => Term::bool(proc.is_term_pid(mem, x_regs[1])),
+        id::IS_REF => Term::bool(proc.is_term_ref(mem, x_regs[1])),
         id::READ_STRING => {
             // Read string content into a stack buffer to release the immutable borrow
             // on `mem` before calling the reader (which needs `&mut mem`).

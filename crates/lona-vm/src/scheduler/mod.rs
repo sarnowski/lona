@@ -7,6 +7,7 @@
 //! multiplexing Lonala processes within a realm.
 
 mod core;
+mod exit_propagation;
 mod process_table;
 mod run_queue;
 mod worker;

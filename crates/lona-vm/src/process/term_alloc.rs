@@ -12,7 +12,7 @@ use crate::platform::MemorySpace;
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::heap::{
-    HeapClosure, HeapFloat, HeapFun, HeapMap, HeapPid, HeapString, HeapTuple, HeapVector,
+    HeapClosure, HeapFloat, HeapFun, HeapMap, HeapPid, HeapRef, HeapString, HeapTuple, HeapVector,
 };
 use crate::term::pair::Pair;
 use crate::term::tag::primary;
@@ -295,6 +295,23 @@ impl Process {
         Some(unsafe { term_from_boxed_addr(addr) })
     }
 
+    /// Allocate a REF (unique reference) on the young heap.
+    ///
+    /// Returns a boxed Term pointing to the allocated ref, or `None` if OOM.
+    #[must_use]
+    pub fn alloc_term_ref<M: MemorySpace>(&mut self, mem: &mut M, id: u64) -> Option<Term> {
+        let addr = self.alloc(HeapRef::SIZE, 8)?;
+
+        let header = HeapRef::make_header();
+        mem.write(addr, header);
+
+        let id_addr = addr.add(8);
+        mem.write(id_addr, id);
+
+        // SAFETY: We just allocated and initialized a valid REF object
+        Some(unsafe { term_from_boxed_addr(addr) })
+    }
+
     // ========================================================================
     // Term Reading Methods
     // ========================================================================
@@ -497,6 +514,26 @@ impl Process {
         Some((index, generation))
     }
 
+    /// Read a REF from the heap.
+    ///
+    /// Returns the unique reference ID, or `None` if the term is not a REF.
+    #[must_use]
+    pub fn read_term_ref<M: MemorySpace>(&self, mem: &M, term: Term) -> Option<u64> {
+        if !term.is_boxed() {
+            return None;
+        }
+
+        let addr = term_to_vaddr(term);
+        let header: Header = mem.read(addr);
+
+        if header.object_tag() != crate::term::tag::object::REF {
+            return None;
+        }
+
+        let id_addr = addr.add(8);
+        Some(mem.read(id_addr))
+    }
+
     // ========================================================================
     // Type checking helpers
     // ========================================================================
@@ -655,6 +692,18 @@ impl Process {
         let addr = term_to_vaddr(term);
         let header: Header = mem.read(addr);
         header.object_tag() == crate::term::tag::object::PID
+    }
+
+    /// Check if a term is a REF (unique reference).
+    #[must_use]
+    pub fn is_term_ref<M: MemorySpace>(&self, mem: &M, term: Term) -> bool {
+        if !term.is_boxed() {
+            return false;
+        }
+
+        let addr = term_to_vaddr(term);
+        let header: Header = mem.read(addr);
+        header.object_tag() == crate::term::tag::object::REF
     }
 
     /// Check if a term is a string.

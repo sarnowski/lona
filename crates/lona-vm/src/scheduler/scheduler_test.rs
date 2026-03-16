@@ -404,6 +404,7 @@ fn three_processes_compute_values() {
             TickResult::Idle => break,
             TickResult::Completed(pid, value) => results.push((pid, value)),
             TickResult::Continued(_) => {}
+            TickResult::Exited(pid, reason) => panic!("process {pid:?} exited: {reason:?}"),
             TickResult::Error(pid, err) => panic!("process {pid:?} errored: {err:?}"),
         }
     }
@@ -437,7 +438,9 @@ fn process_error_doesnt_affect_others() {
     loop {
         match scheduler.tick_worker(&mut worker, &realm, &mut mem) {
             TickResult::Idle => break,
-            TickResult::Completed(pid, value) => completed.push((pid, value)),
+            TickResult::Completed(pid, value) | TickResult::Exited(pid, value) => {
+                completed.push((pid, value));
+            }
             TickResult::Error(pid, _) => errored.push(pid),
             TickResult::Continued(_) => {}
         }
@@ -471,6 +474,7 @@ fn yield_and_resume_preserves_state() {
                 break;
             }
             TickResult::Continued(_) => ticks += 1,
+            TickResult::Exited(_, reason) => panic!("unexpected exit: {reason:?}"),
             TickResult::Error(_, err) => panic!("unexpected error: {err:?}"),
         }
     }
@@ -504,6 +508,7 @@ fn mixed_short_and_long_processes() {
             TickResult::Idle => break,
             TickResult::Completed(pid, _) => completed_order.push(pid),
             TickResult::Continued(_) => {}
+            TickResult::Exited(pid, reason) => panic!("process {pid:?} exited: {reason:?}"),
             TickResult::Error(pid, err) => panic!("process {pid:?} errored: {err:?}"),
         }
     }
@@ -707,6 +712,180 @@ fn try_steal_from_self_returns_false() {
 fn run_all_on_empty_scheduler_returns_immediately() {
     let (scheduler, realm, mut mem) = setup();
     // No processes spawned — run_all should return without hanging
+    scheduler.run_all(&realm, &mut mem);
+    assert_eq!(scheduler.process_count(), 0);
+}
+
+// =============================================================================
+// Ref counter tests
+// =============================================================================
+
+#[test]
+fn next_ref_starts_at_one() {
+    let (scheduler, _, _) = setup();
+    assert_eq!(scheduler.next_ref(), 1);
+}
+
+#[test]
+fn next_ref_returns_unique_ids() {
+    let (scheduler, _, _) = setup();
+    let a = scheduler.next_ref();
+    let b = scheduler.next_ref();
+    let c = scheduler.next_ref();
+    assert_ne!(a, b);
+    assert_ne!(b, c);
+    assert!(a < b);
+    assert!(b < c);
+}
+
+// =============================================================================
+// Link/monitor exit propagation tests
+// =============================================================================
+
+#[test]
+fn normal_exit_does_not_kill_linked_process() {
+    let (scheduler, realm, mut mem) = setup();
+
+    // A completes quickly with :normal, B is long-running
+    let chunk_a = compile_expr(&realm, &mut mem, ":normal");
+    let expr_b = long_running_expr(200);
+    let chunk_b = compile_expr(&realm, &mut mem, &expr_b);
+    let pid_a = scheduler
+        .spawn_on(&realm, &mut mem, chunk_a, ProcessId::NULL, 0)
+        .unwrap();
+    let pid_b = scheduler
+        .spawn_on(&realm, &mut mem, chunk_b, ProcessId::NULL, 0)
+        .unwrap();
+
+    // Manually link A and B
+    scheduler.with_process_table_mut(|pt| {
+        if let Some(a) = pt.get_mut(pid_a) {
+            a.links.insert(pid_b);
+        }
+        if let Some(b) = pt.get_mut(pid_b) {
+            b.links.insert(pid_a);
+        }
+    });
+
+    // Tick-by-tick to observe individual results
+    let mut worker = Worker::new(WorkerId(0));
+    let mut completed = std::vec::Vec::new();
+    let mut errored = std::vec::Vec::new();
+    loop {
+        match scheduler.tick_worker(&mut worker, &realm, &mut mem) {
+            TickResult::Idle => break,
+            TickResult::Completed(pid, _) | TickResult::Exited(pid, _) => completed.push(pid),
+            TickResult::Error(pid, _) => errored.push(pid),
+            TickResult::Continued(_) => {}
+        }
+    }
+
+    // B must COMPLETE (not error) — :normal exit does not cascade
+    assert!(completed.contains(&pid_a), "A should complete normally");
+    assert!(
+        completed.contains(&pid_b),
+        "B should complete normally (not killed)"
+    );
+    assert!(errored.is_empty(), "No process should error");
+}
+
+#[test]
+fn error_exit_kills_linked_process() {
+    let (scheduler, realm, mut mem) = setup();
+
+    // A errors (divide by zero), B is long-running so it's still alive when A dies
+    let chunk_a = compile_expr(&realm, &mut mem, "(/ 1 0)");
+    let expr_b = long_running_expr(800);
+    let chunk_b = compile_expr(&realm, &mut mem, &expr_b);
+    let pid_a = scheduler
+        .spawn_on(&realm, &mut mem, chunk_a, ProcessId::NULL, 0)
+        .unwrap();
+    let pid_b = scheduler
+        .spawn_on(&realm, &mut mem, chunk_b, ProcessId::NULL, 0)
+        .unwrap();
+
+    // Link A and B
+    scheduler.with_process_table_mut(|pt| {
+        if let Some(a) = pt.get_mut(pid_a) {
+            a.links.insert(pid_b);
+        }
+        if let Some(b) = pt.get_mut(pid_b) {
+            b.links.insert(pid_a);
+        }
+    });
+
+    // Tick-by-tick to observe results
+    let mut worker = Worker::new(WorkerId(0));
+    let mut completed = std::vec::Vec::new();
+    let mut errored = std::vec::Vec::new();
+    loop {
+        match scheduler.tick_worker(&mut worker, &realm, &mut mem) {
+            TickResult::Idle => break,
+            TickResult::Completed(pid, _) | TickResult::Exited(pid, _) => completed.push(pid),
+            TickResult::Error(pid, _) => errored.push(pid),
+            TickResult::Continued(_) => {}
+        }
+    }
+
+    // A should error, B should be killed by the cascade (also error)
+    assert!(errored.contains(&pid_a), "A should error (div by zero)");
+    assert!(
+        !completed.contains(&pid_b),
+        "B should NOT complete normally (killed by A's error cascade)"
+    );
+}
+
+#[test]
+fn monitor_delivers_down_message_on_exit() {
+    let (scheduler, realm, mut mem) = setup();
+
+    // Monitored process completes quickly
+    let chunk = compile_expr(&realm, &mut mem, ":done");
+    let monitored_pid = scheduler
+        .spawn_on(&realm, &mut mem, chunk, ProcessId::NULL, 0)
+        .unwrap();
+
+    // Monitor process: long-running so it's still alive when monitored_pid exits
+    let monitor_expr = long_running_expr(400);
+    let monitor_chunk = compile_expr(&realm, &mut mem, &monitor_expr);
+    let monitor_pid = scheduler
+        .spawn_on(&realm, &mut mem, monitor_chunk, ProcessId::NULL, 0)
+        .unwrap();
+
+    let ref_id = scheduler.next_ref();
+    scheduler.with_process_table_mut(|pt| {
+        if let Some(monitored) = pt.get_mut(monitored_pid) {
+            monitored.monitored_by.insert(ref_id, monitor_pid);
+        }
+        if let Some(monitor) = pt.get_mut(monitor_pid) {
+            monitor.monitors_out.insert(ref_id, monitored_pid);
+        }
+    });
+
+    // Run the monitored process first (it's first in queue)
+    let mut worker = Worker::new(WorkerId(0));
+    let mut monitored_completed = false;
+    loop {
+        match scheduler.tick_worker(&mut worker, &realm, &mut mem) {
+            TickResult::Completed(pid, _) if pid == monitored_pid => {
+                monitored_completed = true;
+                break;
+            }
+            TickResult::Idle => break,
+            _ => {}
+        }
+    }
+    assert!(monitored_completed, "monitored process should complete");
+
+    // Verify the :DOWN message was placed in the monitoring process's mailbox
+    let has_down_message = scheduler
+        .with_process_table(|pt| pt.get(monitor_pid).is_some_and(|p| !p.mailbox.is_empty()));
+    assert!(
+        has_down_message,
+        "monitor should have :DOWN message in mailbox"
+    );
+
+    // Run remaining to completion
     scheduler.run_all(&realm, &mut mem);
     assert_eq!(scheduler.process_count(), 0);
 }

@@ -12,6 +12,10 @@
 //! multiple workers. All `Scheduler` methods take `&self` (not `&mut self`)
 //! and acquire locks as needed.
 
+extern crate alloc;
+
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use super::{ProcessTable, RunQueue, Worker};
 use crate::platform::MemorySpace;
 use crate::process::{
@@ -21,6 +25,8 @@ use crate::realm::Realm;
 use crate::sync::{SpinMutex, SpinRwLock};
 use crate::term::Term;
 use crate::vm::{RunResult, RuntimeError, Vm};
+
+use super::exit_propagation::ExitReason;
 
 /// Default number of workers (matches typical core count).
 pub const DEFAULT_WORKER_COUNT: usize = 4;
@@ -40,6 +46,8 @@ pub enum TickResult {
     Continued(ProcessId),
     /// A process completed with a return value.
     Completed(ProcessId, Term),
+    /// A process explicitly called `exit(reason)`.
+    Exited(ProcessId, Term),
     /// A process encountered a runtime error.
     Error(ProcessId, RuntimeError),
 }
@@ -54,7 +62,7 @@ pub enum TickResult {
 /// `tick_worker`. This enables safe concurrent access: `&self` methods
 /// lock only what they need.
 pub struct Scheduler {
-    process_table: SpinMutex<ProcessTable>,
+    pub(super) process_table: SpinMutex<ProcessTable>,
     run_queues: [SpinMutex<RunQueue>; DEFAULT_WORKER_COUNT],
     /// Number of active workers (1 to `DEFAULT_WORKER_COUNT`).
     worker_count: usize,
@@ -62,6 +70,8 @@ pub struct Scheduler {
     ns_var: Term,
     /// The `lona.core` namespace for bootstrapping new processes.
     core_ns: Term,
+    /// Counter for generating unique reference IDs (for monitors).
+    next_ref_id: AtomicU64,
 }
 
 impl Scheduler {
@@ -89,6 +99,7 @@ impl Scheduler {
             worker_count: count,
             ns_var,
             core_ns,
+            next_ref_id: AtomicU64::new(1),
         }
     }
 
@@ -221,6 +232,25 @@ impl Scheduler {
             }
         };
 
+        // Check if the process was killed by an external exit signal while
+        // it was in the run queue (e.g., via 2-arg `exit` or link cascade).
+        if proc.status == ProcessStatus::Error {
+            worker.current_pid = None;
+            let mut realm_guard = realm.write();
+            self.handle_process_exit(pid, &proc, &ExitReason::Error, mem, &mut realm_guard);
+            {
+                let mut pt = self.process_table.lock();
+                pt.free_taken_slot(pid);
+            }
+            return TickResult::Error(
+                pid,
+                RuntimeError::BadArgument {
+                    intrinsic: "exit",
+                    message: "killed by exit signal",
+                },
+            );
+        }
+
         proc.status = ProcessStatus::Running;
         proc.reset_reductions();
         worker.current_pid = Some(pid);
@@ -264,13 +294,36 @@ impl Scheduler {
                 TickResult::Continued(pid)
             }
             RunResult::Completed(value) => {
-                let mut pt = self.process_table.lock();
-                pt.free_taken_slot(pid);
+                let mut realm_guard = realm.write();
+                self.handle_process_exit(pid, &proc, &ExitReason::Normal, mem, &mut realm_guard);
+                {
+                    let mut pt = self.process_table.lock();
+                    pt.free_taken_slot(pid);
+                }
                 TickResult::Completed(pid, value)
             }
+            RunResult::Exited(reason) => {
+                let mut realm_guard = realm.write();
+                self.handle_process_exit(
+                    pid,
+                    &proc,
+                    &ExitReason::Term(reason),
+                    mem,
+                    &mut realm_guard,
+                );
+                {
+                    let mut pt = self.process_table.lock();
+                    pt.free_taken_slot(pid);
+                }
+                TickResult::Exited(pid, reason)
+            }
             RunResult::Error(err) => {
-                let mut pt = self.process_table.lock();
-                pt.free_taken_slot(pid);
+                let mut realm_guard = realm.write();
+                self.handle_process_exit(pid, &proc, &ExitReason::Error, mem, &mut realm_guard);
+                {
+                    let mut pt = self.process_table.lock();
+                    pt.free_taken_slot(pid);
+                }
                 TickResult::Error(pid, err)
             }
         }
@@ -469,4 +522,15 @@ impl Scheduler {
         let rq = self.run_queues[worker_idx].lock();
         rq.len()
     }
+
+    /// Generate a unique reference ID for monitors.
+    ///
+    /// IDs are unique per realm (each realm has its own scheduler).
+    /// Uses `Relaxed` ordering since uniqueness comes from `fetch_add`,
+    /// not from cross-thread visibility of the counter itself.
+    pub fn next_ref(&self) -> u64 {
+        self.next_ref_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    // Exit propagation methods are in `exit_propagation.rs`.
 }

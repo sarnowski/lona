@@ -236,6 +236,7 @@ fn yield_during_simple_function_call() {
             assert_eq!(v, int(6));
         }
         RunResult::Waiting => panic!("Unexpected Waiting"),
+        RunResult::Exited(r) => panic!("Unexpected exit: {r:?}"),
         RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
     }
 }
@@ -305,6 +306,7 @@ fn yield_and_resume_nested_calls() {
                 assert!(yield_count <= 100, "Too many yields");
             }
             RunResult::Waiting => panic!("Unexpected Waiting"),
+            RunResult::Exited(r) => panic!("Unexpected exit: {r:?}"),
             RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
         }
     }
@@ -317,11 +319,15 @@ fn yield_and_resume_nested_calls() {
 fn run_result_methods() {
     assert!(RunResult::Completed(Term::NIL).is_terminal());
     assert!(RunResult::Error(crate::vm::RuntimeError::NoCode).is_terminal());
+    assert!(RunResult::Exited(Term::NIL).is_terminal());
     assert!(!RunResult::Yielded.is_terminal());
 
     assert!(RunResult::Yielded.is_yielded());
     assert!(!RunResult::Completed(Term::NIL).is_yielded());
     assert!(!RunResult::Error(crate::vm::RuntimeError::NoCode).is_yielded());
+    assert!(!RunResult::Exited(Term::NIL).is_yielded());
+
+    assert!(!RunResult::Exited(Term::NIL).is_waiting());
 }
 
 #[test]
@@ -398,6 +404,7 @@ fn stress_many_yields() {
                 );
             }
             RunResult::Waiting => panic!("Unexpected Waiting"),
+            RunResult::Exited(r) => panic!("Unexpected exit: {r:?}"),
             RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
         }
     }
@@ -527,6 +534,7 @@ fn stress_recursive_with_yields() {
                 );
             }
             RunResult::Waiting => panic!("Unexpected Waiting"),
+            RunResult::Exited(r) => panic!("Unexpected exit: {r:?}"),
             RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
         }
     }
@@ -613,6 +621,7 @@ fn stress_deep_call_chain_yield_resume() {
                 assert!(yield_count <= 100, "Too many yields");
             }
             RunResult::Waiting => panic!("Unexpected Waiting"),
+            RunResult::Exited(r) => panic!("Unexpected exit: {r:?}"),
             RunResult::Error(e) => panic!("Unexpected error: {e:?}"),
         }
     }

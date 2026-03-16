@@ -489,7 +489,6 @@ Enable/disable exit signal trapping.
 ```
 
 ```clojure
-;; @todo
 (trap-exit true)   ; => :ok
 (trap-exit false)  ; => :ok
 ```

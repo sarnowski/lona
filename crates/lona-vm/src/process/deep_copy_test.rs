@@ -323,6 +323,28 @@ fn copy_closure_between_processes() {
     assert_eq!(header.object_tag(), object::CLOSURE);
 }
 
+// --- Ref copy ---
+
+#[test]
+fn copy_ref_between_processes() {
+    let (mut mem, mut src, mut dst) = setup_two_processes();
+
+    let ref_term = src.alloc_term_ref(&mut mem, 42).unwrap();
+    let copied = deep_copy_message_to_process(ref_term, &mut dst, &mut mem).unwrap();
+
+    assert!(copied.is_boxed());
+    assert_ne!(ref_term.to_vaddr(), copied.to_vaddr());
+
+    let header: Header = mem.read(copied.to_vaddr());
+    assert_eq!(header.object_tag(), object::REF);
+
+    // Verify the ref ID survived the copy
+    let src_id: u64 = mem.read(ref_term.to_vaddr().add(8));
+    let dst_id: u64 = mem.read(copied.to_vaddr().add(8));
+    assert_eq!(src_id, dst_id);
+    assert_eq!(dst_id, 42);
+}
+
 // --- OOM ---
 
 #[test]

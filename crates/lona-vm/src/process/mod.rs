@@ -66,7 +66,7 @@ mod term_alloc_test;
 
 extern crate alloc;
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 
 use crate::Vaddr;
 use crate::term::Term;
@@ -160,7 +160,7 @@ pub mod frame_offset {
 /// When a slot is reused, generation increments to invalidate stale references.
 /// This prevents the ABA problem where a freed slot is reallocated and an old
 /// reference incorrectly accesses the new process.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProcessId {
     /// Slot index in process table.
     index: u32,
@@ -284,6 +284,17 @@ pub struct Process {
     pub pid: ProcessId,
     /// Parent process identifier (NULL for root processes).
     pub parent_pid: ProcessId,
+
+    // Linking and monitoring
+    /// Bidirectional links to other processes (crash notification).
+    pub links: BTreeSet<ProcessId>,
+    /// Whether this process traps exit signals as messages.
+    pub trap_exit: bool,
+    /// Outgoing monitors: `ref_id` -> monitored process.
+    pub monitors_out: BTreeMap<u64, ProcessId>,
+    /// Incoming monitors: `ref_id` -> monitoring process.
+    pub monitored_by: BTreeMap<u64, ProcessId>,
+
     /// Worker this process is assigned to.
     pub worker_id: WorkerId,
     /// Current execution status.
@@ -398,6 +409,10 @@ impl Process {
         Self {
             pid: ProcessId::NULL,
             parent_pid: ProcessId::NULL,
+            links: BTreeSet::new(),
+            trap_exit: false,
+            monitors_out: BTreeMap::new(),
+            monitored_by: BTreeMap::new(),
             worker_id: WorkerId(0),
             status: ProcessStatus::Ready,
             // Reduction counting - starts at 0, must call reset_reductions() before run

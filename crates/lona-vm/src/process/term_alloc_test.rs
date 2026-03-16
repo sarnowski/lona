@@ -483,3 +483,93 @@ fn read_term_pid_wrong_type() {
             .is_none()
     );
 }
+
+// ============================================================================
+// Ref Tests
+// ============================================================================
+
+#[test]
+fn alloc_term_ref_roundtrip() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_ref(&mut mem, 42).unwrap();
+    assert!(term.is_boxed());
+
+    let id = proc.read_term_ref(&mem, term).unwrap();
+    assert_eq!(id, 42);
+}
+
+#[test]
+fn alloc_term_ref_zero_id() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_ref(&mut mem, 0).unwrap();
+    let id = proc.read_term_ref(&mem, term).unwrap();
+    assert_eq!(id, 0);
+}
+
+#[test]
+fn alloc_term_ref_max_id() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_ref(&mut mem, u64::MAX).unwrap();
+    let id = proc.read_term_ref(&mem, term).unwrap();
+    assert_eq!(id, u64::MAX);
+}
+
+#[test]
+fn alloc_term_ref_unique_ids() {
+    let (mut proc, mut mem) = setup();
+
+    let term1 = proc.alloc_term_ref(&mut mem, 1).unwrap();
+    let term2 = proc.alloc_term_ref(&mut mem, 2).unwrap();
+
+    assert_ne!(
+        proc.read_term_ref(&mem, term1),
+        proc.read_term_ref(&mem, term2)
+    );
+}
+
+#[test]
+fn is_term_ref_true() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_ref(&mut mem, 99).unwrap();
+    assert!(proc.is_term_ref(&mem, term));
+}
+
+#[test]
+fn is_term_ref_false_for_other_types() {
+    let (mut proc, mut mem) = setup();
+
+    assert!(!proc.is_term_ref(&mem, Term::NIL));
+    assert!(!proc.is_term_ref(&mem, Term::TRUE));
+    assert!(!proc.is_term_ref(&mem, Term::small_int(42).unwrap()));
+
+    let pid = proc.alloc_term_pid(&mut mem, 1, 0).unwrap();
+    assert!(!proc.is_term_ref(&mem, pid));
+
+    let string = proc.alloc_term_string(&mut mem, "hello").unwrap();
+    assert!(!proc.is_term_ref(&mem, string));
+}
+
+#[test]
+fn read_term_ref_wrong_type() {
+    let (proc, mem) = setup();
+
+    assert!(proc.read_term_ref(&mem, Term::NIL).is_none());
+    assert!(
+        proc.read_term_ref(&mem, Term::small_int(42).unwrap())
+            .is_none()
+    );
+}
+
+#[test]
+fn verify_ref_object_tag() {
+    let (mut proc, mut mem) = setup();
+
+    let term = proc.alloc_term_ref(&mut mem, 123).unwrap();
+    let addr = Vaddr::new(term.as_raw() & !0b11);
+    let header: Header = mem.read(addr);
+    assert_eq!(header.object_tag(), object::REF);
+}

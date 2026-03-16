@@ -17,6 +17,7 @@ mod receive_test;
 #[cfg(test)]
 mod vm_test;
 
+mod link_monitor;
 mod pattern;
 mod receive;
 mod special_intrinsics;
@@ -689,6 +690,12 @@ pub enum RunResult {
 
     /// Process encountered a runtime error.
     Error(RuntimeError),
+
+    /// Process explicitly called `exit(reason)`.
+    ///
+    /// Distinct from `Completed` (normal return) and `Error` (runtime error).
+    /// All three go through the same exit signal propagation path.
+    Exited(Term),
 }
 
 impl RunResult {
@@ -697,7 +704,7 @@ impl RunResult {
     /// Terminal results mean the process should not be resumed.
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
-        matches!(self, Self::Completed(_) | Self::Error(_))
+        matches!(self, Self::Completed(_) | Self::Error(_) | Self::Exited(_))
     }
 
     /// Returns true if process yielded due to reduction budget.
@@ -1258,7 +1265,7 @@ pub fn execute_with_scheduler<M: MemorySpace>(
 
     loop {
         match Vm::run(worker, proc, mem, realm, scheduler) {
-            RunResult::Completed(term) => return Ok(term),
+            RunResult::Completed(term) | RunResult::Exited(term) => return Ok(term),
             RunResult::Yielded | RunResult::Waiting => {
                 // Single-threaded execution: just continue with fresh budget.
                 // Waiting is treated as Yielded here since there's no scheduler

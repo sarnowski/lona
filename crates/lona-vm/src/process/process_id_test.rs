@@ -5,6 +5,8 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+extern crate alloc;
+
 use super::{ProcessId, WorkerId};
 
 // =============================================================================
@@ -60,6 +62,42 @@ fn process_id_copy() {
     let a = ProcessId::new(1, 2);
     let b = a; // Copy
     assert_eq!(a, b);
+}
+
+#[test]
+fn process_id_ordering() {
+    let a = ProcessId::new(1, 0);
+    let b = ProcessId::new(2, 0);
+    let c = ProcessId::new(1, 1);
+
+    // Lower index comes first
+    assert!(a < b);
+    // Same index, lower generation comes first
+    assert!(a < c);
+    // Higher index is greater regardless of generation
+    assert!(b > c);
+}
+
+#[test]
+fn process_id_in_btree_set() {
+    use alloc::collections::BTreeSet;
+
+    let mut set = BTreeSet::new();
+    let a = ProcessId::new(3, 0);
+    let b = ProcessId::new(1, 0);
+    let c = ProcessId::new(2, 0);
+
+    set.insert(a);
+    set.insert(b);
+    set.insert(c);
+
+    assert_eq!(set.len(), 3);
+    assert!(set.contains(&a));
+
+    // Remove works
+    set.remove(&b);
+    assert_eq!(set.len(), 2);
+    assert!(!set.contains(&b));
 }
 
 // =============================================================================
