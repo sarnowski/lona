@@ -12,8 +12,9 @@
 )]
 
 use crate::Vaddr;
+use crate::intrinsics::{INTRINSIC_NAMES, PROCESS_INTRINSIC_IDS};
 use crate::platform::{MemorySpace, MockVSpace};
-use crate::realm::{Realm, bootstrap, get_core_ns, get_ns_var, lookup_var_in_ns};
+use crate::realm::{Realm, bootstrap, get_core_ns, get_ns_var, get_process_ns, lookup_var_in_ns};
 use crate::term::Term;
 use crate::term::header::Header;
 use crate::term::heap::{HeapNamespace, HeapVar};
@@ -278,4 +279,112 @@ fn test_lookup_var_returns_none_for_missing() {
     // Should not find non-existent var
     let var = lookup_var_in_ns(&realm, &mem, result.core_ns, "nonexistent");
     assert!(var.is_none());
+}
+
+// =============================================================================
+// lona.process namespace tests
+// =============================================================================
+
+#[test]
+fn test_bootstrap_creates_lona_process_namespace() {
+    let (mut realm, mut mem) = setup();
+    bootstrap(&mut realm, &mut mem).unwrap();
+
+    let process_ns = get_process_ns(&realm, &mem);
+    assert!(process_ns.is_some(), "lona.process namespace should exist");
+    assert!(is_term_namespace(&mem, process_ns.unwrap()));
+}
+
+#[test]
+fn test_lona_process_namespace_has_correct_name() {
+    let (mut realm, mut mem) = setup();
+    bootstrap(&mut realm, &mut mem).unwrap();
+
+    let process_ns = get_process_ns(&realm, &mem).unwrap();
+    let ns: HeapNamespace = mem.read(process_ns.to_vaddr());
+
+    let idx = ns.name.as_symbol_index().expect("Expected symbol index");
+    let name_str = realm.symbol_name(&mem, idx).expect("Symbol should exist");
+    assert_eq!(name_str, "lona.process");
+}
+
+#[test]
+fn test_process_intrinsics_in_lona_process() {
+    let (mut realm, mut mem) = setup();
+    bootstrap(&mut realm, &mut mem).unwrap();
+
+    let process_ns = get_process_ns(&realm, &mem).unwrap();
+
+    for &id in PROCESS_INTRINSIC_IDS {
+        let name = INTRINSIC_NAMES[id as usize];
+        let var_term = lookup_var_in_ns(&realm, &mem, process_ns, name);
+        assert!(
+            var_term.is_some(),
+            "Process intrinsic '{}' should be in lona.process",
+            name
+        );
+
+        let var = read_heap_var(&mem, var_term.unwrap()).unwrap();
+        assert!(var.root.is_native_fn(), "'{}' should be a NativeFn", name);
+        assert_eq!(
+            var.root.as_native_fn_id().unwrap(),
+            u16::from(id),
+            "'{}' should have correct intrinsic ID",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_process_intrinsics_auto_referred_into_lona_core() {
+    let (mut realm, mut mem) = setup();
+    let result = bootstrap(&mut realm, &mut mem).unwrap();
+
+    for &id in PROCESS_INTRINSIC_IDS {
+        let name = INTRINSIC_NAMES[id as usize];
+        let var_term = lookup_var_in_ns(&realm, &mem, result.core_ns, name);
+        assert!(
+            var_term.is_some(),
+            "Process intrinsic '{}' should be auto-referred into lona.core",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_process_intrinsics_share_same_var() {
+    let (mut realm, mut mem) = setup();
+    let result = bootstrap(&mut realm, &mut mem).unwrap();
+
+    let process_ns = get_process_ns(&realm, &mem).unwrap();
+
+    // The var in lona.process and lona.core should be the same object
+    for &id in PROCESS_INTRINSIC_IDS {
+        let name = INTRINSIC_NAMES[id as usize];
+        let core_var = lookup_var_in_ns(&realm, &mem, result.core_ns, name).unwrap();
+        let process_var = lookup_var_in_ns(&realm, &mem, process_ns, name).unwrap();
+        assert_eq!(
+            core_var, process_var,
+            "'{}' should be the same var in both namespaces",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_non_process_intrinsics_not_in_lona_process() {
+    let (mut realm, mut mem) = setup();
+    bootstrap(&mut realm, &mut mem).unwrap();
+
+    let process_ns = get_process_ns(&realm, &mem).unwrap();
+
+    // Arithmetic intrinsics should NOT be in lona.process
+    for name in ["+", "-", "*", "/", "mod", "=", "str", "count", "get"] {
+        let var_term = lookup_var_in_ns(&realm, &mem, process_ns, name);
+        assert!(
+            var_term.is_none(),
+            "Non-process intrinsic '{}' should NOT be in lona.process",
+            name
+        );
+    }
 }

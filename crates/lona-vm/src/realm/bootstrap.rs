@@ -3,11 +3,12 @@
 
 //! Bootstrap sequence for initializing a realm with essential vars.
 //!
-//! The bootstrap creates the `lona.core` namespace and seeds it with:
-//! - `def` - the var definition special form (hardcoded, required for bootstrap)
-//! - `*ns*` - process-bound var for current namespace
-//! - Other special forms: `fn*`, `quote`, `do`, `var`, `match`
-//! - All intrinsics: `+`, `-`, `*`, `/`, etc.
+//! The bootstrap creates `lona.core` and `lona.process` namespaces:
+//! - `lona.core`: special forms, `*ns*`, and all intrinsics (auto-referred)
+//! - `lona.process`: process intrinsics (spawn, send, link, monitor, etc.)
+//!
+//! Process intrinsics are registered in `lona.process` and auto-referred
+//! into `lona.core` so they are accessible both qualified and unqualified.
 //!
 //! After bootstrap, processes can use `def` to define new vars and
 //! symbols resolve via namespace lookup.
@@ -26,7 +27,7 @@ use super::Realm;
 /// rules. They cannot be used as regular function values.
 const SPECIAL_FORM_NAMES: &[&str] = &["def", "fn*", "quote", "do", "var", "match"];
 
-use crate::intrinsics::INTRINSIC_NAMES;
+use crate::intrinsics::{INTRINSIC_NAMES, PROCESS_INTRINSIC_IDS};
 
 /// Result of bootstrapping a realm.
 pub struct BootstrapResult {
@@ -39,62 +40,61 @@ pub struct BootstrapResult {
 /// Bootstrap the realm with essential vars.
 ///
 /// This function:
-/// 1. Creates the `lona.core` namespace
-/// 2. Seeds `def` as a special form var (required for bootstrap)
+/// 1. Creates `lona.core` and `lona.process` namespaces
+/// 2. Seeds special forms (`def`, `fn*`, `quote`, `do`, `var`, `match`)
 /// 3. Seeds `*ns*` as a process-bound var (default = `lona.core`)
-/// 4. Seeds other special forms (`fn*`, `quote`, `do`, `var`, `match`)
-/// 5. Seeds all intrinsics as `NativeFn` vars
+/// 4. Seeds all intrinsics as `NativeFn` vars:
+///    - Process intrinsics go in `lona.process`, auto-referred into `lona.core`
+///    - All other intrinsics go directly into `lona.core`
 ///
 /// # Returns
 ///
 /// Returns `Some(BootstrapResult)` containing the core namespace and `*ns*` var,
 /// or `None` if allocation fails.
-///
-/// # Panics
-///
-/// Does not panic.
 pub fn bootstrap<M: MemorySpace>(realm: &mut Realm, mem: &mut M) -> Option<BootstrapResult> {
     // Create lona.core namespace
     let core_sym = realm.intern_symbol(mem, "lona.core")?;
     let core_ns = realm.get_or_create_namespace(mem, core_sym)?;
 
+    // Create lona.process namespace
+    let process_sym = realm.intern_symbol(mem, "lona.process")?;
+    let process_ns = realm.get_or_create_namespace(mem, process_sym)?;
+
     // === SPECIAL FORMS ===
-    // These are hardcoded in the compiler and have SPECIAL_FORM flag
 
     for &name in SPECIAL_FORM_NAMES {
         let sym = realm.intern_symbol(mem, name)?;
-
-        // Special forms have Unbound root - they can't be called as values
         let var = realm.alloc_var(mem, sym, core_ns, Term::UNBOUND)?;
-
         realm.add_ns_mapping(mem, core_ns, sym, var)?;
     }
 
     // === *ns* VAR ===
-    // Process-bound var that holds the current namespace
-    // Root value is lona.core (default for new processes)
 
     let ns_sym = realm.intern_symbol(mem, "*ns*")?;
-    let ns_var = realm.alloc_var(mem, ns_sym, core_ns, core_ns)?; // Root = lona.core
-
+    let ns_var = realm.alloc_var(mem, ns_sym, core_ns, core_ns)?;
     realm.add_ns_mapping(mem, core_ns, ns_sym, ns_var)?;
 
     // === INTRINSICS ===
-    // Each intrinsic becomes a NativeFn var
 
     for (id, &name) in INTRINSIC_NAMES.iter().enumerate() {
-        // Skip if it's also a special form (already registered)
         if SPECIAL_FORM_NAMES.contains(&name) {
             continue;
         }
 
         let sym = realm.intern_symbol(mem, name)?;
-
-        // Root value is the NativeFn with the intrinsic ID
         let native_fn = Term::native_fn(id as u16);
-        let var = realm.alloc_var(mem, sym, core_ns, native_fn)?;
+        let is_process = PROCESS_INTRINSIC_IDS.contains(&(id as u8));
 
-        realm.add_ns_mapping(mem, core_ns, sym, var)?;
+        if is_process {
+            // Process intrinsics: register in lona.process, auto-refer into lona.core
+            let var = realm.alloc_var(mem, sym, process_ns, native_fn)?;
+            realm.add_ns_mapping(mem, process_ns, sym, var)?;
+            realm.add_ns_mapping(mem, core_ns, sym, var)?;
+        } else {
+            // All other intrinsics: register only in lona.core
+            let var = realm.alloc_var(mem, sym, core_ns, native_fn)?;
+            realm.add_ns_mapping(mem, core_ns, sym, var)?;
+        }
     }
 
     Some(BootstrapResult { core_ns, ns_var })
@@ -173,4 +173,10 @@ pub fn get_ns_var<M: MemorySpace>(realm: &Realm, mem: &M) -> Option<Term> {
 pub fn get_core_ns<M: MemorySpace>(realm: &Realm, mem: &M) -> Option<Term> {
     let core_sym = realm.find_symbol(mem, "lona.core")?;
     realm.find_namespace(core_sym)
+}
+
+/// Get the `lona.process` namespace from the realm.
+pub fn get_process_ns<M: MemorySpace>(realm: &Realm, mem: &M) -> Option<Term> {
+    let sym = realm.find_symbol(mem, "lona.process")?;
+    realm.find_namespace(sym)
 }

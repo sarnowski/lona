@@ -448,3 +448,39 @@ fn def_qualified_symbol_in_def() {
     let result = eval("(add-mul 1 2 3)", &mut proc, &mut realm, &mut mem).unwrap();
     assert_eq!(result, int(7)); // 1 + (2 * 3) = 7
 }
+
+#[test]
+fn qualified_lona_process_self() {
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+
+    // Set a concrete pid_term so the result is distinguishable from NIL
+    let pid_term = proc.alloc_term_pid(&mut mem, 7, 1).expect("pid alloc");
+    proc.pid_term = Some(pid_term);
+
+    // lona.process/self should resolve to the same intrinsic as self
+    let qualified = eval("(lona.process/self)", &mut proc, &mut realm, &mut mem).unwrap();
+    assert_eq!(qualified, pid_term);
+
+    let unqualified = eval("(self)", &mut proc, &mut realm, &mut mem).unwrap();
+    assert_eq!(unqualified, pid_term);
+    assert_eq!(qualified, unqualified);
+}
+
+#[test]
+fn qualified_lona_process_pid_predicate() {
+    let (mut proc, mut realm, mut mem) = setup().unwrap();
+
+    // lona.process/pid? should resolve via qualified namespace lookup
+    let result = eval("(lona.process/pid? 42)", &mut proc, &mut realm, &mut mem).unwrap();
+    assert_eq!(result, Term::FALSE);
+
+    // lona.process/ref? should also resolve
+    let result = eval(
+        "(lona.process/ref? :hello)",
+        &mut proc,
+        &mut realm,
+        &mut mem,
+    )
+    .unwrap();
+    assert_eq!(result, Term::FALSE);
+}

@@ -25,7 +25,9 @@ mod copy_test;
 #[cfg(test)]
 mod realm_test;
 
-pub use bootstrap::{BootstrapResult, bootstrap, get_core_ns, get_ns_var, lookup_var_in_ns};
+pub use bootstrap::{
+    BootstrapResult, bootstrap, get_core_ns, get_ns_var, get_process_ns, lookup_var_in_ns,
+};
 pub use copy::{VisitedTracker, deep_copy_term_to_realm};
 
 use crate::Vaddr;

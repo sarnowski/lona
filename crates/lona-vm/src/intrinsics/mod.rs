@@ -248,6 +248,29 @@ pub mod id {
 /// Number of defined intrinsics.
 pub const INTRINSIC_COUNT: usize = 66;
 
+/// Intrinsic IDs that belong in the `lona.process` namespace.
+///
+/// These are auto-referred into `lona.core` during bootstrap so existing
+/// code keeps working. They can also be accessed via qualified form:
+/// `(lona.process/send pid msg)`.
+pub const PROCESS_INTRINSIC_IDS: &[u8] = &[
+    id::PROCESS_INFO,
+    id::SPAWN,
+    id::SELF,
+    id::ALIVE,
+    id::IS_PID,
+    id::SEND,
+    id::IS_REF,
+    id::LINK,
+    id::UNLINK,
+    id::TRAP_EXIT,
+    id::MONITOR,
+    id::DEMONITOR,
+    id::EXIT,
+    id::SPAWN_LINK,
+    id::SPAWN_MONITOR,
+];
+
 /// Intrinsic name lookup table.
 ///
 /// This is the single source of truth for intrinsic names. The bootstrap

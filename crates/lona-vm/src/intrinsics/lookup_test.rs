@@ -51,3 +51,43 @@ fn intrinsic_name_roundtrip() {
         assert_eq!(lookup_intrinsic(name), Some(i));
     }
 }
+
+#[test]
+fn process_intrinsic_ids_contains_expected() {
+    let expected = [
+        id::PROCESS_INFO,
+        id::SPAWN,
+        id::SELF,
+        id::ALIVE,
+        id::IS_PID,
+        id::SEND,
+        id::IS_REF,
+        id::LINK,
+        id::UNLINK,
+        id::TRAP_EXIT,
+        id::MONITOR,
+        id::DEMONITOR,
+        id::EXIT,
+        id::SPAWN_LINK,
+        id::SPAWN_MONITOR,
+    ];
+    assert_eq!(PROCESS_INTRINSIC_IDS.len(), expected.len());
+    for &id in &expected {
+        assert!(
+            PROCESS_INTRINSIC_IDS.contains(&id),
+            "PROCESS_INTRINSIC_IDS should contain {:?} ({})",
+            intrinsic_name(id),
+            id
+        );
+    }
+}
+
+#[test]
+fn process_intrinsic_ids_all_valid() {
+    for &id in PROCESS_INTRINSIC_IDS {
+        assert!(
+            (id as usize) < INTRINSIC_COUNT,
+            "Process intrinsic ID {id} exceeds INTRINSIC_COUNT ({INTRINSIC_COUNT})",
+        );
+    }
+}
